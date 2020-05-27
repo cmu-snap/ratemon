@@ -34,7 +34,9 @@ def failed(fln, fals):
 def parse_csv(flp, out_dir, do_plt=True):
     # Parse a csv file
     print(f"Parsing: {flp}")
-    bw_Mbps, rtt_us, queue_p, dur_s, packet_size_B, num_flows = path.basename(flp)[:-4].split("-")
+
+    # E.g., 64Mbps-40000us-100p-1unfair-8other-1380B-2s.csv
+    bw_Mbps, rtt_us, queue_p, unfair_flows, other_flows, packet_size_B, dur_s = path.basename(flp)[:-4].split("-")
     # Link bandwidth (Mbps).
     bw_Mbps = float(bw_Mbps[:-4])
     # RTT (us).
@@ -45,8 +47,10 @@ def parse_csv(flp, out_dir, do_plt=True):
     dur_s = float(dur_s[:-1])
     # Packet size (bytes)
     packet_size_B = float(packet_size_B[:-1])
-    # Total number of flows
-    num_flows = float(num_flows)
+    # Number of unfair flows
+    unfair_flows = int(unfair_flows[:-6])
+    # Number of other flows
+    other_flows = int(other_flows[:-5])
 
     one_way_ms = rtt_us / 1000 / 2.0
     rtt_ms = rtt_us / 1000
@@ -135,4 +139,7 @@ def main():
     with multiprocessing.Pool() as pol:
         pol.starmap(parse_csv, csvs)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
+
+if __name__ == "__main__":
+    main()
 
