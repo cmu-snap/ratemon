@@ -62,15 +62,18 @@ def parse_csv(flp, out_dir, do_plt=True):
     # Load csv file to ndarray
     data = np.genfromtxt(flp, dtype=float, delimiter=",", names=True)
 
-    output = np.empty([len(data), 3], dtype=float) # RTT ratio, packet arrival rate, loss rate
+    output = np.empty([len(data), 4], dtype=float) # Seq, RTT ratio, packet arrival rate, loss rate
     for i in range(len(data)):
 
         seq = data[i][0]
         sent_time = data[i][1]
         recv_time = data[i][2]
 
+        # Seq
+        output[i][0] = seq
+
         # RTT ratio
-        output[i][0] = (recv_time - sent_time) / one_way_ms
+        output[i][1] = (recv_time - sent_time) / one_way_ms
 
         # Pop out earlier packets
         while (len(packet_queue) > 0 and 
@@ -79,9 +82,9 @@ def parse_csv(flp, out_dir, do_plt=True):
 
         # Inter-arrival time
         if (len(packet_queue) > 0):
-            output[i][1] = (recv_time - packet_queue[0]) / len(packet_queue)
+            output[i][2] = (recv_time - packet_queue[0]) / len(packet_queue)
         else:
-            output[i][1] = 0
+            output[i][2] = 0
 
         packet_queue.append(recv_time)
 
@@ -100,7 +103,7 @@ def parse_csv(flp, out_dir, do_plt=True):
                 loss_queue.append(prev_recv_time + (loss_interval * i))
 
         # Loss rate
-        output[i][2] = len(loss_queue) / float(len(loss_queue) + len(packet_queue))
+        output[i][3] = len(loss_queue) / float(len(loss_queue) + len(packet_queue))
 
     # Write the array to output file
     print("Saving " + out_dir + "/" + path.basename(flp)[:-4] + ".npz")
@@ -132,7 +135,7 @@ def main():
 
     csvs = [(path.join(exp_dir, fln), out_dir, DO_PLT)
              for fln in os.listdir(exp_dir)
-             if not failed(fln, fals))]
+             if (fln.endswith(".csv") and not failed(fln, fals))]
     print(f"Num files: {len(csvs)}")
 
     tim_srt_s = time.time()
