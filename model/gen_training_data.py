@@ -15,14 +15,18 @@ import sim
 BW_MIN_Mbps = 4
 BW_MAX_Mbps = 50
 BW_DELTA_Mbps = 2
-BWS_Mbps = list(range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps))
+BWS_Mbps = range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps)
 # Link delay (us).
 DELAY_MIN_us = 100
 DELAY_MAX_us = 1000
 DELAY_DELTA_us = 50
-DELAYS_us = list(range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us))
-# Router queue size (packets).
-QUEUE = 100
+DELAYS_us = range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us)
+# Router queue size (BDP).
+QUEUE_p = range(1, 21)  # 1 to 20 BDP
+# Number of other flows
+OTHER_FLOWS = range(4, 9)  # 4 to 8 non BBR flows
+# Packet size (bytes)
+PACKET_SIZE_B = 1380
 # Simulation duration (s).
 DUR_s = 20
 # Delay until ACK pacing begins.
@@ -31,6 +35,8 @@ WARMUP_s = 5
 DRY_RUN = False
 # Whether to capture pcap traces.
 PCAP = True
+# Whether to capture csv files.
+CSV = True
 # Whether to run the simulations synchronously or in parallel.
 SYNC = False
 # Default destination for email updates.
@@ -39,6 +45,11 @@ EMAIL_DST = "c.canel@icloud.com"
 LOG_LVL = "INFO"
 # Name of the logger for this module.
 LOGGER = path.basename(__file__).split(".")[0]
+
+
+def bdp_bps(bw_Mbps, one_way_dly_us):
+    """ Calculates the BDP in bits per second. """
+    return (bw_Mbps / 8. * 1e6) * (one_way_dly_us / 1e6)
 
 
 def main():
@@ -69,11 +80,21 @@ def main():
     log = logging.getLogger(LOGGER)
 
     # Assemble the configurations.
-    cnfs = [{"bandwidth_Mbps": bw_Mbps, "delay_us": dly_us,
-             "queue_capacity_p": QUEUE, "experiment_duration_s": DUR_s,
-             "warmup_s": WARMUP_s, "pcap": "true" if PCAP else "false",
+    cnfs = [{"bandwidth_Mbps": bw_Mbps,
+             "delay_us": dly_us,
+             # Calculate queue capacity as a multiple of the BDP. If the BDP is
+             # less than a single packet, then use 1 packet as the BDP anyway.
+             "queue_capacity_p": int(round(
+                 que_p *
+                 max(1, bdp_bps(bw_Mbps, dly_us * 2) / float(PACKET_SIZE_B)))),
+             "experiment_duration_s": DUR_s,
+             "other_flows": flws,
+             "pcap": "true" if PCAP else "false",
+             "csv": "true" if CSV else "false",
+             "packet_size": PACKET_SIZE_B,
              "out_dir": sim_dir}
-            for bw_Mbps, dly_us in itertools.product(BWS_Mbps, DELAYS_us)][:10]
+            for bw_Mbps, dly_us, que_p, flws in itertools.product(
+                BWS_Mbps, DELAYS_us, QUEUE_p, OTHER_FLOWS)]
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
             dry_run=DRY_RUN, sync=SYNC)
 
