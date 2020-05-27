@@ -31,7 +31,7 @@ def failed(fln, fals):
             return True
     return False
 
-def parse_csv(flp, out_dir, do_plt=True):
+def parse_csv(flp, out_dir, rtt_window):
     # Parse a csv file
     print(f"Parsing: {flp}")
 
@@ -77,7 +77,7 @@ def parse_csv(flp, out_dir, do_plt=True):
 
         # Pop out earlier packets
         while (len(packet_queue) > 0 and 
-               packet_queue[0] < recv_time - (rtt_ms * RTT_WINDOW)):
+               packet_queue[0] < recv_time - (rtt_ms * rtt_window)):
             packet_queue.popleft()
 
         # Inter-arrival time
@@ -90,7 +90,7 @@ def parse_csv(flp, out_dir, do_plt=True):
 
         # Pop out earlier loss
         while(len(loss_queue) > 0 and
-              loss_queue[0] < recv_time - (rtt_ms * RTT_WINDOW)):
+              loss_queue[0] < recv_time - (rtt_ms * rtt_window)):
             loss_queue.popleft()
 
         if (i > 0 and seq - data[i-1][0] > packet_size_B):
@@ -105,9 +105,9 @@ def parse_csv(flp, out_dir, do_plt=True):
         # Loss rate
         output[i][3] = len(loss_queue) / float(len(loss_queue) + len(packet_queue))
 
-    # Write the array to output file
-    print("Saving " + out_dir + "/" + path.basename(flp)[:-4] + ".npz")
-    np.savez_compressed(out_dir + "/" + path.basename(flp)[:-4] + ".npz", output)
+    out_flp = path.join(out_dir, f"{path.basename(flp)[:-4]}-{rtt_window}rttW-1flowNum-csv.npz")
+    print("Saving " + out_flp)
+    np.savez_compressed(out_flp, output)
 
 def main():
     # Parse command line arguments.
@@ -122,9 +122,12 @@ def main():
         "--out-dir", help=("The directory in which to store output files "
                            "(required)."),
         required=True, type=str)
+    psr.add_argument('--rtt-window', type=int, default=RTT_WINDOW,
+        help='Size of the RTT window to calculate receiving rate and loss rate (default: 2 * RTT)')
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
+    rtt_window = args.rtt_window
 
     # Determine which configurations failed.
     fals = []
@@ -133,7 +136,7 @@ def main():
         with open(fals_flp, "r") as fil:
             fals = json.load(fil)
 
-    csvs = [(path.join(exp_dir, fln), out_dir, DO_PLT)
+    csvs = [(path.join(exp_dir, fln), out_dir, rtt_window)
              for fln in os.listdir(exp_dir)
              if (fln.endswith(".csv") and not failed(fln, fals))]
     print(f"Num files: {len(csvs)}")
