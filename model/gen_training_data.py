@@ -17,26 +17,32 @@ BW_MAX_Mbps = 50
 BW_DELTA_Mbps = 2
 BWS_Mbps = range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps)
 # Link delay (us).
-DELAY_MIN_us = 100
-DELAY_MAX_us = 1000
-DELAY_DELTA_us = 50
+DELAY_MIN_us = 1000
+DELAY_MAX_us = 20000
+DELAY_DELTA_us = 1000
 DELAYS_us = range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us)
 # Router queue size (BDP).
-QUEUE_p = range(1, 21)  # 1 to 20 BDP
+QUEUE_p = range(1, 32, 2)  # 1 to 32 BDP
 # Number of other flows
-OTHER_FLOWS = range(4, 9)  # 4 to 8 non BBR flows
+OTHER_FLOWS = range(1, 11)  # 1 to 10 non-BBR flows
 # Packet size (bytes)
 PACKET_SIZE_B = 1380
 # Simulation duration (s).
-DUR_s = 20
+DUR_s = 80
 # Delay until ACK pacing begins.
-WARMUP_s = 5
-# Whether to return before running experiments.
-DRY_RUN = False
+WARMUP_s = 60
+# Whether to enable unfairness mitigation.
+ENABLE = False
 # Whether to capture pcap traces.
 PCAP = True
 # Whether to capture csv files.
 CSV = True
+# The number of BBR flows.
+UNFAIR_FLOWS = 1
+# The protocol to use for the non-BBR flows.
+OTHER_PROTO = "ns3::TcpNewReno"
+# Whether to return before running experiments.
+DRY_RUN = False
 # Whether to run the simulations synchronously or in parallel.
 SYNC = False
 # Default destination for email updates.
@@ -88,7 +94,10 @@ def main():
                  que_p *
                  max(1, bdp_bps(bw_Mbps, dly_us * 2) / float(PACKET_SIZE_B)))),
              "experiment_duration_s": DUR_s,
+             "unfair_flows": UNFAIR_FLOWS,
              "other_flows": flws,
+             "other_proto": OTHER_PROTO,
+             "enable" : "true" if ENABLE else "false",
              "pcap": "true" if PCAP else "false",
              "csv": "true" if CSV else "false",
              "packet_size": PACKET_SIZE_B,
