@@ -44,7 +44,7 @@ def parse_time_us(pkt_mdat):
     return pkt_mdat.sec * 1e6 + pkt_mdat.usec
 
 
-def parse_pcap(flp, out_dir):
+def parse_pcap(flp, out_dir, rtt_window):
     """Parse a PCAP file.
 
     Writes to a npz file that contains the sequence number and queue occupency
@@ -99,8 +99,8 @@ def parse_pcap(flp, out_dir):
             cur_time_us = parse_time_us(pkts[i][0])
             flow_packet_count[port] += 1
 
-            # Move window_start to less than RTT_WINDOW
-            while (cur_time_us - parse_time_us(pkts[window_start][0]) > RTT_WINDOW * rtt_us):
+            # Move window_start to less than rtt_window
+            while (cur_time_us - parse_time_us(pkts[window_start][0]) > rtt_window * rtt_us):
                 packet_port = pkts[window_start][1][scapy.layers.inet.TCP].sport
                 if (packet_port - SPORT_OFFSET < unfair_flows):
                     flow_packet_count[packet_port] -= 1
@@ -130,9 +130,12 @@ def main():
         "--out-dir", help=("The directory in which to store output files "
                            "(required)."),
         required=True, type=str)
+    psr.add_argument('--rtt-window', type=int, default=RTT_WINDOW,
+        help='Size of the RTT window to calculate receiving rate and loss rate (default: 2 * RTT)')
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
+    rtt_window = args.rtt_window
 
     # Determine which configurations failed.
     fals = []
@@ -143,7 +146,7 @@ def main():
 
     # Select only PCAP files (".pcap") that were captured at the router's output
     # ("-1-1") and were not the result of a failed experiment.
-    pcaps = [(path.join(exp_dir, fln), out_dir)
+    pcaps = [(path.join(exp_dir, fln), out_dir, rtt_window)
              for fln in os.listdir(exp_dir)
              if (fln.endswith("-1-1.pcap") and not failed(fln, fals))]
     print(f"Num files: {len(pcaps)}")
