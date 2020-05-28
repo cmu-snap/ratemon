@@ -107,7 +107,7 @@ def parse_csv(flp, out_dir, rtt_window):
 
     # Write the array to output file
     print("Saving " + out_dir + "/" + path.basename(flp)[:-4] + ".npz")
-    np.savez_compressed(out_dir + "/" + path.basename(flp)[:-4] + "-" + rtt_window + "rtt_window.npz", output)
+    np.savez_compressed(out_dir + "/" + path.basename(flp)[:-4] + "-" + str(rtt_window) + "rtt_window.npz", output)
 
 def main():
     # Parse command line arguments.
