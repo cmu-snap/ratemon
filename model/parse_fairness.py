@@ -114,7 +114,8 @@ def parse_pcap(flp, out_dir, rtt_window):
 
     for i in range(unfair_flows):
         print("Saving " + out_dir + "/" + path.basename(flp)[:-9] + "-" + str(i+1) + "unfair.npz")
-        np.savez_compressed(out_dir + "/" + path.basename(flp)[:-9] + "-" + str(i+1) + "unfair.npz", output_array[SPORT_OFFSET + i])
+        np.savez_compressed(out_dir + "/" + path.basename(flp)[:-9] + "-" + str(i+1) + "unfair-" + 
+            rtt_window + "-rtt_window.npz", output_array[SPORT_OFFSET + i])
 
 
 def main():
