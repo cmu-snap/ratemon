@@ -6,6 +6,7 @@ import itertools
 import logging
 import os
 from os import path
+import random
 import time
 
 import sim
@@ -104,6 +105,10 @@ def main():
              "out_dir": sim_dir}
             for bw_Mbps, dly_us, que_p, flws in itertools.product(
                 BWS_Mbps, DELAYS_us, QUEUE_p, OTHER_FLOWS)]
+    # Select 2000 random configurations.
+    random.shuffle(cnfs)
+    cnfs = cnfs[:2000]
+
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
             dry_run=DRY_RUN, sync=SYNC)
 
