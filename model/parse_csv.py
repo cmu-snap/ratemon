@@ -105,11 +105,9 @@ def parse_csv(flp, out_dir, rtt_window):
         # Loss rate
         output[i][3] = len(loss_queue) / float(len(loss_queue) + len(packet_queue))
 
-    # Write the array to output file
-    print("Saving " + out_dir + "/" + path.basename(flp)[:-4] + "-" + str(rtt_window) 
-        + "rttW-1flowNum-csv.npz")
-    np.savez_compressed(out_dir + "/" + path.basename(flp)[:-4] + "-" + str(rtt_window) 
-        + "rttW-1flowNum-csv.npz", output)
+    out_flp = path.join(out_dir, f"{path.basename(flp)[:-4]}-{rtt_window}rttW-1flowNum-csv.npz")
+    print("Saving " + out_flp)
+    np.savez_compressed(out_flp, output)
 
 def main():
     # Parse command line arguments.

@@ -113,11 +113,9 @@ def parse_pcap(flp, out_dir, rtt_window):
             output_array[port] = np.vstack([output_array[port], [pkts[i][1][scapy.layers.inet.TCP].seq, queue_occupency]])
 
     for i in range(unfair_flows):
-        print("Saving " + out_dir + "/" + path.basename(flp)[:-9] + "-" + 
-            str(rtt_window) + "rttW-" + str(i+1) + "flowNum-fairness.npz")
-        np.savez_compressed(out_dir + "/" + path.basename(flp)[:-9] + "-" + 
-            str(rtt_window) + "rttW-" + str(i+1) + "flowNum-fairness.npz", 
-            output_array[SPORT_OFFSET + i])
+        out_flp = path.join(out_dir, f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
+        print("Saving " + out_flp)
+        np.savez_compressed(out_flp, output_array[SPORT_OFFSET + i])
 
 
 def main():
