@@ -7,6 +7,60 @@ Models of the form:
 import torch
 
 
+class LstmSimple(torch.nn.Module):
+    # The specification of the input tensor format.
+    # in_spc = ["inter-arrival time", "RTT ratio", "loss rate"]
+    in_spc = ["inter-arrival time", "loss rate"]
+    # The specification of the output tensor format.
+    out_spc = ["queue occupancy"]
+
+    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
+        super(LstmSimple, self).__init__()
+        self.in_dim = len(self.in_spc)
+        self.hid_dim = hid_dim
+        self.num_lyrs = num_lyrs
+        self.out_dim = out_dim
+
+        print(f"LstmSimple - in_dim: {self.in_dim}, hid_dim: {self.hid_dim}, "
+              f"num_lyrs: {self.num_lyrs}, out_dim: {self.out_dim}")
+
+        # Each input entry will correspond to a packet and contain two elements:
+        #   (inter-arrival time, loss rate)
+        # Guess: Set the hidden dimension to 32.
+        self.lstm = torch.nn.LSTM(self.in_dim, self.hid_dim)
+        # The input dimension (hidden dimension) is 32. We are
+        # predicting 5 classes, so the output dimension is also 5.
+        self.fc = torch.nn.Linear(self.hid_dim, self.out_dim)
+        self.sg = torch.nn.Sigmoid()
+
+
+    def forward(self, x, hidden):
+
+        # x = x.view(x.size()[1], x.size()[0], -1)
+        # First dimension is now the batch size.
+
+        # The LSTM itself, which also takes as input the previous hidden state.
+        out, hidden = self.lstm(x, hidden)
+        # Select the last piece as the LSTM output.
+        out = out.contiguous().view(-1, self.hid_dim)
+        # Classify the LSTM output.
+        out = self.fc(out)
+        out = self.sg(out)
+
+        # Not sure what this does...
+        # batch_size = x.size()[0]
+        # out = out.view(batch_size, -1)
+        # out = out[:, -1]
+        # Return the hidden state as well, so that it can be passed in again.
+        return out, hidden
+        #scores = torch.nn.functional.log_softmax(fc_out, 1)
+
+
+    def init_hidden(self, batch_size):
+        weight = next(self.parameters()).data
+        return (weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_(),
+                weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
+
 
 class SimpleOne(torch.nn.Module):
     # The specification of the input tensor format.
@@ -104,6 +158,7 @@ def init_weights(m):
 
 
 MODELS = {
+    "LstmSimple": LstmSimple,
     "SimpleOne": SimpleOne,
     "FcOne": FcOne,
     "FcTwo": FcTwo,

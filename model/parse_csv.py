@@ -9,8 +9,8 @@ from os import path
 import time
 from collections import deque
 
-from matplotlib import pyplot as plt
 import numpy as np
+
 
 # Whether to plot per-experiment average throughput.
 DO_PLT = False
@@ -18,6 +18,12 @@ DO_PLT = False
 LINKS_PER_RTT = 4
 # RTT window to consider receiving rate and loss rate
 RTT_WINDOW = 2
+# The dtype of the output.
+DTYPE = [("seq", "int32"),
+         ("RTT ratio", "float"),
+         ("inter-arrival time", "float"),
+         ("loss rate", "float")]
+
 
 def failed(fln, fals):
     # TODO: This does not work.
@@ -31,12 +37,14 @@ def failed(fln, fals):
             return True
     return False
 
+
 def parse_csv(flp, out_dir, rtt_window):
     # Parse a csv file
     print(f"Parsing: {flp}")
 
     # E.g., 64Mbps-40000us-100p-1unfair-8other-1380B-2s.csv
-    bw_Mbps, rtt_us, queue_p, unfair_flows, other_flows, packet_size_B, dur_s = path.basename(flp)[:-4].split("-")
+    (bw_Mbps, rtt_us, queue_p, unfair_flows, other_flows, packet_size_B,
+     dur_s) = path.basename(flp)[:-4].split("-")
     # Link bandwidth (Mbps).
     bw_Mbps = float(bw_Mbps[:-4])
     # RTT (us).
@@ -55,14 +63,14 @@ def parse_csv(flp, out_dir, rtt_window):
     one_way_ms = rtt_us / 1000 / 2.0
     rtt_ms = rtt_us / 1000
 
-    # There could be better ways using pandas to get inter-arrival time and loss rate 
+    # There could be better ways using pandas to get inter-arrival time and loss rate
     packet_queue = deque()
     loss_queue = deque()
 
     # Load csv file to ndarray
     data = np.genfromtxt(flp, dtype=float, delimiter=",", names=True)
 
-    output = np.empty([len(data), 4], dtype=float) # Seq, RTT ratio, packet arrival rate, loss rate
+    output = np.empty(len(data), dtype=DTYPE)
     for i in range(len(data)):
 
         seq = data[i][0]
@@ -76,12 +84,12 @@ def parse_csv(flp, out_dir, rtt_window):
         output[i][1] = (recv_time - sent_time) / one_way_ms
 
         # Pop out earlier packets
-        while (len(packet_queue) > 0 and 
+        while (packet_queue and
                packet_queue[0] < recv_time - (rtt_ms * rtt_window)):
             packet_queue.popleft()
 
         # Inter-arrival time
-        if (len(packet_queue) > 0):
+        if packet_queue:
             output[i][2] = (recv_time - packet_queue[0]) / len(packet_queue)
         else:
             output[i][2] = 0
@@ -89,8 +97,8 @@ def parse_csv(flp, out_dir, rtt_window):
         packet_queue.append(recv_time)
 
         # Pop out earlier loss
-        while(len(loss_queue) > 0 and
-              loss_queue[0] < recv_time - (rtt_ms * rtt_window)):
+        while (loss_queue and
+               loss_queue[0] < recv_time - (rtt_ms * rtt_window)):
             loss_queue.popleft()
 
         if (i > 0 and seq - data[i-1][0] > packet_size_B):
@@ -99,15 +107,16 @@ def parse_csv(flp, out_dir, rtt_window):
             prev_recv_time = data[i-1][2]
             loss_count = int((seq - prev_seq) / packet_size_B) - 1
             loss_interval = (recv_time - prev_recv_time) / (loss_count + 1)
-            for i in range(1, loss_count + 1):
-                loss_queue.append(prev_recv_time + (loss_interval * i))
+            for j in range(1, loss_count + 1):
+                loss_queue.append(prev_recv_time + (loss_interval * j))
 
         # Loss rate
         output[i][3] = len(loss_queue) / float(len(loss_queue) + len(packet_queue))
 
     out_flp = path.join(out_dir, f"{path.basename(flp)[:-4]}-{rtt_window}rttW-1flowNum-csv.npz")
-    print("Saving " + out_flp)
+    print(f"Saving: {out_flp}")
     np.savez_compressed(out_flp, output)
+
 
 def main():
     # Parse command line arguments.
@@ -119,11 +128,13 @@ def main():
               "(required)."),
         required=True, type=str)
     psr.add_argument(
-        "--out-dir", help=("The directory in which to store output files "
-                           "(required)."),
+        "--out-dir",
+        help="The directory in which to store output files (required).",
         required=True, type=str)
-    psr.add_argument('--rtt-window', type=int, default=RTT_WINDOW,
-        help='Size of the RTT window to calculate receiving rate and loss rate (default: 2 * RTT)')
+    psr.add_argument(
+        "--rtt-window", type=int, default=RTT_WINDOW,
+        help=("Size of the RTT window to calculate receiving rate and loss "
+              "rate (default: 2 * RTT)"))
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
@@ -136,16 +147,15 @@ def main():
         with open(fals_flp, "r") as fil:
             fals = json.load(fil)
 
-    csvs = [(path.join(exp_dir, fln), out_dir, rtt_window)
-             for fln in os.listdir(exp_dir)
-             if (fln.endswith(".csv") and not failed(fln, fals))]
+    csvs = sorted([(path.join(exp_dir, fln), out_dir, rtt_window)
+                   for fln in os.listdir(exp_dir)
+                   if (fln.endswith(".csv") and not failed(fln, fals))])
     print(f"Num files: {len(csvs)}")
-
     tim_srt_s = time.time()
     with multiprocessing.Pool() as pol:
         pol.starmap(parse_csv, csvs)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
+
 if __name__ == "__main__":
     main()
-

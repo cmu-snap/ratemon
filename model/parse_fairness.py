@@ -21,6 +21,10 @@ SRC_IP = "10.1.1.1"
 RTT_WINDOW = 2
 # Source port offset
 SPORT_OFFSET = 49153
+# Whether to parse PCAP files synchronously or in parallel.
+SYNC = False
+# The dtype of the output.
+DTYPE = [("seq", "int32"), ("queue occupancy", "float")]
 
 
 def failed(fln, fals):
@@ -52,7 +56,8 @@ def parse_pcap(flp, out_dir, rtt_window):
     """
     print(f"Parsing: {flp}")
     # E.g., 64Mbps-40000us-100p-1unfair-8other-1380B-2s-1-1.pcap
-    bw_Mbps, rtt_us, queue_p, unfair_flows, other_flows, packet_size_B, dur_s, _, _, = path.basename(flp).split("-")
+    (bw_Mbps, rtt_us, queue_p, unfair_flows, other_flows, packet_size_B,
+     dur_s, _, _,) = path.basename(flp).split("-")
     # Link bandwidth (Mbps).
     bw_Mbps = float(bw_Mbps[:-4])
     # RTT (us).
@@ -73,10 +78,7 @@ def parse_pcap(flp, out_dir, rtt_window):
 
     for i in range(unfair_flows):
         flow_packet_count[SPORT_OFFSET + i] = 0
-
-    for i in range(unfair_flows):
-        output_array[SPORT_OFFSET + i] = np.empty([0, 2], dtype=float)
-
+        output_array[SPORT_OFFSET + i] = np.empty((0,), dtype=DTYPE)
 
     pkts = [
         (pkt_mdat, pkt) for pkt_mdat, pkt in [
@@ -91,18 +93,17 @@ def parse_pcap(flp, out_dir, rtt_window):
     ]
 
     window_start = 0
-
     for i in range(len(pkts)):
         port = pkts[i][1][scapy.layers.inet.TCP].sport
 
-        if (port - SPORT_OFFSET < unfair_flows):
+        if port - SPORT_OFFSET < unfair_flows:
             cur_time_us = parse_time_us(pkts[i][0])
             flow_packet_count[port] += 1
 
             # Move window_start to less than rtt_window
-            while (cur_time_us - parse_time_us(pkts[window_start][0]) > rtt_window * rtt_us):
+            while cur_time_us - parse_time_us(pkts[window_start][0]) > rtt_window * rtt_us:
                 packet_port = pkts[window_start][1][scapy.layers.inet.TCP].sport
-                if (packet_port - SPORT_OFFSET < unfair_flows):
+                if packet_port - SPORT_OFFSET < unfair_flows:
                     flow_packet_count[packet_port] -= 1
                 window_start += 1
 
@@ -110,11 +111,17 @@ def parse_pcap(flp, out_dir, rtt_window):
             queue_occupency = flow_packet_count[port] / float(i - window_start + 1)
 
             # Append this record to numpy array
-            output_array[port] = np.vstack([output_array[port], [pkts[i][1][scapy.layers.inet.TCP].seq, queue_occupency]])
+            output_array[port] = np.append(
+                output_array[port],
+                np.array(
+                    [(pkts[i][1][scapy.layers.inet.TCP].seq, queue_occupency)], dtype=DTYPE),
+                axis=0)
 
     for i in range(unfair_flows):
-        out_flp = path.join(out_dir, f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
-        print("Saving " + out_flp)
+        out_flp = path.join(
+            out_dir,
+            f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
+        print(f"Saving: {out_flp}")
         np.savez_compressed(out_flp, output_array[SPORT_OFFSET + i])
 
 
@@ -128,11 +135,13 @@ def main():
               "(required)."),
         required=True, type=str)
     psr.add_argument(
-        "--out-dir", help=("The directory in which to store output files "
-                           "(required)."),
+        "--out-dir",
+        help="The directory in which to store output files (required).",
         required=True, type=str)
-    psr.add_argument('--rtt-window', type=int, default=RTT_WINDOW,
-        help='Size of the RTT window to calculate receiving rate and loss rate (default: 2 * RTT)')
+    psr.add_argument(
+        "--rtt-window", type=int, default=RTT_WINDOW,
+        help=("Size of the RTT window to calculate receiving rate and loss "
+              "rate (default: 2 * RTT)"))
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
@@ -147,16 +156,18 @@ def main():
 
     # Select only PCAP files (".pcap") that were captured at the router's output
     # ("-1-1") and were not the result of a failed experiment.
-    pcaps = [(path.join(exp_dir, fln), out_dir, rtt_window)
-             for fln in os.listdir(exp_dir)
-             if (fln.endswith("-1-1.pcap") and not failed(fln, fals))]
+    pcaps = sorted([(path.join(exp_dir, fln), out_dir, rtt_window)
+                    for fln in os.listdir(exp_dir)
+                    if fln.endswith("-1-1.pcap") and not failed(fln, fals)])
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
-    with multiprocessing.Pool() as pol:
-        pol.starmap(parse_pcap, pcaps)
+    if SYNC:
+        [parse_pcap(*pcap) for pcap in pcaps]
+    else:
+        with multiprocessing.Pool() as pol:
+            pol.starmap(parse_pcap, pcaps)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
 
 if __name__ == "__main__":
     main()
-
