@@ -15,6 +15,8 @@ import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
 
+from utils import parse_filename
+
 
 # RTT window to consider queue occupency
 RTT_WINDOW = 2
@@ -25,20 +27,6 @@ DTYPE = [("seq", "int32"),
          ("loss rate", "float"),
          ("queue occupancy", "float")]
 
-
-def failed(fln, fals):
-    # TODO: This does not work.
-    for cnf in fals:
-        if (f"{cnf['bandwidth_Mbps']}Mbps-"
-            f"{cnf['delay_us'] * 4}us-"
-            f"{cnf['experiment_duration_s']}s"
-            f"{cnf['queue_capacity_p']}p"
-            f"{cnf['other_flows']}") in fln:
-            print(f"Discarding: {fln}")
-            return True
-    return False
-
-
 def parse_time_us(pkt_mdat):
     """
     Returns the timestamp, in microseconds, of the packet associated with this
@@ -46,6 +34,20 @@ def parse_time_us(pkt_mdat):
     """
     return pkt_mdat.sec * 1e6 + pkt_mdat.usec
 
+def parse_packets(flp, packet_size_B):
+    """
+    Takes in a file path and return the parsed packet list
+    """
+    return [
+        (pkt_mdat, pkt) for pkt_mdat, pkt in [
+            # Parse each packet as a PPP packet.
+            (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
+            for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)]
+        # Select only IP/TCP packets sent from SRC_IP.
+        if (scapy.layers.inet.IP in pkt and
+            scapy.layers.inet.TCP in pkt and
+            pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
+        ]
 
 def parse_pcap(flp, out_dir, rtt_window):
     """Parse a PCAP file.
@@ -55,24 +57,8 @@ def parse_pcap(flp, out_dir, rtt_window):
     """
     print(f"Parsing: {flp}")
     # E.g., 64Mbps-40000us-100p-1unfair-8other-1380B-2s-1-1.pcap
-    bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays, \
-      packet_size_B, dur_s, _, _, = path.basename(flp).split("-")
-    # Link bandwidth (Mbps).
-    bw_Mbps = float(bw_Mbps[:-4])
-    # Bottleneck router delay (us).
-    btl_delay_us = float(btl_delay_us[:-2])
-    # Queue size (packets).
-    queue_p = float(queue_p[:-1])
-    # Experiment duration (s).
-    dur_s = float(dur_s[:-1])
-    # Packet size (bytes)
-    packet_size_B = float(packet_size_B[:-1])
-    # Number of unfair flows
-    unfair_flows = int(unfair_flows[:-6])
-    # Number of other flows
-    other_flows = int(other_flows[:-5])
-    # Edge delays
-    edge_delays = list(map(int, edge_delays[:-2].split(",")))
+    bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows, \
+             other_flows, edge_delays = parse_filename(flp)
 
     # Process PCAP files from unfair senders and receivers
 
@@ -83,34 +69,13 @@ def parse_pcap(flp, out_dir, rtt_window):
         send_flp = flp[:-8] + str(i + 2) + "-0.pcap"
         recv_flp = flp[:-8] + str(i + 2 + unfair_flows + other_flows) + "-0.pcap"
 
-        src_ip = "10.1." + str(i) + ".1"
         rtt_us = (btl_delay_us + 2 * edge_delays[i]) * 2
         rtt_list.append(rtt_us)
         one_way_us = float(rtt_us / 2.0)
 
-        send_pkts = [
-            (pkt_mdat, pkt) for pkt_mdat, pkt in [
-                # Parse each packet as a PPP packet.
-                (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
-                for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(send_flp)]
-            # Select only IP/TCP packets sent from SRC_IP.
-            if (scapy.layers.inet.IP in pkt and
-                scapy.layers.inet.TCP in pkt and
-                pkt[scapy.layers.inet.IP].src == src_ip and
-                pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
-        ]
+        send_pkts = parse_packets(send_flp, packet_size_B)
 
-        recv_pkts = [
-            (pkt_mdat, pkt) for pkt_mdat, pkt in [
-                # Parse each packet as a PPP packet.
-                (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
-                for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(recv_flp)]
-            # Select only IP/TCP packets sent from SRC_IP.
-            if (scapy.layers.inet.IP in pkt and
-                scapy.layers.inet.TCP in pkt and
-                pkt[scapy.layers.inet.IP].src == src_ip and
-                pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
-        ]
+        recv_pkts = parse_packets(recv_flp, packet_size_B)
 
         packet_loss = 0
         window_size = rtt_us * rtt_window
@@ -122,6 +87,9 @@ def parse_pcap(flp, out_dir, rtt_window):
             recv_pkt_seq = recv_pkts[j][1][scapy.layers.inet.TCP].seq
             send_pkt_seq = send_pkts[j + packet_loss][1][scapy.layers.inet.TCP].seq
 
+            # Count the number of dropped packets by checking if the sequence numbers
+            # at sender and receiver are the same. If not, the packet is dropped, and
+            # the packet_loss counter increases by one to keep the index offset at sender
             prev_loss = packet_loss
             while send_pkt_seq != recv_pkt_seq:
                 # Packet loss
@@ -152,6 +120,9 @@ def parse_pcap(flp, out_dir, rtt_window):
             output[j][0] = recv_pkt_seq
             output[j][1] = (curr_recv_time - curr_send_time) / one_way_us
 
+            # If it's processing the first packet (j == window_start == 0)
+            # Or no other packets received within the RTT window,
+            # output 0 for RTT ratio and inter-arrival time
             if j - window_start > 0:
                 output[j][2] = (curr_recv_time - parse_time_us(recv_pkts[window_start][0])) / \
                                (1.0 * (j - window_start))
@@ -164,20 +135,17 @@ def parse_pcap(flp, out_dir, rtt_window):
 
 
     # Process pcap files from routers to determine queue occupency
-    router_pkts = [
-        (pkt_mdat, pkt) for pkt_mdat, pkt in [
-            # Parse each packet as a PPP packet.
-            (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
-            for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)]
-        # Select only IP/TCP packets
-        if (scapy.layers.inet.IP in pkt and
-            scapy.layers.inet.TCP in pkt and
-            pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
-    ]
+    router_pkts = parse_packets(flp, packet_size_B)
 
+    # Number of packets sent by the unfair flows within RTT window
+    # Note that RTT window could be different for flows with different RTT
     window_pkt_count = [0] * unfair_flows
-    output_index = [0] * unfair_flows
+    # Start of the window for each flow (index in router_pkts)
+    # Since different flows could have different RTTs, each flow
+    # needs to keep track of their own window start
     router_window_start = [0] * unfair_flows
+    # Index of the output array where the queue occupency result should be appended
+    output_index = [0] * unfair_flows
 
     for i in range(len(router_pkts)):
         sender = int(router_pkts[i][1][scapy.layers.inet.IP].src.split(".")[2])
@@ -186,7 +154,9 @@ def parse_pcap(flp, out_dir, rtt_window):
             curr_time = parse_time_us(router_pkts[i][0])
             window_pkt_count[sender] += 1
 
-            # Move router_window_start for the unfair flow
+            # Update window_start index for this flow, if the window is larger than
+            # the expected window size. Also decrement packet count if the packet
+            # belongs to the unfair flow
             window_start = router_window_start[sender]
             while (curr_time - parse_time_us(router_pkts[window_start][0]) >
                    rtt_list[sender] * rtt_window):
@@ -236,18 +206,11 @@ def main():
     out_dir = args.out_dir
     rtt_window = args.rtt_window
 
-    # Determine which configurations failed.
-    fals = []
-    fals_flp = path.join(exp_dir, "failed.json")
-    if path.exists(fals_flp):
-        with open(fals_flp, "r") as fil:
-            fals = json.load(fil)
-
-    # Select only PCAP files (".pcap") that were captured at the router's output
-    # ("-1-1") and were not the result of a failed experiment.
+    # Select only PCAP files (".pcap") that were captured at the router's input
+    # ("-1-0") and were not the result of a failed experiment.
     pcaps = [(path.join(exp_dir, fln), out_dir, rtt_window)
              for fln in os.listdir(exp_dir)
-             if (fln.endswith("-1-0.pcap") and not failed(fln, fals))]
+             if fln.endswith("-1-0.pcap")]
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     with multiprocessing.Pool() as pol:
