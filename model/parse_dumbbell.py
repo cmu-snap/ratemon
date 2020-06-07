@@ -15,7 +15,7 @@ import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
 
-from utils import parse_filename
+from utils import *
 
 
 # RTT window to consider queue occupency
@@ -26,28 +26,6 @@ DTYPE = [("seq", "int32"),
          ("inter-arrival time", "float"),
          ("loss rate", "float"),
          ("queue occupancy", "float")]
-
-def parse_time_us(pkt_mdat):
-    """
-    Returns the timestamp, in microseconds, of the packet associated with this
-    PacketMetadata object.
-    """
-    return pkt_mdat.sec * 1e6 + pkt_mdat.usec
-
-def parse_packets(flp, packet_size_B):
-    """
-    Takes in a file path and return the parsed packet list
-    """
-    return [
-        (pkt_mdat, pkt) for pkt_mdat, pkt in [
-            # Parse each packet as a PPP packet.
-            (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
-            for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)]
-        # Select only IP/TCP packets sent from SRC_IP.
-        if (scapy.layers.inet.IP in pkt and
-            scapy.layers.inet.TCP in pkt and
-            pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
-        ]
 
 def parse_pcap(flp, out_dir, rtt_window):
     """Parse a PCAP file.
