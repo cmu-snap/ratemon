@@ -75,6 +75,19 @@ def parse_pcap(flp, out_dir, rtt_window):
 
     flow_packet_count = dict()
     output_array = dict()
+    # Construct the output filepaths.
+    out_flps = [
+        path.join(
+            out_dir,
+            f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
+        for i in range(unfair_flows)]
+
+    # For all of the output filepaths, check if the file already
+    # exists. If all of the output files exist, then we do not need to
+    # parse this file.
+    if np.vectorize(lambda p: path.exists(p))(np.array(out_flps)).all():
+        print(f"    Already parsed: {flp}")
+        return
 
     for i in range(unfair_flows):
         flow_packet_count[SPORT_OFFSET + i] = 0
@@ -117,11 +130,8 @@ def parse_pcap(flp, out_dir, rtt_window):
                     [(pkts[i][1][scapy.layers.inet.TCP].seq, queue_occupency)], dtype=DTYPE),
                 axis=0)
 
-    for i in range(unfair_flows):
-        out_flp = path.join(
-            out_dir,
-            f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
-        print(f"Saving: {out_flp}")
+    for i, out_flp in enumerate(out_flps):
+        print(f"    Saving: {out_flp}")
         np.savez_compressed(out_flp, output_array[SPORT_OFFSET + i])
 
 
