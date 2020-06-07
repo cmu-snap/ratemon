@@ -10,10 +10,7 @@ import time
 from collections import deque
 
 import numpy as np
-import scapy.utils
-import scapy.layers.l2
 import scapy.layers.inet
-import scapy.layers.ppp
 
 from utils import *
 
