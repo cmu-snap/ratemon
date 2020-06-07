@@ -106,10 +106,12 @@ def main():
         _, ax = plt.subplots()
         str_reno = "true" if reno else "false"
         for warm in WARMUP_s:
-            selected = [(k['other_flows'], v) for k, v in data if k['warmup_s'] == warm and k['use_reno'] == str_reno]
+            selected = [(k['other_flows'], v) for k, v in data
+                        if k['warmup_s'] == warm and k['use_reno'] == str_reno]
             selected.sort(key=lambda x: x[0])
             xs, ys = zip(*selected)
-            ax.plot(list(xs), list(ys), label=("With" if warm < DUR_s else "Without") + " ACK pacing")
+            ax.plot(list(xs), list(ys), label=(
+                "With" if warm < DUR_s else "Without") + " ACK pacing")
         flow = 'Reno' if reno else 'Cubic'
         ax.set_xlabel(f"Number of {flow} Flows")
         ax.set_ylabel("Jain's Fairness Index")
