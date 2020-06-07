@@ -329,11 +329,11 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     tot_3 = find_out(3)
     tot_4 = find_out(4)
     print("Ground truth:")
-    print(f"    0 - much lower than fair: {tot_0}")
-    print(f"    1 - lower than fair: {tot_1}")
-    print(f"    2 - fair: {tot_2}")
-    print(f"    3 - greater than fair: {tot_3}")
-    print(f"    4 - much greater than fair: {tot_4}")
+    print(f"    0 - much lower than fair: {tot_0} packets")
+    print(f"    1 - lower than fair: {tot_1} packets")
+    print(f"    2 - fair: {tot_2} packets")
+    print(f"    3 - greater than fair: {tot_3} packets")
+    print(f"    4 - much greater than fair: {tot_4} packets")
     assert (tot_0 + tot_1 + tot_2 + tot_3 + tot_4 ==
             sum([d.shape[0] for d in dat_out])), \
             "Error visualizing ground truth!"
