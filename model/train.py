@@ -105,7 +105,7 @@ def make_datasets(dat_flp, net, bch_trn, bch_tst):
     #       the feature value.
     # TODO: Encode feature transformations like this in the model.
     fets_out, prms_out = zip(*(
-        scale_fets(dat, fet_out, inv=fet_out=="ack_period_us")
+        scale_fets(dat, fet_out, inv=fet_out == "ack_period_us")
         for fet_out in net.out_spc))
 
     if PLT:
