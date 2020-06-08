@@ -152,19 +152,22 @@ def scale_fets(dat_all):
     return [normalize(dat) for dat in dat_all], scl_prms
 
 
-def convert_to_class(dat_all, num_flws):
-    """ Converts each real-valued feature value in dat to a class. """
-    assert len(dat_all) == len(num_flws)
-    for dat in dat_all:
+def convert_to_class(dat_all):
+    """
+    Converts real-valued feature values into classes. dat_all is a
+    list of pairs, one for each simulation, of:
+        (feature matrix, number of flows)
+    """
+    for dat, _ in dat_all:
         assert len(dat.dtype.names) == 1, "Should be only one column."
 
-    def percent_to_class(prc, num_flws_):
+    def percent_to_class(prc, num_flws):
         """ Convert a queue occupancy percent to a fairness class. """
-        assert len(prc) == 1, "Should be only one column"
+        assert len(prc) == 1, "Should be only one column."
         prc = prc[0]
 
         # The fair queue occupancy.
-        fair = 1. / num_flws_
+        fair = 1. / num_flws
         # Threshold between fair and unfair.
         tsh_fair = 0.1
         # Threshold between unfair and very unfair.
@@ -190,15 +193,16 @@ def convert_to_class(dat_all, num_flws):
             assert False, "This should never happen."
         return cls
 
-    return [np.vectorize(
-        functools.partial(percent_to_class, num_flws_=num_flws_),
-        otypes=[int])(dat)
-            for dat, num_flws_ in zip(dat_all, num_flws)]
+    return [
+        np.vectorize(
+            functools.partial(percent_to_class, num_flws=num_flws),
+            otypes=[int])(dat)
+        for dat, num_flws in dat_all]
 
 
 def parse_sim(sim):
     """ Parse one pair of simulation result files and merge them. """
-    print(f"Parsing: {sim}")
+    print(f"    Parsing: {sim}")
     _, _, _, unfair_flows, other_flows, _, _, _, _ = sim.split("-")
     with np.load(f"{sim}-csv.npz") as fil_csv:
         dat_csv = fil_csv[fil_csv.files[0]]
@@ -222,8 +226,8 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
         if sim.endswith("csv"):
             # Remove "-csv" and remember this simulation.
             sims = sims | {sim[:-4],}
-    sims = set(list(sims))
-    print(f"Found {len(sims)} simulations.")
+    sims = set(list(sims)[:10])
+    print(f"    Found {len(sims)} simulations.")
     with multiprocessing.Pool() as pol:
         # Each element of dat corresponds to a single simulation.
         dat = pol.map(parse_sim, [path.join(dat_dir, sim) for sim in sims])
@@ -241,15 +245,18 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     num_flws, dat_in, dat_out = zip(*dat)
     # Scale input features.
     dat_in, prms_in = scale_fets(dat_in)
-    # Convert output features to class labels.
-    dat_out = convert_to_class(dat_out, num_flws)
+    # Convert output features to class labels. Must call list()
+    # because the value gets used more than once.
+    dat_out = convert_to_class(list(zip(dat_out, num_flws)))
 
     # Verify data.
     for (d_in, d_out) in zip(dat_in, dat_out):
-        assert d_in.shape[0] == d_out.shape[0], "Should have the same number of rows."
+        assert d_in.shape[0] == d_out.shape[0], \
+            "Should have the same number of rows."
 
     # Visualaize the ground truth data.
     def find_out(x):
+        """ Returns the number of entries that have a particular value. """
         return sum([1 if v == x else 0
                     for d in dat_out
                     for v in d.tolist()])
@@ -258,12 +265,12 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     tot_2 = find_out(2)
     tot_3 = find_out(3)
     tot_4 = find_out(4)
-    print("Ground truth:")
-    print(f"    0 - much lower than fair: {tot_0} packets")
-    print(f"    1 - lower than fair: {tot_1} packets")
-    print(f"    2 - fair: {tot_2} packets")
-    print(f"    3 - greater than fair: {tot_3} packets")
-    print(f"    4 - much greater than fair: {tot_4} packets")
+    print("    Ground truth:")
+    print(f"        0 - much lower than fair: {tot_0} packets")
+    print(f"        1 - lower than fair: {tot_1} packets")
+    print(f"        2 - fair: {tot_2} packets")
+    print(f"        3 - greater than fair: {tot_3} packets")
+    print(f"        4 - much greater than fair: {tot_4} packets")
     assert (tot_0 + tot_1 + tot_2 + tot_3 + tot_4 ==
             sum([d.shape[0] for d in dat_out])), \
             "Error visualizing ground truth!"
@@ -272,7 +279,6 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     dat = [(torch.tensor(d_in.tolist(), dtype=torch.float),
             torch.tensor(d_out, dtype=torch.long))
            for d_in, d_out in zip(dat_in, dat_out)]
-    print("Done.")
 
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.
@@ -281,8 +287,8 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     tot = len(dat)
     num_val = int(round(tot * 0.2))
     num_tst = int(round(tot * 0.3))
-    print((f"Data - train: {tot - num_val - num_tst}, val: {num_val}, test: "
-           f"{num_tst}"))
+    print((f"    Data - train: {tot - num_val - num_tst}, val: {num_val}, "
+           f"test: {num_tst}"))
     dat_val = dat[:num_val]
     dat_tst = dat[num_val:num_val + num_tst]
     dat_trn = dat[num_val + num_tst:]
@@ -293,6 +299,7 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
         Dataset(dat_val), batch_size=bch_tst, shuffle=False)
     ldr_tst = torch.utils.data.DataLoader(
         Dataset(dat_tst), batch_size=bch_tst, shuffle=False)
+    print("Done.")
     return ldr_trn, ldr_val, ldr_tst, prms_in
 
 
@@ -310,10 +317,35 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
+def inference(ins, labs, net, dev, hidden, los_fnc=None):
+    """
+    Runs a single inference pass. Returns the output of net, or the
+    loss if los_fnc is not None.
+    """
+    # Move the training data to the specified device.
+    ins = ins.to(dev)
+    labs = labs.to(dev)
+    # LSTMs want the sequence length to be first and the batch
+    # size to be second, so we need to flip the first and
+    # second dimensions:
+    #   (batch size, sequence length, LSTM.in_dim) to
+    #   (sequence length, batch size, LSTM.in_dim)
+    ins = ins.transpose(0, 1)
+    # Reduce the labels to a 1D tensor.
+    # TODO: Explain this better.
+    labs = labs.transpose(0, 1).view(-1)
+    # The forwards pass.
+    out, hidden = net(ins, hidden)
+    if los_fnc is None:
+        return out, hidden
+    return los_fnc(out, labs), hidden
+
+
 def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
           val_pat_max, out_flp, lr, momentum, val_imp_thresh,
           tim_out_s):
     """ Trains a model. """
+    print("Training...")
     los_fnc = torch.nn.CrossEntropyLoss()
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     # If using early stopping, then this is the lowest validation loss
@@ -328,16 +360,17 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
 
     # To avoid a divide-by-zero error below, the number of validation passes
     # per epoch much be at least 2.
-    assert VALS_PER_EPC >= 2
+    assert VALS_PER_EPC >= 2, "Must validate at least twice per epoch."
     if len(ldr_trn) < VALS_PER_EPC:
         # If the number of batches per epoch is less than the desired number of
-        # validation passes per epoch, when do a validation pass after every
+        # validation passes per epoch, then do a validation pass after every
         # batch.
         bchs_per_val = 1
     else:
         # Using floor() means that dividing by (VALS_PER_EPC - 1) will result in
         # VALS_PER_EPC validation passes per epoch.
         bchs_per_val = math.floor(len(ldr_trn) / (VALS_PER_EPC - 1))
+    print(f"Will validate after every {bchs_per_val} batches.")
 
     tim_srt_s = time.time()
     # Loop over the dataset multiple times...
@@ -349,46 +382,37 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             break
 
         # For each batch...
-        for bch_idx, (ins, labs) in enumerate(ldr_trn, 0):
-            print(f"epoch: {epoch_idx + 1}/{num_epochs}, "
-                  f"batch: {bch_idx + 1}/{len(ldr_trn)}")
+        for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
+            print(f"Epoch: {epoch_idx + 1}/{'?' if ely_stp else num_epochs}, "
+                  f"batch: {bch_idx_trn + 1}/{len(ldr_trn)}")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
-            # Move the training data to the specified device.
-            ins = ins.to(dev)
-            labs = labs.to(dev)
-            # LSTMs want the sequence length to be first and the batch
-            # size to be second, so we need to flip the first and
-            # second dimensions:
-            #   (batch size, sequence length, LSTM.in_dim) to
-            #   (sequence length, batch size, LSTM.in_dim)
-            ins = ins.transpose(0, 1)
-            # Reduce the labels to a 1D tensor.
-            # TODO: Explain this better.
-            labs = labs.transpose(0, 1).view(-1)
+            hidden[0].to(dev)
+            hidden[1].to(dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            # The forwards and backwards passes.
-            out, hidden = net(ins, hidden)
-            loss = los_fnc(out, labs)
+            loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
+            # The backward pass.
             loss.backward()
             opt.step()
-            print(f"    loss: {loss:.5f}")
+            print(f"    Training loss: {loss:.5f}")
 
             # Run on validation set, print statistics, and (maybe) checkpoint
             # every VAL_PER batches.
-            if ely_stp and not bch_idx % bchs_per_val:
+            if ely_stp and not bch_idx_trn % bchs_per_val:
+                print("    Validation pass:")
                 # For efficiency, convert the model to evaluation mode.
                 net.eval()
                 with torch.no_grad():
                     los_val = 0
-                    for bch_val in ldr_val:
-                        # Get the validation data and move it to the specified
-                        # device.
-                        ins, labs = bch_val
-                        ins = ins.to(dev)
-                        labs = labs.to(dev)
-                        los_val += los_fnc(net(ins), labs).item()
+                    for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
+                        print(f"    Validation batch: {bch_idx_val + 1}/{len(ldr_val)}")
+                        # Initialize the hidden state for every new sequence.
+                        hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
+                        hidden[0].to(dev)
+                        hidden[1].to(dev)
+                        los_val += inference(
+                            ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.train()
 
@@ -396,8 +420,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                     los_val_min = los_val
                 # Calculate the percent improvement in the validation loss.
                 prc = (los_val_min - los_val) / los_val_min * 100
-                print(f"[epoch {epoch_idx:5d}, batch {bch_idx:5d}] Validation "
-                      f"error improvement: {prc:.2f}%")
+                print(f"    Validation error improvement: {prc:.2f}%")
 
                 # If the percent improvement in the validation loss is greater
                 # than a small threshold, then take this as the new best version
@@ -407,28 +430,29 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                     los_val_min = los_val
                     # Reset the validation patience.
                     val_pat = val_pat_max
-                    # Save the new best version of the model. Convert the
-                    # model to Torch Script first.
-                    torch.jit.save(torch.jit.script(net), out_flp)
+                    # # Save the new best version of the model. Convert the
+                    # # model to Torch Script first.
+                    # torch.jit.save(torch.jit.script(net), out_flp)
                 else:
                     val_pat -= 1
-                    if path.exists(out_flp):
-                        # Resume training from the best model.
-                        net = torch.jit.load(out_flp)
-                        net.to(dev)
+                    # if path.exists(out_flp):
+                    #     # Resume training from the best model.
+                    #     net = torch.jit.load(out_flp)
+                    #     net.to(dev)
                 if val_pat <= 0:
                     print(f"Stopped after {epoch_idx + 1} epochs")
                     return net
-    if not ely_stp:
-        # Save the final version of the model. Convert the model to Torch Script
-        # first.
-        print(f"Saving: {out_flp}")
-        # torch.jit.save(torch.jit.script(net), out_flp)
+    # if not ely_stp:
+    #     # Save the final version of the model. Convert the model to Torch Script
+    #     # first.
+    #     print(f"Saving: {out_flp}")
+    #     torch.jit.save(torch.jit.script(net), out_flp)
     return net
 
 
 def test(net, ldr_tst, dev):
     """ Tests a model. """
+    print("Testing...")
     # The number of testing samples that were predicted correctly.
     num_correct = 0
     # Total testing samples.
@@ -437,28 +461,32 @@ def test(net, ldr_tst, dev):
     net.eval()
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
-            print(f"batch: {bch_idx + 1}/{len(ldr_tst)}")
-            # See similar code in train().
+            print(f"Test batch: {bch_idx + 1}/{len(ldr_tst)}")
             bch_tst, seq_len, _ = ins.size()
-            hidden = init_hidden(net, bch_tst, dev)
-            ins = ins.to(dev)
-            labs = labs.to(dev)
-            ins = ins.transpose(0, 1)
-            labs = labs.transpose(0, 1).view(-1)
-            outs, hidden = net(ins, hidden)
-            # The class is the index of the output entry with greatest
-            # value (highest probability). dim=1 because the output
-            # has an entry for every entry in the input sequence.
-            outs = torch.argmax(outs, dim=1)
-            # Compare the outputs to the labels, then cast the
-            # resulting bools to ints and sum them up to get the total
+            # Initialize the hidden state for every new sequence.
+            hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
+            hidden[0].to(dev)
+            hidden[1].to(dev)
+            # Run inference. The first element of the output is the
             # number of correct predictions.
-            num_correct += outs.eq(labs).type(torch.IntTensor).sum().item()
+            num_correct += inference(
+                ins, labs, net, dev, hidden,
+                los_fnc=lambda a, b: (
+                    # argmax(): The class is the index of the output
+                    #     entry with greatest value (i.e., highest
+                    #     probability). dim=1 because the output has an
+                    #     entry for every entry in the input sequence.
+                    # eq(): Compare the outputs to the labels.
+                    # type(): Cast the resulting bools to ints.
+                    # sum(): Sum them up to get the total number of correct
+                    #     predictions.
+                    torch.argmax(
+                        a, dim=1).eq(b).type(torch.IntTensor).sum().item()))[0]
             total += bch_tst * seq_len
     # Convert the model back to training mode.
     net.train()
     acc_tst = num_correct / total
-    print(f"test accuracy: {acc_tst * 100:.2f}%")
+    print(f"Test accuracy: {acc_tst * 100:.2f}%")
     return acc_tst
 
 
@@ -567,6 +595,7 @@ def run_many(args):
 
 
 def main():
+    """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="An LSTM training framework.")
     psr.add_argument(
