@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Based on the PyTorch tutorial: https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+Based on:
+- https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+- https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 """
 
 import argparse
@@ -17,6 +19,7 @@ import numpy as np
 import torch
 
 import models
+import utils
 
 
 # Parameter defaults.
@@ -54,14 +57,18 @@ NUM_CLASSES = 5
 
 
 class Dataset(torch.utils.data.Dataset):
+    """ A simple Dataset that wraps an array of (input, output) value pairs. """
+
     def __init__(self, dat):
         super(Dataset).__init__()
         self.dat = dat
 
     def __len__(self):
+        """ Returns the number of items in this Dataset. """
         return len(self.dat)
 
     def __getitem__(self, idx):
+        """ Returns a specific item from this Dataset. """
         assert torch.utils.data.get_worker_info() is None, \
             "This Dataset does not support being loaded by multiple workers!"
         return self.dat[idx]
@@ -73,16 +80,12 @@ def match(a, b):
     primary key (column 0). The output matrix will contain only
     sequence numbers that are present in a. This function assumes that
     order is preserved between a and b, but that b may have additional
-    entries.
+    entries. Every entry in a must have a corresponding entry in b.
     """
-    # Create a new matrix that is a copy of a but with extra columns
-    # for the values in b. Discard the sequence number column in b
-    # (column 0).
+    # Create an empty matrix that is the size of a but has extra
+    # columns for the corresponding entries from b. Discard the first
+    # column of b, which is the sequence number.
     merged = np.empty(a.shape, dtype=a.dtype.descr + b.dtype.descr[1:])
-    # merged = np.append(
-    #     np.copy(a),
-    #     np.zeros((a.shape[0], b.shape[1] - 1), dtype=b.dtype[1:]),
-    #     axis=1)
     rows_a = a.shape[0]
     cols_a = len(a.dtype.names)
     rows_b = b.shape[0]
@@ -106,58 +109,6 @@ def match(a, b):
     assert i_a == rows_a, "Did not match all rows in a."
     return merged
 
-    # print(f"a.shape: {a.shape}")
-    # print(f"b.shape: {b.shape}")
-    # print(f"merged.shape: {merged.shape}")
-
-    # print(a[a.shape[0]-10:a.shape[0]:,])
-
-    # print(b[b.shape[0]-10:b.shape[0]:,])
-    # print(f"diff: {b.shape[0] - a.shape[0]}")
-
-    # a_s = set(a[:,0])
-    # b_s = set(b[:,0])
-
-    # print(f"len(a_s): {len(a_s)}")
-    # print(f"len(b_s): {len(b_s)}")
-
-    # if a.shape[0] < b.shape[0]:
-    #     print("pcap has more")
-    # if a.shape[0] < b.shape[0]:
-    #     extra = [x for x in list(b[:,0]) if x not in set(a[:,0])]
-    #     print("{} extra in fairness: {}".format(len(extra), extra))
-    #     raise Exception()!
-
-    # def find_dups(d):
-    #     counts = {}
-    #     for k in list(d[:,0]):
-    #         if k not in counts:
-    #             counts[k] = 1
-    #         else:
-    #             counts[k] += 1
-    #     return {k: v for k, v in counts.items() if v > 1}
-
-    # print(f"csv has dups: {a.shape[0] - len(a_s)}")
-    #     dups = find_dups(a)
-    #     print(f"{len(dups)} duplicates detected in a: {dups}")
-    # if b.shape[0] != len(b_s):
-    #dups = find_dups(b)
-    #print(f"{len(dups)} duplicates detected in b: {dups}")
-
-    # print(f"a has but b does not: {a_s - b_s}")
-    # print(f"b has but a does not: {b_s - a_s}")
-
-    # assert a.shape[0] == b.shape[0], "Differing numbers of rows."
-    # assert (a[:, 0] == b[:, 0]).all(), "Differing sequence numbers."
-    # Drop the first column from each.
-    # return np.empty(a.shape)
-    # return np.concatenate((a[:, 1:], b[:, 1:]), axis=1)
-
-
-def scale(x, min_in, max_in, min_out, max_out):
-    assert min_in != max_in, "Divide by zero!"
-    return min_out + (x - min_in) * (max_out - min_out) / (max_in - min_in)
-
 
 def scale_fets(dat_all):
     """
@@ -167,13 +118,12 @@ def scale_fets(dat_all):
     min and the max of column i in the entries in dat_all.
     """
     assert dat_all, "No data!"
-    # Pick the first simulation result and look at the column specification.
+    # Pick the first simulation result and determine the column specification.
     fets = dat_all[0].dtype.names
-    num_fets = len(fets)
+    # Create an empty array to hold the min and max values for each feature.
+    scl_prms = np.empty((len(fets), 2))
     # First, look at all features across simulations to determine the
-    # global scale paramters for each feature.
-    scl_prms = np.empty((num_fets, 2))
-    # For each feature column...
+    # global scale paramters for each feature. For each feature column...
     for j, fet in enumerate(fets):
         # Find the global min and max values for this feature.
         min_global = float("inf")
@@ -186,6 +136,7 @@ def scale_fets(dat_all):
         scl_prms[j] = np.array([min_global, max_global])
 
     def normalize(dat):
+        """ Rescale all of the features in dat to the range [0, 1]. """
         nrm = np.empty(dat.shape, dtype=dat.dtype)
         for j, fet in enumerate(fets):
             min_in, max_in = scl_prms[j]
@@ -193,8 +144,8 @@ def scale_fets(dat_all):
             if min_in == max_in:
                 scaled = np.zeros(fet_values.shape, dtype=fet_values.dtype)
             else:
-                scaled = scale(
-                    fet_values, scl_prms[j][0], scl_prms[j][1], min_out=0, max_out=1)
+                scaled = utils.scale(
+                    fet_values, min_in, max_in, min_out=0, max_out=1)
             nrm[fet] = scaled
         return nrm
 
@@ -202,10 +153,7 @@ def scale_fets(dat_all):
 
 
 def convert_to_class(dat_all, num_flws):
-    """
-    Converts each real-valued feature value in dat to a class.
-    One-hot encoding?
-    """
+    """ Converts each real-valued feature value in dat to a class. """
     assert len(dat_all) == len(num_flws)
     for dat in dat_all:
         assert len(dat.dtype.names) == 1, "Should be only one column."
@@ -248,34 +196,24 @@ def convert_to_class(dat_all, num_flws):
             for dat, num_flws_ in zip(dat_all, num_flws)]
 
 
-def one_hot(dat_all, num_clss):
-    def dat_to_one_hot(dat):
-        assert len(dat.dtype.descr) == 1, "Should be only one column"
-        # Make a new matrix where each value is a one-hot encoding.
-        enc = np.zeros((dat.shape[0], num_clss), dtype=float)
-        for i, cls in enumerate(dat):
-            enc[i][cls] = 1
-        return enc
-
-    return [dat_to_one_hot(dat) for dat in dat_all]
-
-
 def parse_sim(sim):
-    # For each simulation, extract its parsed CSV and PCAP results and
-    # merge them.
+    """ Parse one pair of simulation result files and merge them. """
     print(f"Parsing: {sim}")
     _, _, _, unfair_flows, other_flows, _, _, _, _ = sim.split("-")
-    fil_csv = np.load(f"{sim}-csv.npz")
-    dat_csv = fil_csv[fil_csv.files[0]]
-    fil_csv.close()
-    fil_fair = np.load(f"{sim}-fairness.npz")
-    dat_fair = fil_fair[fil_fair.files[0]]
-    fil_fair.close()
+    with np.load(f"{sim}-csv.npz") as fil_csv:
+        dat_csv = fil_csv[fil_csv.files[0]]
+    with np.load(f"{sim}-fairness.npz") as fil_fair:
+        dat_fair = fil_fair[fil_fair.files[0]]
     return (int(unfair_flows[:-6]) + int(other_flows[:-5]),
             match(dat_csv, dat_fair))
 
 
 def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
+    """
+    Parses the files in data_dir, transforms them (e.g., by scaling)
+    into the correct format for the network, and returns training,
+    validation, and test data loaders.
+    """
     print("Loading data...")
     # Find all simulations.
     sims = set()
@@ -286,7 +224,6 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
             sims = sims | {sim[:-4],}
     sims = set(list(sims))
     print(f"Found {len(sims)} simulations.")
-
     with multiprocessing.Pool() as pol:
         # Each element of dat corresponds to a single simulation.
         dat = pol.map(parse_sim, [path.join(dat_dir, sim) for sim in sims])
@@ -302,17 +239,10 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     # Unzip dat from a list of pairs of in and out features into a pair of lists
     # of in and out features.
     num_flws, dat_in, dat_out = zip(*dat)
-
     # Scale input features.
     dat_in, prms_in = scale_fets(dat_in)
-    # Convert output features to class labels and then to one-hot encodings.
-    # dat_out = one_hot(convert_to_class(dat_out, num_flws), NUM_CLASSES)
+    # Convert output features to class labels.
     dat_out = convert_to_class(dat_out, num_flws)
-    # print(f"dat_out[0]: {dat_out[0]}")
-    # print(f"len(dat_out): {len(dat_out)}")
-    # print(f"len(dat_out[0]): {len(dat_out[0])}")
-    # print(f"len(dat_out[0][0]): {len(dat_out[0][0])}")
-    # print(f"dat_out[0].shape: {dat_out[0].shape}")
 
     # Verify data.
     for (d_in, d_out) in zip(dat_in, dat_out):
@@ -338,23 +268,11 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
             sum([d.shape[0] for d in dat_out])), \
             "Error visualizing ground truth!"
 
-    # x = torch.tensor(
-    #     np.reshape(dat_in[0],
-    #                newshape=(dat_in[0].shape[0], len(dat_in[0].dtype.names))))
-    # x = torch.tensor(list(dat_in[0]))
-    # y = torch.tensor(dat_out[0])
-
-
     # Convert each training input/output pair to Torch tensors.
-    # dat = [(torch.tensor([list(d) for d in list(d_in)], dtype=torch.float),
-    #         torch.tensor(d_out, dtype=torch.float))
-    #        for d_in, d_out in zip(dat_in, dat_out)]
     dat = [(torch.tensor(d_in.tolist(), dtype=torch.float),
             torch.tensor(d_out, dtype=torch.long))
            for d_in, d_out in zip(dat_in, dat_out)]
     print("Done.")
-
-
 
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.
@@ -375,7 +293,6 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
         Dataset(dat_val), batch_size=bch_tst, shuffle=False)
     ldr_tst = torch.utils.data.DataLoader(
         Dataset(dat_tst), batch_size=bch_tst, shuffle=False)
-
     return ldr_trn, ldr_val, ldr_tst, prms_in
 
 
@@ -386,11 +303,8 @@ def init_hidden(net, bch, dev):
     sequence, and is different than the network's weights. It needs to
     be reset for every new sequence.
     """
-    if isinstance(net, torch.nn.DataParallel):
-        init_hidden_func = net.module.init_hidden
-    else:
-        init_hidden_func = net.init_hidden
-    hidden = init_hidden_func(bch)
+    hidden = (net.module.init_hidden if isinstance(net, torch.nn.DataParallel)
+              else net.init_hidden)(bch)
     hidden[0].to(dev)
     hidden[1].to(dev)
     return hidden
@@ -399,6 +313,7 @@ def init_hidden(net, bch, dev):
 def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
           val_pat_max, out_flp, lr, momentum, val_imp_thresh,
           tim_out_s):
+    """ Trains a model. """
     los_fnc = torch.nn.CrossEntropyLoss()
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     # If using early stopping, then this is the lowest validation loss
@@ -513,6 +428,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
 
 
 def test(net, ldr_tst, dev):
+    """ Tests a model. """
     # The number of testing samples that were predicted correctly.
     num_correct = 0
     # Total testing samples.
@@ -534,7 +450,7 @@ def test(net, ldr_tst, dev):
             # value (highest probability). dim=1 because the output
             # has an entry for every entry in the input sequence.
             outs = torch.argmax(outs, dim=1)
-            # Compare the outputs to the labels, when case the
+            # Compare the outputs to the labels, then cast the
             # resulting bools to ints and sum them up to get the total
             # number of correct predictions.
             num_correct += outs.eq(labs).type(torch.IntTensor).sum().item()
@@ -547,6 +463,10 @@ def test(net, ldr_tst, dev):
 
 
 def run(args_):
+    """
+    Trains a model according to the supplied parameters. Returns the test error
+    (lower is better).
+    """
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
@@ -593,10 +513,6 @@ def run(args_):
     ldr_trn, ldr_val, ldr_tst, scl_prms = make_datasets(
         args["data_dir"], in_spc, out_spc, bch_trn, args["test_batch"])
 
-    # for ins, lab in ldr_trn:
-    #     print(f"ins: {ins}")
-    #     print(f"lab: {lab}")
-
     # Save scaling parameters.
     with open(path.join(out_dir, "scale_params.json"), "w") as fil:
         json.dump(scl_prms.tolist(), fil)
@@ -617,12 +533,6 @@ def run(args_):
     tim_srt_s = time.time()
     los_tst = test(net, ldr_tst, dev)
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
-
-    # # Print trained parameters.
-    # print("Trained parameters:")
-    # for nam, prm in net.named_parameters():
-    #     if prm.requires_grad:
-    #         print(f"\t{nam}: {prm}")
     return los_tst
 
 
@@ -653,7 +563,7 @@ def run_many(args):
         # Return the minimum error instead of the maximum accuracy.
         return 1 - max_acc
     print(f"Model cannot be trained with args: {args}")
-    return float
+    return float("inf")
 
 
 def main():
