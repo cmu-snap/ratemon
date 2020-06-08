@@ -387,16 +387,16 @@ def init_hidden(net, bch, dev):
     be reset for every new sequence.
     """
     if isinstance(net, torch.nn.DataParallel):
-        init_hidden = net.module.init_hidden
+        init_hidden_func = net.module.init_hidden
     else:
-        init_hidden = net.init_hidden
-    hidden = init_hidden(bch)
+        init_hidden_func = net.init_hidden
+    hidden = init_hidden_func(bch)
     hidden[0].to(dev)
     hidden[1].to(dev)
     return hidden
 
 
-def train(net, num_epochs, bch_trn, ldr_trn, ldr_val, dev, ely_stp,
+def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
           val_pat_max, out_flp, lr, momentum, val_imp_thresh,
           tim_out_s):
     los_fnc = torch.nn.CrossEntropyLoss()
@@ -604,7 +604,7 @@ def run(args_):
     # Training.
     tim_srt_s = time.time()
     net = train(
-        net, args["epochs"], bch_trn, ldr_trn, ldr_val, dev, args["early_stop"],
+        net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
         args["val_patience"], out_flp, args["learning_rate"], args["momentum"],
         args["val_improvement_thresh"], args["timeout_s"])
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")

@@ -31,8 +31,8 @@ def parse_filename(flp):
     # Edge delays
     edge_delays = list(map(int, edge_delays[:-2].split(",")))
 
-    return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows, 
-             other_flows, edge_delays)
+    return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows,
+            other_flows, edge_delays)
 
 def parse_time_us(pkt_mdat):
     """
