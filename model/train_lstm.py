@@ -226,7 +226,7 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
         if sim.endswith("csv"):
             # Remove "-csv" and remember this simulation.
             sims = sims | {sim[:-4],}
-    sims = set(list(sims)[:10])
+    sims = set(list(sims))
     print(f"    Found {len(sims)} simulations.")
     with multiprocessing.Pool() as pol:
         # Each element of dat corresponds to a single simulation.
