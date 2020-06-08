@@ -35,10 +35,6 @@ class LstmSimple(torch.nn.Module):
 
 
     def forward(self, x, hidden):
-
-        # x = x.view(x.size()[1], x.size()[0], -1)
-        # First dimension is now the batch size.
-
         # The LSTM itself, which also takes as input the previous hidden state.
         out, hidden = self.lstm(x, hidden)
         # Select the last piece as the LSTM output.
@@ -46,14 +42,7 @@ class LstmSimple(torch.nn.Module):
         # Classify the LSTM output.
         out = self.fc(out)
         out = self.sg(out)
-
-        # Not sure what this does...
-        # batch_size = x.size()[0]
-        # out = out.view(batch_size, -1)
-        # out = out[:, -1]
-        # Return the hidden state as well, so that it can be passed in again.
         return out, hidden
-        #scores = torch.nn.functional.log_softmax(fc_out, 1)
 
 
     def init_hidden(self, batch_size):
