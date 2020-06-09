@@ -8,7 +8,9 @@ import torch
 
 
 class LstmSimple(torch.nn.Module):
-    # The specification of the input tensor format.
+    # The specification of the input tensor format.  For now, do not
+    # use RTT ratio because our method of estimating it cannot be
+    # performed by a general receiver.
     # in_spc = ["inter-arrival time", "RTT ratio", "loss rate"]
     in_spc = ["inter-arrival time", "loss rate"]
     # The specification of the output tensor format.

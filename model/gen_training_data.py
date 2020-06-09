@@ -33,7 +33,7 @@ DUR_s = 80
 # Delay until ACK pacing begins.
 WARMUP_s = 60
 # Whether to enable unfairness mitigation.
-ENABLE = False
+ENABLE_MITIGATION = False
 # Whether to capture pcap traces.
 PCAP = True
 # Whether to capture csv files.
@@ -98,7 +98,7 @@ def main():
              "unfair_flows": UNFAIR_FLOWS,
              "other_flows": flws,
              "other_proto": OTHER_PROTO,
-             "enable" : "true" if ENABLE else "false",
+             "enable_mitigation" : "true" if ENABLE_MITIGATION else "false",
              "pcap": "true" if PCAP else "false",
              "csv": "true" if CSV else "false",
              "packet_size": PACKET_SIZE_B,

@@ -99,7 +99,6 @@ def match(a, b):
             for j in range(cols_a):
                 merged[i_a][j] = a[i_a][j]
             for j in range(1, cols_b):
-                # print(f"a.shape[1] + j - 1: {a.shape[1] + j - 1}")
                 merged[i_a][cols_a + j - 1] = b[i_b][j]
             i_a += 1
             i_b += 1
@@ -265,12 +264,13 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     tot_2 = find_out(2)
     tot_3 = find_out(3)
     tot_4 = find_out(4)
+    tot = tot_0 + tot_1 + tot_2 + tot_3 + tot_4
     print("    Ground truth:")
-    print(f"        0 - much lower than fair: {tot_0} packets")
-    print(f"        1 - lower than fair: {tot_1} packets")
-    print(f"        2 - fair: {tot_2} packets")
-    print(f"        3 - greater than fair: {tot_3} packets")
-    print(f"        4 - much greater than fair: {tot_4} packets")
+    print(f"        0 - much lower than fair: {tot_0} packets ({tot_0 / tot * 100:.2f}%)")
+    print(f"        1 - lower than fair: {tot_1} packets ({tot_1 / tot * 100:.2f}%)")
+    print(f"        2 - fair: {tot_2} packets ({tot_2 / tot * 100:.2f}%)")
+    print(f"        3 - greater than fair: {tot_3} packets ({tot_3 / tot * 100:.2f}%)")
+    print(f"        4 - much greater than fair: {tot_4} packets ({tot_4 / tot * 100:.2f}%)")
     assert (tot_0 + tot_1 + tot_2 + tot_3 + tot_4 ==
             sum([d.shape[0] for d in dat_out])), \
             "Error visualizing ground truth!"
@@ -346,6 +346,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
           tim_out_s):
     """ Trains a model. """
     print("Training...")
+    # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss()
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     # If using early stopping, then this is the lowest validation loss
