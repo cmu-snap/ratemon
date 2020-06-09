@@ -15,6 +15,8 @@ import traceback
 # Warning: If you move this file from the directory "unfair/model", then you
 #          must update this variable.
 NS3_DIR = path.join(path.dirname(path.realpath(__file__)), "..", "ns-3-unfair")
+# The name of the ns-3 application to run.
+APP = "dumbbell"
 # Used to synchronize writing to the error log.
 LOCK = multiprocessing.Lock()
 # Name of the error log file.
@@ -22,8 +24,10 @@ ERR_FLN = "failed.json"
 # Name of the logger for this module.
 LOGGER = path.basename(__file__).split(".")[0]
 
+
 def check_output(cnf, logger):
-    args = ([path.join(NS3_DIR, "build", "scratch", "ai-multi-flow"),] +
+    """ Runs a configuration and returns its output. """
+    args = ([path.join(NS3_DIR, "build", "scratch", APP),] +
             [f"--{arg}={val}" for arg, val in cnf.items()])
     cmd = f"LD_LIBRARY_PATH={os.environ['LD_LIBRARY_PATH']} {' '.join(args)}"
     log = logging.getLogger(logger)
@@ -57,6 +61,10 @@ def check_output(cnf, logger):
 
 
 def run(cnf, res_fnc, logger):
+    """
+    Runs a configuration. If res_fnc is not None, then returns the result of
+    parsing the configuration's output using res_fnc, otherwise returns None.
+    """
     # Build the arguments array, run the simulation, and iterate over each line
     # in its output.
     out = check_output(cnf, logger)
@@ -65,7 +73,12 @@ def run(cnf, res_fnc, logger):
     return res_fnc(out)
 
 
-def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None, dry_run=False, sync=False):
+def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
+        dry_run=False, sync=False):
+    """
+    Simulates a set of configurations. Returns a list of pairs of the form:
+        (configuration, result)
+    """
     # Set up logging.
     logger = LOGGER if log_par is None else f"{log_par}.{LOGGER}"
     log = logging.getLogger(logger)

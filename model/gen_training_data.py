@@ -60,6 +60,7 @@ def bdp_bps(bw_Mbps, one_way_dly_us):
 
 
 def main():
+    """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Generates training data.")
     psr.add_argument(
@@ -87,21 +88,22 @@ def main():
     log = logging.getLogger(LOGGER)
 
     # Assemble the configurations.
-    cnfs = [{"bandwidth_Mbps": bw_Mbps,
-             "delay_us": dly_us,
+    cnfs = [{"bottleneck_bandwidth_Mbps": bw_Mbps,
+             "bottleneck_delay_us": dly_us,
              # Calculate queue capacity as a multiple of the BDP. If the BDP is
              # less than a single packet, then use 1 packet as the BDP anyway.
-             "queue_capacity_p": int(round(
+             "bottleneck_queue_p": int(round(
                  que_p *
-                 max(1, bdp_bps(bw_Mbps, dly_us * 2) / float(PACKET_SIZE_B)))),
-             "experiment_duration_s": DUR_s,
+                 max(1, bdp_bps(bw_Mbps, dly_us * 3) / float(PACKET_SIZE_B)))),
              "unfair_flows": UNFAIR_FLOWS,
              "other_flows": flws,
              "other_proto": OTHER_PROTO,
-             "enable_mitigation" : "true" if ENABLE_MITIGATION else "false",
+             "unfair_edge_delays_us": f"[{dly_us}]",
+             "other_edge_delays_us": f"[{dly_us}]",
+             "payload_B": PACKET_SIZE_B,
+             "enable_mitigation": "false",
+             "duration_s": DUR_s,
              "pcap": "true" if PCAP else "false",
-             "csv": "true" if CSV else "false",
-             "packet_size": PACKET_SIZE_B,
              "out_dir": sim_dir}
             for bw_Mbps, dly_us, que_p, flws in itertools.product(
                 BWS_Mbps, DELAYS_us, QUEUE_p, OTHER_FLOWS)]
