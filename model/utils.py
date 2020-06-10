@@ -1,19 +1,19 @@
 #! /usr/bin/env python3
-"""Utility functions for parse_*.py """
-
-from os import path
+""" Utility functions. """
 
 import scapy.utils
 import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
 
-def parse_filename(flp):
+
+def parse_sim_name(sim):
     """
     Returns experiment setup in filename
     """
+    # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
     bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays, \
-      packet_size_B, dur_s, _, _, = path.basename(flp).split("-")
+      packet_size_B, dur_s, = sim.split("-")
     # Link bandwidth (Mbps).
     bw_Mbps = float(bw_Mbps[:-4])
     # Bottleneck router delay (us).
@@ -29,10 +29,11 @@ def parse_filename(flp):
     # Number of other flows
     other_flows = int(other_flows[:-5])
     # Edge delays
-    edge_delays = list(map(int, edge_delays[:-2].split(",")))
+    edge_delays = [int(del_us) for del_us in edge_delays[:-2].split(",")]
 
     return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows,
             other_flows, edge_delays)
+
 
 def parse_time_us(pkt_mdat):
     """
@@ -40,6 +41,7 @@ def parse_time_us(pkt_mdat):
     PacketMetadata object.
     """
     return pkt_mdat.sec * 1e6 + pkt_mdat.usec
+
 
 def parse_packets(flp, packet_size_B):
     """
