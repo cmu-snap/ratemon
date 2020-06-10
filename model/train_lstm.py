@@ -6,7 +6,6 @@ Based on:
 """
 
 import argparse
-import functools
 import json
 import math
 import multiprocessing
@@ -116,55 +115,7 @@ def scale_fets(dat_all):
     return [normalize(dat) for dat in dat_all], scl_prms
 
 
-def convert_to_class(dat_all):
-    """
-    Converts real-valued feature values into classes. dat_all is a
-    list of pairs, one for each simulation, of:
-        (feature matrix, number of flows)
-    """
-    for dat, _ in dat_all:
-        assert len(dat.dtype.names) == 1, "Should be only one column."
-
-    def percent_to_class(prc, num_flws):
-        """ Convert a queue occupancy percent to a fairness class. """
-        assert len(prc) == 1, "Should be only one column."
-        prc = prc[0]
-
-        # The fair queue occupancy.
-        fair = 1. / num_flws
-        # Threshold between fair and unfair.
-        tsh_fair = 0.1
-        # Threshold between unfair and very unfair.
-        tsh_unfair = 0.4
-
-        dif = (fair - prc) / fair
-        if dif < -1 * tsh_unfair:
-            # We are much lower than fair.
-            cls = 0
-        elif -1 * tsh_unfair <= dif < -1 * tsh_fair:
-            # We are not that much lower than fair.
-            cls = 1
-        elif -1 * tsh_fair <= dif <= tsh_fair:
-            # We are fair.
-            cls = 2
-        elif tsh_fair < dif <= tsh_unfair:
-            # We are not that much higher than fair.
-            cls = 3
-        elif tsh_unfair < dif:
-            # We are much higher than fair.
-            cls = 4
-        else:
-            assert False, "This should never happen."
-        return cls
-
-    return [
-        np.vectorize(
-            functools.partial(percent_to_class, num_flws=num_flws),
-            otypes=[int])(dat)
-        for dat, num_flws in dat_all]
-
-
-def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
+def make_datasets(net, dat_dir, bch_trn, bch_tst):
     """
     Parses the files in data_dir, transforms them (e.g., by scaling)
     into the correct format for the network, and returns training,
@@ -181,12 +132,13 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     print("Done.")
 
     print("Formatting data...")
-    assert in_spc, "Empty in spec."
-    assert out_spc, "Empty out spec."
+    assert net.in_spc, "Empty in spec."
+    assert net.out_spc, "Empty out spec."
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.
-    dat_all = [(num_flws, dat[in_spc], dat[out_spc]) for num_flws, dat in dat_all]
+    dat_all = [(num_flws, dat[net.in_spc], dat[net.out_spc])
+               for num_flws, dat in dat_all]
     # Unzip dat from a list of pairs of in and out features into a pair of lists
     # of in and out features.
     num_flws_all, dat_in_all, dat_out_all = zip(*dat_all)
@@ -194,7 +146,7 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     dat_in_all, prms_in = scale_fets(dat_in_all)
     # Convert output features to class labels. Must call list()
     # because the value gets used more than once.
-    dat_out_all = convert_to_class(list(zip(dat_out_all, num_flws_all)))
+    dat_out_all = net.convert_to_class(list(zip(dat_out_all, num_flws_all)))
     print("Done.")
 
     print("Verifying and visualizing data...")
@@ -202,27 +154,26 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     for (dat_in, dat_out) in zip(dat_in_all, dat_out_all):
         assert dat_in.shape[0] == dat_out.shape[0], \
             "Should have the same number of rows."
+    # Find the uniques classes in the output features and make sure that they
+    # are properly formed.
+    for cls in {x for y in [set(dat_out.tolist()) for dat_out in dat_out_all]
+                for x in y}:
+        assert 0 <= cls <= net.num_clss, "Invalid class: {cls}"
+
     # Visualaize the ground truth data.
-    def find_out(x):
+    def count(x):
         """ Returns the number of entries that have a particular value. """
-        return sum([1 if cls == x else 0
-                    for dat_out in dat_out_all
-                    for cls in dat_out.tolist()])
-    tot_0 = find_out(0)
-    tot_1 = find_out(1)
-    tot_2 = find_out(2)
-    tot_3 = find_out(3)
-    tot_4 = find_out(4)
-    tot = tot_0 + tot_1 + tot_2 + tot_3 + tot_4
-    print(("\n    Ground truth:\n"
-           f"        0 - much lower than fair: {tot_0} packets ({tot_0 / tot * 100:.2f}%)\n"
-           f"        1 - lower than fair: {tot_1} packets ({tot_1 / tot * 100:.2f}%)\n"
-           f"        2 - fair: {tot_2} packets ({tot_2 / tot * 100:.2f}%)\n"
-           f"        3 - greater than fair: {tot_3} packets ({tot_3 / tot * 100:.2f}%)\n"
-           f"        4 - much greater than fair: {tot_4} packets ({tot_4 / tot * 100:.2f}%)\n"))
-    assert (tot_0 + tot_1 + tot_2 + tot_3 + tot_4 ==
-            sum([dat_out.shape[0] for dat_out in dat_out_all])), \
-            "Error visualizing ground truth!"
+        return sum([(dat_out == x).sum()
+                    for dat_out in dat_out_all])
+    clss = list(range(net.num_clss))
+    tots = [count(cls) for cls in clss]
+    tot = sum(tots)
+    print("\n    Ground truth:")
+    for cls, tot_cls in zip(clss, tots):
+        print(f"        {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)")
+    print()
+    assert (tot == sum([dat_out.shape[0] for dat_out in dat_out_all])), \
+        "Error visualizing ground truth!"
     print("Done.")
 
     print("Creating train/val/test data...")
@@ -230,6 +181,9 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
                 torch.tensor(dat_out, dtype=torch.long))
                for dat_in, dat_out in zip(dat_in_all, dat_out_all)]
+    # Transform the data as required by thios specific model.
+    dat_all = net.modify_data(dat_all)
+
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.
     random.shuffle(dat_all)
@@ -262,12 +216,13 @@ def init_hidden(net, bch, dev):
     """
     hidden = (net.module.init_hidden if isinstance(net, torch.nn.DataParallel)
               else net.init_hidden)(bch)
-    hidden[0].to(dev)
-    hidden[1].to(dev)
+    if hidden is not None:
+        hidden[0].to(dev)
+        hidden[1].to(dev)
     return hidden
 
 
-def inference(ins, labs, net, dev, hidden, los_fnc=None):
+def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
@@ -275,15 +230,16 @@ def inference(ins, labs, net, dev, hidden, los_fnc=None):
     # Move the training data to the specified device.
     ins = ins.to(dev)
     labs = labs.to(dev)
-    # LSTMs want the sequence length to be first and the batch
-    # size to be second, so we need to flip the first and
-    # second dimensions:
-    #   (batch size, sequence length, LSTM.in_dim) to
-    #   (sequence length, batch size, LSTM.in_dim)
-    ins = ins.transpose(0, 1)
-    # Reduce the labels to a 1D tensor.
-    # TODO: Explain this better.
-    labs = labs.transpose(0, 1).view(-1)
+    if net.is_lstm:
+        # LSTMs want the sequence length to be first and the batch
+        # size to be second, so we need to flip the first and
+        # second dimensions:
+        #   (batch size, sequence length, LSTM.in_dim) to
+        #   (sequence length, batch size, LSTM.in_dim)
+        ins = ins.transpose(0, 1)
+        # Reduce the labels to a 1D tensor.
+        # TODO: Explain this better.
+        labs = labs.transpose(0, 1).view(-1)
     # The forwards pass.
     out, hidden = net(ins, hidden)
     if los_fnc is None:
@@ -321,7 +277,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
         # Using floor() means that dividing by (VALS_PER_EPC - 1) will result in
         # VALS_PER_EPC validation passes per epoch.
         bchs_per_val = math.floor(len(ldr_trn) / (VALS_PER_EPC - 1))
-    print(f"Will validate after every {bchs_per_val} batches.")
+    if ely_stp:
+        print(f"Will validate after every {bchs_per_val} batches.")
 
     tim_srt_s = time.time()
     # Loop over the dataset multiple times...
@@ -338,8 +295,6 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                   f"batch: {bch_idx_trn + 1}/{len(ldr_trn)}")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
-            hidden[0].to(dev)
-            hidden[1].to(dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
             loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
@@ -360,8 +315,6 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                         print(f"    Validation batch: {bch_idx_val + 1}/{len(ldr_val)}")
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
-                        hidden[0].to(dev)
-                        hidden[1].to(dev)
                         los_val += inference(
                             ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
@@ -413,11 +366,13 @@ def test(net, ldr_tst, dev):
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
             print(f"Test batch: {bch_idx + 1}/{len(ldr_tst)}")
-            bch_tst, seq_len, _ = ins.size()
+            if net.is_lstm:
+                bch_tst, seq_len, _ = ins.size()
+            else:
+                bch_tst, _ = ins.size()
+                seq_len = 1
             # Initialize the hidden state for every new sequence.
-            hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
-            hidden[0].to(dev)
-            hidden[1].to(dev)
+            hidden = init_hidden(net, bch=bch_tst, dev=dev)
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
@@ -470,19 +425,12 @@ def run(args_):
 
     # Instantiate and configure the network.
     net = models.MODELS[args["model"]]()
+    base_net = net
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]
     if num_gpus >= num_gpus_to_use > 1:
         net = torch.nn.DataParallel(net)
-        # Do this after converting the net to a DataParallel() in case
-        # that process somehow changes the in_spc. I.e., we want to
-        # get the input and output specs from the *final* network
-        # object.
-        in_spc = net.module.in_spc
-        out_spc = net.module.out_spc
-    else:
-        in_spc = net.in_spc
-        out_spc = net.out_spc
+        base_net = net.module
 
     dev = torch.device(
         "cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
@@ -490,7 +438,7 @@ def run(args_):
 
     bch_trn = args["train_batch"]
     ldr_trn, ldr_val, ldr_tst, scl_prms = make_datasets(
-        args["data_dir"], in_spc, out_spc, bch_trn, args["test_batch"])
+        base_net, args["data_dir"], bch_trn, args["test_batch"])
 
     # Save scaling parameters.
     with open(path.join(out_dir, "scale_params.json"), "w") as fil:
