@@ -23,7 +23,7 @@ DELAY_MAX_us = 20000
 DELAY_DELTA_us = 1000
 DELAYS_us = range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us)
 # Router queue size (BDP).
-QUEUE_p = range(1, 32, 2)  # 1 to 32 BDP
+QUEUE_p = range(1, 32, 4)  # 1 to 32 BDP
 # Number of other flows
 OTHER_FLOWS = range(1, 11)  # 1 to 10 non-BBR flows
 # Packet size (bytes)
