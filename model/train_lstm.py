@@ -74,41 +74,6 @@ class Dataset(torch.utils.data.Dataset):
         return self.dat[idx]
 
 
-def match(a, b):
-    """
-    Merges two data matrices that both use sequence number as the
-    primary key (column 0). The output matrix will contain only
-    sequence numbers that are present in a. This function assumes that
-    order is preserved between a and b, but that b may have additional
-    entries. Every entry in a must have a corresponding entry in b.
-    """
-    # Create an empty matrix that is the size of a but has extra
-    # columns for the corresponding entries from b. Discard the first
-    # column of b, which is the sequence number.
-    merged = np.empty(a.shape, dtype=a.dtype.descr + b.dtype.descr[1:])
-    rows_a = a.shape[0]
-    cols_a = len(a.dtype.names)
-    rows_b = b.shape[0]
-    cols_b = len(b.dtype.names)
-    i_a = 0
-    i_b = 0
-    while i_a < rows_a and i_b < rows_b:
-        if a[i_a][0] == b[i_b][0]:
-            # The current entry in b is a match for the current entry
-            # in a. Fill in the current output row.
-            for j in range(cols_a):
-                merged[i_a][j] = a[i_a][j]
-            for j in range(1, cols_b):
-                merged[i_a][cols_a + j - 1] = b[i_b][j]
-            i_a += 1
-            i_b += 1
-        else:
-            # The current entry in b does not match. Skip it.
-            i_b += 1
-    assert i_a == rows_a, "Did not match all rows in a."
-    return merged
-
-
 def scale_fets(dat_all):
     """
     dat_all is a list of numpy arrays, each corresponding to a simulation.
@@ -199,37 +164,20 @@ def convert_to_class(dat_all):
         for dat, num_flws in dat_all]
 
 
-def parse_sim(sim):
-    """ Parse one pair of simulation result files and merge them. """
-    print(f"    Parsing: {sim}")
-    _, _, _, unfair_flows, other_flows, _, _, _, _ = sim.split("-")
-    with np.load(f"{sim}-csv.npz") as fil_csv:
-        dat_csv = fil_csv[fil_csv.files[0]]
-    with np.load(f"{sim}-fairness.npz") as fil_fair:
-        dat_fair = fil_fair[fil_fair.files[0]]
-    return (int(unfair_flows[:-6]) + int(other_flows[:-5]),
-            match(dat_csv, dat_fair))
-
-
 def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     """
     Parses the files in data_dir, transforms them (e.g., by scaling)
     into the correct format for the network, and returns training,
     validation, and test data loaders.
     """
+    # Load all results.
     print("Loading data...")
-    # Find all simulations.
-    sims = set()
-    for fln in os.listdir(dat_dir):
-        sim, _ = fln.split(".")
-        if sim.endswith("csv"):
-            # Remove "-csv" and remember this simulation.
-            sims = sims | {sim[:-4],}
-    sims = set(list(sims))
+    sims = os.listdir(dat_dir)
     print(f"    Found {len(sims)} simulations.")
     with multiprocessing.Pool() as pol:
-        # Each element of dat corresponds to a single simulation.
-        dat = pol.map(parse_sim, [path.join(dat_dir, sim) for sim in sims])
+        # Each element of dat_all corresponds to a single simulation.
+        dat_all = pol.map(
+            utils.load_sim, [path.join(dat_dir, sim) for sim in sims])
     print("Done.")
 
     print("Formatting data...")
@@ -238,60 +186,62 @@ def make_datasets(dat_dir, in_spc, out_spc, bch_trn, bch_tst):
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.
-    dat = [(num_flws_, d[in_spc], d[out_spc]) for num_flws_, d in dat]
+    dat_all = [(num_flws, dat[in_spc], dat[out_spc]) for num_flws, dat in dat_all]
     # Unzip dat from a list of pairs of in and out features into a pair of lists
     # of in and out features.
-    num_flws, dat_in, dat_out = zip(*dat)
+    num_flws_all, dat_in_all, dat_out_all = zip(*dat_all)
     # Scale input features.
-    dat_in, prms_in = scale_fets(dat_in)
+    dat_in_all, prms_in = scale_fets(dat_in_all)
     # Convert output features to class labels. Must call list()
     # because the value gets used more than once.
-    dat_out = convert_to_class(list(zip(dat_out, num_flws)))
+    dat_out_all = convert_to_class(list(zip(dat_out_all, num_flws_all)))
+    print("Done.")
 
+    print("Verifying and visualizing data...")
     # Verify data.
-    for (d_in, d_out) in zip(dat_in, dat_out):
-        assert d_in.shape[0] == d_out.shape[0], \
+    for (dat_in, dat_out) in zip(dat_in_all, dat_out_all):
+        assert dat_in.shape[0] == dat_out.shape[0], \
             "Should have the same number of rows."
-
     # Visualaize the ground truth data.
     def find_out(x):
         """ Returns the number of entries that have a particular value. """
-        return sum([1 if v == x else 0
-                    for d in dat_out
-                    for v in d.tolist()])
+        return sum([1 if cls == x else 0
+                    for dat_out in dat_out_all
+                    for cls in dat_out.tolist()])
     tot_0 = find_out(0)
     tot_1 = find_out(1)
     tot_2 = find_out(2)
     tot_3 = find_out(3)
     tot_4 = find_out(4)
     tot = tot_0 + tot_1 + tot_2 + tot_3 + tot_4
-    print("    Ground truth:")
-    print(f"        0 - much lower than fair: {tot_0} packets ({tot_0 / tot * 100:.2f}%)")
-    print(f"        1 - lower than fair: {tot_1} packets ({tot_1 / tot * 100:.2f}%)")
-    print(f"        2 - fair: {tot_2} packets ({tot_2 / tot * 100:.2f}%)")
-    print(f"        3 - greater than fair: {tot_3} packets ({tot_3 / tot * 100:.2f}%)")
-    print(f"        4 - much greater than fair: {tot_4} packets ({tot_4 / tot * 100:.2f}%)")
+    print(("\n    Ground truth:\n"
+           f"        0 - much lower than fair: {tot_0} packets ({tot_0 / tot * 100:.2f}%)\n"
+           f"        1 - lower than fair: {tot_1} packets ({tot_1 / tot * 100:.2f}%)\n"
+           f"        2 - fair: {tot_2} packets ({tot_2 / tot * 100:.2f}%)\n"
+           f"        3 - greater than fair: {tot_3} packets ({tot_3 / tot * 100:.2f}%)\n"
+           f"        4 - much greater than fair: {tot_4} packets ({tot_4 / tot * 100:.2f}%)\n"))
     assert (tot_0 + tot_1 + tot_2 + tot_3 + tot_4 ==
-            sum([d.shape[0] for d in dat_out])), \
+            sum([dat_out.shape[0] for dat_out in dat_out_all])), \
             "Error visualizing ground truth!"
+    print("Done.")
 
+    print("Creating train/val/test data...")
     # Convert each training input/output pair to Torch tensors.
-    dat = [(torch.tensor(d_in.tolist(), dtype=torch.float),
-            torch.tensor(d_out, dtype=torch.long))
-           for d_in, d_out in zip(dat_in, dat_out)]
-
+    dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
+                torch.tensor(dat_out, dtype=torch.long))
+               for dat_in, dat_out in zip(dat_in_all, dat_out_all)]
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.
-    random.shuffle(dat)
+    random.shuffle(dat_all)
     # 50% for training, 20% for validation, 30% for testing.
-    tot = len(dat)
+    tot = len(dat_all)
     num_val = int(round(tot * 0.2))
     num_tst = int(round(tot * 0.3))
     print((f"    Data - train: {tot - num_val - num_tst}, val: {num_val}, "
            f"test: {num_tst}"))
-    dat_val = dat[:num_val]
-    dat_tst = dat[num_val:num_val + num_tst]
-    dat_trn = dat[num_val + num_tst:]
+    dat_val = dat_all[:num_val]
+    dat_tst = dat_all[num_val:num_val + num_tst]
+    dat_trn = dat_all[num_val + num_tst:]
     # Create the dataloaders.
     ldr_trn = torch.utils.data.DataLoader(
         Dataset(dat_trn), batch_size=bch_trn, shuffle=True)
@@ -586,9 +536,9 @@ def run_many(args):
             trls -= 1
     if ress:
         print(("Resulting accuracies: "
-               f"{', '.join([f'{res:.2f}%' for res in ress])}"))
+               f"{', '.join([f'{res:.2f}' for res in ress])}"))
         max_acc = max(ress)
-        print(f"Maximum accuracy: {max_acc:.2f}%")
+        print(f"Maximum accuracy: {max_acc:.2f}")
         # Return the minimum error instead of the maximum accuracy.
         return 1 - max_acc
     print(f"Model cannot be trained with args: {args}")

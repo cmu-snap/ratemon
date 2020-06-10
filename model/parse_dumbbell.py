@@ -37,6 +37,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     sim = path.basename(sim_dir)
     _, btl_delay_us, _, _, payload_B, unfair_flows, \
              other_flows, edge_delays = utils.parse_sim_name(sim)
+    assert unfair_flows > 0, f"No unfair flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
     out_flps = [
