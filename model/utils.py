@@ -31,8 +31,8 @@ def parse_filename(flp):
     # Edge delays
     edge_delays = list(map(int, edge_delays[:-2].split(",")))
 
-    return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows, 
-             other_flows, edge_delays)
+    return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows,
+            other_flows, edge_delays)
 
 def parse_time_us(pkt_mdat):
     """
@@ -55,3 +55,12 @@ def parse_packets(flp, packet_size_B):
             scapy.layers.inet.TCP in pkt and
             pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
         ]
+
+
+def scale(x, min_in, max_in, min_out, max_out):
+    """
+    Scales x, which is from the range [min_in, max_in], to the range
+    [min_out, max_out].
+    """
+    assert min_in != max_in, "Divide by zero!"
+    return min_out + (x - min_in) * (max_out - min_out) / (max_in - min_in)
