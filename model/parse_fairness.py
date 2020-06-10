@@ -73,21 +73,21 @@ def parse_pcap(flp, out_dir, rtt_window):
     # Number of other flows
     other_flows = int(other_flows[:-5])
 
-    flow_packet_count = dict()
-    output_array = dict()
     # Construct the output filepaths.
     out_flps = [
         path.join(
             out_dir,
             f"{path.basename(flp)[:-9]}-{rtt_window}rttW-{i+1}flowNum-fairness.npz")
         for i in range(unfair_flows)]
-
     # For all of the output filepaths, check if the file already
     # exists. If all of the output files exist, then we do not need to
     # parse this file.
     if np.vectorize(lambda p: path.exists(p))(np.array(out_flps)).all():
         print(f"    Already parsed: {flp}")
         return
+
+    flow_packet_count = {}
+    output_array = {}
 
     for i in range(unfair_flows):
         flow_packet_count[SPORT_OFFSET + i] = 0
@@ -136,6 +136,7 @@ def parse_pcap(flp, out_dir, rtt_window):
 
 
 def main():
+    """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Parses the output of gen_training_data.py.")
