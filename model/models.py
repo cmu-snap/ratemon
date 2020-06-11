@@ -24,6 +24,10 @@ class Model(torch.nn.Module):
     # Whether this model is an LSTM. LSTMs require slightly different
     # data handling.
     is_lstm = False
+    # The loss function to use during training.
+    los_fnc = None
+    # The optimizer to use during training.
+    opt = None
 
     def __init__(self):
         super(Model, self).__init__()
@@ -33,6 +37,8 @@ class Model(torch.nn.Module):
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
         assert self.num_clss > 0, "Invalid number of output classes!"
+        assert self.los_fnc is not None, "No loss function!"
+        assert self.opt is not None, "No optimizer!"
 
     def init_hidden(self, batch_size):
         """
@@ -62,29 +68,32 @@ class Model(torch.nn.Module):
                          "class itself."))
 
 
-class Binary(Model):
+class BinaryDnn(Model):
     """ A simple binary classifier neural network. """
 
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     num_clss = 2
     nums_nodes = [16, 32, 16, 2]
+    # los_fnc = torch.nn.BCELoss
+    los_fnc = torch.nn.CrossEntropyLoss
+    opt = torch.optim.SGD
 
-    def __init__(self, win=20):
-        super(Binary, self).__init__()
+    def __init__(self, win=500):
+        super(BinaryDnn, self).__init__()
         self.check()
 
         self.win = win
         # We must store these as indivual class variables (instead of
         # just storing them in self.fcs) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(len(Binary.in_spc) * self.win, 64)
+        self.fc0 = torch.nn.Linear(len(BinaryDnn.in_spc) * self.win, 64)
         self.fc1 = torch.nn.Linear(64, 32)
         self.fc2 = torch.nn.Linear(32, 16)
         self.fc3 = torch.nn.Linear(16, 2)
         self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
         self.sg = torch.nn.Sigmoid()
-        print(f"Binary - win: {self.win}, fc layers: {len(self.fcs)}")
+        print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}")
 
     def forward(self, x, hidden=None):
         for fc in self.fcs:
@@ -106,7 +115,7 @@ class Binary(Model):
                     # percent. prc[0] assumes a single column.
                     lambda prc, fair: prc[0] > fair, fair=1. / num_flws),
                 # Convert to integers.
-                otypes=[int])(dat_out).astype(int)
+                otypes=[int])(dat_out)
             for dat_out, num_flws in dat_out_all]
 
     def modify_data(self, dat_all):
@@ -158,6 +167,9 @@ class Lstm(Model):
     out_spc = ["queue occupancy"]
     num_clss = 5
     is_lstm = True
+    # Cross-entropy loss is designed for multi-class classification tasks.
+    los_fnc = torch.nn.CrossEntropyLoss
+    opt = torch.optim.Adam
 
     def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
         super(Lstm, self).__init__()
@@ -339,7 +351,7 @@ class FcFour(torch.nn.Module):
 
 
 MODELS = {
-    "Binary": Binary,
+    "BinaryDnn": BinaryDnn,
     "Lstm": Lstm,
     "SimpleOne": SimpleOne,
     "FcOne": FcOne,

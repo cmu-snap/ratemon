@@ -252,9 +252,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
           tim_out_s):
     """ Trains a model. """
     print("Training...")
-    # Cross-entropy loss is designed for multi-class classification tasks.
-    los_fnc = torch.nn.CrossEntropyLoss()
-    opt = torch.optim.Adam(net.parameters(), lr=lr)
+    los_fnc = net.los_fnc()
+    opt = net.opt(net.parameters(), lr=lr)
     # If using early stopping, then this is the lowest validation loss
     # encountered so far.
     los_val_min = None
