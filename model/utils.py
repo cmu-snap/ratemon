@@ -16,26 +16,25 @@ def parse_sim_name(sim):
     """
     # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
     bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays, \
-      packet_size_B, dur_s, = sim.split("-")
+      payload_B, dur_s, = sim.split("-")
     # Link bandwidth (Mbps).
     bw_Mbps = float(bw_Mbps[:-4])
     # Bottleneck router delay (us).
     btl_delay_us = float(btl_delay_us[:-2])
     # Queue size (packets).
     queue_p = float(queue_p[:-1])
-    # Experiment duration (s).
-    dur_s = float(dur_s[:-1])
-    # Packet size (bytes)
-    packet_size_B = float(packet_size_B[:-1])
     # Number of unfair flows
     unfair_flows = int(unfair_flows[:-6])
     # Number of other flows
     other_flows = int(other_flows[:-5])
     # Edge delays
     edge_delays = [int(del_us) for del_us in edge_delays[:-2].split(",")]
-
-    return (bw_Mbps, btl_delay_us, queue_p, dur_s, packet_size_B, unfair_flows,
-            other_flows, edge_delays)
+    # Packet size (bytes)
+    payload_B = float(payload_B[:-1])
+    # Experiment duration (s).
+    dur_s = float(dur_s[:-1])
+    return (bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays,
+            payload_B, dur_s)
 
 
 def parse_time_us(pkt_mdat):
