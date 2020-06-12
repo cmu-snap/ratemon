@@ -210,7 +210,9 @@ def main():
     if SYNC:
         [parse_pcap(*pcap) for pcap in pcaps]
     else:
-        with multiprocessing.Pool() as pol:
+        # Use 20 workers only to reduce the likelihood of running out
+        # of memory.
+        with multiprocessing.Pool(processes=20) as pol:
             pol.starmap(parse_pcap, pcaps)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
