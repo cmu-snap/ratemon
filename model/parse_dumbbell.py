@@ -125,6 +125,14 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
                 output[j][3] = 0
 
         output_list.append(output)
+    # Save memory by explicitly deleting the sent and received packets
+    # after they've been parsed. This happens outside of the above
+    # for-loop because only the last iteration's sent and received
+    # packets are not automatically cleaned up by now (they go out of
+    # scope when the send_pkts and recv_pkts variables are overwritten
+    # by the next loop).
+    del send_pkts
+    del recv_pkts
 
     # Process pcap files from routers to determine queue occupency
     router_pkts = utils.parse_packets(path.join(sim_dir, f"{sim}-1-0.pcap"), payload_B)
