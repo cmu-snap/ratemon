@@ -20,8 +20,9 @@ SYNC = False
 RTT_WINDOW = 2
 # The dtype of the output.
 DTYPE = [("seq", "int32"),
-         ("RTT ratio", "float"),
+         ("arrival time", "float"),
          ("inter-arrival time", "float"),
+         ("RTT ratio", "float"),
          ("loss rate", "float"),
          ("queue occupancy", "float")]
 
@@ -34,39 +35,33 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     the last n RTT (default set to be 2 RTT).
     """
     print(f"Parsing: {sim_dir}")
-    sim = path.basename(sim_dir)
-    (_, btl_delay_us, _, unfair_flows, other_flows, edge_delays, payload_B,
-     _) = utils.parse_sim_name(sim)
-    assert unfair_flows > 0, f"No unfair flows to analyze: {sim_dir}"
+    sim = utils.Sim(sim_dir)
+    assert sim.unfair_flws > 0, f"No unfair flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
-    out_flps = [
-        path.join(
-            out_dir,
-            f"{sim}-{rtt_window}rttW-{i + 1}flowNum.npz")
-        for i in range(unfair_flows)]
-    # For all of the output filepaths, check if the file already
-    # exists. If all of the output files exist, then we do not need to
-    # parse this file.
-    if np.vectorize(lambda p: path.exists(p))(np.array(out_flps)).all():
+    out_flp = path.join(out_dir, f"{sim.name}-{rtt_window}rttW.npz")
+    # If the output file exists, then we do not need to parse this file.
+    if path.exists(out_flp):
         print(f"    Already parsed: {sim_dir}")
         return
 
     # Process PCAP files from unfair senders and receivers
 
-    output_list = []
-    rtt_list = []
+    unfair_flws = []
+    rtts_us = []
 
-    for i in range(0, unfair_flows):
-        rtt_us = (btl_delay_us + 2 * edge_delays[i]) * 2
-        rtt_list.append(rtt_us)
-        one_way_us = float(rtt_us / 2.0)
+    for unfair_idx in range(sim.unfair_flws):
+        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
+        rtt_us = one_way_us * 2
+        rtts_us.append(rtt_us)
 
         send_pkts = utils.parse_packets(
-            path.join(sim_dir, f"{sim}-{i + 2}-0.pcap"), payload_B)
+            path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
+            sim.payload_B)
         recv_pkts = utils.parse_packets(
-            path.join(sim_dir, f"{sim}-{i + 2 + unfair_flows + other_flows}-0.pcap"),
-            payload_B)
+            path.join(sim_dir,
+                      f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap"),
+            sim.payload_B)
 
         packet_loss = 0
         window_size = rtt_us * rtt_window
@@ -108,23 +103,27 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
                    window_size):
                 window_start += 1
 
-            # Fill into output
-            output[j][0] = recv_pkt_seq
-            output[j][1] = (curr_recv_time - curr_send_time) / one_way_us
-
-            # If it's processing the first packet (j == window_start == 0)
-            # Or no other packets received within the RTT window,
-            # output 0 for RTT ratio and inter-arrival time
-            if j - window_start > 0:
-                output[j][2] = (
-                    (curr_recv_time - utils.parse_time_us(recv_pkts[window_start][0])) /
-                    (1.0 * (j - window_start)))
-                output[j][3] = len(loss_queue) / (1.0 * (len(loss_queue) + j - window_start))
+            output[j]["seq"] = recv_pkt_seq
+            output[j]["arrival time"] = curr_recv_time
+            if j > 0:
+                interarrival_time = curr_recv_time - utils.parse_time_us(
+                    recv_pkts[j - 1][0])
             else:
-                output[j][2] = 0
-                output[j][3] = 0
+                interarrival_time = 0
+            output[j]["inter-arrival time"] = interarrival_time
+            output[j]["RTT ratio"] = ((curr_recv_time - curr_send_time) /
+                                      one_way_us)
+            # If it's processing the first packet (j == window_start == 0) or no
+            # other packets received within the RTT window, then output 0 for
+            # loss rate.
+            if j - window_start > 0:
+                loss_rate = (len(loss_queue) /
+                             (1.0 * (len(loss_queue) + j - window_start)))
+            else:
+                loss_rate = 0
+            output[j]["loss rate"] = loss_rate
 
-        output_list.append(output)
+        unfair_flws.append(output)
     # Save memory by explicitly deleting the sent and received packets
     # after they've been parsed. This happens outside of the above
     # for-loop because only the last iteration's sent and received
@@ -135,21 +134,22 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     del recv_pkts
 
     # Process pcap files from routers to determine queue occupency
-    router_pkts = utils.parse_packets(path.join(sim_dir, f"{sim}-1-0.pcap"), payload_B)
+    router_pkts = utils.parse_packets(
+        path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B)
     # Number of packets sent by the unfair flows within RTT window
     # Note that RTT window could be different for flows with different RTT
-    window_pkt_count = [0] * unfair_flows
+    window_pkt_count = [0] * sim.unfair_flws
     # Start of the window for each flow (index in router_pkts)
     # Since different flows could have different RTTs, each flow
     # needs to keep track of their own window start
-    router_window_start = [0] * unfair_flows
+    router_window_start = [0] * sim.unfair_flws
     # Index of the output array where the queue occupency result should be appended
-    output_index = [0] * unfair_flows
+    output_index = [0] * sim.unfair_flws
 
     for i, router_pkt in enumerate(router_pkts):
         sender = int(router_pkt[1][scapy.layers.inet.IP].src.split(".")[2])
 
-        if sender < unfair_flows:
+        if sender < sim.unfair_flws:
             curr_time = utils.parse_time_us(router_pkt[0])
             window_pkt_count[sender] += 1
 
@@ -158,7 +158,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             # belongs to the unfair flow
             window_start = router_window_start[sender]
             while (curr_time - utils.parse_time_us(router_pkts[window_start][0]) >
-                   rtt_list[sender] * rtt_window):
+                   rtts_us[sender] * rtt_window):
                 prev_sender = int(router_pkts[window_start][1]
                                   [scapy.layers.inet.IP].src.split(".")[2])
                 if prev_sender == sender:
@@ -170,14 +170,15 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             queue_occupency = window_pkt_count[sender] / float(i - window_start + 1)
 
             # Add this record to output array
-            if output_index[sender] < len(output_list[sender]):
-                output_list[sender][output_index[sender]][4] = queue_occupency
+            if output_index[sender] < len(unfair_flws[sender]):
+                unfair_flws[sender][output_index[sender]]["queue occupancy"] = (
+                    queue_occupency)
                 output_index[sender] = output_index[sender] + 1
 
     # Write to output
-    for i, out_flp in enumerate(out_flps):
-        print(f"    Saving: {out_flp}")
-        np.savez_compressed(out_flp, output_list[i])
+    print(f"    Saving: {out_flp}")
+    np.savez_compressed(
+        out_flp, **{str(k + 1): v for k, v in enumerate(unfair_flws)})
 
 
 def main():

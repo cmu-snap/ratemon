@@ -10,31 +10,37 @@ import scapy.layers.inet
 import scapy.layers.ppp
 
 
-def parse_sim_name(sim):
-    """
-    Returns experiment setup in filename
-    """
-    # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
-    bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays, \
-      payload_B, dur_s, = sim.split("-")
-    # Link bandwidth (Mbps).
-    bw_Mbps = float(bw_Mbps[:-4])
-    # Bottleneck router delay (us).
-    btl_delay_us = float(btl_delay_us[:-2])
-    # Queue size (packets).
-    queue_p = float(queue_p[:-1])
-    # Number of unfair flows
-    unfair_flows = int(unfair_flows[:-6])
-    # Number of other flows
-    other_flows = int(other_flows[:-5])
-    # Edge delays
-    edge_delays = [int(del_us) for del_us in edge_delays[:-2].split(",")]
-    # Packet size (bytes)
-    payload_B = float(payload_B[:-1])
-    # Experiment duration (s).
-    dur_s = float(dur_s[:-1])
-    return (bw_Mbps, btl_delay_us, queue_p, unfair_flows, other_flows, edge_delays,
-            payload_B, dur_s)
+class Sim():
+    """ Describes the parameters of a simulation. """
+
+    def __init__(self, sim):
+        if "/" in sim:
+            sim = path.basename(sim)
+        self.name = sim
+        toks = sim.split("-")
+        if sim.endswith(".npz"):
+            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s-2rttW.npz
+            toks = toks[:-1]
+        # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
+        (bw_Mbps, btl_delay_us, queue_p, unfair_flws, other_flws, edge_delays,
+         payload_B, dur_s) = toks
+
+        # Link bandwidth (Mbps).
+        self.bw_Mbps = float(bw_Mbps[:-4])
+        # Bottleneck router delay (us).
+        self.btl_delay_us = float(btl_delay_us[:-2])
+        # Queue size (packets).
+        self.queue_p = float(queue_p[:-1])
+        # Number of unfair flows
+        self.unfair_flws = int(unfair_flws[:-6])
+        # Number of other flows
+        self.other_flws = int(other_flws[:-5])
+        # Edge delays
+        self.edge_delays = [int(del_us) for del_us in edge_delays[:-2].split(",")]
+        # Packet size (bytes)
+        self.payload_B = float(payload_B[:-1])
+        # Experiment duration (s).
+        self.dur_s = float(dur_s[:-1])
 
 
 def parse_time_us(pkt_mdat):
@@ -76,10 +82,8 @@ def load_sim(flp):
     a tuple of the form: (total number of flows, results matrix).
     """
     print(f"    Parsing: {flp}")
-    assert flp.endswith("1flowNum.npz"), f"More than one unfair flow: {flp}"
-    _, _, _, unfair_flws, other_flws, _, _, _ = parse_sim_name(
-        # The sim name is the filepath's basename with the last two
-        # "-"-separated fields ("-XrttW-YflowNum.npz") removed.
-        "-".join(path.basename(flp).split("-")[:-2]))
+    sim = Sim(flp)
     with np.load(flp) as fil:
-        return unfair_flws + other_flws, fil[fil.files[0]]
+        assert len(fil.files) == 1 and "1" in fil.files, \
+            "More than one unfair flow detected!"
+        return sim, sim.unfair_flws + sim.other_flws, fil["1"]
