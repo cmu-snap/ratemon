@@ -149,7 +149,7 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     print("Formatting data...")
     # Drop the first few packets so that we consider steady-state behavior only.
     assert np.array([dat.shape[0] > warmup for _, _, dat in dat_all]).all(), \
-        "Unable to drop first {warmup} packets!"
+        f"Unable to drop first {warmup} packets!"
     dat_all = [(sim, num_flws, dat[warmup:]) for sim, num_flws, dat in dat_all]
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
