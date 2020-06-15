@@ -9,7 +9,6 @@ import time
 from collections import deque
 
 import numpy as np
-import scapy.layers.inet
 
 import utils
 
@@ -55,10 +54,10 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
         rtt_us = one_way_us * 2
         rtts_us.append(rtt_us)
 
-        send_pkts = utils.parse_packets(
+        send_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
             sim.payload_B)
-        recv_pkts = utils.parse_packets(
+        recv_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir,
                       f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap"),
             sim.payload_B)
@@ -70,8 +69,8 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
         output = np.empty(len(recv_pkts), dtype=DTYPE)
 
         for j, recv_pkt in enumerate(recv_pkts):
-            recv_pkt_seq = recv_pkt[1][scapy.layers.inet.TCP].seq
-            send_pkt_seq = send_pkts[j + packet_loss][1][scapy.layers.inet.TCP].seq
+            recv_pkt_seq = recv_pkt[0]
+            send_pkt_seq = send_pkts[j + packet_loss][0]
 
             # Count the number of dropped packets by checking if the
             # sequence numbers at sender and receiver are the same. If
@@ -81,33 +80,31 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             while send_pkt_seq != recv_pkt_seq:
                 # Packet loss
                 packet_loss += 1
-                send_pkt_seq = send_pkts[j + packet_loss][1][scapy.layers.inet.TCP].seq
+                send_pkt_seq = send_pkts[j + packet_loss][0]
 
             curr_loss = packet_loss - prev_loss
-            curr_recv_time = utils.parse_time_us(recv_pkt[0])
-            curr_send_time = utils.parse_time_us(send_pkts[j + packet_loss][0])
+            curr_recv_time = recv_pkt[1]
+            curr_send_time = send_pkts[j + packet_loss][1]
 
             # Process packet loss
             if (curr_loss > 0 and j > 0):
-                prev_recv_time = utils.parse_time_us(recv_pkts[j-1][0])
+                prev_recv_time = recv_pkts[j - 1][1]
                 loss_interval = (curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
                 for k in range(0, curr_loss):
                     loss_queue.append(prev_recv_time + (k + 1) * loss_interval)
 
             # Pop out earlier loss
-            while loss_queue and loss_queue[0] < curr_recv_time - (window_size):
+            while loss_queue and loss_queue[0] < curr_recv_time - window_size:
                 loss_queue.popleft()
 
             # Update window_start
-            while (curr_recv_time - utils.parse_time_us(recv_pkts[window_start][0]) >
-                   window_size):
+            while curr_recv_time - recv_pkts[window_start][1] > window_size:
                 window_start += 1
 
             output[j]["seq"] = recv_pkt_seq
             output[j]["arrival time"] = curr_recv_time
             if j > 0:
-                interarrival_time = curr_recv_time - utils.parse_time_us(
-                    recv_pkts[j - 1][0])
+                interarrival_time = curr_recv_time - recv_pkts[j - 1][1]
             else:
                 interarrival_time = 0
             output[j]["inter-arrival time"] = interarrival_time
@@ -134,7 +131,8 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     del recv_pkts
 
     # Process pcap files from routers to determine queue occupency
-    router_pkts = utils.parse_packets(
+    # (sender, timestamp)
+    router_pkts = utils.parse_packets_router(
         path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B)
     # Number of packets sent by the unfair flows within RTT window
     # Note that RTT window could be different for flows with different RTT
@@ -147,21 +145,19 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     output_index = [0] * sim.unfair_flws
 
     for i, router_pkt in enumerate(router_pkts):
-        sender = int(router_pkt[1][scapy.layers.inet.IP].src.split(".")[2])
+        sender = router_pkt[0]
 
         if sender < sim.unfair_flws:
-            curr_time = utils.parse_time_us(router_pkt[0])
+            curr_time = router_pkt[1]
             window_pkt_count[sender] += 1
 
             # Update window_start index for this flow, if the window is larger than
             # the expected window size. Also decrement packet count if the packet
             # belongs to the unfair flow
             window_start = router_window_start[sender]
-            while (curr_time - utils.parse_time_us(router_pkts[window_start][0]) >
+            while ((curr_time - router_pkts[window_start][1]) >
                    rtts_us[sender] * rtt_window):
-                prev_sender = int(router_pkts[window_start][1]
-                                  [scapy.layers.inet.IP].src.split(".")[2])
-                if prev_sender == sender:
+                if router_pkts[window_start][0] == sender:
                     window_pkt_count[sender] -= 1
                 window_start += 1
 

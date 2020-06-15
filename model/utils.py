@@ -43,28 +43,34 @@ class Sim():
         self.dur_s = float(dur_s[:-1])
 
 
-def parse_time_us(pkt_mdat):
+def parse_packets_endpoint(flp, packet_size_B):
     """
-    Returns the timestamp, in microseconds, of the packet associated with this
-    PacketMetadata object.
+    Takes in a file path and returns (seq, timestamp).
     """
-    return pkt_mdat.sec * 1e6 + pkt_mdat.usec
-
-
-def parse_packets(flp, packet_size_B):
-    """
-    Takes in a file path and return the parsed packet list
-    """
+    # Not using parse_time_us for efficiency purpose
     return [
-        (pkt_mdat, pkt) for pkt_mdat, pkt in [
-            # Parse each packet as a PPP packet.
-            (pkt_mdat, scapy.layers.ppp.PPP(pkt_dat))
-            for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)]
-        # Select only IP/TCP packets sent from SRC_IP.
-        if (scapy.layers.inet.IP in pkt and
-            scapy.layers.inet.TCP in pkt and
-            pkt_mdat.wirelen >= packet_size_B) # Ignore non-data packets
-        ]
+        (scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].seq,
+         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
+        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
+        # Ignore non-data packets.
+        if pkt_mdat.wirelen >= packet_size_B
+    ]
+
+
+def parse_packets_router(flp, packet_size_B):
+    """
+    Takes in a file path and returns (sender, timestamp).
+    """
+    # Not using parse_time_us for efficiency purpose
+    return [
+        # Parse each packet as a PPP packet.
+        (int(scapy.layers.ppp.PPP(pkt_dat)[
+            scapy.layers.inet.IP].src.split(".")[2]),
+         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
+        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
+        # Ignore non-data packets.
+        if pkt_mdat.wirelen >= packet_size_B
+    ]
 
 
 def scale(x, min_in, max_in, min_out, max_out):
