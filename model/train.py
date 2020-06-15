@@ -430,19 +430,17 @@ def test(net, ldr_tst, dev):
     return acc_tst
 
 
-def run(args, dat_all):
+def run(args, dat_all, out_flp):
     """
     Trains a model according to the supplied parameters. Returns the test error
     (lower is better).
     """
     # Instantiate and configure the network.
     net = models.MODELS[args["model"]]()
-    base_net = net
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]
     if num_gpus >= num_gpus_to_use > 1:
         net = torch.nn.DataParallel(net)
-        base_net = net.module
 
     dev = torch.device(
         "cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
@@ -512,7 +510,7 @@ def run_many(args_):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = run(args, dat_all)
+        res = run(args, dat_all, out_flp)
         if res == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
@@ -574,7 +572,8 @@ def main():
     psr.add_argument(
         "--val-patience", default=DEFAULTS["val_patience"],
         help=("The number of times that the validation loss can increase "
-              "before training is automatically aborted."), type=int)
+              "before training is automatically aborted."),
+        type=int)
     psr.add_argument(
         "--val-improvement-thresh", default=DEFAULTS["val_improvement_thresh"],
         help="Threshold for percept improvement in validation loss.",
