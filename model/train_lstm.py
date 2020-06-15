@@ -132,16 +132,21 @@ def make_datasets(net, dat_dir, bch_trn, bch_tst):
     print("Done.")
 
     print("Formatting data...")
-    assert net.in_spc, "Empty in spec."
-    assert net.out_spc, "Empty out spec."
+    # Drop the first few packets so that we consider steady-state behavior only.
+    assert np.array([dat.shape[0] > warmup for _, _, dat in dat_all]).all(), \
+        "Unable to drop first {warmup} packets!"
+    dat_all = [(sim, num_flws, dat[warmup:]) for sim, num_flws, dat in dat_all]
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.
-    dat_all = [(num_flws, dat[net.in_spc], dat[net.out_spc])
-               for num_flws, dat in dat_all]
+    assert net.in_spc, "Empty in spec."
+    assert net.out_spc, "Empty out spec."
+    dat_all = [(sim, num_flws, dat["arrival time"], dat[net.in_spc], dat[net.out_spc])
+               for sim, num_flws, dat in dat_all]
     # Unzip dat from a list of pairs of in and out features into a pair of lists
     # of in and out features.
-    num_flws_all, dat_in_all, dat_out_all = zip(*dat_all)
+    sims_all, num_flws_all, arr_times_all, dat_in_all, dat_out_all = (
+        zip(*dat_all))
     # Scale input features.
     dat_in_all, prms_in = scale_fets(dat_in_all)
     # Convert output features to class labels. Must call list()
@@ -181,8 +186,11 @@ def make_datasets(net, dat_dir, bch_trn, bch_tst):
     dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
                 torch.tensor(dat_out, dtype=torch.long))
                for dat_in, dat_out in zip(dat_in_all, dat_out_all)]
-    # Transform the data as required by thios specific model.
-    dat_all = net.modify_data(dat_all)
+    # Transform the data as required by this specific model.
+    dat_all = net.modify_data(list(zip(
+        sims_all,
+        [torch.tensor(arr_times.tolist()) for arr_times in arr_times_all],
+        dat_all)))
 
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.

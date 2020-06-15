@@ -58,8 +58,9 @@ class Model(torch.nn.Module):
 
     def modify_data(self, dat_all):
         """
-        Performs an arbitrary transformation on the data. data_all is a
-        list of tuples of the form: (input tensor, output tensor).
+        Performs an arbitrary transformation on the data. dat_all is a list of
+        tuples (one for each simulation) of the form:
+            (sim, arrival times tensor, (input data tensor, output data tensor))
         """
         return dat_all
 
@@ -79,15 +80,17 @@ class BinaryDnn(Model):
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=500):
+    def __init__(self, win=20, rtt_buckets=-True):
         super(BinaryDnn, self).__init__()
         self.check()
 
         self.win = win
+        self.rtt_buckets = rtt_buckets
         # We must store these as indivual class variables (instead of
         # just storing them in self.fcs) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(len(BinaryDnn.in_spc) * self.win, 64)
+        self.fc0 = torch.nn.Linear(
+            self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 64)
         self.fc1 = torch.nn.Linear(64, 32)
         self.fc2 = torch.nn.Linear(32, 16)
         self.fc3 = torch.nn.Linear(16, 2)
@@ -118,42 +121,102 @@ class BinaryDnn(Model):
                 otypes=[int])(dat_out)
             for dat_out, num_flws in dat_out_all]
 
+    @staticmethod
+    def bucketize(arr_times, rtt_us, num_buckets):
+        """
+        Uses arr_times to divide the arriving packets into num_buckets
+        intervals. Each interval has duration rtt_us / num_buckets.
+        Returns the number of packets that arrived during each interval.
+        """
+        num_pkts = arr_times.size()[0]
+        assert num_pkts > 0, "Need more than 0 packets!"
+        # Records the number of packets that arrived during each
+        # interval.
+        counts = torch.zeros(num_buckets)
+        # The duration of each interval.
+        interval_us = rtt_us / num_buckets
+        # The arrival time of the first packet, and therefore the
+        # start of the first interval.
+        start_time_us = arr_times[0].item()
+        for idx in torch.floor((arr_times - start_time_us) / interval_us).type(
+                torch.IntTensor):
+            assert idx < num_buckets, \
+                "Invalid idx ({idx}) for the number of buckets ({num_buckets})!"
+            counts[idx] += 1
+        assert counts.sum().item() == num_pkts, "Error building counts!"
+        return counts
+
     def modify_data(self, dat_all):
-        # Extract from the set of simulations many separate intervals
-        # of length self.win. Each interval becomes a training
-        # example.
-        total_packets = sum([dat_in.size()[0] for dat_in, _ in dat_all])
+        """
+        Extracts from the set of simulations many separate intervals
+        of length self.win. Each interval becomes a training example.
+        """
+        total_packets = sum(
+            [dat_in.size()[0] for sim, arr_times, (dat_in, _) in dat_all])
         # Set the number of windows to be the number of adjacent
         # windows that fit in the set of simulations. However, when
         # actually selecting the windows, they may overlap.
         num_wins = float(total_packets) / self.win
+        # The reformatted data.
         dat_all_new = []
         # Loop over all of the simulations.
-        for dat_in, dat_out in dat_all:
+        for sim, arr_times, (dat_in, dat_out) in dat_all:
+            # Do not pick indices between 0 and (self.win - 1) to make
+            # sure that all windows of length self.win ending on the
+            # chosen index fit within the simulation.
+            if self.rtt_buckets:
+                rtt_us = 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
+                first_arr_time = None
+                for idx, arr_time in enumerate(arr_times):
+                    if first_arr_time is None:
+                        first_arr_time = arr_time
+                        continue
+                    if (arr_time - first_arr_time) >= rtt_us:
+                        start_idx = idx
+                        break
+            else:
+                rtt_us = None
+                start_idx = self.win
+
             # The number of packets in this simulation.
-            sim_packets = dat_in.size()[0]
+            sim_pkts = dat_in.size()[0]
             # Select random intervals from this simulation.
             for idx in random.sample(
-                    # Do not pick indices between 0 and (self.win - 1) to make
-                    # sure that all windows of length self.win ending on the
-                    # chosen index fit within the simulation.
-                    range(self.win, sim_packets),
+                    range(start_idx, sim_pkts),
                     # Calculate the fraction of windows that should come from
                     # this simulation.
-                    math.ceil(sim_packets / total_packets * num_wins)):
-                assert idx >= self.win, \
-                    f"Improperly formed index ({idx}) for window ({self.win})!"
-                dat_all_new.append(
-                    (dat_in[idx - self.win:idx].flatten(),
-                     # As an output feature, select only the final
-                     # ground truth value. I.e., the final ground
-                     # truth value for this window becomes the ground
-                     # truth for the entire window.
-                     dat_out[idx - self.win:idx].flatten()[-1]))
+                    math.ceil(sim_pkts / total_packets * num_wins)):
+                assert idx >= start_idx, \
+                    f"Improperly formed index ({idx}) for start index ({start_idx})!"
+
+                if self.rtt_buckets:
+                    assert rtt_us is not None, "rtt_us is not defined!"
+                    cur_arr_time = arr_times[idx]
+                    win_start_idx = None
+                    for i in range(idx, -1, -1):
+                        if cur_arr_time - arr_times[i] >= rtt_us:
+                            win_start_idx = i + 1
+                            break
+                    assert win_start_idx is not None and 0 <= win_start_idx <= idx, \
+                        "Insufficient packets to create window."
+                else:
+                    win_start_idx = idx - self.win
+
+                dat_in_new = dat_in[win_start_idx:idx].flatten()
+                if self.rtt_buckets:
+                    dat_in_new = self.bucketize(
+                        arr_times[win_start_idx:idx + 1], rtt_us, self.win)
+
+                # As an output feature, select only the final ground
+                # truth value. I.e., the final ground truth value for
+                # this window becomes the ground truth for the entire
+                # window.
+                dat_all_new.append((dat_in_new, dat_out[idx]))
+
         # Verify that we selected at least as many windows as we intended to.
         num_selected_wins = len(dat_all_new)
         assert num_selected_wins >= num_wins, \
-            "Insufficient windows: {num_selected_wins} < {num_wins}"
+            f"Insufficient windows: {num_selected_wins} < {num_wins}"
         return dat_all_new
 
 
