@@ -25,6 +25,8 @@ import utils
 DEFAULTS = {
     "epochs": 100,
     "num_gpus": 0,
+    "warmup": 1000,
+    "num_sims": 10,
     "train_batch": 10,
     "test_batch": 10_000,
     "learning_rate": 0.001,
@@ -45,10 +47,12 @@ EPCS_MAX = 10_000
 # decreased to less than this fraction of the original throughput for a
 # training example to be considered.
 NEW_TPT_TSH = 0.925
-# Whether to generate training data graphs.
-PLT = False
 # The random seed.
 SEED = 1337
+# Set to true to parse the simulations in sorted order.
+SHUFFLE = False
+# The number of times to log progress during one epoch.
+LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
 # The number of output classes.
@@ -115,15 +119,25 @@ def scale_fets(dat_all):
     return [normalize(dat) for dat in dat_all], scl_prms
 
 
-def make_datasets(net, dat_dir, bch_trn, bch_tst):
+def make_datasets(net, dat_dir, bch_trn, bch_tst, warmup, num_sims, shuffle):
     """
     Parses the files in data_dir, transforms them (e.g., by scaling)
     into the correct format for the network, and returns training,
     validation, and test data loaders.
+
+    If num_sims is not None, then selects only the first num_sims
+    simulations. If shuffle is True, then the simulations will be parsed in
+    sorted order. Use num_sims and shuffle=True together to simplify debugging.
+
     """
     # Load all results.
     print("Loading data...")
-    sims = os.listdir(dat_dir)
+    sims = sorted(os.listdir(dat_dir))
+    if shuffle:
+        random.shuffle(sims)
+    if num_sims is not None:
+        sims = sims[:num_sims]
+
     print(f"    Found {len(sims)} simulations.")
     with multiprocessing.Pool() as pol:
         # Each element of dat_all corresponds to a single simulation.
@@ -272,10 +286,13 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     # zero, training aborts.
     val_pat = val_pat_max
 
+    num_bchs_trn = len(ldr_trn)
+    bchs_per_log = math.floor(num_bchs_trn / LOGS_PER_EPC)
+
     # To avoid a divide-by-zero error below, the number of validation passes
     # per epoch much be at least 2.
     assert VALS_PER_EPC >= 2, "Must validate at least twice per epoch."
-    if len(ldr_trn) < VALS_PER_EPC:
+    if num_bchs_trn < VALS_PER_EPC:
         # If the number of batches per epoch is less than the desired number of
         # validation passes per epoch, then do a validation pass after every
         # batch.
@@ -283,7 +300,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     else:
         # Using floor() means that dividing by (VALS_PER_EPC - 1) will result in
         # VALS_PER_EPC validation passes per epoch.
-        bchs_per_val = math.floor(len(ldr_trn) / (VALS_PER_EPC - 1))
+        bchs_per_val = math.floor(num_bchs_trn / (VALS_PER_EPC - 1))
     if ely_stp:
         print(f"Will validate after every {bchs_per_val} batches.")
 
@@ -298,8 +315,9 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
 
         # For each batch...
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
-            print(f"Epoch: {epoch_idx + 1}/{'?' if ely_stp else num_epochs}, "
-                  f"batch: {bch_idx_trn + 1}/{len(ldr_trn)}")
+            if bch_idx_trn % bchs_per_log == 0:
+                print(f"Epoch: {epoch_idx + 1}/{'?' if ely_stp else num_epochs}, "
+                      f"batch: {bch_idx_trn + 1}/{num_bchs_trn}", end=" ")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
@@ -308,7 +326,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             # The backward pass.
             loss.backward()
             opt.step()
-            print(f"    Training loss: {loss:.5f}")
+            if bch_idx_trn % bchs_per_log == 0:
+                print(f"\tTraining loss: {loss:.5f}")
 
             # Run on validation set, print statistics, and (maybe) checkpoint
             # every VAL_PER batches.
@@ -445,7 +464,8 @@ def run(args_):
 
     bch_trn = args["train_batch"]
     ldr_trn, ldr_val, ldr_tst, scl_prms = make_datasets(
-        base_net, args["data_dir"], bch_trn, args["test_batch"])
+        base_net, args["data_dir"], bch_trn, args["test_batch"], args["warmup"],
+        args["num_sims"], SHUFFLE)
 
     # Save scaling parameters.
     with open(path.join(out_dir, "scale_params.json"), "w") as fil:
