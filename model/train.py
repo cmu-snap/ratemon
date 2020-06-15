@@ -12,6 +12,7 @@ import multiprocessing
 import os
 from os import path
 import random
+import sys
 import time
 
 import numpy as np
@@ -538,6 +539,14 @@ def main():
         help=("The path to a directory containing the"
               "training/validation/testing data (required)."),
         required=True, type=str)
+    psr.add_argument(
+        "--warmup", default=0,
+        help=("The number of packets to drop from the beginning of each "
+              "simulation."),
+        type=int)
+    psr.add_argument(
+        "--num-sims", default=sys.maxsize,
+        help="The number of simulations to consider.", type=int)
     model_opts = sorted(models.MODELS.keys())
     psr.add_argument(
         "--model", default=model_opts[0], help="The model to use.",
