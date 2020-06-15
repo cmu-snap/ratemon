@@ -16,6 +16,7 @@ DEFAULT_TLS_OPT = 40
 
 
 def main():
+    """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Hyper-parameter optimizer for train.py.")
@@ -80,6 +81,16 @@ def main():
             "name": "num_gpus",
             "type": "fixed",
             "value": 1
+        },
+        {
+            "name": "warmup",
+            "type": "fixed",
+            "value": 1000
+        },
+        {
+            "name": "num_sims",
+            "type": "fixed",
+            "value": None
         },
         {
             "name": "train_batch",
