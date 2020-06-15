@@ -167,11 +167,12 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     # Convert output features to class labels. Must call list()
     # because the value gets used more than once.
     dat_out_all = net.convert_to_class(list(zip(dat_out_all, num_flws_all)))
+    dat_all = list(zip(dat_in_all, dat_out_all))
     print("Done.")
 
-    print("Verifying and visualizing data...")
+    print("Verifying data...")
     # Verify data.
-    for (dat_in, dat_out) in zip(dat_in_all, dat_out_all):
+    for (dat_in, dat_out) in dat_all:
         assert dat_in.shape[0] == dat_out.shape[0], \
             "Should have the same number of rows."
     # Find the uniques classes in the output features and make sure that they
@@ -179,12 +180,26 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     for cls in {x for y in [set(dat_out.tolist()) for dat_out in dat_out_all]
                 for x in y}:
         assert 0 <= cls <= net.num_clss, "Invalid class: {cls}"
+    print("Done.")
 
+    print("Converting data into model-specific format...")
+    # Convert each training input/output pair to Torch tensors.
+    dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
+                torch.tensor(dat_out, dtype=torch.long))
+               for dat_in, dat_out in dat_all]
+    # Transform the data as required by this specific model.
+    dat_all = net.modify_data(list(zip(
+        sims_all,
+        [torch.tensor(arr_times.tolist()) for arr_times in arr_times_all],
+        dat_all)))
+    print("Done")
+
+    print("Visualizing data...")
     # Visualaize the ground truth data.
+    _, dat_out_all = zip(*dat_all)
     def count(x):
         """ Returns the number of entries that have a particular value. """
-        return sum([(dat_out == x).sum()
-                    for dat_out in dat_out_all])
+        return sum([(dat_out == x).sum().item() for dat_out in dat_out_all])
     clss = list(range(net.num_clss))
     tots = [count(cls) for cls in clss]
     tot = sum(tots)
@@ -192,18 +207,10 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     for cls, tot_cls in zip(clss, tots):
         print(f"        {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)")
     print()
-    assert (tot == sum([dat_out.shape[0] for dat_out in dat_out_all])), \
-        "Error visualizing ground truth!"
-
-    # Convert each training input/output pair to Torch tensors.
-    dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
-                torch.tensor(dat_out, dtype=torch.long))
-               for dat_in, dat_out in zip(dat_in_all, dat_out_all)]
-    # Transform the data as required by this specific model.
-    dat_all = net.modify_data(list(zip(
-        sims_all,
-        [torch.tensor(arr_times.tolist()) for arr_times in arr_times_all],
-        dat_all)))
+    out_dim = sum(
+        [1 if len(dat_out.size()) == 0 else dat_out.size()[0]
+         for dat_out in dat_out_all])
+    assert tot == out_dim, f"Error visualizing ground truth! {tot} != {out_dim}"
     print("Done.")
     return dat_all, prms_in
 
