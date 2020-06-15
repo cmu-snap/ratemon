@@ -119,7 +119,7 @@ def scale_fets(dat_all):
     return [normalize(dat) for dat in dat_all], scl_prms
 
 
-def make_datasets(net, dat_dir, bch_trn, bch_tst, warmup, num_sims, shuffle):
+def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     """
     Parses the files in data_dir, transforms them (e.g., by scaling)
     into the correct format for the network, and returns training,
@@ -193,9 +193,7 @@ def make_datasets(net, dat_dir, bch_trn, bch_tst, warmup, num_sims, shuffle):
     print()
     assert (tot == sum([dat_out.shape[0] for dat_out in dat_out_all])), \
         "Error visualizing ground truth!"
-    print("Done.")
 
-    print("Creating train/val/test data...")
     # Convert each training input/output pair to Torch tensors.
     dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
                 torch.tensor(dat_out, dtype=torch.long))
@@ -205,7 +203,16 @@ def make_datasets(net, dat_dir, bch_trn, bch_tst, warmup, num_sims, shuffle):
         sims_all,
         [torch.tensor(arr_times.tolist()) for arr_times in arr_times_all],
         dat_all)))
+    print("Done.")
+    return dat_all, prms_in
 
+
+def split_data(dat_all, bch_trn, bch_tst):
+    """
+    Divide dat_all into training, validation, and test sets and construct data
+    loaders.
+    """
+    print("Creating train/val/test data...")
     # Shuffle the data to ensure that the training, validation, and test sets
     # are uniformly sampled.
     random.shuffle(dat_all)
@@ -226,7 +233,7 @@ def make_datasets(net, dat_dir, bch_trn, bch_tst, warmup, num_sims, shuffle):
     ldr_tst = torch.utils.data.DataLoader(
         Dataset(dat_tst), batch_size=bch_tst, shuffle=False)
     print("Done.")
-    return ldr_trn, ldr_val, ldr_tst, prms_in
+    return ldr_trn, ldr_val, ldr_tst
 
 
 def init_hidden(net, bch, dev):
@@ -285,10 +292,10 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     # validation loss by at least val_imp_thresh percent. When this reaches
     # zero, training aborts.
     val_pat = val_pat_max
-
+    # The number of batches per epoch.
     num_bchs_trn = len(ldr_trn)
+    # Log the training process every few batches.
     bchs_per_log = math.floor(num_bchs_trn / LOGS_PER_EPC)
-
     # To avoid a divide-by-zero error below, the number of validation passes
     # per epoch much be at least 2.
     assert VALS_PER_EPC >= 2, "Must validate at least twice per epoch."
@@ -422,10 +429,50 @@ def test(net, ldr_tst, dev):
     return acc_tst
 
 
-def run(args_):
+def run(args, dat_all):
     """
     Trains a model according to the supplied parameters. Returns the test error
     (lower is better).
+    """
+    # Instantiate and configure the network.
+    net = models.MODELS[args["model"]]()
+    base_net = net
+    num_gpus = torch.cuda.device_count()
+    num_gpus_to_use = args["num_gpus"]
+    if num_gpus >= num_gpus_to_use > 1:
+        net = torch.nn.DataParallel(net)
+        base_net = net.module
+
+    dev = torch.device(
+        "cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
+    net.to(dev)
+
+    ldr_trn, ldr_val, ldr_tst = split_data(
+        dat_all, args["train_batch"], args["test_batch"])
+
+    # Training.
+    tim_srt_s = time.time()
+    net = train(
+        net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
+        args["val_patience"], out_flp, args["learning_rate"], args["momentum"],
+        args["val_improvement_thresh"], args["timeout_s"])
+    print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
+
+    # # Read the best version of the model from disk.
+    # net = torch.jit.load(out_flp)
+    # net.to(dev)
+
+    # Testing.
+    tim_srt_s = time.time()
+    los_tst = test(net, ldr_tst, dev)
+    print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    return los_tst
+
+
+def run_many(args_):
+    """
+    Run args["conf_trials"] trials and survive args["max_attempts"] failed
+    attempts.
     """
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
@@ -449,52 +496,14 @@ def run(args_):
     if path.exists(out_flp):
         os.remove(out_flp)
 
-    # Instantiate and configure the network.
-    net = models.MODELS[args["model"]]()
-    base_net = net
-    num_gpus = torch.cuda.device_count()
-    num_gpus_to_use = args["num_gpus"]
-    if num_gpus >= num_gpus_to_use > 1:
-        net = torch.nn.DataParallel(net)
-        base_net = net.module
-
-    dev = torch.device(
-        "cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
-    net.to(dev)
-
-    bch_trn = args["train_batch"]
-    ldr_trn, ldr_val, ldr_tst, scl_prms = make_datasets(
-        base_net, args["data_dir"], bch_trn, args["test_batch"], args["warmup"],
+    dat_all, scl_prms = make_datasets(
+        models.MODELS[args["model"]](), args["data_dir"], args["warmup"],
         args["num_sims"], SHUFFLE)
 
     # Save scaling parameters.
     with open(path.join(out_dir, "scale_params.json"), "w") as fil:
         json.dump(scl_prms.tolist(), fil)
 
-    # Training.
-    tim_srt_s = time.time()
-    net = train(
-        net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
-        args["val_patience"], out_flp, args["learning_rate"], args["momentum"],
-        args["val_improvement_thresh"], args["timeout_s"])
-    print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
-
-    # # Read the best version of the model from disk.
-    # net = torch.jit.load(out_flp)
-    # net.to(dev)
-
-    # Testing.
-    tim_srt_s = time.time()
-    los_tst = test(net, ldr_tst, dev)
-    print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
-    return los_tst
-
-
-def run_many(args):
-    """
-    Run args["conf_trials"] trials and survive args["max_attempts"] failed
-    attempts.
-    """
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
     apts = 0
@@ -502,7 +511,7 @@ def run_many(args):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = run(args)
+        res = run(args, dat_all)
         if res == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
