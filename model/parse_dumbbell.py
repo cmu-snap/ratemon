@@ -201,7 +201,7 @@ def main():
 
     # Find all simulations.
     pcaps = [(path.join(exp_dir, sim), out_dir, rtt_window)
-             for sim in os.listdir(exp_dir)]
+             for sim in sorted(os.listdir(exp_dir))]
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     if SYNC:
