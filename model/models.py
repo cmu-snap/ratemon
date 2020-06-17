@@ -220,6 +220,38 @@ class BinaryDnn(Model):
         return dat_in_new, dat_out_new
 
 
+
+class SVM(BinaryDnn):
+    """ A simple SVM binary classifier. """
+
+    in_spc = ["inter-arrival time", "loss rate"]
+    out_spc = ["queue occupancy"]
+    num_clss = 2
+    nums_nodes = [2]
+    los_fnc = torch.nn.CrossEntropyLoss
+    opt = torch.optim.SGD
+
+    def __init__(self, win=20, rtt_buckets=-True, disp=False):
+        super(BinaryDnn, self).__init__()
+        self.check()
+
+        self.win = win
+        self.rtt_buckets = rtt_buckets
+        # We must store these as indivual class variables (instead of
+        # just storing them in self.fcs) because PyTorch looks at the
+        # class variables to determine the model's trainable weights.
+        self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 2)
+        self.fcs = [self.fc0]
+        self.sg = torch.nn.Sigmoid()
+        if (disp):
+            print(f"SVM - win: {self.win}, fc layers: {len(self.fcs)}")
+
+    def forward(self, x, hidden=None):
+        fwd = self.fc0(x)  # Forward pass
+        return fwd, hidden
+
+
+
 class Lstm(Model):
     """ An LSTM that classifies a flow into one of five fairness categories. """
 
@@ -414,6 +446,7 @@ class FcFour(torch.nn.Module):
 MODELS = {
     "BinaryDnn": BinaryDnn,
     "Lstm": Lstm,
+    "SVM": SVM,
     "SimpleOne": SimpleOne,
     "FcOne": FcOne,
     "FcTwo": FcTwo,
