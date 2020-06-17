@@ -9,7 +9,6 @@ import time
 from collections import deque
 
 import numpy as np
-import scapy.layers.inet
 
 import utils
 
@@ -63,9 +62,9 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
         one_way_us = float(rtt_us / 2.0)
 
         # (Seq, timestamp)
-        send_pkts = parse_packets_endpoint(
+        send_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir, f"{sim}-{i + 2}-0.pcap"), payload_B)
-        recv_pkts = parse_packets_endpoint(
+        recv_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir, f"{sim}-{i + 2 + unfair_flows + other_flows}-0.pcap"),
             payload_B)
 
@@ -127,7 +126,8 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
 
     # Process pcap files from routers to determine queue occupency
     # (sender, timestamp)
-    router_pkts = parse_packets_routerpath.join(sim_dir, f"{sim}-1-0.pcap"), payload_B)
+    router_pkts = utils.parse_packets_router(
+        path.join(sim_dir, f"{sim}-1-0.pcap"), payload_B)
     # Number of packets sent by the unfair flows within RTT window
     # Note that RTT window could be different for flows with different RTT
     window_pkt_count = [0] * unfair_flows
