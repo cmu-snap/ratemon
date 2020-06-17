@@ -172,9 +172,12 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
                 output_index[sender] = output_index[sender] + 1
 
     # Write to output
-    print(f"    Saving: {out_flp}")
-    np.savez_compressed(
-        out_flp, **{str(k + 1): v for k, v in enumerate(unfair_flws)})
+    if path.exists(out_flp):
+        print(f"    Output already exists: {out_flp}")
+    else:
+        print(f"    Saving: {out_flp}")
+        np.savez_compressed(
+            out_flp, **{str(k + 1): v for k, v in enumerate(unfair_flws)})
 
 
 def main():
