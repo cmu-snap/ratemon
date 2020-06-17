@@ -54,12 +54,14 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
         rtt_us = one_way_us * 2
         rtts_us.append(rtt_us)
 
+        # (Seq, timestamp)
         send_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
             sim.payload_B)
         recv_pkts = utils.parse_packets_endpoint(
-            path.join(sim_dir,
-                      f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap"),
+            path.join(
+                sim_dir,
+                f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap")
             sim.payload_B)
 
         packet_loss = 0
@@ -155,8 +157,8 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             # the expected window size. Also decrement packet count if the packet
             # belongs to the unfair flow
             window_start = router_window_start[sender]
-            while ((curr_time - router_pkts[window_start][1]) >
-                   rtts_us[sender] * rtt_window):
+            while (curr_time - router_pkts[window_start][1] >
+                   rtt_list[sender] * rtt_window):
                 if router_pkts[window_start][0] == sender:
                     window_pkt_count[sender] -= 1
                 window_start += 1
