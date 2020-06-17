@@ -221,20 +221,6 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     # parameters.
     dat_in_all, prms_in = scale_fets(dat_in_all)
 
-    # Visualaize the ground truth data.
-    clss = list(range(net.num_clss))
-    # Assumes that dat_out_all is a structured numpy array containing
-    # a column named "class".
-    tots = [(dat_out_all["class"] == cls).sum() for cls in clss]
-    tot = sum(tots)
-    print("\nGround truth:")
-    for cls, tot_cls in zip(clss, tots):
-        print(f"    {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)")
-    print()
-    tot_actual = np.prod(np.array(dat_out_all.shape))
-    assert tot == tot_actual, \
-        f"Error visualizing ground truth! {tot} != {tot_actual}"
-
     return dat_in_all, dat_out_all, prms_in
 
 
@@ -371,8 +357,10 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
         # For each batch...
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
             if bch_idx_trn % bchs_per_log == 0:
-                print(f"Epoch: {epoch_idx + 1}/{'?' if ely_stp else num_epochs}, "
-                      f"batch: {bch_idx_trn + 1}/{num_bchs_trn}", end=" ")
+                print(f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
+                      f"{'?' if ely_stp else num_epochs}, "
+                      f"batch: {bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
+                      f"{num_bchs_trn}", end=" ")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
@@ -382,7 +370,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             loss.backward()
             opt.step()
             if bch_idx_trn % bchs_per_log == 0:
-                print(f"\tTraining loss: {loss:.5f}")
+                print(f"    Training loss: {loss:.5f}")
 
             # Run on validation set, print statistics, and (maybe) checkpoint
             # every VAL_PER batches.
@@ -442,11 +430,13 @@ def test(net, ldr_tst, dev):
     num_correct = 0
     # Total testing samples.
     total = 0
+    num_bchs_tst = len(ldr_tst)
     # For efficiency, convert the model to evaluation mode.
     net.eval()
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
-            print(f"Test batch: {bch_idx + 1}/{len(ldr_tst)}")
+            print(f"Test batch: {bch_idx + 1:{f'0{len(str(num_bchs_tst))}'}}/"
+                  f"{num_bchs_tst}")
             if net.is_lstm:
                 bch_tst, seq_len, _ = ins.size()
             else:
@@ -483,7 +473,7 @@ def run(args, dat_in, dat_out, out_flp):
     (lower is better).
     """
     # Instantiate and configure the network. Move it to the proper device.
-    net = models.MODELS[args["model"]]()
+    net = models.MODELS[args["model"]](disp=True)
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]
     if num_gpus >= num_gpus_to_use > 1:
@@ -544,6 +534,7 @@ def run_many(args_):
     # Load or geenrate training data.
     dat_flp = path.join(out_dir, "data.npz")
     scl_prms_flp = path.join(out_dir, "scale_params.json")
+    net_tmp = models.MODELS[args["model"]]()
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the
     # proper scaling parameters.
@@ -557,8 +548,8 @@ def run_many(args_):
     else:
         print("Regenerating data...")
         dat_in, dat_out, scl_prms = make_datasets(
-            models.MODELS[args["model"]](), args["data_dir"], args["warmup"],
-            args["num_sims"], SHUFFLE)
+            net_tmp, models.MODELS[args["model"]](), args["data_dir"],
+            args["warmup"], args["num_sims"], SHUFFLE)
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
         np.savez_compressed(dat_flp, **{"in": dat_in, "out": dat_out})
@@ -566,6 +557,19 @@ def run_many(args_):
         print(f"Saving scaling parameters: {scl_prms_flp}")
         with open(scl_prms_flp, "w") as fil:
             json.dump(scl_prms.tolist(), fil)
+
+    # Visualaize the ground truth data.
+    clss = list(range(net_tmp.num_clss))
+    # Assumes that dat_out is a structured numpy array containing a
+    # column named "class".
+    tots = [(dat_out["class"] == cls).sum() for cls in clss]
+    tot = sum(tots)
+    print("Ground truth:\n" + "\n".join(
+        [f"    {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)"
+         for cls, tot_cls in zip(clss, tots)]))
+    tot_actual = np.prod(np.array(dat_out.shape))
+    assert tot == tot_actual, \
+        f"Error visualizing ground truth! {tot} != {tot_actual}"
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]

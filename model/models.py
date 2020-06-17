@@ -67,12 +67,11 @@ class BinaryDnn(Model):
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     num_clss = 2
-    nums_nodes = [16, 32, 16, 2]
     # los_fnc = torch.nn.BCELoss
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=20, rtt_buckets=-True):
+    def __init__(self, win=20, rtt_buckets=-True, disp=False):
         super(BinaryDnn, self).__init__()
         self.check()
 
@@ -88,7 +87,12 @@ class BinaryDnn(Model):
         self.fc3 = torch.nn.Linear(16, 2)
         self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
         self.sg = torch.nn.Sigmoid()
-        print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}")
+        if disp:
+            print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}"
+                  "\n    " + "\n    ".join(
+                      [f"Linear: {lay.in_features}x{lay.out_features}"
+                       for lay in self.fcs]) +
+                  "\n    Sigmoid")
 
     def forward(self, x, hidden=None):
         for fc in self.fcs:
