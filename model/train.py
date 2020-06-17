@@ -59,52 +59,64 @@ VALS_PER_EPC = 15
 
 
 class Dataset(torch.utils.data.Dataset):
-    """ A simple Dataset that wraps an array of (input, output) value pairs. """
+    """ A simple Dataset that wraps arrays of input and output features. """
 
-    def __init__(self, dat):
+    def __init__(self, dat_in, dat_out, dev):
+        """
+        dat_out is assumed to have only a single practical dimension (e.g.,
+        (X,), or (X, 1)).
+        """
         super(Dataset).__init__()
-
-        # # Convert each training input/output pair to Torch tensors.
-        # dat_all = [(torch.tensor(dat_in.tolist(), dtype=torch.float),
-        #             torch.tensor(dat_out, dtype=torch.int))
-        #            for dat_in, dat_out in dat_all]
-
-        self.dat = dat
+        shp_in = dat_in.shape
+        shp_out = dat_out.shape
+        assert shp_in[0] == shp_out[0], \
+            "Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
+        # Convert the numpy arrays to Torch tensors.
+        self.dat_in = torch.tensor(dat_in, dtype=torch.float)
+        # Reshape the output into a 1D array first, because
+        # CrossEntropyLoss expects a single value. The dtype must be
+        # long because the loss functions expect longs.
+        self.dat_out = torch.tensor(
+            dat_out.reshape(shp_out[0]), dtype=torch.long)
+        # Move the entire dataset to the target device. This will fail
+        # if the device has insufficient memory.
+        self.dat_in = self.dat_in.to(dev)
+        self.dat_out = self.dat_out.to(dev)
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
-        return len(self.dat)
+        return len(self.dat_in)
 
     def __getitem__(self, idx):
-        """ Returns a specific item from this Dataset. """
+        """ Returns a specific (input, output) pair from this Dataset. """
         assert torch.utils.data.get_worker_info() is None, \
             "This Dataset does not support being loaded by multiple workers!"
-        return self.dat[idx]
+        return self.dat_in[idx], self.dat_out[idx]
 
 
 def scale_fets(dat):
     """
-    dat_all is a list of numpy arrays, each corresponding to a simulation.
-    Returns a copy of dat_all with the columns scaled between 0 and 1. Also
-    returns an array of shape (dat_all[0].shape[1], 2) where row i contains the
-    min and the max of column i in the entries in dat_all.
+    Returns a copy of dat with the columns scaled between 0 and
+    1. Also returns an array of shape (dat_all[0].shape[1], 2) where
+    row i contains the min and the max of column i in dat.
     """
     assert dat.dtype.names is not None, \
         f"The provided array is not structured. dtype: {dat.dtype.descr}"
+    # Create an empty array to hold the min and max values (i.e.,
+    # scaling parameters) for each column (i.e., feature).
     fets = dat.dtype.names
-    # Create an empty array to hold the min and max values for each feature.
     scl_prms = np.empty((len(fets), 2))
     # The new scaled array.
     new = np.empty(dat.shape, dtype=dat.dtype)
     # For all features...
     for j, fet in enumerate(fets):
-        # Determine the min and max of this feature.
+        # Determine the min and max values of this feature.
         fet_values = dat[fet]
         min_in = fet_values.min()
         max_in = fet_values.max()
         scl_prms[j] = np.array([min_in, max_in])
-
         if min_in == max_in:
+            # Handle the rare case where all of the feature values are the same.
             scaled = np.zeros(fet_values.shape, dtype=fet_values.dtype)
         else:
             scaled = utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1)
@@ -113,11 +125,13 @@ def scale_fets(dat):
 
 
 def process_sim(net, sim_flp, warmup):
-    print("Loading data...")
+    """
+    Loads and processes data from a single simulation. Drops the first
+    "warmup" packets. Uses "net" to determine the relevant input and
+    output features. Returns a tuple of numpy arrays of the form:
+    (input data, output data).
+    """
     sim, dat = utils.load_sim(sim_flp)
-    print("Done.")
-
-    print("Formatting data...")
     # Drop the first few packets so that we consider steady-state behavior only.
     assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
     dat = dat[warmup:]
@@ -126,43 +140,33 @@ def process_sim(net, sim_flp, warmup):
     # columns correspond to the feature names in in_spc and out_spc.
     assert net.in_spc, "{sim_flp}: Empty in spec."
     assert net.out_spc, "{sim_flp}: Empty out spec."
-    print(f"dat: {dat}")
     arr_times = dat["arrival time"]
     dat_in = dat[net.in_spc]
     dat_out = dat[net.out_spc]
-    print(f"dat_out: {dat_out}")
     # Convert output features to class labels.
     dat_out = net.convert_to_class(sim, dat_out)
-    print("Done.")
 
     # Verify data.
-    print("Verifying data...")
     assert dat_in.shape[0] == dat_out.shape[0], \
-        "Should have the same number of rows."
-    # Find the uniques classes in the output features and make sure that they
-    # are properly formed.
-    for cls in set(dat_out.tolist()):
+        f"{sim_flp}: Input and output should have the same number of rows."
+    # Find the uniques classes in the output features and make sure
+    # that they are properly formed. Assumes that dat_out is a
+    # structured numpy array containing a column named "class".
+    for cls in set(dat_out["class"].tolist()):
         assert 0 <= cls < net.num_clss, "Invalid class: {cls}"
-    print("Done.")
 
-    print("Converting data into model-specific format...")
     # Transform the data as required by this specific model.
-    dat_in, dat_out = net.modify_data(
-        sim, dat_in, dat_out, arr_times=arr_times)
-    print("Done")
-    return dat_in, dat_out
+    return net.modify_data(sim, dat_in, dat_out, arr_times=arr_times)
 
 
 def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     """
-    Parses the files in data_dir, transforms them (e.g., by scaling)
-    into the correct format for the network, and returns training,
-    validation, and test data loaders.
+    Parses the simulation files in data_dir and transforms them (e.g., by
+    scaling) into the correct format for the network.
 
-    If num_sims is not None, then selects only the first num_sims
-    simulations. If shuffle is True, then the simulations will be parsed in
+    If num_sims is not None, then this function selects the first num_sims
+    simulations only. If shuffle is True, then the simulations will be parsed in
     sorted order. Use num_sims and shuffle=True together to simplify debugging.
-
     """
     sims = sorted(os.listdir(dat_dir))
     if shuffle:
@@ -183,8 +187,8 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     dim_out = None
     dtype_out = None
     for dat_in, dat_out in dat_all:
-        dim_in_cur = dat_in.shape[0]
-        dim_out_cur = dat_out.shape[0]
+        dim_in_cur = len(dat_in.dtype.descr)
+        dim_out_cur = len(dat_out.dtype.descr)
         dtype_in_cur = dat_in.dtype
         dtype_out_cur = dat_out.dtype
         if dim_in is None:
@@ -218,28 +222,28 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     dat_in_all, prms_in = scale_fets(dat_in_all)
 
     # Visualaize the ground truth data.
-    print("\nVisualizing data...")
     clss = list(range(net.num_clss))
-    tots = [(dat_out_all == cls).sum() for cls in clss]
+    # Assumes that dat_out_all is a structured numpy array containing
+    # a column named "class".
+    tots = [(dat_out_all["class"] == cls).sum() for cls in clss]
     tot = sum(tots)
-    print("\n    Ground truth:")
+    print("\nGround truth:")
     for cls, tot_cls in zip(clss, tots):
-        print(f"        {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)")
+        print(f"    {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)")
     print()
+    tot_actual = np.prod(np.array(dat_out_all.shape))
+    assert tot == tot_actual, \
+        f"Error visualizing ground truth! {tot} != {tot_actual}"
 
-    tot_true = math.prod(dat_out_all.shape)
-    assert tot == tot_true, f"Error visualizing ground truth! {tot} != {tot_true}"
-    print("Done.")
     return dat_in_all, dat_out_all, prms_in
 
 
-def split_data(dat_in, dat_out, bch_trn, bch_tst):
+def split_data(dat_in, dat_out, bch_trn, bch_tst, dev):
     """
-    Divide dat_all into training, validation, and test sets and construct data
-    loaders.
+    Divides dat_in and dat_out into training, validation, and test
+    sets and constructs data loaders.
     """
     print("Creating train/val/test data...")
-
     # Destroy columns names to make merging the matrices easier. I.e.,
     # convert from structured to regular numpy arrays.
     dat_in = utils.clean(dat_in)
@@ -247,7 +251,7 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
 
     # Shuffle the data to ensure that the training, validation, and
     # test sets are uniformly sampled. To shuffle the input and output
-    # data together, we must merged them into a combined matrix.
+    # data together, we must first merge them into a combined matrix.
     num_exps = dat_in.shape[0]
     num_cols_in = dat_in.shape[1]
     merged = np.empty((num_exps, num_cols_in + dat_out.shape[1]), dtype=float)
@@ -271,11 +275,14 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
 
     # Create the dataloaders.
     ldr_trn = torch.utils.data.DataLoader(
-        Dataset(dat_trn_in, dat_trn_out), batch_size=bch_trn, shuffle=True)
+        Dataset(dat_trn_in, dat_trn_out, dev),
+        batch_size=bch_trn, shuffle=True)
     ldr_val = torch.utils.data.DataLoader(
-        Dataset(dat_val_in, dat_val_out), batch_size=bch_tst, shuffle=False)
+        Dataset(dat_val_in, dat_val_out, dev),
+        batch_size=bch_tst, shuffle=False)
     ldr_tst = torch.utils.data.DataLoader(
-        Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst, shuffle=False)
+        Dataset(dat_tst_in, dat_tst_out, dev),
+        batch_size=bch_tst, shuffle=False)
     print("Done.")
     return ldr_trn, ldr_val, ldr_tst
 
@@ -295,14 +302,11 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
-def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
+def inference(ins, labs, net, hidden=None, los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
     """
-    # Move the training data to the specified device.
-    ins = ins.to(dev)
-    labs = labs.to(dev)
     if net.is_lstm:
         # LSTMs want the sequence length to be first and the batch
         # size to be second, so we need to flip the first and
@@ -373,7 +377,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
+            loss, hidden = inference(ins, labs, net, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -393,7 +397,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.train()
 
@@ -453,7 +457,7 @@ def test(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
-                ins, labs, net, dev, hidden,
+                ins, labs, net, hidden,
                 los_fnc=lambda a, b: (
                     # argmax(): The class is the index of the output
                     #     entry with greatest value (i.e., highest
@@ -478,19 +482,18 @@ def run(args, dat_in, dat_out, out_flp):
     Trains a model according to the supplied parameters. Returns the test error
     (lower is better).
     """
-    # Instantiate and configure the network.
+    # Instantiate and configure the network. Move it to the proper device.
     net = models.MODELS[args["model"]]()
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]
     if num_gpus >= num_gpus_to_use > 1:
         net = torch.nn.DataParallel(net)
-
-    dev = torch.device(
-        "cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
+    dev = torch.device("cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
     net.to(dev)
 
+    # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        dat_in, dat_out, args["train_batch"], args["test_batch"])
+        dat_in, dat_out, args["train_batch"], args["test_batch"], dev)
 
     # Training.
     tim_srt_s = time.time()
@@ -541,6 +544,9 @@ def run_many(args_):
     # Load or geenrate training data.
     dat_flp = path.join(out_dir, "data.npz")
     scl_prms_flp = path.join(out_dir, "scale_params.json")
+    # Check for the presence of both the data and the scaling
+    # parameters because the resulting model is useless without the
+    # proper scaling parameters.
     if path.exists(dat_flp) and path.exists(scl_prms_flp):
         print("Found existing data!")
         dat = np.load(dat_flp)
@@ -555,7 +561,7 @@ def run_many(args_):
             args["num_sims"], SHUFFLE)
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
-        np.savez_compressed(dat_flp, {"in": dat_in, "out": dat_out})
+        np.savez_compressed(dat_flp, **{"in": dat_in, "out": dat_out})
         # Save scaling parameters.
         print(f"Saving scaling parameters: {scl_prms_flp}")
         with open(scl_prms_flp, "w") as fil:

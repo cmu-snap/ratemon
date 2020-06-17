@@ -97,13 +97,12 @@ class BinaryDnn(Model):
 
     @staticmethod
     def convert_to_class(sim, dat_out):
-        print(f"dat_out: {dat_out}")
         # Verify that the output features consist of exactly one column.
         assert len(dat_out.dtype.names) == 1, "Should be only one column."
         # Map a conversion function across all entries. Note that
         # here an entry is an entire row, since each row is a
         # single tuple value.
-        return np.vectorize(
+        clss = np.vectorize(
             functools.partial(
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
@@ -111,6 +110,9 @@ class BinaryDnn(Model):
                 fair=1. / (sim.unfair_flws + sim.other_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
+        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
+        clss_str["class"] = clss
+        return clss_str
 
     @staticmethod
     def bucketize(arr_times, rtt_us, num_buckets):
@@ -122,8 +124,11 @@ class BinaryDnn(Model):
         num_pkts = arr_times.shape[0]
         assert num_pkts > 0, "Need more than 0 packets!"
         # Records the number of packets that arrived during each
-        # interval.
-        counts = np.zeros((1,), dtype=[("buckets", "int", num_buckets)])
+        # interval. This is a structured numpy array where each column
+        # is named based on its bucket index.
+        counts = np.zeros(
+            (1,),
+            dtype=[(f"bucket_{bkt}", "int") for bkt in range(num_buckets)])
         # The duration of each interval.
         interval_us = rtt_us / num_buckets
         # The arrival time of the first packet, and therefore the
@@ -133,14 +138,14 @@ class BinaryDnn(Model):
                 (arr_times - start_time_us) / interval_us).astype(int):
             assert idx < num_buckets, \
                 "Invalid idx ({idx}) for the number of buckets ({num_buckets})!"
-            counts[0][0][idx] += 1
-        assert counts[0][0].sum() == num_pkts, "Error building counts!"
+            counts[0][idx] += 1
+        assert sum(counts[0].tolist()) == num_pkts, "Error building counts!"
         return counts
 
     def modify_data(self, sim, dat_in, dat_out, **kwargs):  # arr_times, num_wins):
         """
-        Extracts from the set of simulations many separate intervals
-        of length self.win. Each interval becomes a training example.
+        Extracts from the set of simulations many separate intervals. Each
+        interval becomes a training example.
         """
         assert "arr_times" in kwargs, f"kwargs missing \"arr_times\": {kwargs}"
         arr_times = kwargs["arr_times"]
@@ -172,8 +177,10 @@ class BinaryDnn(Model):
 
         # Select random intervals from this simulation to create the
         # new input data.
-        pkt_idxs = random.sample(range(start_idx, num_pkts), num_wins)
-        dat_in_new = np.empty((num_wins, self.win), dtype=[("buckets", "int", self.win)])
+        pkt_idxs = random.choices(range(start_idx, num_pkts), k=num_wins)
+        dat_in_new = np.empty(
+            (num_wins,),
+            dtype=[(f"bucket_{bkt}", "int") for bkt in range(self.win)])
         for win_idx, pkt_idx in enumerate(pkt_idxs):
             if self.rtt_buckets:
                 cur_arr_time = arr_times[pkt_idx]
