@@ -111,7 +111,7 @@ def parse_pcap(flp, out_dir, rtt_window):
 
     # Process pcap files from routers to determine queue occupency
     # (sender, timestamp)
-    router_pkts = parse_packets_endpoint(flp, packet_size_B)
+    router_pkts = parse_packets_router(flp, packet_size_B)
 
     # Number of packets sent by the unfair flows within RTT window
     # Note that RTT window could be different for flows with different RTT
