@@ -43,26 +43,18 @@ class Model(torch.nn.Module):
     def init_hidden(self, batch_size):
         """
         If this model is an LSTM, then this method returns the initialized
-        hidden state. Otherwise, return None.
+        hidden state. Otherwise, returns None.
         """
         return None
 
     @staticmethod
-    def convert_to_class(dat_out_all):
-        """
-        Converts real-valued feature values into classes. dat_out_all is a
-        list of pairs, one for each simulation, of the form:
-            (output feature Numpy array, number of flows)
-        """
-        return dat_out_all
+    def convert_to_class(sim, dat_out):
+        """ Converts real-valued feature values into classes. """
+        return dat_out
 
-    def modify_data(self, dat_all):
-        """
-        Performs an arbitrary transformation on the data. dat_all is a list of
-        tuples (one for each simulation) of the form:
-            (sim, arrival times tensor, (input data tensor, output data tensor))
-        """
-        return dat_all
+    def modify_data(self, sim, dat_in, dat_out, **kwargs):
+        """ Performs an arbitrary transformation on the data. """
+        return dat_in, dat_out
 
     def forward(self, x, hidden):
         raise Exception(("Attempting to call \"forward()\" on the Model base "
@@ -104,22 +96,21 @@ class BinaryDnn(Model):
         return self.sg(x), hidden
 
     @staticmethod
-    def convert_to_class(dat_out_all):
-        # Verify that all feature maps have exactly one column.
-        for dat_out, _ in dat_out_all:
-            assert len(dat_out.dtype.names) == 1, "Should be only one column."
-        return [
-            # Map a conversion function across all entries. Note that
-            # here an entry is an entire row, since each row is a
-            # single tuple value.
-            np.vectorize(
-                functools.partial(
-                    # Compare each queue occupancy percent with the fair
-                    # percent. prc[0] assumes a single column.
-                    lambda prc, fair: prc[0] > fair, fair=1. / num_flws),
-                # Convert to integers.
-                otypes=[int])(dat_out)
-            for dat_out, num_flws in dat_out_all]
+    def convert_to_class(sim, dat_out):
+        print(f"dat_out: {dat_out}")
+        # Verify that the output features consist of exactly one column.
+        assert len(dat_out.dtype.names) == 1, "Should be only one column."
+        # Map a conversion function across all entries. Note that
+        # here an entry is an entire row, since each row is a
+        # single tuple value.
+        return np.vectorize(
+            functools.partial(
+                # Compare each queue occupancy percent with the fair
+                # percent. prc[0] assumes a single column.
+                lambda prc, fair: prc[0] > fair,
+                fair=1. / (sim.unfair_flws + sim.other_flws)),
+            # Convert to integers.
+            otypes=[int])(dat_out)
 
     @staticmethod
     def bucketize(arr_times, rtt_us, num_buckets):
@@ -128,96 +119,89 @@ class BinaryDnn(Model):
         intervals. Each interval has duration rtt_us / num_buckets.
         Returns the number of packets that arrived during each interval.
         """
-        num_pkts = arr_times.size()[0]
+        num_pkts = arr_times.shape[0]
         assert num_pkts > 0, "Need more than 0 packets!"
         # Records the number of packets that arrived during each
         # interval.
-        counts = torch.zeros(num_buckets)
+        counts = np.zeros((1,), dtype=[("buckets", "int", num_buckets)])
         # The duration of each interval.
         interval_us = rtt_us / num_buckets
         # The arrival time of the first packet, and therefore the
         # start of the first interval.
-        start_time_us = arr_times[0].item()
-        for idx in torch.floor((arr_times - start_time_us) / interval_us).type(
-                torch.IntTensor):
+        start_time_us = arr_times[0]
+        for idx in np.floor(
+                (arr_times - start_time_us) / interval_us).astype(int):
             assert idx < num_buckets, \
                 "Invalid idx ({idx}) for the number of buckets ({num_buckets})!"
-            counts[idx] += 1
-        assert counts.sum().item() == num_pkts, "Error building counts!"
+            counts[0][0][idx] += 1
+        assert counts[0][0].sum() == num_pkts, "Error building counts!"
         return counts
 
-    def modify_data(self, dat_all):
+    def modify_data(self, sim, dat_in, dat_out, **kwargs):  # arr_times, num_wins):
         """
         Extracts from the set of simulations many separate intervals
         of length self.win. Each interval becomes a training example.
         """
-        total_packets = sum(
-            [dat_in.size()[0] for sim, arr_times, (dat_in, _) in dat_all])
-        # Set the number of windows to be the number of adjacent
-        # windows that fit in the set of simulations. However, when
-        # actually selecting the windows, they may overlap.
-        num_wins = float(total_packets) / self.win
-        # The reformatted data.
-        dat_all_new = []
-        # Loop over all of the simulations.
-        for sim, arr_times, (dat_in, dat_out) in dat_all:
-            # Do not pick indices between 0 and (self.win - 1) to make
-            # sure that all windows of length self.win ending on the
-            # chosen index fit within the simulation.
+        assert "arr_times" in kwargs, f"kwargs missing \"arr_times\": {kwargs}"
+        arr_times = kwargs["arr_times"]
+
+        # Determine the safe starting index. Do not pick indices
+        # between 0 and start_idx to make sure that all windows ending
+        # on the chosen index fit within the simulation.
+        rtt_us = 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
+        num_pkts = dat_in.shape[0]
+        if self.rtt_buckets:
+            first_arr_time = None
+            start_idx = None
+            for idx, arr_time in enumerate(arr_times):
+                if first_arr_time is None:
+                    first_arr_time = arr_time
+                    continue
+                if arr_time - first_arr_time >= rtt_us:
+                    start_idx = idx
+                    break
+            assert start_idx is not None and start_idx < num_pkts, \
+                "Unable to determine start index!"
+            # The number of windows is the number of RTTs between the
+            # start index and the end of the experiment.
+            num_wins = math.ceil(
+                (sim.dur_s * 1e6 - arr_times[start_idx]) / rtt_us)
+        else:
+            start_idx = self.win
+            num_wins = math.ceil(num_pkts / self.win)
+
+        # Select random intervals from this simulation to create the
+        # new input data.
+        pkt_idxs = random.sample(range(start_idx, num_pkts), num_wins)
+        dat_in_new = np.empty((num_wins, self.win), dtype=[("buckets", "int", self.win)])
+        for win_idx, pkt_idx in enumerate(pkt_idxs):
             if self.rtt_buckets:
-                rtt_us = 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
-                first_arr_time = None
-                for idx, arr_time in enumerate(arr_times):
-                    if first_arr_time is None:
-                        first_arr_time = arr_time
-                        continue
-                    if (arr_time - first_arr_time) >= rtt_us:
-                        start_idx = idx
+                cur_arr_time = arr_times[pkt_idx]
+                win_start_idx = None
+                for arr_time_idx in range(pkt_idx, -1, -1):
+                    if cur_arr_time - arr_times[arr_time_idx] >= rtt_us:
+                        win_start_idx = arr_time_idx + 1
                         break
+                assert (win_start_idx is not None and
+                        0 <= win_start_idx <= pkt_idx), \
+                    "Insufficient packets to create window!"
+
+                dat_in_new[win_idx] = self.bucketize(
+                    arr_times[win_start_idx:pkt_idx + 1], rtt_us, self.win)
             else:
-                rtt_us = None
-                start_idx = self.win
+                dat_in_new[win_idx] = dat_in[pkt_idx - self.win + 1:pkt_idx + 1].flatten()
 
-            # The number of packets in this simulation.
-            sim_pkts = dat_in.size()[0]
-            # Select random intervals from this simulation.
-            for idx in random.sample(
-                    range(start_idx, sim_pkts),
-                    # Calculate the fraction of windows that should come from
-                    # this simulation.
-                    math.ceil(sim_pkts / total_packets * num_wins)):
-                assert idx >= start_idx, \
-                    f"Improperly formed index ({idx}) for start index ({start_idx})!"
-
-                if self.rtt_buckets:
-                    assert rtt_us is not None, "rtt_us is not defined!"
-                    cur_arr_time = arr_times[idx]
-                    win_start_idx = None
-                    for i in range(idx, -1, -1):
-                        if cur_arr_time - arr_times[i] >= rtt_us:
-                            win_start_idx = i + 1
-                            break
-                    assert win_start_idx is not None and 0 <= win_start_idx <= idx, \
-                        "Insufficient packets to create window."
-                else:
-                    win_start_idx = idx - self.win
-
-                dat_in_new = dat_in[win_start_idx:idx].flatten()
-                if self.rtt_buckets:
-                    dat_in_new = self.bucketize(
-                        arr_times[win_start_idx:idx + 1], rtt_us, self.win)
-
-                # As an output feature, select only the final ground
-                # truth value. I.e., the final ground truth value for
-                # this window becomes the ground truth for the entire
-                # window.
-                dat_all_new.append((dat_in_new, dat_out[idx]))
+        # As an output feature, select only the final ground truth
+        # value. I.e., the final ground truth value for this window
+        # becomes the ground truth for the entire window.
+        dat_out_new = np.take(dat_out, pkt_idxs)
 
         # Verify that we selected at least as many windows as we intended to.
-        num_selected_wins = len(dat_all_new)
+        num_selected_wins = len(dat_in_new)
         assert num_selected_wins >= num_wins, \
             f"Insufficient windows: {num_selected_wins} < {num_wins}"
-        return dat_all_new
+
+        return dat_in_new, dat_out_new
 
 
 class Lstm(Model):
@@ -264,9 +248,8 @@ class Lstm(Model):
                 weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
 
     @staticmethod
-    def convert_to_class(dat_out_all):
-        for dat_out, _ in dat_out_all:
-            assert len(dat_out.dtype.names) == 1, "Should be only one column."
+    def convert_to_class(sim, dat_out):
+        assert len(dat_out.dtype.names) == 1, "Should be only one column."
 
         def percent_to_class(prc, fair):
             """ Convert a queue occupancy percent to a fairness class. """
@@ -298,14 +281,13 @@ class Lstm(Model):
                 assert False, "This should never happen."
             return cls
 
-        return [
-            # Map a conversion function across all entries. Note that
-            # here an entry is an entire row, since each row is a
-            # single tuple value.
-            np.vectorize(
-                functools.partial(percent_to_class, fair=1. / num_flws),
-                otypes=[int])(dat_out)
-            for dat_out, num_flws in dat_out_all]
+        # Map a conversion function across all entries. Note that here
+        # an entry is an entire row, since each row is a single tuple
+        # value.
+        return np.vectorize(
+            functools.partial(
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
+            otypes=[int])(dat_out)
 
 
 #######################################################################

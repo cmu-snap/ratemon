@@ -88,8 +88,27 @@ def load_sim(flp):
     a tuple of the form: (total number of flows, results matrix).
     """
     print(f"    Parsing: {flp}")
-    sim = Sim(flp)
     with np.load(flp) as fil:
         assert len(fil.files) == 1 and "1" in fil.files, \
             "More than one unfair flow detected!"
-        return sim, sim.unfair_flws + sim.other_flws, fil["1"]
+        return Sim(flp), fil["1"]
+
+
+def clean(arr):
+    """
+    "Cleans" the provided numpy array by removing its column names. I.e., this
+    converts a structured numpy array into a regular numpy array. Assumes that
+    dtypes can be converted to float. If the
+    """
+    assert arr.dtype.names is not None, \
+        f"The provided array is not structured. dtype: {arr.dtype.descr}"
+    num_dims = len(arr.shape)
+    assert num_dims == 1, \
+        (f"Only 1D structured arrays are supported, but this one has {num_dims} "
+         "dims!")
+
+    num_cols = len(arr.dtype.descr)
+    new = np.empty((arr.shape[0], num_cols), dtype=float)
+    for col in range(num_cols):
+        new[:, col] = arr[arr.dtype.names[col]]
+    return new
