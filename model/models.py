@@ -77,14 +77,19 @@ class BinaryDnn(Model):
 
         self.win = win
         self.rtt_buckets = rtt_buckets
+        # Determine layer dimensions.
+        num_ins = (self.win if self.rtt_buckets
+                   else len(BinaryDnn.in_spc) * self.win)
+        dim_1 = min(num_ins, 64)
+        dim_2 = min(dim_1, 32)
+        dim_3 = min(dim_2, 16)
         # We must store these as indivual class variables (instead of
         # just storing them in self.fcs) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(
-            self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 64)
-        self.fc1 = torch.nn.Linear(64, 32)
-        self.fc2 = torch.nn.Linear(32, 16)
-        self.fc3 = torch.nn.Linear(16, 2)
+        self.fc0 = torch.nn.Linear(num_ins, dim_1)
+        self.fc1 = torch.nn.Linear(dim_1, dim_2)
+        self.fc2 = torch.nn.Linear(dim_2, dim_3)
+        self.fc3 = torch.nn.Linear(dim_3, self.num_clss)
         self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
         self.sg = torch.nn.Sigmoid()
         if disp:
