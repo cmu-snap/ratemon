@@ -548,8 +548,8 @@ def run_many(args_):
     else:
         print("Regenerating data...")
         dat_in, dat_out, scl_prms = make_datasets(
-            net_tmp, models.MODELS[args["model"]](), args["data_dir"],
-            args["warmup"], args["num_sims"], SHUFFLE)
+            net_tmp, args["data_dir"], args["warmup"], args["num_sims"],
+            SHUFFLE)
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
         np.savez_compressed(dat_flp, **{"in": dat_in, "out": dat_out})
