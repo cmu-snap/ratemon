@@ -227,8 +227,8 @@ class SVM(BinaryDnn):
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     num_clss = 2
-    nums_nodes = [2]
-    los_fnc = torch.nn.CrossEntropyLoss
+    nums_nodes = [1]
+    los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
 
     def __init__(self, win=20, rtt_buckets=-True, disp=False):
@@ -240,7 +240,7 @@ class SVM(BinaryDnn):
         # We must store these as indivual class variables (instead of
         # just storing them in self.fcs) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 2)
+        self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 1)
         self.fcs = [self.fc0]
         self.sg = torch.nn.Sigmoid()
         if (disp):
