@@ -78,10 +78,10 @@ class Dataset(torch.utils.data.Dataset):
         # long because the loss functions expect longs.
         self.dat_out = torch.tensor(
             dat_out.reshape(shp_out[0]), dtype=torch.long)
-        # Move the entire dataset to the target device. This will fail
-        # if the device has insufficient memory.
-        self.dat_in = self.dat_in.to(dev)
-        self.dat_out = self.dat_out.to(dev)
+        # # Move the entire dataset to the target device. This will fail
+        # # if the device has insufficient memory.
+        # self.dat_in = self.dat_in.to(dev)
+        # self.dat_out = self.dat_out.to(dev)
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
@@ -288,11 +288,15 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
-def inference(ins, labs, net, hidden=None, los_fnc=None):
+def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
     """
+    # Move input and output data to the proper device.
+    ins = ins.to(dev)
+    labs = labs.to(dev)
+
     if net.is_lstm:
         # LSTMs want the sequence length to be first and the batch
         # size to be second, so we need to flip the first and
@@ -365,7 +369,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference(ins, labs, net, hidden, los_fnc)
+            loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -385,7 +389,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.train()
 
@@ -447,7 +451,7 @@ def test(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
-                ins, labs, net, hidden,
+                ins, labs, net, dev, hidden,
                 los_fnc=lambda a, b: (
                     # argmax(): The class is the index of the output
                     #     entry with greatest value (i.e., highest
