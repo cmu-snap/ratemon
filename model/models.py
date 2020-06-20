@@ -168,7 +168,6 @@ class BinaryDnn(Model):
             diff = arr_time - start_time_us
             raw_interval = diff / interval_us
             interval_idx = np.floor(raw_interval).astype(int)
-
             # # Convert the arrival times to interval indices and loop over them.
             # for interval_idx in np.floor(
             #         (arr_times - start_time_us) / interval_us).astype(int):
@@ -191,9 +190,14 @@ class BinaryDnn(Model):
             (f"Error building counts! Bucketed {bucketed_pkts} of {num_pkts} "
              "packets!")
 
-        # print(f"bucketed_pkts: {bucketed_pkts}")
-
     def create_buckets(self, sim, dat_in, dat_out):
+        """
+        Divides dat_in into windows and divides each window into self.win
+        buckets, which each defines a temporal interval. The value of
+        each bucket is the number of packets that arrived during that
+        interval. The output value for each window is the output of
+        the last packet in the window.
+        """
         fets = dat_in.dtype.names
         assert "arrival time" in fets, f"Missing \"arrival time\": {fets}"
         arr_times = dat_in["arrival time"]
@@ -274,11 +278,14 @@ class BinaryDnn(Model):
             list(range(1, len(dat_in_new.dtype.names) - self.win + 1)))
 
     def create_windows(self, dat_in, dat_out):
+        """
+        Divides dat_in into windows of self.win packets. Flattens the
+        features of the packets in a window. The output value for each
+        window is the output of the last packet in the window.
+        """
         num_pkts = dat_in.shape[0]
         num_wins = math.ceil(num_pkts / self.win)
-
         fets = [(name, typ) for name, typ in dat_in.dtype.descr if name != ""]
-
         # Select random intervals from this simulation to create the
         # new input data. Do not pick indices between 0 and self.win
         # to make sure that all windows ending on the chosen index fit
@@ -333,9 +340,6 @@ class BinaryDnn(Model):
                 if "loss rate" in fet:
                     dat_in_new[fet] = np.reciprocal(np.sqrt(dat_in_new[fet]))
 
-        # for i in range(dat_in_new.shape[0]):
-        #     print(",".join([str(dat_in_new[i][j]) for j in range(len(dat_in_new.dtype.descr))]))
-
         return dat_in_new, dat_out_new, scl_grps
 
 
@@ -353,7 +357,7 @@ class Lstm(Model):
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.Adam
 
-    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
+    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5, disp=False):
         super(Lstm, self).__init__()
         self.check()
 
@@ -364,8 +368,9 @@ class Lstm(Model):
         self.lstm = torch.nn.LSTM(self.in_dim, self.hid_dim)
         self.fc = torch.nn.Linear(self.hid_dim, self.out_dim)
         self.sg = torch.nn.Sigmoid()
-        print(f"Lstm - in_dim: {self.in_dim}, hid_dim: {self.hid_dim}, "
-              f"num_lyrs: {self.num_lyrs}, out_dim: {self.out_dim}")
+        if disp:
+            print(f"Lstm - in_dim: {self.in_dim}, hid_dim: {self.hid_dim}, "
+                  f"num_lyrs: {self.num_lyrs}, out_dim: {self.out_dim}")
 
     def forward(self, x, hidden):
         # The LSTM itself, which also takes as input the previous hidden state.

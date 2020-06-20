@@ -119,18 +119,12 @@ def scale_fets(dat, scl_grps):
     # Determine the min and the max of each scaling group.
     for scl_grp in scl_grps_unique:
         # Determine the features in this scaling group.
-        scl_grp_fets = [
-            fet for fet_idx, fet in enumerate(fets)
-            if scl_grps[fet_idx] == scl_grp]
-
-        print(f"scl_grp {scl_grp} features: {scl_grp_fets}")
-
+        scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
+                        if scl_grps[fet_idx] == scl_grp]
         # Extract the columns corresponding to this scaling group.
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [rdc(np.min, fet_values), rdc(np.max, fet_values)]
-
-    print(f"scl_grps_prms: {scl_grps_prms}")
 
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
@@ -150,8 +144,6 @@ def scale_fets(dat, scl_grps):
             np.zeros(
                 fet_values.shape, dtype=fet_values.dtype) if min_in == max_in
             else utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1))
-
-    print(f"scl_prms: {scl_prms}")
 
     return new, scl_prms
 
@@ -263,13 +255,6 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     # because all of the features must be scaled using the same
     # parameters.
     dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps)
-
-    # print([x for x in dat_in_all["loss rate_0"]])
-    # for i in range(dat_in_all.shape[0]):
-    #     print(",".join([f"{dat_in_all[i][j]:.5f}" for j in range(len(dat_in_all.dtype.descr))]))
-
-    # raise Exception()
-
     return dat_in_all, dat_out_all, prms_in
 
 
