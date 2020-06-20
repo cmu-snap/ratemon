@@ -61,7 +61,7 @@ VALS_PER_EPC = 15
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
 
-    def __init__(self, dat_in, dat_out, dev):
+    def __init__(self, dat_in, dat_out):
         """
         dat_out is assumed to have only a single practical dimension (e.g.,
         (X,), or (X, 1)).
@@ -224,7 +224,7 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     return dat_in_all, dat_out_all, prms_in
 
 
-def split_data(dat_in, dat_out, bch_trn, bch_tst, dev):
+def split_data(dat_in, dat_out, bch_trn, bch_tst):
     """
     Divides dat_in and dat_out into training, validation, and test
     sets and constructs data loaders.
@@ -261,14 +261,14 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst, dev):
 
     # Create the dataloaders.
     ldr_trn = torch.utils.data.DataLoader(
-        Dataset(dat_trn_in, dat_trn_out, dev),
-        batch_size=bch_trn, shuffle=True)
+        Dataset(dat_trn_in, dat_trn_out), batch_size=bch_trn, shuffle=True,
+        drop_last=False)
     ldr_val = torch.utils.data.DataLoader(
-        Dataset(dat_val_in, dat_val_out, dev),
-        batch_size=bch_tst, shuffle=False)
+        Dataset(dat_val_in, dat_val_out), batch_size=bch_tst, shuffle=False,
+        drop_last=False)
     ldr_tst = torch.utils.data.DataLoader(
-        Dataset(dat_tst_in, dat_tst_out, dev),
-        batch_size=bch_tst, shuffle=False)
+        Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst, shuffle=False,
+        drop_last=False)
     print("Done.")
     return ldr_trn, ldr_val, ldr_tst
 
@@ -487,7 +487,7 @@ def run(args, dat_in, dat_out, out_flp):
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        dat_in, dat_out, args["train_batch"], args["test_batch"], dev)
+        dat_in, dat_out, args["train_batch"], args["test_batch"])
 
     # Training.
     tim_srt_s = time.time()
@@ -567,9 +567,10 @@ def run_many(args_):
     # Assumes that dat_out is a structured numpy array containing a
     # column named "class".
     tots = [(dat_out["class"] == cls).sum() for cls in clss]
+    # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("Ground truth:\n" + "\n".join(
-        [f"    {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)"
+        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
     tot_actual = np.prod(np.array(dat_out.shape))
     assert tot == tot_actual, \
