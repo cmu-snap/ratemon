@@ -96,33 +96,63 @@ class Dataset(torch.utils.data.Dataset):
         return self.dat_in[idx], self.dat_out[idx]
 
 
-def scale_fets(dat):
+def scale_fets(dat, scl_grps):
     """
     Returns a copy of dat with the columns scaled between 0 and
     1. Also returns an array of shape (dat_all[0].shape[1], 2) where
     row i contains the min and the max of column i in dat.
     """
-    assert dat.dtype.names is not None, \
+    fets = dat.dtype.names
+    assert fets is not None, \
         f"The provided array is not structured. dtype: {dat.dtype.descr}"
+    assert len(scl_grps) == len(fets), \
+        f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
+
+    # Determine the unique scaling groups.
+    scl_grps_unique = set(scl_grps)
+    # Create an empty array to hold the min and max values (i.e.,
+    # scaling parameters) for each scaling group.
+    scl_grps_prms = np.empty((len(scl_grps_unique), 2))
+    # Function to reduce a structured array.
+    rdc = (lambda fnc, arr:
+           fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+    # Determine the min and the max of each scaling group.
+    for scl_grp in scl_grps_unique:
+        # Determine the features in this scaling group.
+        scl_grp_fets = [
+            fet for fet_idx, fet in enumerate(fets)
+            if scl_grps[fet_idx] == scl_grp]
+
+        print(f"scl_grp {scl_grp} features: {scl_grp_fets}")
+
+        # Extract the columns corresponding to this scaling group.
+        fet_values = dat[scl_grp_fets]
+        # Record the min and max of these columns.
+        scl_grps_prms[scl_grp] = [rdc(np.min, fet_values), rdc(np.max, fet_values)]
+
+    print(f"scl_grps_prms: {scl_grps_prms}")
+
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
-    fets = dat.dtype.names
     scl_prms = np.empty((len(fets), 2))
-    # The new scaled array.
+    # Create an empty array to hold the rescaled features.
     new = np.empty(dat.shape, dtype=dat.dtype)
-    # For all features...
-    for j, fet in enumerate(fets):
-        # Determine the min and max values of this feature.
+    # Rescale each feature based on its scaling group's min and max.
+    for fet_idx, fet in enumerate(fets):
+        # Look up the min and max values for this feature's scaling group.
+        min_in, max_in = scl_grps_prms[scl_grps[fet_idx]]
+        # Store this min and max in the list of per-column scaling parameters.
+        scl_prms[fet_idx] = np.array([min_in, max_in])
+        #
         fet_values = dat[fet]
-        min_in = fet_values.min()
-        max_in = fet_values.max()
-        scl_prms[j] = np.array([min_in, max_in])
-        if min_in == max_in:
+        new[fet] = (
             # Handle the rare case where all of the feature values are the same.
-            scaled = np.zeros(fet_values.shape, dtype=fet_values.dtype)
-        else:
-            scaled = utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1)
-        new[fet] = scaled
+            np.zeros(
+                fet_values.shape, dtype=fet_values.dtype) if min_in == max_in
+            else utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1))
+
+    print(f"scl_prms: {scl_prms}")
+
     return new, scl_prms
 
 
@@ -143,7 +173,6 @@ def process_sim(idx, total, net, sim_flp, warmup):
     # columns correspond to the feature names in in_spc and out_spc.
     assert net.in_spc, "{sim_flp}: Empty in spec."
     assert net.out_spc, "{sim_flp}: Empty out spec."
-    arr_times = dat["arrival time"]
     dat_in = dat[net.in_spc]
     dat_out = dat[net.out_spc]
     # Convert output features to class labels.
@@ -159,7 +188,7 @@ def process_sim(idx, total, net, sim_flp, warmup):
         assert 0 <= cls < net.num_clss, "Invalid class: {cls}"
 
     # Transform the data as required by this specific model.
-    return net.modify_data(sim, dat_in, dat_out, arr_times=arr_times)
+    return net.modify_data(sim, dat_in, dat_out)
 
 
 def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
@@ -193,7 +222,8 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     dtype_in = None
     dim_out = None
     dtype_out = None
-    for dat_in, dat_out in dat_all:
+    scl_grps = None
+    for dat_in, dat_out, scl_grps_cur in dat_all:
         dim_in_cur = len(dat_in.dtype.descr)
         dim_out_cur = len(dat_out.dtype.descr)
         dtype_in_cur = dat_in.dtype
@@ -206,6 +236,8 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
             dtype_in = dtype_in_cur
         if dtype_out is None:
             dtype_out = dtype_out_cur
+        if scl_grps is None:
+            scl_grps = scl_grps_cur
         assert dim_in_cur == dim_in, \
             f"Invalid input feature dim: {dim_in_cur} != {dim_in}"
         assert dim_out_cur == dim_out, \
@@ -214,19 +246,29 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
             f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
         assert dtype_out_cur == dtype_out, \
             f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
+        assert scl_grps_cur == scl_grps, \
+            f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
     assert dim_in is not None, "Unable to compute input feature dim!"
     assert dim_out is not None, "Unable to compute output feature dim!"
     assert dtype_in is not None, "Unable to compute input dtype!"
     assert dtype_out is not None, "Unable to compute output dtype!"
+    assert scl_grps is not None, "Unable to compte scaling groups!"
 
     # Build combined feature lists.
-    dat_in_all, dat_out_all = zip(*dat_all)
+    dat_in_all, dat_out_all, _ = zip(*dat_all)
     dat_in_all = np.concatenate(dat_in_all, axis=0)
     dat_out_all = np.concatenate(dat_out_all, axis=0)
+
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all)
+    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps)
+
+    # print([x for x in dat_in_all["loss rate_0"]])
+    # for i in range(dat_in_all.shape[0]):
+    #     print(",".join([f"{dat_in_all[i][j]:.5f}" for j in range(len(dat_in_all.dtype.descr))]))
+
+    # raise Exception()
 
     return dat_in_all, dat_out_all, prms_in
 
@@ -339,20 +381,16 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     val_pat = val_pat_max
     # The number of batches per epoch.
     num_bchs_trn = len(ldr_trn)
-    # Log the training process every few batches.
-    bchs_per_log = math.floor(num_bchs_trn / LOGS_PER_EPC)
-    # To avoid a divide-by-zero error below, the number of validation passes
-    # per epoch much be at least 2.
-    assert VALS_PER_EPC >= 2, "Must validate at least twice per epoch."
-    if num_bchs_trn < VALS_PER_EPC:
-        # If the number of batches per epoch is less than the desired number of
-        # validation passes per epoch, then do a validation pass after every
-        # batch.
-        bchs_per_val = 1
+    # Print a lot statement every few batches.
+    if LOGS_PER_EPC == 0:
+        # Disable logging.
+        bchs_per_log = sys.maxsize
     else:
-        # Using floor() means that dividing by (VALS_PER_EPC - 1) will result in
-        # VALS_PER_EPC validation passes per epoch.
-        bchs_per_val = math.floor(num_bchs_trn / (VALS_PER_EPC - 1))
+        bchs_per_log = math.ceil(num_bchs_trn / LOGS_PER_EPC)
+    # Perform a validation pass every few batches.
+    assert not ely_stp or VALS_PER_EPC > 0, \
+        f"Early stopping configured with erroneous VALS_PER_EPC: {VALS_PER_EPC}"
+    bchs_per_val = math.ceil(num_bchs_trn / VALS_PER_EPC)
     if ely_stp:
         print(f"Will validate after every {bchs_per_val} batches.")
 
