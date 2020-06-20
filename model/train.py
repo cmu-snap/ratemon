@@ -56,6 +56,8 @@ SHUFFLE = True
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
+# Whether to parse simulation files synchronously or in parallel.
+SYNC = False
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -175,12 +177,16 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     if num_sims is not None:
         sims = sims[:num_sims]
 
-    print(f"Found {len(sims)} simulations.")
-    with multiprocessing.Pool() as pol:
-        # Each element of dat_all corresponds to a single simulation.
-        dat_all = pol.starmap(
-            process_sim,
-            [(net, path.join(dat_dir, sim), warmup) for sim in sims])
+    tot_sims = len(sims)
+    print(f"Found {tot_sims} simulations.")
+    sims_args = [(idx, tot_sims, net, path.join(dat_dir, sim), warmup)
+                 for idx, sim in enumerate(sims)]
+    if SYNC:
+        dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+    else:
+        with multiprocessing.Pool() as pol:
+            # Each element of dat_all corresponds to a single simulation.
+            dat_all = pol.starmap(process_sim, sims_args)
 
     # Validate data.
     dim_in = None
