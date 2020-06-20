@@ -36,7 +36,6 @@ class Model(torch.nn.Module):
         """ Verifies that this Model instance has been initialized properly. """
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
-        assert self.num_clss > 0, "Invalid number of output classes!"
         assert self.los_fnc is not None, "No loss function!"
         assert self.opt is not None, "No optimizer!"
 
@@ -226,8 +225,7 @@ class SVM(BinaryDnn):
 
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
-    num_clss = 2
-    nums_nodes = [1]
+    num_clss = None
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
 
@@ -241,15 +239,21 @@ class SVM(BinaryDnn):
         # just storing them in self.fcs) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
         self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 1)
-        self.fcs = [self.fc0]
         self.sg = torch.nn.Sigmoid()
         if (disp):
-            print(f"SVM - win: {self.win}, fc layers: {len(self.fcs)}")
+            print(f"SVM - win: {self.win}, fc layers: 1\n\n    " +
+                  f"Linear: {self.fc0.in_features}x{self.fc0.out_features}" +
+                  "\n    Sigmoid")
 
     def forward(self, x, hidden=None):
         fwd = self.fc0(x)  # Forward pass
         return fwd, hidden
 
+    def modify_data(self, sim, dat_in, dat_out, **kwargs):
+        new_dat_in, new_dat_out = super(SVM, self).modify_data(sim, dat_in, dat_out, **kwargs)
+        for i in range(len(new_dat_out)):
+            new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
+        return new_dat_in, new_dat_out
 
 
 class Lstm(Model):
