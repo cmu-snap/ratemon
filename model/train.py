@@ -50,8 +50,8 @@ EPCS_MAX = 10_000
 NEW_TPT_TSH = 0.925
 # The random seed.
 SEED = 1337
-# Set to true to parse the simulations in sorted order.
-SHUFFLE = False
+# Set to false to parse the simulations in sorted order.
+SHUFFLE = True
 # The number of times to log progress during one epoch.
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
