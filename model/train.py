@@ -124,14 +124,15 @@ def scale_fets(dat):
     return new, scl_prms
 
 
-def process_sim(net, sim_flp, warmup):
+def process_sim(idx, total, net, sim_flp, warmup):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
     output features. Returns a tuple of numpy arrays of the form:
     (input data, output data).
     """
-    sim, dat = utils.load_sim(sim_flp)
+    sim, dat = utils.load_sim(
+        sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     # Drop the first few packets so that we consider steady-state behavior only.
     assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
     dat = dat[warmup:]
