@@ -164,20 +164,17 @@ class BinaryDnn(Model):
         # start of the first interval.
         start_time_us = arr_times[0]
 
-        for arr_time in arr_times:
-            diff = arr_time - start_time_us
-            raw_interval = diff / interval_us
-            interval_idx = np.floor(raw_interval).astype(int)
-            # # Convert the arrival times to interval indices and loop over them.
-            # for interval_idx in np.floor(
-            #         (arr_times - start_time_us) / interval_us).astype(int):
+
+        # Convert the arrival times to interval indices and loop over them.
+        for interval_idx in np.floor(
+                (arr_times - start_time_us) / interval_us).astype(int):
+            if interval_idx == num_buckets:
+                print(f"Warning: Interval is {interval_idx} when it should be "
+                      "in the range [0, {num_buckets}]. Fixing interval...")
+                interval_idx -= 1
             assert 0 <= interval_idx < num_buckets, \
-                (f"Invalid idx ({interval_idx}) for the number of buckets ({num_buckets})!\n"
-                 f"arr_times: {arr_times}\n"
-                 f"arr_time: {arr_time}\n"
-                 f"start_time_us: {start_time_us}\n"
-                 f"diff: {diff}\n"
-                 f"raw_interval: {raw_interval}\n")
+                (f"Invalid idx ({interval_idx}) for the number of buckets "
+                 f"({num_buckets})!")
             dat_in_new[dat_in_new_idx][interval_idx] += 1
         # Set the values of the other features based on the last packet in this
         # window.
