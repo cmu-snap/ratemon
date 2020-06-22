@@ -36,6 +36,8 @@ class Model(torch.nn.Module):
         """ Verifies that this Model instance has been initialized properly. """
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
+        assert self.num_clss is None or self.num_clss > 0, \
+    "Invalid number of output classes!"
         assert self.los_fnc is not None, "No loss function!"
         assert self.opt is not None, "No optimizer!"
 
@@ -229,25 +231,21 @@ class SVM(BinaryDnn):
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=20, rtt_buckets=-True, disp=False):
+    def __init__(self, win=20, rtt_buckets=True, disp=False):
         super(BinaryDnn, self).__init__()
         self.check()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
-        # We must store these as indivual class variables (instead of
-        # just storing them in self.fcs) because PyTorch looks at the
-        # class variables to determine the model's trainable weights.
         self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 1)
         self.sg = torch.nn.Sigmoid()
         if (disp):
-            print(f"SVM - win: {self.win}, fc layers: 1\n\n    " +
+            print(f"SVM - win: {self.win}, fc layers: 1\n    " +
                   f"Linear: {self.fc0.in_features}x{self.fc0.out_features}" +
                   "\n    Sigmoid")
 
     def forward(self, x, hidden=None):
-        fwd = self.fc0(x)  # Forward pass
-        return fwd, hidden
+        return self.fc0(x), hidden
 
     def modify_data(self, sim, dat_in, dat_out, **kwargs):
         new_dat_in, new_dat_out = super(SVM, self).modify_data(sim, dat_in, dat_out, **kwargs)
