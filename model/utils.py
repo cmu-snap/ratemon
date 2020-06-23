@@ -61,7 +61,8 @@ class BalancedSampler:
     """
 
     def __init__(self, dataset, batch_size, drop_last):
-        assert isinstance(dataset, Dataset), "Incompatible dataset!"
+        assert isinstance(dataset, Dataset), \
+            "Dataset must be an instance of utils.Dataset."
         # Determine the unique classes.
         _, dat_out = dataset.raw()
         clss = set(dat_out.tolist())
@@ -109,6 +110,7 @@ class BalancedSampler:
         self.num_batches = max_examples // examples_per_cls
 
     def __iter__(self):
+        # Create an iterator for each class.
         self.iters = {
             cls: iter(sampler) for cls, sampler in self.samplers.items()}
         return self
