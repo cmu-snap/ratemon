@@ -17,7 +17,7 @@ class Dataset(torch.utils.data.Dataset):
     def __init__(self, dat_in, dat_out):
         """
         dat_out is assumed to have only a single practical dimension (e.g.,
-        (X,), or (X, 1)).
+        dat_out should be of shape (X,), or (X, 1)).
         """
         super(Dataset).__init__()
         shp_in = dat_in.shape
