@@ -31,13 +31,13 @@ class Model(torch.nn.Module):
 
     def __init__(self):
         super(Model, self).__init__()
+        self.__check()
 
-    def check(self):
+    def __check(self):
         """ Verifies that this Model instance has been initialized properly. """
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
-        assert self.num_clss is None or self.num_clss > 0, \
-    "Invalid number of output classes!"
+        assert self.num_clss > 0, "Invalid number of output classes!"
         assert self.los_fnc is not None, "No loss function!"
         assert self.opt is not None, "No optimizer!"
 
@@ -62,21 +62,13 @@ class Model(torch.nn.Module):
                          "class itself."))
 
 
-class BinaryDnn(Model):
-    """ A simple binary classifier neural network. """
+class BinaryModel(Model):
+    """ A base class for binary classification models. """
 
-    # in_spc = ["arrival time", "loss rate"]
-    in_spc = ["arrival time"]
-    # in_spc = ["inter-arrival time", "loss rate"]
-    # in_spc = ["inter-arrival time"]
-    out_spc = ["queue occupancy"]
     num_clss = 2
-    los_fnc = torch.nn.CrossEntropyLoss
-    opt = torch.optim.SGD
 
-    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False, disp=False):
-        super(BinaryDnn, self).__init__()
-        self.check()
+    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False):
+        super(BinaryModel, self).__init__()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
@@ -84,7 +76,6 @@ class BinaryDnn(Model):
             assert "arrival time" in self.in_spc, \
                 "When bucketizing packets, \"arrival time\" must be a feature."
         self.sqrt_loss = sqrt_loss
-
         # Determine layer dimensions. If we are bucketizing packets
         # based on arrival time, then there will be one input feature
         # for every bucket (self.win) plus one input feature for every
@@ -92,31 +83,8 @@ class BinaryDnn(Model):
         # not bucketizing packets, then there will be one input
         # feature for each entry in self.in_spc for each packet
         # (self.win).
-        num_ins = (self.win + len(self.in_spc) - 1 if self.rtt_buckets
-                   else len(self.in_spc) * self.win)
-        dim_1 = min(num_ins, 64)
-        dim_2 = min(dim_1, 32)
-        dim_3 = min(dim_2, 16)
-        # We must store these as indivual class variables (instead of
-        # just storing them in self.fcs) because PyTorch looks at the
-        # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(num_ins, dim_1)
-        self.fc1 = torch.nn.Linear(dim_1, dim_2)
-        self.fc2 = torch.nn.Linear(dim_2, dim_3)
-        self.fc3 = torch.nn.Linear(dim_3, self.num_clss)
-        self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
-        self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}"
-                  "\n    " + "\n    ".join(
-                      [f"Linear: {lay.in_features}x{lay.out_features}"
-                       for lay in self.fcs]) +
-                  "\n    Sigmoid")
-
-    def forward(self, x, hidden=None):
-        for fc in self.fcs:
-            x = torch.nn.functional.relu(fc(x))
-        return self.sg(x), hidden
+        self.num_ins = (self.win + len(self.in_spc) - 1 if self.rtt_buckets
+                        else len(self.in_spc) * self.win)
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -138,8 +106,8 @@ class BinaryDnn(Model):
         return clss_str
 
     @staticmethod
-    def bucketize(dat_in, dat_in_start_idx, dat_in_end_idx, dat_in_new,
-                  dat_in_new_idx, dur_us, num_buckets):
+    def __bucketize(dat_in, dat_in_start_idx, dat_in_end_idx, dat_in_new,
+                    dat_in_new_idx, dur_us, num_buckets):
         """
         Uses dat_in["arrival time"] to divide the arriving packets from
         the range [dat_in_start_idx, dat_in_end_idx] into num_buckets
@@ -186,7 +154,7 @@ class BinaryDnn(Model):
             (f"Error building counts! Bucketed {bucketed_pkts} of {num_pkts} "
              "packets!")
 
-    def create_buckets(self, sim, dat_in, dat_out):
+    def __create_buckets(self, sim, dat_in, dat_out):
         """
         Divides dat_in into windows and divides each window into self.win
         buckets, which each defines a temporal interval. The value of
@@ -253,7 +221,7 @@ class BinaryDnn(Model):
                 win_start_idx is not None and 0 <= win_start_idx <= pkt_idx), \
                 ("Problem finding beginning of window! Are there insufficient "
                  "packets?")
-            self.bucketize(
+            self.__bucketize(
                 dat_in, win_start_idx, pkt_idx, dat_in_new, win_idx, dur_us,
                 self.win)
 
@@ -273,7 +241,7 @@ class BinaryDnn(Model):
             [0] * self.win +
             list(range(1, len(dat_in_new.dtype.names) - self.win + 1)))
 
-    def create_windows(self, dat_in, dat_out):
+    def __create_windows(self, dat_in, dat_out):
         """
         Divides dat_in into windows of self.win packets. Flattens the
         features of the packets in a window. The output value for each
@@ -323,8 +291,8 @@ class BinaryDnn(Model):
         interval becomes a training example.
         """
         dat_in_new, dat_out_new, scl_grps = (
-            self.create_buckets(sim, dat_in, dat_out) if self.rtt_buckets
-            else self.create_windows(dat_in, dat_out))
+            self.__create_buckets(sim, dat_in, dat_out) if self.rtt_buckets
+            else self.__create_windows(dat_in, dat_out))
 
         # If configured to do so, compute 1 / sqrt(x) for any features
         # that contain "loss rate". We cannot simply look for a single
@@ -339,22 +307,57 @@ class BinaryDnn(Model):
         return dat_in_new, dat_out_new, scl_grps
 
 
-class SVM(BinaryDnn):
+class BinaryDnn(BinaryModel):
+    """ A simple binary classifier neural network. """
+
+    # in_spc = ["arrival time", "loss rate"]
+    in_spc = ["arrival time"]
+    # in_spc = ["inter-arrival time", "loss rate"]
+    # in_spc = ["inter-arrival time"]
+    out_spc = ["queue occupancy"]
+    los_fnc = torch.nn.CrossEntropyLoss
+    opt = torch.optim.SGD
+
+    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False, disp=False):
+        super(BinaryDnn, self).__init__(win, rtt_buckets, sqrt_loss)
+
+        dim_1 = min(self.num_ins, 64)
+        dim_2 = min(dim_1, 32)
+        dim_3 = min(dim_2, 16)
+        # We must store these as indivual class variables (instead of
+        # just storing them in self.fcs) because PyTorch looks at the
+        # class variables to determine the model's trainable weights.
+        self.fc0 = torch.nn.Linear(self.num_ins, dim_1)
+        self.fc1 = torch.nn.Linear(dim_1, dim_2)
+        self.fc2 = torch.nn.Linear(dim_2, dim_3)
+        self.fc3 = torch.nn.Linear(dim_3, self.num_clss)
+        self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
+        self.sg = torch.nn.Sigmoid()
+        if disp:
+            print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}"
+                  "\n    " + "\n    ".join(
+                      [f"Linear: {lay.in_features}x{lay.out_features}"
+                       for lay in self.fcs]) +
+                  "\n    Sigmoid")
+
+    def forward(self, x, hidden=None):
+        for fc in self.fcs:
+            x = torch.nn.functional.relu(fc(x))
+        return self.sg(x), hidden
+
+
+class SVM(BinaryModel):
     """ A simple SVM binary classifier. """
 
-    in_spc = ["inter-arrival time", "loss rate"]
+    in_spc = ["arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
-    num_clss = None
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=20, rtt_buckets=True, disp=False):
-        super(SVM, self).__init__(win, rtt_buckets, disp)
-        self.check()
+    def __init__(self, win=20, rtt_buckets=True, sqrt_loss=False, disp=False):
+        super(SVM, self).__init__(win, rtt_buckets, sqrt_loss)
 
-        self.fc = torch.nn.Linear(
-            self.win if self.rtt_buckets
-            else len(BinaryDnn.in_spc) * self.win, 1)
+        self.fc = torch.nn.Linear(self.num_ins, 1)
         self.sg = torch.nn.Sigmoid()
         if disp:
             print(f"SVM - win: {self.win}, fc layers: 1\n"
@@ -388,7 +391,6 @@ class Lstm(Model):
 
     def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5, disp=False):
         super(Lstm, self).__init__()
-        self.check()
 
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
