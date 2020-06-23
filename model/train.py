@@ -140,8 +140,9 @@ def process_sim(idx, total, net, sim_flp, warmup):
     # Find the uniques classes in the output features and make sure
     # that they are properly formed. Assumes that dat_out is a
     # structured numpy array containing a column named "class".
-    for cls in set(dat_out["class"].tolist()):
-        assert 0 <= cls < net.num_clss, "Invalid class: {cls}"
+    if not isinstance(net, models.SVM):
+        for cls in set(dat_out["class"].tolist()):
+            assert 0 <= cls < net.num_clss, "Invalid class: {cls}"
 
     # Transform the data as required by this specific model.
     return net.modify_data(sim, dat_in, dat_out)
@@ -581,7 +582,9 @@ def run_many(args_):
             json.dump(scl_prms.tolist(), fil)
 
     # Visualaize the ground truth data.
-    clss = list(range(net_tmp.num_clss))
+    clss = ([-1, 1] if isinstance(net_tmp, models.SVM) 
+        else list(range(net_tmp.num_clss)))
+
     # Assumes that dat_out is a structured numpy array containing a
     # column named "class".
     tots = [(dat_out["class"] == cls).sum() for cls in clss]
