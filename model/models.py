@@ -349,7 +349,7 @@ class SVM(BinaryDnn):
     opt = torch.optim.SGD
 
     def __init__(self, win=20, rtt_buckets=True, disp=False):
-        super(BinaryDnn, self).__init__()
+        super(SVM, self).__init__(win, rtt_buckets, disp)
         self.check()
 
         self.fc0 = torch.nn.Linear(
