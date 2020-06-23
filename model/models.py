@@ -163,8 +163,6 @@ class BinaryDnn(Model):
         # The arrival time of the first packet, and therefore the
         # start of the first interval.
         start_time_us = arr_times[0]
-
-
         # Convert the arrival times to interval indices and loop over them.
         for interval_idx in np.floor(
                 (arr_times - start_time_us) / interval_us).astype(int):
