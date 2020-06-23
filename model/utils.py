@@ -116,6 +116,9 @@ class BalancedSampler:
                 torch.utils.data.RandomSampler(cls_idxs, replacement=False),
                 examples_per_cls, drop_last)
             for cls, cls_idxs in clss_idxs.items()}
+        # After __iter__() is called, this will contain an iterator for each
+        # class.
+        self.iters = {}
         self.num_batches = max_examples // examples_per_cls
 
     def __iter__(self):
