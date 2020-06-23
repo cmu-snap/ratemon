@@ -364,11 +364,12 @@ class SVM(BinaryDnn):
     def forward(self, x, hidden=None):
         return self.fc0(x), hidden
 
-    def modify_data(self, sim, dat_in, dat_out, **kwargs):
-        new_dat_in, new_dat_out = super(SVM, self).modify_data(sim, dat_in, dat_out, **kwargs)
+    def modify_data(self, sim, dat_in, dat_out):
+        new_dat_in, new_dat_out, scl_grps = super(SVM, self).modify_data(
+            sim, dat_in, dat_out)
         for i in range(len(new_dat_out)):
             new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
-        return new_dat_in, new_dat_out
+        return new_dat_in, new_dat_out, scl_grps
 
 
 class Lstm(Model):
