@@ -95,6 +95,11 @@ class Dataset(torch.utils.data.Dataset):
             "This Dataset does not support being loaded by multiple workers!"
         return self.dat_in[idx], self.dat_out[idx]
 
+    def raw(self):
+        """ Returns the raw data underlying this dataset. """
+        return self.dat_in, self.dat_out
+
+
 
 def scale_fets(dat, scl_grps):
     """
