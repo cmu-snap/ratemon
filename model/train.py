@@ -485,6 +485,13 @@ def run(args, dat_in, dat_out, out_flp):
     ldr_trn, ldr_val, ldr_tst = split_data(
         dat_in, dat_out, args["train_batch"], args["test_batch"])
 
+    # Explicitly move the training (and maybe validation) data to the target
+    # device.
+    ldr_trn.dataset.to(dev)
+    ely_stp = args["early_stop"]
+    if ely_stp:
+        ldr_val.dataset.to(dev)
+
     # Training.
     tim_srt_s = time.time()
     net = train(
@@ -493,14 +500,24 @@ def run(args, dat_in, dat_out, out_flp):
         args["val_improvement_thresh"], args["timeout_s"])
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
 
+    # Explicitly delete the training and validation data so that they are
+    # removed from the target device.
+    del ldr_trn
+    del ldr_val
+    # This is necessary for the GPU memory to be released.
+    torch.cuda.empty_cache()
+
     # # Read the best version of the model from disk.
     # net = torch.jit.load(out_flp)
     # net.to(dev)
 
     # Testing.
+    ldr_tst.dataset.to(dev)
     tim_srt_s = time.time()
     los_tst = test(net, ldr_tst, dev)
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    del ldr_tst
+    torch.cuda.empty_cache()
     return los_tst
 
 

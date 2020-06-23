@@ -31,10 +31,19 @@ class Dataset(torch.utils.data.Dataset):
         # long because the loss functions expect longs.
         self.dat_out = torch.tensor(
             dat_out.reshape(shp_out[0]), dtype=torch.long)
-        # # Move the entire dataset to the target device. This will fail
-        # # if the device has insufficient memory.
-        # self.dat_in = self.dat_in.to(dev)
-        # self.dat_out = self.dat_out.to(dev)
+
+    def to(self, dev):
+        """ Move the entire dataset to the target device. """
+        try:
+            # This will fail if there is insufficient memory.
+            self.dat_in = self.dat_in.to(dev)
+            self.dat_out = self.dat_out.to(dev)
+        except RuntimeError:
+            print(f"Warning:: Unable to move dataset to device: {dev}")
+            # In case the input data was moved successfully but there
+            # was insufficient device memory for the output data, move
+            # the input data back to main memory.
+            self.dat_in = self.dat_in.to(torch.device("cpu"))
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
