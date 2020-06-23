@@ -521,6 +521,7 @@ def run_many(args_):
 
     if args["no_rand"]:
         random.seed(SEED)
+        np.random.seed(SEED)
         torch.manual_seed(SEED)
 
     out_dir = args["out_dir"]
