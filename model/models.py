@@ -12,56 +12,6 @@ import numpy as np
 import torch
 
 
-class BalancedSampler(torch.utils.data.Sampler):
-
-    def __init__(self, dataset, batch_size, drop_last, out, shuffle):
-        super(BalancedSampler, self).__init__(dataset, batch_size, drop_last)
-        assert isinstance(dataset, Dataset), "Incompatible dataset!"
-        _, dat_out = dataset.raw()
-        clss = set(dat_out.tolist())
-        num_clss = len(clss)
-
-        assert batch_size >= num_clss, \
-            (f"The batch size ({batch_size}) must be at least as large as the "
-             f"number of classes ({num_clss})!")
-        assert batch_size % num_clss == 0, \
-            (f"The number of classes ({num_clss}) must evenly divide the batch "
-             f"size ({batch_size})!")
-
-        # Find the indices for each class.
-        clss_idxs = [torch.where(dat_out == cls) for cls in clss]
-        # Determine the number of examples in the most populous class.
-        self.max_examples = max(len(cls_idxs) for cls_idxs in clss_idxs)
-        # Generate new samples to fill in under-represented classes.
-        for i, cls_idxs in enumerate(clss_idxs):
-            num_examples = len(cls_idxs)
-            # If this class has insufficient examples...
-            if num_examples < max_examples:
-                cls_idxs[i] = torch.cat(
-                    (cls_idxs,
-                     torch.multinomial(
-                         torch.ones((num_examples,)),
-                         num_samples=max_examples - num_examples,
-                         replacement=True)),
-                    dim=0)
-        # Create a BatchSampler for each class.
-        self.samplers = [
-            iter(torch.utils.data.BatchSampler(
-                torch.utils.data.RandomSampler(cls_idxs, replacement=False),
-                batch_size / num_clss, drop_last))
-            for cls_idxs in clss_idxs]
-
-    def __iter__(self):
-        return self
-
-    def __len__(self):
-        return self.max_examples
-
-    def __next__(self):
-        # Pull examples from each class and merge them into a single list.
-        return [idx for idx in next(sampler) for sampler in self.samplers]
-
-
 class Model(torch.nn.Module):
     """ A wrapper class for PyTorch models. """
 

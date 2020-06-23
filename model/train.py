@@ -60,47 +60,6 @@ VALS_PER_EPC = 15
 SYNC = False
 
 
-class Dataset(torch.utils.data.Dataset):
-    """ A simple Dataset that wraps arrays of input and output features. """
-
-    def __init__(self, dat_in, dat_out):
-        """
-        dat_out is assumed to have only a single practical dimension (e.g.,
-        (X,), or (X, 1)).
-        """
-        super(Dataset).__init__()
-        shp_in = dat_in.shape
-        shp_out = dat_out.shape
-        assert shp_in[0] == shp_out[0], \
-            "Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
-        # Convert the numpy arrays to Torch tensors.
-        self.dat_in = torch.tensor(dat_in, dtype=torch.float)
-        # Reshape the output into a 1D array first, because
-        # CrossEntropyLoss expects a single value. The dtype must be
-        # long because the loss functions expect longs.
-        self.dat_out = torch.tensor(
-            dat_out.reshape(shp_out[0]), dtype=torch.long)
-        # # Move the entire dataset to the target device. This will fail
-        # # if the device has insufficient memory.
-        # self.dat_in = self.dat_in.to(dev)
-        # self.dat_out = self.dat_out.to(dev)
-
-    def __len__(self):
-        """ Returns the number of items in this Dataset. """
-        return len(self.dat_in)
-
-    def __getitem__(self, idx):
-        """ Returns a specific (input, output) pair from this Dataset. """
-        assert torch.utils.data.get_worker_info() is None, \
-            "This Dataset does not support being loaded by multiple workers!"
-        return self.dat_in[idx], self.dat_out[idx]
-
-    def raw(self):
-        """ Returns the raw data underlying this dataset. """
-        return self.dat_in, self.dat_out
-
-
-
 def scale_fets(dat, scl_grps):
     """
     Returns a copy of dat with the columns scaled between 0 and
@@ -299,15 +258,17 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
     dat_trn_out = dat_out[num_val + num_tst:]
 
     # Create the dataloaders.
+    dataset_trn = utils.Dataset(dat_trn_in, dat_trn_out)
     ldr_trn = torch.utils.data.DataLoader(
-        Dataset(dat_trn_in, dat_trn_out), batch_size=bch_trn, shuffle=True,
-        drop_last=False)
+        dataset_trn,
+        batch_sampler=utils.BalancedSampler(
+            dataset_trn, bch_trn, drop_last=False))
     ldr_val = torch.utils.data.DataLoader(
-        Dataset(dat_val_in, dat_val_out), batch_size=bch_tst, shuffle=False,
-        drop_last=False)
+        utils.Dataset(dat_val_in, dat_val_out), batch_size=bch_tst,
+        shuffle=False, drop_last=False)
     ldr_tst = torch.utils.data.DataLoader(
-        Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst, shuffle=False,
-        drop_last=False)
+        utils.Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst,
+        shuffle=False, drop_last=False)
     print("Done.")
     return ldr_trn, ldr_val, ldr_tst
 

@@ -8,6 +8,116 @@ import scapy.utils
 import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
+import torch
+
+
+class Dataset(torch.utils.data.Dataset):
+    """ A simple Dataset that wraps arrays of input and output features. """
+
+    def __init__(self, dat_in, dat_out):
+        """
+        dat_out is assumed to have only a single practical dimension (e.g.,
+        (X,), or (X, 1)).
+        """
+        super(Dataset).__init__()
+        shp_in = dat_in.shape
+        shp_out = dat_out.shape
+        assert shp_in[0] == shp_out[0], \
+            "Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
+        # Convert the numpy arrays to Torch tensors.
+        self.dat_in = torch.tensor(dat_in, dtype=torch.float)
+        # Reshape the output into a 1D array first, because
+        # CrossEntropyLoss expects a single value. The dtype must be
+        # long because the loss functions expect longs.
+        self.dat_out = torch.tensor(
+            dat_out.reshape(shp_out[0]), dtype=torch.long)
+        # # Move the entire dataset to the target device. This will fail
+        # # if the device has insufficient memory.
+        # self.dat_in = self.dat_in.to(dev)
+        # self.dat_out = self.dat_out.to(dev)
+
+    def __len__(self):
+        """ Returns the number of items in this Dataset. """
+        return len(self.dat_in)
+
+    def __getitem__(self, idx):
+        """ Returns a specific (input, output) pair from this Dataset. """
+        assert torch.utils.data.get_worker_info() is None, \
+            "This Dataset does not support being loaded by multiple workers!"
+        return self.dat_in[idx], self.dat_out[idx]
+
+    def raw(self):
+        """ Returns the raw data underlying this dataset. """
+        return self.dat_in, self.dat_out
+
+
+class BalancedSampler:
+    """
+    A batching sampler that creates balanced batches. The batch size
+    must be evenly divided by the number of classes. This does not
+    inherit from any of the existing Torch Samplers because it does
+    not require any of their functionalty. Instead, this is a wrapper
+    for many other Samplers, one for each class.
+    """
+
+    def __init__(self, dataset, batch_size, drop_last):
+        assert isinstance(dataset, Dataset), "Incompatible dataset!"
+        # Determine the unique classes.
+        _, dat_out = dataset.raw()
+        clss = set(dat_out.tolist())
+        num_clss = len(clss)
+        assert batch_size >= num_clss, \
+            (f"The batch size ({batch_size}) must be at least as large as the "
+             f"number of classes ({num_clss})!")
+        assert batch_size % num_clss == 0, \
+            (f"The number of classes ({num_clss}) must evenly divide the batch "
+             f"size ({batch_size})!")
+
+        print("Balancing classes...")
+        # Find the indices for each class.
+        clss_idxs = {cls: torch.where(dat_out == cls)[0] for cls in clss}
+        # Determine the number of examples in the most populous class.
+        max_examples = max(len(cls_idxs) for cls_idxs in clss_idxs.values())
+        # Generate new samples to fill in under-represented classes.
+        for cls, cls_idxs in clss_idxs.items():
+            num_examples = len(cls_idxs)
+            # If this class has insufficient examples...
+            if num_examples < max_examples:
+                new_examples = max_examples - num_examples
+                # Duplicate existing examples to make this class balanced.
+                # Append the duplicated examples to the true examples.
+                clss_idxs[cls] = torch.cat(
+                    (cls_idxs,
+                     torch.multinomial(
+                         # Sample from the existing examples using a uniform
+                         # distribution.
+                         torch.ones((num_examples,)),
+                         num_samples=new_examples,
+                         # Sample with replacement in case the number of new
+                         # examples is greater than the number of existing
+                         # examples.
+                         replacement=True)),
+                    dim=0)
+                print(f"Added {new_examples} examples to class {cls}!")
+        # Create a BatchSampler iterator for each class.
+        examples_per_cls = batch_size // num_clss
+        self.samplers = {
+            cls: iter(torch.utils.data.BatchSampler(
+                torch.utils.data.RandomSampler(cls_idxs, replacement=False),
+                examples_per_cls, drop_last))
+            for cls, cls_idxs in clss_idxs.items()}
+        self.num_batches = max_examples // examples_per_cls
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return self.num_batches
+
+    def __next__(self):
+        # Pull examples from each class and merge them into a single list.
+        return [idx for sampler in self.samplers.values()
+                for idx in next(sampler)]
 
 
 class Sim():
