@@ -102,13 +102,15 @@ class BalancedSampler:
         # Create a BatchSampler iterator for each class.
         examples_per_cls = batch_size // num_clss
         self.samplers = {
-            cls: iter(torch.utils.data.BatchSampler(
+            cls: torch.utils.data.BatchSampler(
                 torch.utils.data.RandomSampler(cls_idxs, replacement=False),
-                examples_per_cls, drop_last))
+                examples_per_cls, drop_last)
             for cls, cls_idxs in clss_idxs.items()}
         self.num_batches = max_examples // examples_per_cls
 
     def __iter__(self):
+        self.iters = {
+            cls: iter(sampler) for cls, sampler in self.samplers.items()}
         return self
 
     def __len__(self):
@@ -116,8 +118,7 @@ class BalancedSampler:
 
     def __next__(self):
         # Pull examples from each class and merge them into a single list.
-        return [idx for sampler in self.samplers.values()
-                for idx in next(sampler)]
+        return [idx for it in self.iters.values() for idx in next(it)]
 
 
 class Sim():
