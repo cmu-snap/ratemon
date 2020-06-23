@@ -352,17 +352,17 @@ class SVM(BinaryDnn):
         super(SVM, self).__init__(win, rtt_buckets, disp)
         self.check()
 
-        self.fc0 = torch.nn.Linear(
+        self.fc = torch.nn.Linear(
             self.win if self.rtt_buckets
             else len(BinaryDnn.in_spc) * self.win, 1)
         self.sg = torch.nn.Sigmoid()
         if disp:
             print(f"SVM - win: {self.win}, fc layers: 1\n"
-                  f"    Linear: {self.fc0.in_features}x{self.fc0.out_features}"
-                  "\n    Sigmoid")
+                  f"    Linear: {self.fc.in_features}x{self.fc.out_features}\n"
+                  "    Sigmoid")
 
     def forward(self, x, hidden=None):
-        return self.fc0(x), hidden
+        return self.fc(x), hidden
 
     def modify_data(self, sim, dat_in, dat_out):
         new_dat_in, new_dat_out, scl_grps = super(SVM, self).modify_data(
