@@ -563,6 +563,10 @@ def run_many(args_):
             f"Improperly formed data file: {dat_flp}"
         dat_in = dat["in"]
         dat_out = dat["out"]
+        dat_in_shape = dat_in.shape
+        dat_out_shape = dat_out.shape
+        assert dat_in_shape[0] == dat_out_shape[0], \
+            f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
     else:
         print("Regenerating data...")
         dat_in, dat_out, scl_prms = make_datasets(
