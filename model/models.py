@@ -339,7 +339,6 @@ class BinaryDnn(Model):
         return dat_in_new, dat_out_new, scl_grps
 
 
-
 class SVM(BinaryDnn):
     """ A simple SVM binary classifier. """
 
@@ -353,13 +352,13 @@ class SVM(BinaryDnn):
         super(BinaryDnn, self).__init__()
         self.check()
 
-        self.win = win
-        self.rtt_buckets = rtt_buckets
-        self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 1)
+        self.fc0 = torch.nn.Linear(
+            self.win if self.rtt_buckets
+            else len(BinaryDnn.in_spc) * self.win, 1)
         self.sg = torch.nn.Sigmoid()
-        if (disp):
-            print(f"SVM - win: {self.win}, fc layers: 1\n    " +
-                  f"Linear: {self.fc0.in_features}x{self.fc0.out_features}" +
+        if disp:
+            print(f"SVM - win: {self.win}, fc layers: 1\n"
+                  f"    Linear: {self.fc0.in_features}x{self.fc0.out_features}"
                   "\n    Sigmoid")
 
     def forward(self, x, hidden=None):

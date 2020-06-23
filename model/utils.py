@@ -198,13 +198,13 @@ def parse_packets_router(flp, packet_size_B):
     ]
 
 
-def scale(x, min_in, max_in, min_out, max_out):
+def scale(val, min_in, max_in, min_out, max_out):
     """
-    Scales x, which is from the range [min_in, max_in], to the range
+    Scales val, which is from the range [min_in, max_in], to the range
     [min_out, max_out].
     """
     assert min_in != max_in, "Divide by zero!"
-    return min_out + (x - min_in) * (max_out - min_out) / (max_in - min_in)
+    return min_out + (val - min_in) * (max_out - min_out) / (max_in - min_in)
 
 
 def load_sim(flp, msg=None):
