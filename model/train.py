@@ -280,15 +280,14 @@ def init_hidden(net, bch, dev):
     sequence, and is different than the network's weights. It needs to
     be reset for every new sequence.
     """
-    hidden = (net.module.init_hidden if isinstance(net, torch.nn.DataParallel)
-              else net.init_hidden)(bch)
-    if hidden is not None:
+    hidden = net.init_hidden(bch)
+    if hidden != torch.zeros(()):
         hidden[0].to(dev)
         hidden[1].to(dev)
     return hidden
 
 
-def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
+def inference(ins, labs, net_raw, dev, hidden=torch.zeros(()), los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
@@ -297,7 +296,7 @@ def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
     ins = ins.to(dev)
     labs = labs.to(dev)
 
-    if net.is_lstm:
+    if isinstance(net_raw, models.Lstm):
         # LSTMs want the sequence length to be first and the batch
         # size to be second, so we need to flip the first and
         # second dimensions:
@@ -307,8 +306,8 @@ def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
         # Reduce the labels to a 1D tensor.
         # TODO: Explain this better.
         labs = labs.transpose(0, 1).view(-1)
-    # The forwards pass.
-    out, hidden = net(ins, hidden)
+    # The forward pass.
+    out, hidden = net_raw(ins, hidden)
     if los_fnc is None:
         return out, hidden
     return los_fnc(out, labs), hidden
@@ -320,7 +319,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     """ Trains a model. """
     print("Training...")
     los_fnc = net.los_fnc()
-    opt = net.opt(net.parameters(), lr=lr)
+    opt = net.opt(net.net.parameters(), lr=lr)
     # If using early stopping, then this is the lowest validation loss
     # encountered so far.
     los_val_min = None
@@ -365,7 +364,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
+            loss, hidden = inference(ins, labs, net.net, dev, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -377,7 +376,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             if ely_stp and not bch_idx_trn % bchs_per_val:
                 print("    Validation pass:")
                 # For efficiency, convert the model to evaluation mode.
-                net.eval()
+                net.net.eval()
                 with torch.no_grad():
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
@@ -385,9 +384,9 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net.net, dev, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
-                net.train()
+                net.net.train()
 
                 if los_val_min is None:
                     los_val_min = los_val
@@ -405,13 +404,13 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                     val_pat = val_pat_max
                     # Save the new best version of the model. Convert the
                     # model to Torch Script first.
-                    torch.jit.save(torch.jit.script(net), out_flp)
+                    torch.jit.save(torch.jit.script(net.net), out_flp)
                 else:
                     val_pat -= 1
                     if path.exists(out_flp):
                         # Resume training from the best model.
-                        net = torch.jit.load(out_flp)
-                        net.to(dev)
+                        net.net = torch.jit.load(out_flp)
+                        net.net.to(dev)
                 if val_pat <= 0:
                     print(f"Stopped after {epoch_idx + 1} epochs")
                     return net
@@ -419,7 +418,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
         # Save the final version of the model. Convert the model to Torch Script
         # first.
         print(f"Saving: {out_flp}")
-        torch.jit.save(torch.jit.script(net), out_flp)
+        torch.jit.save(torch.jit.script(net.net), out_flp)
     return net
 
 
@@ -432,12 +431,12 @@ def test(net, ldr_tst, dev):
     total = 0
     num_bchs_tst = len(ldr_tst)
     # For efficiency, convert the model to evaluation mode.
-    net.eval()
+    net.net.eval()
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
             print(f"Test batch: {bch_idx + 1:{f'0{len(str(num_bchs_tst))}'}}/"
                   f"{num_bchs_tst}")
-            if net.is_lstm:
+            if isinstance(net, models.LstmWrapper):
                 bch_tst, seq_len, _ = ins.size()
             else:
                 bch_tst, _ = ins.size()
@@ -447,10 +446,10 @@ def test(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
-                ins, labs, net, dev, hidden, los_fnc=net.check_output)[0]
+                ins, labs, net.net, dev, hidden, los_fnc=net.check_output)[0]
             total += bch_tst * seq_len
     # Convert the model back to training mode.
-    net.train()
+    net.net.train()
     acc_tst = num_correct / total
     print(f"Test accuracy: {acc_tst * 100:.2f}%")
     return acc_tst
@@ -462,13 +461,14 @@ def run(args, dat_in, dat_out, out_flp):
     (lower is better).
     """
     # Instantiate and configure the network. Move it to the proper device.
-    net = models.MODELS[args["model"]](disp=True)
+    net = models.MODELS[args["model"]]()
+    net.new()
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]
     if num_gpus >= num_gpus_to_use > 1:
-        net = torch.nn.DataParallel(net)
+        net.net = torch.nn.DataParallel(net.net)
     dev = torch.device("cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
-    net.to(dev)
+    net.net.to(dev)
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
@@ -497,8 +497,8 @@ def run(args, dat_in, dat_out, out_flp):
     torch.cuda.empty_cache()
 
     # Read the best version of the model from disk.
-    net = torch.jit.load(out_flp)
-    net.to(dev)
+    net.net = torch.jit.load(out_flp)
+    net.net.to(dev)
 
     # Testing.
     ldr_tst.dataset.to(dev)
@@ -570,7 +570,7 @@ def run_many(args_):
             json.dump(scl_prms.tolist(), fil)
 
     # Visualaize the ground truth data.
-    clss = ([-1, 1] if isinstance(net_tmp, models.SVM)
+    clss = ([-1, 1] if isinstance(net_tmp, models.SvmWrapper)
             else list(range(net_tmp.num_clss)))
     # Assumes that dat_out is a structured numpy array containing a
     # column named "class".

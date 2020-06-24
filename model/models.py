@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 
-class PytorchModel(torch.nn.Module):
+class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
 
     # The specification of the input tensor format.
@@ -18,16 +18,13 @@ class PytorchModel(torch.nn.Module):
     out_spc = []
     # The number of output classes.
     num_clss = 0
-    # Whether this model is an LSTM. LSTMs require slightly different
-    # data handling.
-    is_lstm = False
     # The loss function to use during training.
     los_fnc = None
     # The optimizer to use during training.
     opt = None
 
     def __init__(self):
-        super(PytorchModel, self).__init__()
+        self.net = None
         self.__check()
 
     def __check(self):
@@ -45,7 +42,7 @@ class PytorchModel(torch.nn.Module):
         If this model is an LSTM, then this method returns the initialized
         hidden state. Otherwise, returns None.
         """
-        return None
+        return torch.zeros(())
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -81,19 +78,20 @@ class PytorchModel(torch.nn.Module):
         return torch.argmax(
             out, dim=1).eq(target).type(torch.IntTensor).sum().item()
 
-    def forward(self, x, hidden):
+    def new(self):
+        """ Returns a new instance of the underlying torch.nn.Module. """
         raise Exception(
-            ("Attempting to call \"forward()\" on the PytorchModel base class "
+            ("Attempting to call \"new()\" on the PytorchModelWrapper base class "
              "itself."))
 
 
-class BinaryModel(PytorchModel):
+class BinaryModelWrapper(PytorchModelWrapper):
     """ A base class for binary classification models. """
 
     num_clss = 2
 
     def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False):
-        super(BinaryModel, self).__init__()
+        super(BinaryModelWrapper, self).__init__()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
@@ -332,8 +330,8 @@ class BinaryModel(PytorchModel):
         return dat_in_new, dat_out_new, scl_grps
 
 
-class BinaryDnn(BinaryModel):
-    """ A simple binary classifier neural network. """
+class BinaryDnnWrapper(BinaryModelWrapper):
+    """ Wraps BinaryDnn. """
 
     # in_spc = ["arrival time", "loss rate"]
     in_spc = ["arrival time"]
@@ -343,57 +341,55 @@ class BinaryDnn(BinaryModel):
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False, disp=False):
-        super(BinaryDnn, self).__init__(win, rtt_buckets, sqrt_loss)
+    def new(self):
+        self.net = BinaryDnn(self.num_ins, self.num_clss)
+        return self.net
 
-        dim_1 = min(self.num_ins, 64)
+
+class BinaryDnn(torch.nn.Module):
+    """ A simple binary classifier neural network. """
+
+    def __init__(self, num_ins, num_outs):
+        super(BinaryDnn, self).__init__()
+        dim_1 = min(num_ins, 64)
         dim_2 = min(dim_1, 32)
         dim_3 = min(dim_2, 16)
         # We must store these as indivual class variables (instead of
-        # just storing them in self.fcs) because PyTorch looks at the
+        # just storing them in a list) because PyTorch looks at the
         # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(self.num_ins, dim_1)
+        self.fc0 = torch.nn.Linear(num_ins, dim_1)
         self.fc1 = torch.nn.Linear(dim_1, dim_2)
         self.fc2 = torch.nn.Linear(dim_2, dim_3)
-        self.fc3 = torch.nn.Linear(dim_3, self.num_clss)
-        self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
+        self.fc3 = torch.nn.Linear(dim_3, num_outs)
         self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}"
-                  "\n    " + "\n    ".join(
-                      [f"Linear: {lay.in_features}x{lay.out_features}"
-                       for lay in self.fcs]) +
-                  "\n    Sigmoid")
+        print("BinaryDnn:\n    " +
+              "\n    ".join(
+                  [f"Linear: {lay.in_features}x{lay.out_features}"
+                   for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
+              "\n    Sigmoid")
 
-    def forward(self, x, hidden=None):
-        for fc in self.fcs:
-            x = torch.nn.functional.relu(fc(x))
+    def forward(self, x, hidden=torch.zeros(())):
+        x = torch.nn.functional.relu(self.fc0(x))
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        x = torch.nn.functional.relu(self.fc3(x))
         return self.sg(x), hidden
 
 
-class SVM(BinaryModel):
-    """ A simple SVM binary classifier. """
+class SvmWrapper(BinaryModelWrapper):
+    """ Wraps Svm. """
 
     in_spc = ["arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
 
-    def __init__(self, win=20, rtt_buckets=True, sqrt_loss=False, disp=False):
-        super(SVM, self).__init__(win, rtt_buckets, sqrt_loss)
-
-        self.fc = torch.nn.Linear(self.num_ins, 1)
-        self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"SVM - win: {self.win}, fc layers: 1\n"
-                  f"    Linear: {self.fc.in_features}x{self.fc.out_features}\n"
-                  "    Sigmoid")
-
-    def forward(self, x, hidden=None):
-        return self.fc(x), hidden
+    def new(self):
+        self.net = Svm(self.num_ins)
+        return self.net
 
     def modify_data(self, sim, dat_in, dat_out):
-        new_dat_in, new_dat_out, scl_grps = super(SVM, self).modify_data(
+        new_dat_in, new_dat_out, scl_grps = super(SvmWrapper, self).modify_data(
             sim, dat_in, dat_out)
         for i in range(len(new_dat_out)):
             new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
@@ -421,8 +417,23 @@ class SVM(BinaryModel):
         return out.eq(target).type(torch.IntTensor).sum().item()
 
 
-class Lstm(PytorchModel):
-    """ An LSTM that classifies a flow into one of five fairness categories. """
+class Svm(torch.nn.Module):
+    """ A simple SVM binary classifier. """
+
+    def __init__(self, num_ins):
+        super(Svm, self).__init__()
+        self.fc = torch.nn.Linear(num_ins, 1)
+        self.sg = torch.nn.Sigmoid()
+        print(f"SVM:\n"
+              f"    Linear: {self.fc.in_features}x{self.fc.out_features}\n"
+              "    Sigmoid")
+
+    def forward(self, x, hidden=torch.zeros(())):
+        return self.fc(x), hidden
+
+
+class LstmWrapper(PytorchModelWrapper):
+    """ Wraps Lstm. """
 
     # For now, we do not use RTT ratio because our method of estimating
     # it cannot be performed by a general receiver.
@@ -430,37 +441,23 @@ class Lstm(PytorchModel):
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     num_clss = 5
-    is_lstm = True
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.Adam
 
-    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5, disp=False):
-        super(Lstm, self).__init__()
-
+    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
+        super(LstmWrapper, self).__init__()
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
         self.num_lyrs = num_lyrs
         self.out_dim = out_dim
-        self.lstm = torch.nn.LSTM(self.in_dim, self.hid_dim)
-        self.fc = torch.nn.Linear(self.hid_dim, self.out_dim)
-        self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"Lstm - in_dim: {self.in_dim}, hid_dim: {self.hid_dim}, "
-                  f"num_lyrs: {self.num_lyrs}, out_dim: {self.out_dim}")
 
-    def forward(self, x, hidden):
-        # The LSTM itself, which also takes as input the previous hidden state.
-        out, hidden = self.lstm(x, hidden)
-        # Select the last piece as the LSTM output.
-        out = out.contiguous().view(-1, self.hid_dim)
-        # Classify the LSTM output.
-        out = self.fc(out)
-        out = self.sg(out)
-        return out, hidden
+    def new(self):
+        self.net = Lstm(self.in_dim, self.hid_dim, self.num_lyrs, self.out_dim)
+        return self.net
 
     def init_hidden(self, batch_size):
-        weight = next(self.parameters()).data
+        weight = next(self.net.parameters()).data
         return (weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_(),
                 weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
 
@@ -505,6 +502,29 @@ class Lstm(PytorchModel):
             functools.partial(
                 percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
+
+
+class Lstm(torch.nn.Module):
+    """ An LSTM that classifies a flow into one of five fairness categories. """
+
+    def __init__(self, in_dim, hid_dim, num_lyrs, out_dim):
+        super(Lstm, self).__init__()
+        self.hid_dim = hid_dim
+        self.lstm = torch.nn.LSTM(in_dim, self.hid_dim)
+        self.fc = torch.nn.Linear(self.hid_dim, out_dim)
+        self.sg = torch.nn.Sigmoid()
+        print(f"Lstm - in_dim: {in_dim}, hid_dim: {self.hid_dim}, "
+              f"num_lyrs: {num_lyrs}, out_dim: {out_dim}")
+
+    def forward(self, x, hidden):
+        # The LSTM itself, which also takes as input the previous hidden state.
+        out, hidden = self.lstm(x, hidden)
+        # Select the last piece as the LSTM output.
+        out = out.contiguous().view(-1, self.hid_dim)
+        # Classify the LSTM output.
+        out = self.fc(out)
+        out = self.sg(out)
+        return out, hidden
 
 
 #######################################################################
@@ -613,7 +633,7 @@ class FcFour(torch.nn.Module):
 
 
 MODELS = {
-    "BinaryDnn": BinaryDnn,
-    "Lstm": Lstm,
-    "SVM": SVM,
+    "BinaryDnn": BinaryDnnWrapper,
+    "SVM": SvmWrapper,
+    "Lstm": LstmWrapper
 }
