@@ -403,23 +403,23 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                     los_val_min = los_val
                     # Reset the validation patience.
                     val_pat = val_pat_max
-                    # # Save the new best version of the model. Convert the
-                    # # model to Torch Script first.
-                    # torch.jit.save(torch.jit.script(net), out_flp)
+                    # Save the new best version of the model. Convert the
+                    # model to Torch Script first.
+                    torch.jit.save(torch.jit.script(net), out_flp)
                 else:
                     val_pat -= 1
-                    # if path.exists(out_flp):
-                    #     # Resume training from the best model.
-                    #     net = torch.jit.load(out_flp)
-                    #     net.to(dev)
+                    if path.exists(out_flp):
+                        # Resume training from the best model.
+                        net = torch.jit.load(out_flp)
+                        net.to(dev)
                 if val_pat <= 0:
                     print(f"Stopped after {epoch_idx + 1} epochs")
                     return net
-    # if not ely_stp:
-    #     # Save the final version of the model. Convert the model to Torch Script
-    #     # first.
-    #     print(f"Saving: {out_flp}")
-    #     torch.jit.save(torch.jit.script(net), out_flp)
+    if not ely_stp:
+        # Save the final version of the model. Convert the model to Torch Script
+        # first.
+        print(f"Saving: {out_flp}")
+        torch.jit.save(torch.jit.script(net), out_flp)
     return net
 
 
@@ -496,9 +496,9 @@ def run(args, dat_in, dat_out, out_flp):
     # This is necessary for the GPU memory to be released.
     torch.cuda.empty_cache()
 
-    # # Read the best version of the model from disk.
-    # net = torch.jit.load(out_flp)
-    # net.to(dev)
+    # Read the best version of the model from disk.
+    net = torch.jit.load(out_flp)
+    net.to(dev)
 
     # Testing.
     ldr_tst.dataset.to(dev)
