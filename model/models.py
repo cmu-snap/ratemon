@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Models of the form:
-  (current throughput, current RTT, target throughput) -> (ACK pacing interval)
-"""
+""" Models. """
 
 import functools
 import math
