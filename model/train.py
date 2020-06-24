@@ -447,18 +447,7 @@ def test(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
-                ins, labs, net, dev, hidden,
-                los_fnc=lambda a, b: (
-                    # argmax(): The class is the index of the output
-                    #     entry with greatest value (i.e., highest
-                    #     probability). dim=1 because the output has an
-                    #     entry for every entry in the input sequence.
-                    # eq(): Compare the outputs to the labels.
-                    # type(): Cast the resulting bools to ints.
-                    # sum(): Sum them up to get the total number of correct
-                    #     predictions.
-                    torch.argmax(
-                        a, dim=1).eq(b).type(torch.IntTensor).sum().item()))[0]
+                ins, labs, net, dev, hidden, los_fnc=net.check_output)[0]
             total += bch_tst * seq_len
     # Convert the model back to training mode.
     net.train()
