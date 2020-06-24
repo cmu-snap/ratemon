@@ -508,7 +508,7 @@ class Lstm(PytorchModel):
 
 
 #######################################################################
-#### Old Models. Present for archival purposes only. These are not ####
+#### Old models. Present for archival purposes only. These are not ####
 #### guaranteed to function.                                       ####
 #######################################################################
 
@@ -616,9 +616,4 @@ MODELS = {
     "BinaryDnn": BinaryDnn,
     "Lstm": Lstm,
     "SVM": SVM,
-    "SimpleOne": SimpleOne,
-    "FcOne": FcOne,
-    "FcTwo": FcTwo,
-    "FcThree": FcThree,
-    "FcFour": FcFour
 }
