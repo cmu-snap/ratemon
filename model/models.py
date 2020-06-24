@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 
-class Model(torch.nn.Module):
+class PytorchModel(torch.nn.Module):
     """ A wrapper class for PyTorch models. """
 
     # The specification of the input tensor format.
@@ -27,11 +27,13 @@ class Model(torch.nn.Module):
     opt = None
 
     def __init__(self):
-        super(Model, self).__init__()
+        super(PytorchModel, self).__init__()
         self.__check()
 
     def __check(self):
-        """ Verifies that this Model instance has been initialized properly. """
+        """
+        Verifies that this PytorchModel instance has been initialized properly.
+        """
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
         assert self.num_clss > 0, "Invalid number of output classes!"
@@ -55,11 +57,12 @@ class Model(torch.nn.Module):
         return dat_in, dat_out
 
     def forward(self, x, hidden):
-        raise Exception(("Attempting to call \"forward()\" on the Model base "
-                         "class itself."))
+        raise Exception(
+            ("Attempting to call \"forward()\" on the PytorchModel base class "
+             "itself."))
 
 
-class BinaryModel(Model):
+class BinaryModel(PytorchModel):
     """ A base class for binary classification models. """
 
     num_clss = 2
@@ -372,7 +375,7 @@ class SVM(BinaryModel):
         return new_dat_in, new_dat_out, scl_grps
 
 
-class Lstm(Model):
+class Lstm(PytorchModel):
     """ An LSTM that classifies a flow into one of five fairness categories. """
 
     # For now, we do not use RTT ratio because our method of estimating
