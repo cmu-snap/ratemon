@@ -629,6 +629,6 @@ class FcFour(torch.nn.Module):
 
 MODELS = {
     "BinaryDnn": BinaryDnnWrapper,
-    "SVM": SvmWrapper,
+    "Svm": SvmWrapper,
     "Lstm": LstmWrapper
 }
