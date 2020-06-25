@@ -17,18 +17,20 @@ import utils
 SYNC = False
 # RTT window to consider queue occupency
 RTT_WINDOW = 2
+# ALPHA for EWMA loss rate
+ALPHA = 0.5
 # The dtype of the output.
 DTYPE = [("seq", "int32"),
          ("arrival time", "float"),
          ("inter-arrival time", "float"),
          ("RTT ratio", "float"),
          ("loss rate", "float"),
+         ("loss ewma", "float"),
          ("queue occupancy", "float")]
 
 
 def parse_pcap(sim_dir, out_dir, rtt_window):
     """Parse a PCAP file.
-
     Writes a npz file that contains the sequence number, RTT ratio,
     inter-arrival time, loss rate, and queue occupency percentage in
     the last n RTT (default set to be 2 RTT).
@@ -65,6 +67,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             sim.payload_B)
 
         packet_loss = 0
+        loss_ewma = 0.0
         window_size = rtt_us * rtt_window
         window_start = 0
         loss_queue = deque()
@@ -87,6 +90,10 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             curr_loss = packet_loss - prev_loss
             curr_recv_time = recv_pkt[1]
             curr_send_time = send_pkts[j + packet_loss][1]
+
+            # Update loss_ewma
+            # loss_ewma = alpha * instantaneous + (1 - alpha) * previous loss_ewma
+            loss_ewma = ALPHA * (curr_loss / (1.0 * curr_loss + 1)) + (1.0 - ALPHA) * loss_ewma
 
             # Process packet loss
             if (curr_loss > 0 and j > 0):
@@ -112,6 +119,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             output[j]["inter-arrival time"] = interarrival_time
             output[j]["RTT ratio"] = ((curr_recv_time - curr_send_time) /
                                       one_way_us)
+            output[j]["loss ewma"] = loss_ewma
             # If it's processing the first packet (j == window_start == 0) or no
             # other packets received within the RTT window, then output 0 for
             # loss rate.
@@ -149,7 +157,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     for i, router_pkt in enumerate(router_pkts):
         sender = router_pkt[0]
 
-        if sender < sim.unfair_flws:
+        if sender < sim.unfair_flws and output_index[sender] < len(unfair_flws[sender]):
             curr_time = router_pkt[1]
             window_pkt_count[sender] += 1
 
@@ -157,21 +165,37 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             # the expected window size. Also decrement packet count if the packet
             # belongs to the unfair flow
             window_start = router_window_start[sender]
-            while (curr_time - router_pkts[window_start][1] >
-                   rtts_us[sender] * rtt_window):
-                if router_pkts[window_start][0] == sender:
-                    window_pkt_count[sender] -= 1
-                window_start += 1
+
+            # Use RTT ratio from previous step to compute actual RTT
+            # (Assuming that the one-way delay for the ACK sending back to sender
+            #  would be min one-way delay)
+            rtt_ratio = unfair_flws[sender][output_index[sender]]["RTT ratio"]
+            actual_rtt = rtts_us[sender] * (rtt_ratio + 0.5)
+
+            # To avoid the window size bouncing back and forth,
+            # only allow the window to grow/shrink in one direction
+            if curr_time - router_pkts[window_start][1] > actual_rtt * rtt_window:
+                while (curr_time - router_pkts[window_start][1] >
+                       actual_rtt * rtt_window):
+                    if router_pkts[window_start][0] == sender:
+                        window_pkt_count[sender] -= 1
+                    window_start += 1
+            # Grow the window size to eariler packets
+            elif curr_time - router_pkts[window_start][1] < actual_rtt * rtt_window:
+                while (window_start > 0 and curr_time - router_pkts[window_start][1] <
+                       actual_rtt * rtt_window):
+                    if router_pkts[window_start][0] == sender:
+                        window_pkt_count[sender] += 1
+                    window_start -= 1
 
             router_window_start[sender] = window_start
             # Get queue occupency
             queue_occupency = window_pkt_count[sender] / float(i - window_start + 1)
 
             # Add this record to output array
-            if output_index[sender] < len(unfair_flws[sender]):
-                unfair_flws[sender][output_index[sender]]["queue occupancy"] = (
-                    queue_occupency)
-                output_index[sender] = output_index[sender] + 1
+            unfair_flws[sender][output_index[sender]]["queue occupancy"] = (
+                queue_occupency)
+            output_index[sender] = output_index[sender] + 1
 
     # Write to output
     if path.exists(out_flp):
