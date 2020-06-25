@@ -269,7 +269,6 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
     ldr_tst = torch.utils.data.DataLoader(
         utils.Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst,
         shuffle=False, drop_last=False)
-    print("Done.")
     return ldr_trn, ldr_val, ldr_tst
 
 
@@ -281,13 +280,13 @@ def init_hidden(net, bch, dev):
     be reset for every new sequence.
     """
     hidden = net.init_hidden(bch)
-    if hidden != torch.zeros(()):
-        hidden[0].to(dev)
-        hidden[1].to(dev)
+    hidden[0].to(dev)
+    hidden[1].to(dev)
     return hidden
 
 
-def inference(ins, labs, net_raw, dev, hidden=torch.zeros(()), los_fnc=None):
+def inference(ins, labs, net_raw, dev,
+              hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
@@ -306,8 +305,11 @@ def inference(ins, labs, net_raw, dev, hidden=torch.zeros(()), los_fnc=None):
         # Reduce the labels to a 1D tensor.
         # TODO: Explain this better.
         labs = labs.transpose(0, 1).view(-1)
-    # The forward pass.
-    out, hidden = net_raw(ins, hidden)
+        # The forward pass.
+        out, hidden = net_raw(ins, hidden)
+    else:
+        # The forward pass.
+        out = net_raw(ins)
     if los_fnc is None:
         return out, hidden
     return los_fnc(out, labs), hidden

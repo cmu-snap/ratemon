@@ -42,7 +42,7 @@ class PytorchModelWrapper:
         If this model is an LSTM, then this method returns the initialized
         hidden state. Otherwise, returns None.
         """
-        return torch.zeros(())
+        return torch.zeros(()), torch.zeros(())
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -51,7 +51,7 @@ class PytorchModelWrapper:
 
     def modify_data(self, sim, dat_in, dat_out):
         """ Performs an arbitrary transformation on the data. """
-        return dat_in, dat_out
+        return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
 
     def check_output(self, out, target):
         """
@@ -368,12 +368,12 @@ class BinaryDnn(torch.nn.Module):
                    for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
               "\n    Sigmoid")
 
-    def forward(self, x, hidden=torch.zeros(())):
+    def forward(self, x):
         x = torch.nn.functional.relu(self.fc0(x))
         x = torch.nn.functional.relu(self.fc1(x))
         x = torch.nn.functional.relu(self.fc2(x))
         x = torch.nn.functional.relu(self.fc3(x))
-        return self.sg(x), hidden
+        return self.sg(x)
 
 
 class SvmWrapper(BinaryModelWrapper):
@@ -400,8 +400,8 @@ class SvmWrapper(BinaryModelWrapper):
         Returns the number of examples from out that were classified correctly,
         according to target.
         """
-        # Remove dimensions that are 1.
-        out = torch.squeeze(out)
+        # Remove trailing dimensions of size 1.
+        out = torch.reshape(out, (out.size()[0],))
         # Validate input.
         size_out = out.size()
         size_target = target.size()
@@ -423,13 +423,10 @@ class Svm(torch.nn.Module):
     def __init__(self, num_ins):
         super(Svm, self).__init__()
         self.fc = torch.nn.Linear(num_ins, 1)
-        self.sg = torch.nn.Sigmoid()
-        print(f"SVM:\n"
-              f"    Linear: {self.fc.in_features}x{self.fc.out_features}\n"
-              "    Sigmoid")
+        print(f"SVM:\n    Linear: {self.fc.in_features}x{self.fc.out_features}")
 
-    def forward(self, x, hidden=torch.zeros(())):
-        return self.fc(x), hidden
+    def forward(self, x):
+        return self.fc(x)
 
 
 class LstmWrapper(PytorchModelWrapper):
@@ -498,10 +495,13 @@ class LstmWrapper(PytorchModelWrapper):
         # Map a conversion function across all entries. Note that here
         # an entry is an entire row, since each row is a single tuple
         # value.
-        return np.vectorize(
+        clss = np.vectorize(
             functools.partial(
                 percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
+        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
+        clss_str["class"] = clss
+        return clss_str
 
 
 class Lstm(torch.nn.Module):

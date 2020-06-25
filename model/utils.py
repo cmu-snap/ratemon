@@ -108,7 +108,7 @@ class BalancedSampler:
                          # examples.
                          replacement=True)),
                     dim=0)
-                print(f"Added {new_examples} examples to class {cls}!")
+                print(f"    Added {new_examples} examples to class {cls}.")
         # Create a BatchSampler iterator for each class.
         examples_per_cls = batch_size // num_clss
         self.samplers = {
@@ -232,7 +232,7 @@ def clean(arr):
         (f"Only 1D structured arrays are supported, but this one has {num_dims} "
          "dims!")
 
-    num_cols = len(arr.dtype.descr)
+    num_cols = len(arr.dtype.names)
     new = np.empty((arr.shape[0], num_cols), dtype=float)
     for col in range(num_cols):
         new[:, col] = arr[arr.dtype.names[col]]
