@@ -51,7 +51,7 @@ NEW_TPT_TSH = 0.925
 # The random seed.
 SEED = 1337
 # Set to false to parse the simulations in sorted order.
-SHUFFLE = True
+SHUFFLE = False
 # The number of times to log progress during one epoch.
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
@@ -67,8 +67,16 @@ def scale_fets(dat, scl_grps):
     row i contains the min and the max of column i in dat.
     """
     fets = dat.dtype.names
-    assert fets is not None, \
-        f"The provided array is not structured. dtype: {dat.dtype.descr}"
+    if fets is None:
+        fets = dat[0].dtype.names
+        assert fets is not None, \
+            ("The provided array is not structured and does not contain "
+             "structured arrays. dtype: {dat.dtype.descr}")
+        nested = True
+        num_sims = dat.shape[0]
+    else:
+        nested = False
+        num_sims = 1
     assert len(scl_grps) == len(fets), \
         f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
 
@@ -76,39 +84,60 @@ def scale_fets(dat, scl_grps):
     scl_grps_unique = set(scl_grps)
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each scaling group.
-    scl_grps_prms = np.empty((len(scl_grps_unique), 2))
+    scl_grps_prms = np.zeros((len(scl_grps_unique), 2), dtype=float)
+    scl_grps_prms[:, 0].fill(float("inf"))
+    scl_grps_prms[:, 1].fill(float("-inf"))
     # Function to reduce a structured array.
-    rdc = (lambda fnc, arr:
-           fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
-    # Determine the min and the max of each scaling group.
-    for scl_grp in scl_grps_unique:
-        # Determine the features in this scaling group.
-        scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
-                        if scl_grps[fet_idx] == scl_grp]
-        # Extract the columns corresponding to this scaling group.
-        fet_values = dat[scl_grp_fets]
-        # Record the min and max of these columns.
-        scl_grps_prms[scl_grp] = [rdc(np.min, fet_values), rdc(np.max, fet_values)]
+    rdc = (lambda fnc, arr: fnc(np.array(
+        [fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+
+    # Determine the min and the max of each scaling group. Assume that
+    # dat is an array of structured arrays that each represent a
+    # simulation. For each structured array...
+    for sim in range(num_sims):
+        assert nested or sim == 0, \
+            "Invalid situation; nested: {nested}, sim: {sim}"
+        # For each scaling group, update its min and max.
+        for scl_grp in scl_grps_unique:
+            # Determine the features in this scaling group.
+            scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
+                            if scl_grps[fet_idx] == scl_grp]
+            # Extract the columns corresponding to this scaling group.
+            fet_values = dat[sim][scl_grp_fets] if nested else dat[scl_grp_fets]
+            # Update the min and max of this scaling group.
+            scl_grps_prms[scl_grp] = [
+                min(scl_grps_prms[scl_grp][0], rdc(np.min, fet_values)),
+                max(scl_grps_prms[scl_grp][1], rdc(np.max, fet_values))]
 
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
     scl_prms = np.empty((len(fets), 2))
     # Create an empty array to hold the rescaled features.
     new = np.empty(dat.shape, dtype=dat.dtype)
-    # Rescale each feature based on its scaling group's min and max.
-    for fet_idx, fet in enumerate(fets):
-        # Look up the min and max values for this feature's scaling group.
-        min_in, max_in = scl_grps_prms[scl_grps[fet_idx]]
-        # Store this min and max in the list of per-column scaling parameters.
-        scl_prms[fet_idx] = np.array([min_in, max_in])
-        #
-        fet_values = dat[fet]
-        new[fet] = (
-            # Handle the rare case where all of the feature values are the same.
-            np.zeros(
-                fet_values.shape, dtype=fet_values.dtype) if min_in == max_in
-            else utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1))
+    # Perform the rescaling.
+    for sim in range(num_sims):
+        assert nested or sim == 0, \
+            "Invalid situation; nested: {nested}, sim: {sim}"
+        if nested:
+            new[sim] = np.empty(dat[sim].shape, dtype=dat[sim].dtype)
 
+        # Rescale each feature based on its scaling group's min and max.
+        for fet_idx, fet in enumerate(fets):
+            # Look up the min and max values for this feature's scaling group.
+            min_in, max_in = scl_grps_prms[scl_grps[fet_idx]]
+            # Store this min and max in the list of per-column scaling parameters.
+            scl_prms[fet_idx] = np.array([min_in, max_in])
+            # Extract the correct unscaled feature values and determine which
+            # target array we should write into.
+            fet_values, target = (
+                (dat[sim][fet], new[sim]) if nested else (dat[fet], new))
+            target[fet] = (
+                # Handle the rare case where all of the feature values
+                # are the same.
+                np.zeros(fet_values.shape, dtype=fet_values.dtype)
+                if min_in == max_in
+                else utils.scale(
+                    fet_values, min_in, max_in, min_out=0, max_out=1))
     return new, scl_prms
 
 
@@ -212,9 +241,16 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
 
     # Build combined feature lists.
     dat_in_all, dat_out_all, _ = zip(*dat_all)
-    dat_in_all = np.concatenate(dat_in_all, axis=0)
-    dat_out_all = np.concatenate(dat_out_all, axis=0)
-
+    if isinstance(net, models.LstmWrapper):
+        # If the net is an LSTM, then to separate simulation results
+        # each become a single training example.
+        dat_in_all = np.array(list(dat_in_all))
+        dat_out_all = np.array(list(dat_out_all))
+    else:
+        # If the net is not an LSTM, then each individual point in
+        # each simulations result becomes a training example.
+        dat_in_all = np.concatenate(dat_in_all, axis=0)
+        dat_out_all = np.concatenate(dat_out_all, axis=0)
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
@@ -222,28 +258,49 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     return dat_in_all, dat_out_all, prms_in
 
 
-def split_data(dat_in, dat_out, bch_trn, bch_tst):
+def split_data(net, dat_in, dat_out, bch_trn, bch_tst):
     """
     Divides dat_in and dat_out into training, validation, and test
     sets and constructs data loaders.
     """
     print("Creating train/val/test data...")
-    # Destroy columns names to make merging the matrices easier. I.e.,
-    # convert from structured to regular numpy arrays.
-    dat_in = utils.clean(dat_in)
-    dat_out = utils.clean(dat_out)
-
-    # Shuffle the data to ensure that the training, validation, and
-    # test sets are uniformly sampled. To shuffle the input and output
-    # data together, we must first merge them into a combined matrix.
     num_exps = dat_in.shape[0]
-    num_cols_in = dat_in.shape[1]
-    merged = np.empty((num_exps, num_cols_in + dat_out.shape[1]), dtype=float)
-    merged[:, :num_cols_in] = dat_in
-    merged[:, num_cols_in:] = dat_out
-    np.random.shuffle(merged)
-    dat_in = merged[:, :num_cols_in]
-    dat_out = merged[:, num_cols_in:]
+
+    # def merge(arr0, arr1):
+    #     num_cols_0 = arr0.shape[1]
+    #     merged = np.empty((arr0.shape[0], num_cols_0 + arr1.shape[1]), dtype=float)
+    #     merged[:, :num_cols_0] = arr0
+    #     merged[:, 1:] = arr1
+    #     return merged, num_cols_0
+
+    # def unmerge(merged, num_cols_0):
+    #     return merged[:, :num_cols_0], merged[:, num_cols_0:]
+        
+    if isinstance(net, models.LstmWrapper):
+        dat_in = np.array([utils.clean(sim) for sim in dat_in])
+        dat_out = np.array([utils.clean(sim) for sim in dat_out])
+
+        sims = list(range(num_exps))
+        random.shuffle(sims)
+        dat_in, dat_out = zip(*[(dat_in[i], dat_out[i]) for i in sims])
+        dat_in = np.array(dat_in)
+        dat_out = np.array(dat_out)
+    else:
+        # Destroy columns names to make merging the matrices easier. I.e.,
+        # convert from structured to regular numpy arrays.
+        dat_in = utils.clean(dat_in)
+        dat_out = utils.clean(dat_out)
+
+        # Shuffle the data to ensure that the training, validation, and
+        # test sets are uniformly sampled. To shuffle the input and output
+        # data together, we must first merge them into a combined matrix.
+        num_cols_in = dat_in.shape[1]
+        merged = np.empty((num_exps, num_cols_in + dat_out.shape[1]), dtype=float)
+        merged[:, :num_cols_in] = dat_in
+        merged[:, num_cols_in:] = dat_out
+        np.random.shuffle(merged)
+        dat_in = merged[:, :num_cols_in]
+        dat_out = merged[:, num_cols_in:]
 
     # 50% for training, 20% for validation, 30% for testing.
     num_val = int(round(num_exps * 0.2))
@@ -259,10 +316,15 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
 
     # Create the dataloaders.
     dataset_trn = utils.Dataset(dat_trn_in, dat_trn_out)
-    ldr_trn = torch.utils.data.DataLoader(
-        dataset_trn,
-        batch_sampler=utils.BalancedSampler(
-            dataset_trn, bch_trn, drop_last=False))
+    # If the net is an LSTM, then we do not use a BalancedSampler.
+    if isinstance(net, models.LstmWrapper):
+        ldr_trn = torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_trn, shuffle=True, drop_last=False)
+    else:
+        ldr_trn = torch.utils.data.DataLoader(
+            dataset_trn,
+            batch_sampler=utils.BalancedSampler(
+                dataset_trn, bch_trn, drop_last=False))
     ldr_val = torch.utils.data.DataLoader(
         utils.Dataset(dat_val_in, dat_val_out), batch_size=bch_tst,
         shuffle=False, drop_last=False)
@@ -281,13 +343,13 @@ def init_hidden(net, bch, dev):
     be reset for every new sequence.
     """
     hidden = net.init_hidden(bch)
-    if hidden != torch.zeros(()):
-        hidden[0].to(dev)
-        hidden[1].to(dev)
+    #if hidden != (torch.zeros(()), torch.zeros(())):
+    hidden[0].to(dev)
+    hidden[1].to(dev)
     return hidden
 
 
-def inference(ins, labs, net_raw, dev, hidden=torch.zeros(()), los_fnc=None):
+def inference(ins, labs, net_raw, dev, hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
@@ -297,17 +359,32 @@ def inference(ins, labs, net_raw, dev, hidden=torch.zeros(()), los_fnc=None):
     labs = labs.to(dev)
 
     if isinstance(net_raw, models.Lstm):
+        # ins = torch.nn.utils.rnn.pack_sequence(ins, enforce_sorted=False)        
         # LSTMs want the sequence length to be first and the batch
         # size to be second, so we need to flip the first and
         # second dimensions:
         #   (batch size, sequence length, LSTM.in_dim) to
         #   (sequence length, batch size, LSTM.in_dim)
-        ins = ins.transpose(0, 1)
+        #ins = ins.transpose(0, 1)
         # Reduce the labels to a 1D tensor.
         # TODO: Explain this better.
         labs = labs.transpose(0, 1).view(-1)
+
+
+        #lengths = [t.size()[0] for t in ins]
+        #ins = torch.nn.utils.rnn.pack_padded_sequence(padded, lengths)
     # The forward pass.
+    print(f"\nins: {ins}")
+    print(f"type(ins): {type(ins)}")
     out, hidden = net_raw(ins, hidden)
+
+    # out, _ = torch.nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
+
+    print(f"out: {out}")
+    print(f"out.size(): {out.size()}")
+    print(f"labs: {labs}")
+    print(f"labs.size(): {labs.size()}")
+    
     if los_fnc is None:
         return out, hidden
     return los_fnc(out, labs), hidden
@@ -472,7 +549,7 @@ def run(args, dat_in, dat_out, out_flp):
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        dat_in, dat_out, args["train_batch"], args["test_batch"])
+        net, dat_in, dat_out, args["train_batch"], args["test_batch"])
 
     # Explicitly move the training (and maybe validation) data to the target
     # device.
@@ -547,7 +624,7 @@ def run_many(args_):
     # proper scaling parameters.
     if path.exists(dat_flp) and path.exists(scl_prms_flp):
         print("Found existing data!")
-        dat = np.load(dat_flp)
+        dat = np.load(dat_flp, allow_pickle=True)
         assert "in" in dat.files and "out" in dat.files, \
             f"Improperly formed data file: {dat_flp}"
         dat_in = dat["in"]
@@ -574,13 +651,20 @@ def run_many(args_):
             else list(range(net_tmp.num_clss)))
     # Assumes that dat_out is a structured numpy array containing a
     # column named "class".
-    tots = [(dat_out["class"] == cls).sum() for cls in clss]
+    get_tot = lambda arr: [(arr["class"] == cls).sum() for cls in clss]
+    if isinstance(net_tmp, models.LstmWrapper):
+        tots = [sum(cls_tots) for cls_tots in
+                zip(*[get_tot(dat_out_) for dat_out_ in dat_out])]
+    else:
+        tots = get_tot(dat_out)
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("Ground truth:\n" + "\n".join(
         [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
-    tot_actual = np.prod(np.array(dat_out.shape))
+    prd = lambda arr: np.prod(np.array(arr.shape)) 
+    tot_actual = (sum([prd(dat_out_) for dat_out_ in dat_out])
+                  if isinstance(net_tmp, models.LstmWrapper) else prd(dat_out))
     assert tot == tot_actual, \
         f"Error visualizing ground truth! {tot} != {tot_actual}"
 

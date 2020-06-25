@@ -42,7 +42,7 @@ class PytorchModelWrapper:
         If this model is an LSTM, then this method returns the initialized
         hidden state. Otherwise, returns None.
         """
-        return torch.zeros(())
+        return torch.zeros(()), torch.zeros(())
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -51,7 +51,7 @@ class PytorchModelWrapper:
 
     def modify_data(self, sim, dat_in, dat_out):
         """ Performs an arbitrary transformation on the data. """
-        return dat_in, dat_out
+        return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
 
     def check_output(self, out, target):
         """
@@ -368,7 +368,7 @@ class BinaryDnn(torch.nn.Module):
                    for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
               "\n    Sigmoid")
 
-    def forward(self, x, hidden=torch.zeros(())):
+    def forward(self, x, hidden=(torch.zeros(()), torch.zeros(()))):
         x = torch.nn.functional.relu(self.fc0(x))
         x = torch.nn.functional.relu(self.fc1(x))
         x = torch.nn.functional.relu(self.fc2(x))
@@ -428,7 +428,7 @@ class Svm(torch.nn.Module):
               f"    Linear: {self.fc.in_features}x{self.fc.out_features}\n"
               "    Sigmoid")
 
-    def forward(self, x, hidden=torch.zeros(())):
+    def forward(self, x, hidden=(torch.zeros(()), torch.zeros(()))):
         return self.fc(x), hidden
 
 
@@ -498,10 +498,13 @@ class LstmWrapper(PytorchModelWrapper):
         # Map a conversion function across all entries. Note that here
         # an entry is an entire row, since each row is a single tuple
         # value.
-        return np.vectorize(
+        clss = np.vectorize(
             functools.partial(
                 percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
+        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
+        clss_str["class"] = clss
+        return clss_str
 
 
 class Lstm(torch.nn.Module):
@@ -516,14 +519,22 @@ class Lstm(torch.nn.Module):
         print(f"Lstm - in_dim: {in_dim}, hid_dim: {self.hid_dim}, "
               f"num_lyrs: {num_lyrs}, out_dim: {out_dim}")
 
-    def forward(self, x, hidden):
+    def forward(self, x, hidden=(torch.zeros(()), torch.zeros(()))):
+        lengths = torch.tensor([x_.size()[0] for x_ in x])
+        x = torch.nn.utils.rnn.pack_padded_sequence(
+            x, lengths=lengths, enforce_sorted=False, batch_first=True)
+        #x =
         # The LSTM itself, which also takes as input the previous hidden state.
-        out, hidden = self.lstm(x, hidden)
+        #print(f"self.lstm({type(x)}, {type(hidden)}({type(hidden[0])}, {type(hidden[1])}))")
+        out, hidden = self.lstm(input=x, hx=hidden)
+        out, _ = torch.nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
         # Select the last piece as the LSTM output.
         out = out.contiguous().view(-1, self.hid_dim)
         # Classify the LSTM output.
         out = self.fc(out)
         out = self.sg(out)
+        # out = torch.nn.utils.rnn.pack_sequence(out)
+        # print(f" -> ({type(out)}, {type(hidden)}({type(hidden[0])}, {type(hidden[1])}))")
         return out, hidden
 
 

@@ -24,26 +24,50 @@ class Dataset(torch.utils.data.Dataset):
         shp_out = dat_out.shape
         assert shp_in[0] == shp_out[0], \
             "Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
-        # Convert the numpy arrays to Torch tensors.
-        self.dat_in = torch.tensor(dat_in, dtype=torch.float)
-        # Reshape the output into a 1D array first, because
-        # CrossEntropyLoss expects a single value. The dtype must be
-        # long because the loss functions expect longs.
-        self.dat_out = torch.tensor(
-            dat_out.reshape(shp_out[0]), dtype=torch.long)
+        # Convert the numpy arrays to Torch tensors. Reshape the
+        # output into a 1D array first, because CrossEntropyLoss
+        # expects a single value. The dtype must be long because the
+        # loss functions expect longs.
+        try:
+            self.dat_in = torch.tensor(dat_in, dtype=torch.float)
+            self.dat_out = torch.tensor(
+                dat_out.reshape(shp_out[0]), dtype=torch.long)
+        except TypeError:
+            self.dat_in = []
+            self.dat_out = []
+            for dat_in_, dat_out_ in zip(dat_in, dat_out):
+                shp_in_ = dat_in_.shape
+                shp_out_ = dat_out_.shape
+                assert shp_in_[0] == shp_out_[0], \
+                    "Mismatched dat_in ({shp_in_}) and dat_out ({shp_out_})!"
+                self.dat_in.append(torch.tensor(dat_in_, dtype=torch.float))
+                self.dat_out.append(torch.tensor(dat_out_.reshape(shp_out_[0]), dtype=torch.long))
 
     def to(self, dev):
         """ Move the entire dataset to the target device. """
         try:
-            # This will fail if there is insufficient memory.
-            self.dat_in = self.dat_in.to(dev)
-            self.dat_out = self.dat_out.to(dev)
+            if isinstance(self.dat_in, torch.Tensor):
+                # This will fail if there is insufficient memory.
+                self.dat_in = self.dat_in.to(dev)
+                self.dat_out = self.dat_out.to(dev)
+            else:
+                for dat_in in self.dat_in:
+                    dat_in.to(dev)
+                for dat_out in self.dat_out:
+                    dat_in.to(dev)
         except RuntimeError:
             print(f"Warning:: Unable to move dataset to device: {dev}")
             # In case the input data was moved successfully but there
             # was insufficient device memory for the output data, move
             # the input data back to main memory.
-            self.dat_in = self.dat_in.to(torch.device("cpu"))
+            cpu = torch.device("cpu")
+            if isinstance(self.dat_in, torch.Tensor):
+                self.dat_in = self.dat_in.to(cpu)
+            else:
+                for dat_in in self.dat_in:
+                    dat_in.to(cpu)
+                for dat_out in self.dat_out:
+                    dat_in.to(cpu)
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
@@ -232,7 +256,7 @@ def clean(arr):
         (f"Only 1D structured arrays are supported, but this one has {num_dims} "
          "dims!")
 
-    num_cols = len(arr.dtype.descr)
+    num_cols = len(arr.dtype.names)
     new = np.empty((arr.shape[0], num_cols), dtype=float)
     for col in range(num_cols):
         new[:, col] = arr[arr.dtype.names[col]]
