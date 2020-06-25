@@ -58,25 +58,33 @@ class PytorchModelWrapper:
         Returns the number of examples from out that were classified correctly,
         according to target.
         """
-        # Remove dimensions that are 1.
-        out = torch.squeeze(out)
-        # Validate input.
         size_out = out.size()
         size_target = target.size()
+        assert size_target
         assert size_out[0] == size_target[0], \
-            f"Sizes to not match: {size_out} != {size_target}"
-        assert size_out[1] == self.num_clss, \
-            (f"Expecting one-hot encoding for {self.num_clss} classes, but "
-             f"found size: {size_out}")
-
-        # argmax(): The class is the index of the output entry with greatest
-        #     value (i.e., highest probability). dim=1 because the output has an
-        #     entry for every entry in the input sequence.
+            ("Output and target have different batch sizes (first dimension): "
+             f"{size_out} != {size_target}")
+        # Transform the output into classes.
+        out = self._check_output_helper(out)
+        size_out = out.size()
+        assert size_out == size_target, \
+            f"Output and target sizes do not match: {size_out} != {size_target}"
         # eq(): Compare the outputs to the labels.
         # type(): Cast the resulting bools to ints.
         # sum(): Sum them up to get the total number of correct predictions.
-        return torch.argmax(
-            out, dim=1).eq(target).type(torch.IntTensor).sum().item()
+        return out.eq(target).type(torch.IntTensor).sum().item()
+
+    def _check_output_helper(self, out):
+        """ Convert the raw network output into classes. """
+        # Assume a one-hot encoding of class probabilities. The class
+        # is the index of the output entry with greatest value (i.e.,
+        # highest probability). Set dim=1 because the first dimension
+        # is the batch.
+        size_out = out.size()
+        assert size_out[1] == self.num_clss, \
+            (f"Expecting one-hot encoding for {self.num_clss} classes, but "
+             f"found size: {size_out}")
+        return torch.argmax(out, dim=1)
 
     def new(self):
         """ Returns a new instance of the underlying torch.nn.Module. """
@@ -395,26 +403,13 @@ class SvmWrapper(BinaryModelWrapper):
             new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
         return new_dat_in, new_dat_out, scl_grps
 
-    def check_output(self, out, target):
-        """
-        Returns the number of examples from out that were classified correctly,
-        according to target.
-        """
-        # Remove trailing dimensions of size 1.
+    def _check_output_helper(self, out):
+        # Remove a trailing dimension of size 1.
         out = torch.reshape(out, (out.size()[0],))
-        # Validate input.
-        size_out = out.size()
-        size_target = target.size()
-        assert size_out == size_target, \
-            f"Sizes to not match: {size_out} != {size_target}"
-
         # Transform the output to report classes -1 and 1.
         out[torch.where(out < 0)] = -1
         out[torch.where(out >= 0)] = 1
-        # eq(): Compare the outputs to the labels.
-        # type(): Cast the resulting bools to ints.
-        # sum(): Sum them up to get the total number of correct predictions.
-        return out.eq(target).type(torch.IntTensor).sum().item()
+        return out
 
 
 class Svm(torch.nn.Module):
