@@ -61,7 +61,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
         recv_pkts = utils.parse_packets_endpoint(
             path.join(
                 sim_dir,
-                f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap")
+                f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap"),
             sim.payload_B)
 
         packet_loss = 0
@@ -158,7 +158,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             # belongs to the unfair flow
             window_start = router_window_start[sender]
             while (curr_time - router_pkts[window_start][1] >
-                   rtt_list[sender] * rtt_window):
+                   rtts_us[sender] * rtt_window):
                 if router_pkts[window_start][0] == sender:
                     window_pkt_count[sender] -= 1
                 window_start += 1
@@ -210,7 +210,8 @@ def main():
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     if SYNC:
-        [parse_pcap(*pcap) for pcap in pcaps]
+        for pcap in pcaps:
+            parse_pcap(*pcap)
     else:
         with multiprocessing.Pool() as pol:
             pol.starmap(parse_pcap, pcaps)

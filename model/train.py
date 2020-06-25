@@ -50,18 +50,20 @@ EPCS_MAX = 10_000
 NEW_TPT_TSH = 0.925
 # The random seed.
 SEED = 1337
-# Set to true to parse the simulations in sorted order.
-SHUFFLE = False
+# Set to false to parse the simulations in sorted order.
+SHUFFLE = True
 # The number of times to log progress during one epoch.
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
+# Whether to parse simulation files synchronously or in parallel.
+SYNC = False
 
 
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
 
-    def __init__(self, dat_in, dat_out, dev):
+    def __init__(self, dat_in, dat_out):
         """
         dat_out is assumed to have only a single practical dimension (e.g.,
         (X,), or (X, 1)).
@@ -78,10 +80,10 @@ class Dataset(torch.utils.data.Dataset):
         # long because the loss functions expect longs.
         self.dat_out = torch.tensor(
             dat_out.reshape(shp_out[0]), dtype=torch.long)
-        # Move the entire dataset to the target device. This will fail
-        # if the device has insufficient memory.
-        self.dat_in = self.dat_in.to(dev)
-        self.dat_out = self.dat_out.to(dev)
+        # # Move the entire dataset to the target device. This will fail
+        # # if the device has insufficient memory.
+        # self.dat_in = self.dat_in.to(dev)
+        # self.dat_out = self.dat_out.to(dev)
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
@@ -94,44 +96,67 @@ class Dataset(torch.utils.data.Dataset):
         return self.dat_in[idx], self.dat_out[idx]
 
 
-def scale_fets(dat):
+def scale_fets(dat, scl_grps):
     """
     Returns a copy of dat with the columns scaled between 0 and
     1. Also returns an array of shape (dat_all[0].shape[1], 2) where
     row i contains the min and the max of column i in dat.
     """
-    assert dat.dtype.names is not None, \
+    fets = dat.dtype.names
+    assert fets is not None, \
         f"The provided array is not structured. dtype: {dat.dtype.descr}"
+    assert len(scl_grps) == len(fets), \
+        f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
+
+    # Determine the unique scaling groups.
+    scl_grps_unique = set(scl_grps)
+    # Create an empty array to hold the min and max values (i.e.,
+    # scaling parameters) for each scaling group.
+    scl_grps_prms = np.empty((len(scl_grps_unique), 2))
+    # Function to reduce a structured array.
+    rdc = (lambda fnc, arr:
+           fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+    # Determine the min and the max of each scaling group.
+    for scl_grp in scl_grps_unique:
+        # Determine the features in this scaling group.
+        scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
+                        if scl_grps[fet_idx] == scl_grp]
+        # Extract the columns corresponding to this scaling group.
+        fet_values = dat[scl_grp_fets]
+        # Record the min and max of these columns.
+        scl_grps_prms[scl_grp] = [rdc(np.min, fet_values), rdc(np.max, fet_values)]
+
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
-    fets = dat.dtype.names
     scl_prms = np.empty((len(fets), 2))
-    # The new scaled array.
+    # Create an empty array to hold the rescaled features.
     new = np.empty(dat.shape, dtype=dat.dtype)
-    # For all features...
-    for j, fet in enumerate(fets):
-        # Determine the min and max values of this feature.
+    # Rescale each feature based on its scaling group's min and max.
+    for fet_idx, fet in enumerate(fets):
+        # Look up the min and max values for this feature's scaling group.
+        min_in, max_in = scl_grps_prms[scl_grps[fet_idx]]
+        # Store this min and max in the list of per-column scaling parameters.
+        scl_prms[fet_idx] = np.array([min_in, max_in])
+        #
         fet_values = dat[fet]
-        min_in = fet_values.min()
-        max_in = fet_values.max()
-        scl_prms[j] = np.array([min_in, max_in])
-        if min_in == max_in:
+        new[fet] = (
             # Handle the rare case where all of the feature values are the same.
-            scaled = np.zeros(fet_values.shape, dtype=fet_values.dtype)
-        else:
-            scaled = utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1)
-        new[fet] = scaled
+            np.zeros(
+                fet_values.shape, dtype=fet_values.dtype) if min_in == max_in
+            else utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1))
+
     return new, scl_prms
 
 
-def process_sim(net, sim_flp, warmup):
+def process_sim(idx, total, net, sim_flp, warmup):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
     output features. Returns a tuple of numpy arrays of the form:
     (input data, output data).
     """
-    sim, dat = utils.load_sim(sim_flp)
+    sim, dat = utils.load_sim(
+        sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     # Drop the first few packets so that we consider steady-state behavior only.
     assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
     dat = dat[warmup:]
@@ -140,7 +165,6 @@ def process_sim(net, sim_flp, warmup):
     # columns correspond to the feature names in in_spc and out_spc.
     assert net.in_spc, "{sim_flp}: Empty in spec."
     assert net.out_spc, "{sim_flp}: Empty out spec."
-    arr_times = dat["arrival time"]
     dat_in = dat[net.in_spc]
     dat_out = dat[net.out_spc]
     # Convert output features to class labels.
@@ -157,7 +181,7 @@ def process_sim(net, sim_flp, warmup):
             assert 0 <= cls < net.num_clss, "Invalid class: {cls}"
 
     # Transform the data as required by this specific model.
-    return net.modify_data(sim, dat_in, dat_out, arr_times=arr_times)
+    return net.modify_data(sim, dat_in, dat_out)
 
 
 def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
@@ -175,19 +199,24 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     if num_sims is not None:
         sims = sims[:num_sims]
 
-    print(f"Found {len(sims)} simulations.")
-    with multiprocessing.Pool() as pol:
-        # Each element of dat_all corresponds to a single simulation.
-        dat_all = pol.starmap(
-            process_sim,
-            [(net, path.join(dat_dir, sim), warmup) for sim in sims])
+    tot_sims = len(sims)
+    print(f"Found {tot_sims} simulations.")
+    sims_args = [(idx, tot_sims, net, path.join(dat_dir, sim), warmup)
+                 for idx, sim in enumerate(sims)]
+    if SYNC:
+        dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+    else:
+        with multiprocessing.Pool() as pol:
+            # Each element of dat_all corresponds to a single simulation.
+            dat_all = pol.starmap(process_sim, sims_args)
 
     # Validate data.
     dim_in = None
     dtype_in = None
     dim_out = None
     dtype_out = None
-    for dat_in, dat_out in dat_all:
+    scl_grps = None
+    for dat_in, dat_out, scl_grps_cur in dat_all:
         dim_in_cur = len(dat_in.dtype.descr)
         dim_out_cur = len(dat_out.dtype.descr)
         dtype_in_cur = dat_in.dtype
@@ -200,6 +229,8 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
             dtype_in = dtype_in_cur
         if dtype_out is None:
             dtype_out = dtype_out_cur
+        if scl_grps is None:
+            scl_grps = scl_grps_cur
         assert dim_in_cur == dim_in, \
             f"Invalid input feature dim: {dim_in_cur} != {dim_in}"
         assert dim_out_cur == dim_out, \
@@ -208,24 +239,27 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
             f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
         assert dtype_out_cur == dtype_out, \
             f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
+        assert scl_grps_cur == scl_grps, \
+            f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
     assert dim_in is not None, "Unable to compute input feature dim!"
     assert dim_out is not None, "Unable to compute output feature dim!"
     assert dtype_in is not None, "Unable to compute input dtype!"
     assert dtype_out is not None, "Unable to compute output dtype!"
+    assert scl_grps is not None, "Unable to compte scaling groups!"
 
     # Build combined feature lists.
-    dat_in_all, dat_out_all = zip(*dat_all)
+    dat_in_all, dat_out_all, _ = zip(*dat_all)
     dat_in_all = np.concatenate(dat_in_all, axis=0)
     dat_out_all = np.concatenate(dat_out_all, axis=0)
+
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all)
-
+    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps)
     return dat_in_all, dat_out_all, prms_in
 
 
-def split_data(dat_in, dat_out, bch_trn, bch_tst, dev):
+def split_data(dat_in, dat_out, bch_trn, bch_tst):
     """
     Divides dat_in and dat_out into training, validation, and test
     sets and constructs data loaders.
@@ -262,14 +296,14 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst, dev):
 
     # Create the dataloaders.
     ldr_trn = torch.utils.data.DataLoader(
-        Dataset(dat_trn_in, dat_trn_out, dev),
-        batch_size=bch_trn, shuffle=True)
+        Dataset(dat_trn_in, dat_trn_out), batch_size=bch_trn, shuffle=True,
+        drop_last=False)
     ldr_val = torch.utils.data.DataLoader(
-        Dataset(dat_val_in, dat_val_out, dev),
-        batch_size=bch_tst, shuffle=False)
+        Dataset(dat_val_in, dat_val_out), batch_size=bch_tst, shuffle=False,
+        drop_last=False)
     ldr_tst = torch.utils.data.DataLoader(
-        Dataset(dat_tst_in, dat_tst_out, dev),
-        batch_size=bch_tst, shuffle=False)
+        Dataset(dat_tst_in, dat_tst_out), batch_size=bch_tst, shuffle=False,
+        drop_last=False)
     print("Done.")
     return ldr_trn, ldr_val, ldr_tst
 
@@ -289,11 +323,15 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
-def inference(ins, labs, net, hidden=None, los_fnc=None):
+def inference(ins, labs, net, dev, hidden=None, los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
     """
+    # Move input and output data to the proper device.
+    ins = ins.to(dev)
+    labs = labs.to(dev)
+
     if net.is_lstm:
         # LSTMs want the sequence length to be first and the batch
         # size to be second, so we need to flip the first and
@@ -329,20 +367,16 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
     val_pat = val_pat_max
     # The number of batches per epoch.
     num_bchs_trn = len(ldr_trn)
-    # Log the training process every few batches.
-    bchs_per_log = math.floor(num_bchs_trn / LOGS_PER_EPC)
-    # To avoid a divide-by-zero error below, the number of validation passes
-    # per epoch much be at least 2.
-    assert VALS_PER_EPC >= 2, "Must validate at least twice per epoch."
-    if num_bchs_trn < VALS_PER_EPC:
-        # If the number of batches per epoch is less than the desired number of
-        # validation passes per epoch, then do a validation pass after every
-        # batch.
-        bchs_per_val = 1
+    # Print a lot statement every few batches.
+    if LOGS_PER_EPC == 0:
+        # Disable logging.
+        bchs_per_log = sys.maxsize
     else:
-        # Using floor() means that dividing by (VALS_PER_EPC - 1) will result in
-        # VALS_PER_EPC validation passes per epoch.
-        bchs_per_val = math.floor(num_bchs_trn / (VALS_PER_EPC - 1))
+        bchs_per_log = math.ceil(num_bchs_trn / LOGS_PER_EPC)
+    # Perform a validation pass every few batches.
+    assert not ely_stp or VALS_PER_EPC > 0, \
+        f"Early stopping configured with erroneous VALS_PER_EPC: {VALS_PER_EPC}"
+    bchs_per_val = math.ceil(num_bchs_trn / VALS_PER_EPC)
     if ely_stp:
         print(f"Will validate after every {bchs_per_val} batches.")
 
@@ -366,7 +400,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference(ins, labs, net, hidden, los_fnc)
+            loss, hidden = inference(ins, labs, net, dev, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -386,7 +420,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net, dev, hidden, los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.train()
 
@@ -448,7 +482,7 @@ def test(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference(
-                ins, labs, net, hidden,
+                ins, labs, net, dev, hidden,
                 los_fnc=lambda a, b: (
                     # argmax(): The class is the index of the output
                     #     entry with greatest value (i.e., highest
@@ -484,7 +518,7 @@ def run(args, dat_in, dat_out, out_flp):
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        dat_in, dat_out, args["train_batch"], args["test_batch"], dev)
+        dat_in, dat_out, args["train_batch"], args["test_batch"])
 
     # Training.
     tim_srt_s = time.time()
@@ -549,8 +583,8 @@ def run_many(args_):
     else:
         print("Regenerating data...")
         dat_in, dat_out, scl_prms = make_datasets(
-            net_tmp, args["data_dir"],
-            args["warmup"], args["num_sims"], SHUFFLE)
+            net_tmp, args["data_dir"], args["warmup"], args["num_sims"],
+            SHUFFLE)
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
         np.savez_compressed(dat_flp, **{"in": dat_in, "out": dat_out})
@@ -566,9 +600,10 @@ def run_many(args_):
     # Assumes that dat_out is a structured numpy array containing a
     # column named "class".
     tots = [(dat_out["class"] == cls).sum() for cls in clss]
+    # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("Ground truth:\n" + "\n".join(
-        [f"    {cls}: {tot_cls} packets ({tot_cls / tot * 100:.2f}%)"
+        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
     tot_actual = np.prod(np.array(dat_out.shape))
     assert tot == tot_actual, \
