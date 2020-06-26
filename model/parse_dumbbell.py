@@ -24,11 +24,11 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time", "int32"),
     ("inter-arrival time", "int32"),
-    ("RTT ratio", "float")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
 EWMAS = [
+    ("RTT ratio ewma", "float")
     ("inter-arrival time ewma", "float"),
     ("loss rate ewma", "float"),
     ("queue occupancy ewma", "float")
@@ -36,9 +36,9 @@ EWMAS = [
 # These metrics are calculated over an window of packets, for varies
 # window sizes.
 WINDOWED = [
-    ("average inter-arrival time", "float"),
-    ("loss rate", "float"),
-    ("queue occupancy", "float")
+    ("average inter-arrival time windowed", "float"),
+    ("loss rate windowed", "float"),
+    ("queue occupancy windowed", "float")
 ]
 # The alpha values at which to evaluate the EWMA metrics.
 ALPHAS = [i / 10 for i in range(11)]
@@ -50,10 +50,14 @@ DTYPE = (REGULAR +
          [(f"{name}-alpha{alpha}", typ)
           for (name, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
          [(f"{name}-minRtt{win}", typ)
-           for (name, typ), win in itertools.product(WINDOWED, WINDOWS)])
+          for (name, typ), win in itertools.product(WINDOWED, WINDOWS)])
 
 
-def parse_pcap(sim_dir, out_dir, rtt_window):
+def update_ewma(prev, new, alpha):
+    return alpha * new + (1 - alpha) * prev
+
+
+def parse_pcap(sim_dir, out_dir):
     """Parse a PCAP file.
     Writes a npz file that contains the sequence number, RTT ratio,
     inter-arrival time, loss rate, and queue occupency percentage in
@@ -73,12 +77,12 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
     # Process PCAP files from unfair senders and receivers
 
     unfair_flws = []
-    rtts_us = []
+    min_rtts_us = []
 
     for unfair_idx in range(sim.unfair_flws):
         one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
-        rtt_us = one_way_us * 2
-        rtts_us.append(rtt_us)
+        min_rtt_us = one_way_us * 2
+        min_rtts_us.append(min_rtt_us)
 
         # (Seq, timestamp)
         send_pkts = utils.parse_packets_endpoint(
@@ -90,69 +94,97 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
                 f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0.pcap"),
             sim.payload_B)
 
-        packet_loss = 0
-        loss_ewma = 0.0
-        window_size = rtt_us * rtt_window
-        window_start = 0
-        loss_queue = deque()
+        # State that the windowed metrics need to track across packets.
+        windowed_state = {win: {
+            "packet_loss": 0
+            "window_start": 0
+            "loss_queue": deque()
+            } for win in WINDOWS}
+        # Final output.
         output = np.empty(len(recv_pkts), dtype=DTYPE)
 
         for j, recv_pkt in enumerate(recv_pkts):
+
+            # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
-            send_pkt_seq = send_pkts[j + packet_loss][0]
-
-            # Count the number of dropped packets by checking if the
-            # sequence numbers at sender and receiver are the same. If
-            # not, the packet is dropped, and the packet_loss counter
-            # increases by one to keep the index offset at sender
-            prev_loss = packet_loss
-            while send_pkt_seq != recv_pkt_seq:
-                # Packet loss
-                packet_loss += 1
-                send_pkt_seq = send_pkts[j + packet_loss][0]
-
-            curr_loss = packet_loss - prev_loss
-            curr_recv_time = recv_pkt[1]
-            curr_send_time = send_pkts[j + packet_loss][1]
-
-            # Update loss_ewma
-            # loss_ewma = alpha * instantaneous + (1 - alpha) * previous loss_ewma
-            loss_ewma = ALPHA * (curr_loss / (1.0 * curr_loss + 1)) + (1.0 - ALPHA) * loss_ewma
-
-            # Process packet loss
-            if (curr_loss > 0 and j > 0):
-                prev_recv_time = recv_pkts[j - 1][1]
-                loss_interval = (curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
-                for k in range(0, curr_loss):
-                    loss_queue.append(prev_recv_time + (k + 1) * loss_interval)
-
-            # Pop out earlier loss
-            while loss_queue and loss_queue[0] < curr_recv_time - window_size:
-                loss_queue.popleft()
-
-            # Update window_start
-            while curr_recv_time - recv_pkts[window_start][1] > window_size:
-                window_start += 1
-
             output[j]["seq"] = recv_pkt_seq
+            curr_recv_time = recv_pkt[1]
             output[j]["arrival time"] = curr_recv_time
             if j > 0:
                 interarrival_time = curr_recv_time - recv_pkts[j - 1][1]
             else:
                 interarrival_time = 0
             output[j]["inter-arrival time"] = interarrival_time
-            output[j]["RTT ratio"] = ((curr_recv_time - curr_send_time) /
-                                      one_way_us)
-            output[j]["loss ewma"] = loss_ewma
-            # If it's processing the first packet (j == window_start == 0) or no
-            # other packets received within the RTT window, then output 0 for
-            # loss rate.
-            if j - window_start > 0:
-                loss_rate = (len(loss_queue) /
-                             (1.0 * (len(loss_queue) + j - window_start)))
-            else:
-                loss_rate = 0
-            output[j]["loss rate"] = loss_rate
+
+            # EWMA metrics.
+            for (metric, ), alpha in itertools.product(EWMAS, ALPHAS):
+                if j > 0:
+                    if "RTT ratio" in metric:
+                        new = 0
+                    elif "inter-arrival time" in metric:
+                        new = interarrival_time
+                    elif "loss rate" in metric:
+                        new = curr_loss / (curr_loss + 1)
+                    elif "queue occupancy" in metric:
+                        new = 0
+                    else:
+                        raise Exception(f"Unknown EWMA metric: {metric}")
+                    new_ewma = update_ewma(output[j - 1][metric], new, alpha)
+                else:
+                    new_ewma = 0
+                output[j][ewma] = new_ewma
+
+            # Windowed metrics.
+            for (metric, _). win in itertools.product(WINDOWED, WINDOWS):
+                window_size = win * min_rtt_us
+                state = windowed_state[win]
+                if "average inter-arrival time" in metric:
+                    new = 0
+                elif "loss rate" in metric:
+                    # Count the number of dropped packets by checking if the
+                    # sequence numbers at sender and receiver are the same. If
+                    # not, the packet is dropped, and the packet_loss counter
+                    # increases by one to keep the index offset at sender
+                    send_pkt_seq = send_pkts[j + state["packet_loss"]][0]
+                    prev_loss = state["packet_loss"]
+                    while send_pkt_seq != recv_pkt_seq:
+                        # Packet loss
+                        state["packet_loss"] += 1
+                        send_pkt_seq = send_pkts[j + state["packet_loss"]][0]
+
+                    # Process packet loss
+                    curr_loss = state["packet_loss"] - prev_loss
+                    if (curr_loss > 0 and j > 0):
+                        prev_recv_time = recv_pkts[j - 1][1]
+                        loss_interval = (curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
+                        for k in range(0, curr_loss):
+                            state["loss_queue"].append(prev_recv_time + (k + 1) * loss_interval)
+
+                    # Pop out earlier loss
+                    while state["loss_queue"] and state["loss_queue"][0] < curr_recv_time - window_size:
+                        state["loss_queue"].popleft()
+
+                    # Update window_start
+                    while curr_recv_time - recv_pkts[state["window_start"]][1] > window_size:
+                        state["window_start"] += 1
+
+                    # If it's processing the first packet (j == window_start == 0) or no
+                    # other packets received within the RTT window, then output 0 for
+                    # loss rate.
+                    if j - state["window_start"] > 0:
+                        new = (len(state["loss_queue"]) /
+                                     (1.0 * (len(state["loss_queue"]) + j - state["window_start"])))
+                    else:
+                        new = 0
+
+                    # curr_send_time = send_pkts[j + state["packet_loss"]][1]
+                    # output[j]["RTT ratio"] = ((curr_recv_time - curr_send_time) /
+                    #                           one_way_us)
+                elif "queue occupancy" in metric:
+                    new = 0
+                else:
+                    raise Exception(f"Unknown windowed metric: {metric}")
+                output[j][metric] = new
 
         unfair_flws.append(output)
     # Save memory by explicitly deleting the sent and received packets
@@ -194,7 +226,7 @@ def parse_pcap(sim_dir, out_dir, rtt_window):
             # (Assuming that the one-way delay for the ACK sending back to sender
             #  would be min one-way delay)
             rtt_ratio = unfair_flws[sender][output_index[sender]]["RTT ratio"]
-            actual_rtt = rtts_us[sender] * (rtt_ratio + 0.5)
+            actual_rtt = min_rtts_us[sender] * (rtt_ratio + 0.5)
 
             # To avoid the window size bouncing back and forth,
             # only allow the window to grow/shrink in one direction
@@ -243,17 +275,12 @@ def main():
         "--out-dir",
         help="The directory in which to store output files (required).",
         required=True, type=str)
-    psr.add_argument(
-        "--rtt-window", default=RTT_WINDOW,
-        help=("Size of the RTT window to calculate receiving rate and loss "
-              "rate (default: 2 * RTT)"), type=int)
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
-    rtt_window = args.rtt_window
 
     # Find all simulations.
-    pcaps = [(path.join(exp_dir, sim), out_dir, rtt_window)
+    pcaps = [(path.join(exp_dir, sim), out_dir)
              for sim in sorted(os.listdir(exp_dir))]
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
