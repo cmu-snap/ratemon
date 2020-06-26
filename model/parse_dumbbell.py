@@ -2,6 +2,7 @@
 """Parses the pcap file of dumbbell topology. """
 
 import argparse
+import itertools
 import multiprocessing
 import os
 from os import path
@@ -15,18 +16,41 @@ import utils
 
 # Whether to parse PCAP files synchronously or in parallel.
 SYNC = False
-# RTT window to consider queue occupency
-RTT_WINDOW = 2
-# ALPHA for EWMA loss rate
-ALPHA = 0.5
-# The dtype of the output.
-DTYPE = [("seq", "int32"),
-         ("arrival time", "float"),
-         ("inter-arrival time", "float"),
-         ("RTT ratio", "float"),
-         ("loss rate", "float"),
-         ("loss ewma", "float"),
-         ("queue occupancy", "float")]
+
+# Assemble the output dtype.
+#
+# These metrics do not change.
+REGULAR = [
+    ("seq", "int32"),
+    ("arrival time", "int32"),
+    ("inter-arrival time", "int32"),
+    ("RTT ratio", "float")
+]
+# These metrics are exponentially-weighted moving averages (EWMAs),
+# that are recorded for various values of alpha.
+EWMAS = [
+    ("inter-arrival time ewma", "float"),
+    ("loss rate ewma", "float"),
+    ("queue occupancy ewma", "float")
+]
+# These metrics are calculated over an window of packets, for varies
+# window sizes.
+WINDOWED = [
+    ("average inter-arrival time", "float"),
+    ("loss rate", "float"),
+    ("queue occupancy", "float")
+]
+# The alpha values at which to evaluate the EWMA metrics.
+ALPHAS = [i / 10 for i in range(11)]
+# The window durations (multiples of the minimum RTT) at which to
+# evaluate the window-based metrics.
+WINDOWS = [2**i for i in range(0, 11, 2)]
+# The final dtype combines each metric at multiple granularities.
+DTYPE = (REGULAR +
+         [(f"{name}-alpha{alpha}", typ)
+          for (name, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
+         [(f"{name}-minRtt{win}", typ)
+           for (name, typ), win in itertools.product(WINDOWED, WINDOWS)])
 
 
 def parse_pcap(sim_dir, out_dir, rtt_window):
