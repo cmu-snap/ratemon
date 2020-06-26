@@ -399,8 +399,9 @@ class SvmWrapper(BinaryModelWrapper):
     def modify_data(self, sim, dat_in, dat_out):
         new_dat_in, new_dat_out, scl_grps = super(SvmWrapper, self).modify_data(
             sim, dat_in, dat_out)
-        for i in range(len(new_dat_out)):
-            new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
+        # Map [0,1] to [-1, 1]
+        fet = new_dat_out.dtype.names[0]
+        new_dat_out[fet] = new_dat_out[fet] * 2 - 1
         return new_dat_in, new_dat_out, scl_grps
 
     def _check_output_helper(self, out):
