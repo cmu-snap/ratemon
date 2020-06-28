@@ -24,6 +24,7 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time", "int32"),
     ("inter-arrival time", "int32"),
+    ("true RTT ratio", "float")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -46,15 +47,26 @@ ALPHAS = [i / 10 for i in range(11)]
 # evaluate the window-based metrics.
 WINDOWS = [2**i for i in range(0, 11, 2)]
 # The final dtype combines each metric at multiple granularities.
+def make_ewma_metric(metric, alpha):
+    return f"{metric}-alpha{alpha}"
+def make_win_metric(metric, win):
+    return f"{metric}-minRtt{win}"
 DTYPE = (REGULAR +
-         [(f"{name}-alpha{alpha}", typ)
-          for (name, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-         [(f"{name}-minRtt{win}", typ)
-          for (name, typ), win in itertools.product(WINDOWED, WINDOWS)])
+         [(make_ewma_metric(metric, alpha), typ)
+          for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
+         [(make_win_metric(metric, win), typ)
+          for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
 
 
 def update_ewma(prev, new, alpha):
     return alpha * new + (1 - alpha) * prev
+
+
+def get_metric(substr, metrics):
+    candidates = [metric for metric in metrics if substr in metric]
+    assert len(candidates) == 1, \
+        f"More than one candidate for substring \"{substr}\": {candidates}"
+    return candidates[0]
 
 
 def parse_pcap(sim_dir, out_dir):
@@ -96,7 +108,6 @@ def parse_pcap(sim_dir, out_dir):
 
         # State that the windowed metrics need to track across packets.
         windowed_state = {win: {
-            "packet_loss": 0
             "window_start": 0
             "loss_queue": deque()
             } for win in WINDOWS}
@@ -116,72 +127,98 @@ def parse_pcap(sim_dir, out_dir):
                 interarrival_time = 0
             output[j]["inter-arrival time"] = interarrival_time
 
+            # Count the number of dropped packets by checking if the
+            # sequence numbers at sender and receiver are the same. If
+            # not, the packet is dropped, and the packet_loss counter
+            # increases by one to keep the index offset at sender
+            send_pkt_seq = send_pkts[j + packet_loss][0]
+            prev_loss = packet_loss
+            while send_pkt_seq != recv_pkt_seq:
+                # Packet loss
+                packet_loss += 1
+                send_pkt_seq = send_pkts[j + packet_loss][0]
+            curr_loss = packet_loss - prev_loss
+
+            # Calculate the true RTT ratio as the actual one-way delay
+            # divided by the minimum one-way delay. Of course, this
+            # may not be the same as the true RTT divided by the
+            # minimum RTT, since packets on the reverse path likely
+            # experience less queuing. Therefore, this can be thought
+            # of as an upper bound on the true RTT ratio.
+            output[j]["true RTT ratio"] = (
+                (curr_recv_time -
+                 # Calculate the send time of this packet.
+                 send_pkts[j + packet_loss][1]) /
+                one_way_us)
+
             # EWMA metrics.
             for (metric, ), alpha in itertools.product(EWMAS, ALPHAS):
+                metric = make_ewma_metric(metric, alpha)
                 if j > 0:
                     if "RTT ratio" in metric:
                         new = 0
                     elif "inter-arrival time" in metric:
                         new = interarrival_time
                     elif "loss rate" in metric:
+                        # Why is this divided by (curr_loss + 1)?
                         new = curr_loss / (curr_loss + 1)
                     elif "queue occupancy" in metric:
-                        new = 0
+                        # Queue occupancy is calculated using the
+                        # router's PCAP files, below.
+                        continue
                     else:
                         raise Exception(f"Unknown EWMA metric: {metric}")
                     new_ewma = update_ewma(output[j - 1][metric], new, alpha)
                 else:
                     new_ewma = 0
-                output[j][ewma] = new_ewma
+                output[j][metric] = new_ewma
 
             # Windowed metrics.
             for (metric, _). win in itertools.product(WINDOWED, WINDOWS):
+                metric = make_win_metric(metric, win)
                 window_size = win * min_rtt_us
                 state = windowed_state[win]
-                if "average inter-arrival time" in metric:
-                    new = 0
-                elif "loss rate" in metric:
-                    # Count the number of dropped packets by checking if the
-                    # sequence numbers at sender and receiver are the same. If
-                    # not, the packet is dropped, and the packet_loss counter
-                    # increases by one to keep the index offset at sender
-                    send_pkt_seq = send_pkts[j + state["packet_loss"]][0]
-                    prev_loss = state["packet_loss"]
-                    while send_pkt_seq != recv_pkt_seq:
-                        # Packet loss
-                        state["packet_loss"] += 1
-                        send_pkt_seq = send_pkts[j + state["packet_loss"]][0]
 
-                    # Process packet loss
-                    curr_loss = state["packet_loss"] - prev_loss
+                if "average inter-arrival time" in metric:
+                    # This is calculated as part of the loss rate
+                    # calculation, below.
+                    continue
+                elif "loss rate" in metric:
+                    # Process packet loss.
                     if (curr_loss > 0 and j > 0):
                         prev_recv_time = recv_pkts[j - 1][1]
                         loss_interval = (curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
                         for k in range(0, curr_loss):
                             state["loss_queue"].append(prev_recv_time + (k + 1) * loss_interval)
 
-                    # Pop out earlier loss
+                    # Pop out earlier loss.
                     while state["loss_queue"] and state["loss_queue"][0] < curr_recv_time - window_size:
                         state["loss_queue"].popleft()
 
-                    # Update window_start
+                    # Update window_start.
                     while curr_recv_time - recv_pkts[state["window_start"]][1] > window_size:
                         state["window_start"] += 1
 
-                    # If it's processing the first packet (j == window_start == 0) or no
-                    # other packets received within the RTT window, then output 0 for
-                    # loss rate.
+                    # If it's processing the first packet (j ==
+                    # window_start == 0) or no other packets were
+                    # received within the RTT window, then output 0
+                    # for the loss rate.
                     if j - state["window_start"] > 0:
                         new = (len(state["loss_queue"]) /
-                                     (1.0 * (len(state["loss_queue"]) + j - state["window_start"])))
+                               (1.0 * (len(state["loss_queue"]) + j - state["window_start"])))
                     else:
                         new = 0
 
-                    # curr_send_time = send_pkts[j + state["packet_loss"]][1]
-                    # output[j]["RTT ratio"] = ((curr_recv_time - curr_send_time) /
-                    #                           one_way_us)
+                    # Calculate the average inter-arrival time.
+                    output[j][make_win_metric(
+                        "average inter-arrival time windowed", win)] = (
+                            (curr_recv_time -
+                             utils.parse_time_us(recv_pkts[window_start][0]) /
+                             (j - state["window_start"]))
                 elif "queue occupancy" in metric:
-                    new = 0
+                    # Queue occupancy is calculated using the router's
+                    # PCAP files, below.
+                    continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
