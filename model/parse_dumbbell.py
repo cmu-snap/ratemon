@@ -69,7 +69,7 @@ def parse_pcap(sim_dir, out_dir):
     assert sim.unfair_flws > 0, f"No unfair flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
-    out_flp = path.join(out_dir, f"{sim.name}-{rtt_window}rttW.npz")
+    out_flp = path.join(out_dir, f"{sim.name}.npz")
     # If the output file exists, then we do not need to parse this file.
     if path.exists(out_flp):
         print(f"    Already parsed: {sim_dir}")
@@ -103,7 +103,7 @@ def parse_pcap(sim_dir, out_dir):
             "router_window_start": 0
 
             } for win in WINDOWS}
-        
+
         # Number of packet loss up to the current processing packet
         packet_loss = 0
 
@@ -123,7 +123,7 @@ def parse_pcap(sim_dir, out_dir):
                 interarrival_time = 0
             output[j]["inter-arrival time"] = interarrival_time
 
-            # Process packet loss - 
+            # Process packet loss -
             # Count the number of dropped packets by checking if the
             # sequence numbers at sender and receiver are the same. If
             # not, the packet is dropped, and the packet_loss counter
@@ -163,7 +163,7 @@ def parse_pcap(sim_dir, out_dir):
                     new_ewma = update_ewma(output[j - 1][metric], new, alpha)
                 else:
                     new_ewma = 0
-                output[j][ewma] = new_ewma
+                output[j][metric] = new_ewma
 
             # Windowed metrics.
             for (metric, _). win in itertools.product(WINDOWED, WINDOWS):
@@ -175,7 +175,7 @@ def parse_pcap(sim_dir, out_dir):
                     state["window_start"] += 1
 
                 if "average inter-arrival time" in metric:
-                    new = ((curr_recv_time - recv_pkts[j - state["window_start"]]) / 
+                    new = ((curr_recv_time - recv_pkts[j - state["window_start"]]) /
                            (1.0 * (j - state["window_start"] + 1)))
                 elif "loss rate" in metric:
                     # If it's processing the first packet (j == window_start == 0) or no
@@ -183,7 +183,7 @@ def parse_pcap(sim_dir, out_dir):
                     # loss rate.
                     if j - state["window_start"] > 0:
                         new = (len(state["loss_queue"]) /
-                                     (1.0 * (len(state["loss_queue"]) + j - state["window_start"])))
+                               (1.0 * (len(state["loss_queue"]) + j - state["window_start"])))
                     else:
                         new = 0
                 else:
@@ -211,7 +211,7 @@ def parse_pcap(sim_dir, out_dir):
         sender = router_pkt[0]
 
         if sender < sim.unfair_flws and output_index[sender] < len(unfair_flws[sender]):
-            
+
             curr_time = router_pkt[1]
 
             for (metric, _). win in itertools.product(WINDOWED, WINDOWS):
@@ -251,7 +251,8 @@ def parse_pcap(sim_dir, out_dir):
                 queue_occupency = state['window_pkt_count'] / float(i - window_start + 1)
 
                 # Add this record to output array
-                unfair_flws[sender][output_index[sender]][metric]["queue occupancy windowed"] = queue_occupency
+                unfair_flws[sender][output_index[sender]][metric]["queue occupancy windowed"] = (
+                    queue_occupency)
             output_index[sender] = output_index[sender] + 1
 
     # Write to output
