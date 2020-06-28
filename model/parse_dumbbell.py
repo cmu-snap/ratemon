@@ -24,6 +24,7 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time", "int32"),
     ("inter-arrival time", "int32"),
+    ("RTT ratio", "float")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -80,7 +81,7 @@ def parse_pcap(sim_dir, out_dir):
     min_rtts_us = []
 
     for unfair_idx in range(sim.unfair_flws):
-        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
+        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx] * 1.0
         min_rtt_us = one_way_us * 2
         min_rtts_us.append(min_rtt_us)
 
@@ -97,7 +98,10 @@ def parse_pcap(sim_dir, out_dir):
         # State that the windowed metrics need to track across packets.
         windowed_state = {win: {
             "window_start": 0,
-            "loss_queue": deque()
+            "loss_queue": deque(),
+            "window_pkt_count": 0,
+            "router_window_start": 0
+
             } for win in WINDOWS}
         
         # Number of packet loss up to the current processing packet
@@ -142,13 +146,14 @@ def parse_pcap(sim_dir, out_dir):
                     for k in range(0, curr_loss):
                         state["loss_queue"].append(prev_recv_time + (k + 1) * loss_interval)
 
+            curr_send_time = send_pkts[j + packet_loss][1]
+            output[j]["RTT ratio"] = (curr_recv_time - curr_send_time) / one_way_us
+
             # EWMA metrics.
             for (metric, ), alpha in itertools.product(EWMAS, ALPHAS):
                 if j > 0:
                     if "RTT ratio" in metric:
-                        curr_send_time = send_pkts[j + packet_loss][1]
-                        new = ((curr_recv_time - curr_send_time) /
-                                one_way_us)
+                        new = output[j]["RTT ratio"]
                     elif "inter-arrival time" in metric:
                         new = interarrival_time
                     elif "loss rate" in metric:
@@ -199,13 +204,6 @@ def parse_pcap(sim_dir, out_dir):
     # (sender, timestamp)
     router_pkts = utils.parse_packets_router(
         path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B)
-    # Number of packets sent by the unfair flows within RTT window
-    # Note that RTT window could be different for flows with different RTT
-    window_pkt_count = [0] * sim.unfair_flws
-    # Start of the window for each flow (index in router_pkts)
-    # Since different flows could have different RTTs, each flow
-    # needs to keep track of their own window start
-    router_window_start = [0] * sim.unfair_flws
     # Index of the output array where the queue occupency result should be appended
     output_index = [0] * sim.unfair_flws
 
@@ -213,43 +211,47 @@ def parse_pcap(sim_dir, out_dir):
         sender = router_pkt[0]
 
         if sender < sim.unfair_flws and output_index[sender] < len(unfair_flws[sender]):
+            
             curr_time = router_pkt[1]
-            window_pkt_count[sender] += 1
 
-            # Update window_start index for this flow, if the window is larger than
-            # the expected window size. Also decrement packet count if the packet
-            # belongs to the unfair flow
-            window_start = router_window_start[sender]
+            for (metric, _). win in itertools.product(WINDOWED, WINDOWS):
+                state = windowed_state[win]
+                state['window_pkt_count'] += 1
 
-            # Use RTT ratio from previous step to compute actual RTT
-            # (Assuming that the one-way delay for the ACK sending back to sender
-            #  would be min one-way delay)
-            rtt_ratio = unfair_flws[sender][output_index[sender]]["RTT ratio"]
-            actual_rtt = min_rtts_us[sender] * (rtt_ratio + 0.5)
+                # Update window_start index for this flow, if the window is larger than
+                # the expected window size. Also decrement packet count if the packet
+                # belongs to the unfair flow
+                window_start = state['router_window_start']
 
-            # To avoid the window size bouncing back and forth,
-            # only allow the window to grow/shrink in one direction
-            if curr_time - router_pkts[window_start][1] > actual_rtt * rtt_window:
-                while (curr_time - router_pkts[window_start][1] >
-                       actual_rtt * rtt_window):
-                    if router_pkts[window_start][0] == sender:
-                        window_pkt_count[sender] -= 1
-                    window_start += 1
-            # Grow the window size to eariler packets
-            elif curr_time - router_pkts[window_start][1] < actual_rtt * rtt_window:
-                while (window_start > 0 and curr_time - router_pkts[window_start][1] <
-                       actual_rtt * rtt_window):
-                    if router_pkts[window_start][0] == sender:
-                        window_pkt_count[sender] += 1
-                    window_start -= 1
+                # Use RTT ratio from previous step to compute actual RTT
+                # (Assuming that the one-way delay for the ACK sending back to sender
+                #  would be min one-way delay)
+                rtt_ratio = output[output_index[sender]]["RTT ratio"]
+                actual_rtt_us = min_rtts_us[sender] * (rtt_ratio + 0.5)
+                window_size = win * actual_rtt_us
 
-            router_window_start[sender] = window_start
-            # Get queue occupency
-            queue_occupency = window_pkt_count[sender] / float(i - window_start + 1)
+                # To avoid the window size bouncing back and forth,
+                # only allow the window to grow/shrink in one direction
+                if curr_time - router_pkts[window_start][1] > window_size:
+                    while (curr_time - router_pkts[window_start][1] >
+                           window_size):
+                        if router_pkts[window_start][0] == sender:
+                            state['window_pkt_count'] -= 1
+                        window_start += 1
+                # Grow the window size to eariler packets
+                elif curr_time - router_pkts[window_start][1] < window_size:
+                    while (window_start > 0 and curr_time - router_pkts[window_start][1] <
+                           window_size):
+                        if router_pkts[window_start][0] == sender:
+                            state['window_pkt_count'] += 1
+                        window_start -= 1
 
-            # Add this record to output array
-            unfair_flws[sender][output_index[sender]]["queue occupancy"] = (
-                queue_occupency)
+                state['router_window_start'] = window_start
+                # Get queue occupency
+                queue_occupency = state['window_pkt_count'] / float(i - window_start + 1)
+
+                # Add this record to output array
+                unfair_flws[sender][output_index[sender]][metric]["queue occupancy windowed"] = queue_occupency
             output_index[sender] = output_index[sender] + 1
 
     # Write to output
