@@ -168,7 +168,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 (arr_times - start_time_us) / interval_us).astype(int):
             if interval_idx == num_buckets:
                 print(f"Warning: Interval is {interval_idx} when it should be "
-                      "in the range [0, {num_buckets}]. Fixing interval...")
+                      f"in the range [0, {num_buckets}]. Fixing interval...")
                 interval_idx -= 1
             assert 0 <= interval_idx < num_buckets, \
                 (f"Invalid idx ({interval_idx}) for the number of buckets "
