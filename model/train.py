@@ -265,9 +265,9 @@ def split_data(net, dat_in, dat_out, bch_trn, bch_tst):
             dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
         if isinstance(net, models.SvmSklearnWrapper)
         else torch.utils.data.DataLoader(
-                dataset_trn,
-                batch_sampler=utils.BalancedSampler(
-                    dataset_trn, bch_trn, drop_last=False)))
+            dataset_trn,
+            batch_sampler=utils.BalancedSampler(
+                dataset_trn, bch_trn, drop_last=False)))
     ldr_val = torch.utils.data.DataLoader(
         utils.Dataset(dat_val_in, dat_val_out), batch_size=bch_tst,
         shuffle=False, drop_last=False)
@@ -463,6 +463,10 @@ def test(net, ldr_tst, dev):
 
 
 def run_sklearn(args, dat_in, dat_out, out_flp):
+    """
+    Trains an sklearn model according to the supplied parameters. Returns the
+    test error (lower is better).
+    """
     # Construct the model.
     print("Building model...")
     net = models.MODELS[args["model"]]()
@@ -484,8 +488,8 @@ def run_sklearn(args, dat_in, dat_out, out_flp):
 
 def run_torch(args, dat_in, dat_out, out_flp):
     """
-    Trains a model according to the supplied parameters. Returns the test error
-    (lower is better).
+    Trains a PyTorch model according to the supplied parameters. Returns the
+    test error (lower is better).
     """
     # Instantiate and configure the network. Move it to the proper device.
     net = models.MODELS[args["model"]]()

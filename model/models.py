@@ -447,9 +447,14 @@ class SvmSklearnWrapper(SvmWrapper):
         return self.net
 
     def train(self, dataset):
+        """ Fits this model to the provided dataset. """
         self.net.fit(*dataset.raw())
 
     def test(self, dataset):
+        """
+        Tests this model on the provided dataset and returns the test accuracy
+        (higher is better).
+        """
         # Compare dat_out and pred to determine accuracy
         dat_in, dat_out = dataset.raw()
         # Evaluate the model on the input data, convert the result to
