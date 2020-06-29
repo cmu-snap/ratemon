@@ -473,11 +473,10 @@ def run_sklearn(args, dat_in, dat_out, out_flp):
     # Training.
     print("Training...")
     net.train(ldr_trn.dataset)
-    print("Done.")
-    # # Save the model.
-    # print(f"Saving: {out_flp}")
-    # with open(out_flp, "w") as fil:
-    #     pickle.dump(net.net, fil)
+    # Save the model.
+    print(f"Saving: {out_flp}")
+    with open(out_flp, "wb") as fil:
+        pickle.dump(net.net, fil)
     # Testing.
     print("Testing...")
     return net.test(ldr_tst.dataset)
