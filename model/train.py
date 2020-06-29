@@ -11,6 +11,7 @@ import math
 import multiprocessing
 import os
 from os import path
+import pickle
 import random
 import sys
 import time
@@ -222,7 +223,7 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     return dat_in_all, dat_out_all, prms_in
 
 
-def split_data(dat_in, dat_out, bch_trn, bch_tst):
+def split_data(net, dat_in, dat_out, bch_trn, bch_tst):
     """
     Divides dat_in and dat_out into training, validation, and test
     sets and constructs data loaders.
@@ -259,10 +260,14 @@ def split_data(dat_in, dat_out, bch_trn, bch_tst):
 
     # Create the dataloaders.
     dataset_trn = utils.Dataset(dat_trn_in, dat_trn_out)
-    ldr_trn = torch.utils.data.DataLoader(
-        dataset_trn,
-        batch_sampler=utils.BalancedSampler(
-            dataset_trn, bch_trn, drop_last=False))
+    ldr_trn = (
+        torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
+        if isinstance(net, models.SvmSklearnWrapper)
+        else torch.utils.data.DataLoader(
+                dataset_trn,
+                batch_sampler=utils.BalancedSampler(
+                    dataset_trn, bch_trn, drop_last=False)))
     ldr_val = torch.utils.data.DataLoader(
         utils.Dataset(dat_val_in, dat_val_out), batch_size=bch_tst,
         shuffle=False, drop_last=False)
@@ -457,7 +462,28 @@ def test(net, ldr_tst, dev):
     return acc_tst
 
 
-def run(args, dat_in, dat_out, out_flp):
+def run_sklearn(args, dat_in, dat_out, out_flp):
+    # Construct the model.
+    print("Building model...")
+    net = models.MODELS[args["model"]]()
+    net.new()
+    # Split the data into training, validation, and test loaders.
+    ldr_trn, _, ldr_tst = split_data(
+        net, dat_in, dat_out, args["train_batch"], args["test_batch"])
+    # Training.
+    print("Training...")
+    net.train(ldr_trn.dataset)
+    print("Done.")
+    # # Save the model.
+    # print(f"Saving: {out_flp}")
+    # with open(out_flp, "w") as fil:
+    #     pickle.dump(net.net, fil)
+    # Testing.
+    print("Testing...")
+    return net.test(ldr_tst.dataset)
+
+
+def run_torch(args, dat_in, dat_out, out_flp):
     """
     Trains a model according to the supplied parameters. Returns the test error
     (lower is better).
@@ -474,7 +500,7 @@ def run(args, dat_in, dat_out, out_flp):
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        dat_in, dat_out, args["train_batch"], args["test_batch"])
+        net, dat_in, dat_out, args["train_batch"], args["test_batch"])
 
     # Explicitly move the training (and maybe validation) data to the target
     # device.
@@ -535,7 +561,10 @@ def run_many(args_):
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):
         os.makedirs(out_dir)
-    out_flp = path.join(args["out_dir"], "net.pth")
+    net_tmp = models.MODELS[args["model"]]()
+    out_fln = ("model.pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
+               else "net.pth")
+    out_flp = path.join(args["out_dir"], out_fln)
     # If a trained model file already exists, then delete it.
     if path.exists(out_flp):
         os.remove(out_flp)
@@ -543,7 +572,6 @@ def run_many(args_):
     # Load or geenrate training data.
     dat_flp = path.join(out_dir, "data.npz")
     scl_prms_flp = path.join(out_dir, "scale_params.json")
-    net_tmp = models.MODELS[args["model"]]()
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the
     # proper scaling parameters.
@@ -593,7 +621,9 @@ def run_many(args_):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = run(args, dat_in, dat_out, out_flp)
+        res = (run_sklearn(args, dat_in, dat_out, out_flp)
+               if isinstance(net_tmp, models.SvmSklearnWrapper)
+               else run_torch(args, dat_in, dat_out, out_flp))
         if res == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))

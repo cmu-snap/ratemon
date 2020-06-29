@@ -6,6 +6,7 @@ import math
 import random
 
 import numpy as np
+from sklearn import svm
 import torch
 
 
@@ -34,8 +35,9 @@ class PytorchModelWrapper:
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
         assert self.num_clss > 0, "Invalid number of output classes!"
-        assert self.los_fnc is not None, "No loss function!"
-        assert self.opt is not None, "No optimizer!"
+        if not isinstance(self, SvmSklearnWrapper):
+            assert self.los_fnc is not None, "No loss function!"
+            assert self.opt is not None, "No optimizer!"
 
     def init_hidden(self, batch_size):
         """
@@ -425,6 +427,42 @@ class Svm(torch.nn.Module):
         return self.fc(x)
 
 
+class SvmSklearnWrapper(SvmWrapper):
+    """ Wraps an sklearn SVM. """
+
+    in_spc = ["arrival time", "loss rate"]
+    out_spc = ["queue occupancy"]
+    los_fnc = None
+    opt = None
+
+    def new(self):
+        # Use L1 regularization. Since the number of samples is
+        # greater than the number of features, solve the primal
+        # optimization problem instead of its dual. Automatically set
+        # the class weights based on the class popularity in the
+        # training data. Increase the maximum number of iterations
+        # from 1000 to 10000.
+        self.net = svm.LinearSVC(
+            penalty="l1", dual=False, class_weight="balanced", max_iter=10000)
+        return self.net
+
+    def train(self, dataset):
+        self.net.fit(*dataset.raw())
+
+    def test(self, dataset):
+        # Compare dat_out and pred to determine accuracy
+        dat_in, dat_out = dataset.raw()
+        # Evaluate the model on the input data, convert the result to
+        # a tensor for each manipulation, and compare it to the ground
+        # truth. self.check_output() returns the number of examples
+        # classifier correctly, so dividing by the total number of
+        # samples yields the accuracy.
+        acc_tst = self.check_output(
+            torch.tensor(self.net.predict(dat_in)), dat_out) / dat_in.size()[0]
+        print(f"Test accuracy: {acc_tst * 100:.2f}%")
+        return acc_tst
+
+
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
@@ -631,5 +669,6 @@ class FcFour(torch.nn.Module):
 MODELS = {
     "BinaryDnn": BinaryDnnWrapper,
     "Svm": SvmWrapper,
+    "SvmSklearn": SvmSklearnWrapper,
     "Lstm": LstmWrapper
 }
