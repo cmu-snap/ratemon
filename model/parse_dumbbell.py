@@ -260,6 +260,9 @@ def parse_pcap(sim_dir, out_dir):
     # should be appended. Once for each unfair flow, since the
     # per-flow output is stored separately.
     output_idxs = [0] * sim.unfair_flws
+    # Track the number of other flows' packets that have arrived since
+    # the last packet for each flow.
+    pkts_since_last = {sender: 0 for sender in range(sim.unfair_flws)}
     # State that the windowed metrics need to track across
     # packets.
     windowed_state = {win: {
@@ -297,8 +300,19 @@ def parse_pcap(sim_dir, out_dir):
                         # and receiver logs, above.
                         continue
                     if "queue occupancy" in metric:
-                        # TODO: Queue occupancy EWMA.
-                        new = 0
+                        # Extra safety check to avoid divide-by-zero
+                        # errors.
+                        assert j > 0, \
+                            ("Cannot calculate queue occupancy EWMA for the "
+                             "first packet.")
+                        # The instanteneous queue occupancy is 1
+                        # divided by the number of packets that have
+                        # entered the queue since the last packet from
+                        # the same flow. This is the fraction of
+                        # packets added to the queue corresponding to
+                        # this flow, over the time since when the
+                        # flow's last packet arrived.
+                        new = 1 / pkts_since_last[sender]
                     else:
                         raise Exception(f"Unknown EWMA metric: {metric}")
                     new_ewma = update_ewma(
@@ -366,6 +380,16 @@ def parse_pcap(sim_dir, out_dir):
                     raise Exception(f"Unknown windowed metric: {metric}")
                 unfair_flws[sender][output_idx][metric] = new
             output_idxs[sender] += 1
+
+        # For each unfair flow except the current packet's flow,
+        # increment the number of packets since the last packet from
+        # that flow.
+        for flw in range(sim.unfair_flws):
+            if flw != sender:
+                pkts_since_last[flw] += 1
+        # For the current packet's flw, the number of packets since
+        # the last packet in this flow is now 1.
+        pkts_since_last[sender] = 1
 
     # Write to output
     if path.exists(out_flp):
