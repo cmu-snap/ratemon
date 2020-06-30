@@ -46,7 +46,7 @@ WINDOWED = [
 ALPHAS = [i / 10 for i in range(1, 11)]
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
-WINDOWS = [2**i for i in range(0, 11, 2)]
+WINDOWS = [2**i for i in range(0, 11)]
 
 
 def make_ewma_metric(metric, alpha):
