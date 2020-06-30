@@ -476,14 +476,19 @@ def run_sklearn(args, dat_in, dat_out, out_flp):
         net, dat_in, dat_out, args["train_batch"], args["test_batch"])
     # Training.
     print("Training...")
+    tim_srt_s = time.time()
     net.train(ldr_trn.dataset)
+    print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
     # Save the model.
     print(f"Saving: {out_flp}")
     with open(out_flp, "wb") as fil:
         pickle.dump(net.net, fil)
     # Testing.
     print("Testing...")
-    return net.test(ldr_tst.dataset)
+    tim_srt_s = time.time()
+    los_tst = net.test(ldr_tst.dataset)
+    print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    return los_tst
 
 
 def run_torch(args, dat_in, dat_out, out_flp):
