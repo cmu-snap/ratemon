@@ -162,6 +162,7 @@ def parse_pcap(sim_dir, out_dir):
                 metric = make_ewma_metric(metric, alpha)
                 if j > 0:
                     if "RTT ratio" in metric:
+                        # TODO: RTT ratio EWMA
                         new = 0
                     elif "inter-arrival time" in metric:
                         new = interarrival_time
@@ -252,7 +253,7 @@ def parse_pcap(sim_dir, out_dir):
     # Index of the output array where the queue occupency result
     # should be appended. Once for each unfair flow, since the
     # per-flow output is stored separately.
-    output_index = [0] * sim.unfair_flws
+    output_idxs = [0] * sim.unfair_flws
     # State that the windowed metrics need to track across
     # packets.
     windowed_state = {win: {
@@ -264,9 +265,15 @@ def parse_pcap(sim_dir, out_dir):
     for j, router_pkt in enumerate(router_pkts):
         # The flow to which this packet belongs.
         sender, curr_time = router_pkt
-        # Process only packets that are part of one of the unfair flows.
-        # What is this for: and output_index[sender] < len(unfair_flws[sender]):
-        if sender < sim.unfair_flws:
+        # Process only packets that are part of one of the unfair
+        # flows. Discard packets that did not make it to the receiver
+        # (e.g., at the end of the experiment).
+        if (sender < sim.unfair_flws and
+            output_idxs[sender] < unfair_flws[sender].shape[0]):
+            # We cannot move this above the if-statement condition
+            # because it is valid only if sender < sim.unfair_flws.
+            output_idx = output_idxs[sender]
+
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
@@ -284,15 +291,16 @@ def parse_pcap(sim_dir, out_dir):
                         # and receiver logs, above.
                         continue
                     if "queue occupancy" in metric:
+                        # TODO: Queue occupancy EWMA.
                         new = 0
                     else:
                         raise Exception(f"Unknown EWMA metric: {metric}")
                     new_ewma = update_ewma(
-                        unfair_flws[sender][output_index[sender] - 1][metric],
+                        unfair_flws[sender][output_idx - 1][metric],
                         new, alpha)
                 else:
                     new_ewma = 0
-                unfair_flws[sender][output_index[sender]][metric] = new_ewma
+                unfair_flws[sender][output_idx][metric] = new_ewma
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
@@ -317,7 +325,7 @@ def parse_pcap(sim_dir, out_dir):
                     # actual RTT (Assuming that the one-way delay for
                     # the ACK sending back to sender would be min
                     # one-way delay).
-                    rtt_ratio = unfair_flws[sender][output_index[sender]]["true RTT ratio"]
+                    rtt_ratio = unfair_flws[sender][output_idx]["true RTT ratio"]
                     actual_rtt_us = min_rtts_us[sender] * (rtt_ratio + 0.5)
                     window_size = win * actual_rtt_us
                     # To avoid the window size bouncing back and
@@ -346,8 +354,8 @@ def parse_pcap(sim_dir, out_dir):
                     new = state["window_pkt_count"] / (j - window_start + 1)
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
-                unfair_flws[sender][output_index[sender]][metric] = new
-            output_index[sender] += 1
+                unfair_flws[sender][output_idx][metric] = new
+            output_idxs[sender] += 1
 
     # Write to output
     if path.exists(out_flp):
