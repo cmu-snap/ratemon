@@ -29,8 +29,8 @@ REGULAR = [
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
 EWMAS = [
-    ("RTT ratio ewma", "float"),
     ("inter-arrival time ewma", "float"),
+    ("RTT ratio ewma", "float"),
     ("loss rate ewma", "float"),
     ("queue occupancy ewma", "float")
 ]
@@ -38,6 +38,7 @@ EWMAS = [
 # window sizes.
 WINDOWED = [
     ("average inter-arrival time windowed", "float"),
+    ("average RTT ratio windowed", "float"),
     ("loss rate windowed", "float"),
     ("queue occupancy windowed", "float")
 ]
@@ -161,13 +162,16 @@ def parse_pcap(sim_dir, out_dir):
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
                 if j > 0:
-                    if "RTT ratio" in metric:
+                    if "inter-arrival time" in metric:
+                        new = interarrival_time
+                    elif "RTT ratio" in metric:
                         # TODO: RTT ratio EWMA
                         new = 0
-                    elif "inter-arrival time" in metric:
-                        new = interarrival_time
                     elif "loss rate" in metric:
-                        # Why is this divided by (curr_loss + 1)?
+                        # Divide curr_loss by (curr_loss + 1) because
+                        # over the course of sending (curr_loss + 1)
+                        # packets, one got through and curr_loss were
+                        # lost.
                         new = curr_loss / (curr_loss + 1)
                     elif "queue occupancy" in metric:
                         # Queue occupancy is calculated using the
@@ -190,7 +194,10 @@ def parse_pcap(sim_dir, out_dir):
                     # This is calculated as part of the loss rate
                     # calculation, below.
                     continue
-                if "loss rate" in metric:
+                if "average RTT ratio" in metric:
+                    # TODO: Average RTT ratio over a window.
+                    new = 0
+                elif "loss rate" in metric:
                     # Process packet loss.
                     if (curr_loss > 0 and j > 0):
                         prev_recv_time = recv_pkts[j - 1][1]
@@ -269,7 +276,7 @@ def parse_pcap(sim_dir, out_dir):
         # flows. Discard packets that did not make it to the receiver
         # (e.g., at the end of the experiment).
         if (sender < sim.unfair_flws and
-            output_idxs[sender] < unfair_flws[sender].shape[0]):
+                output_idxs[sender] < unfair_flws[sender].shape[0]):
             # We cannot move this above the if-statement condition
             # because it is valid only if sender < sim.unfair_flws.
             output_idx = output_idxs[sender]
@@ -278,13 +285,13 @@ def parse_pcap(sim_dir, out_dir):
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
                 if j > 0:
-                    if "RTT ratio" in metric:
-                        # The RTT ratio is calculated using the sender
-                        # and receiver logs, above.
-                        continue
                     if "inter-arrival time" in metric:
                         # The inter-arrival time is calculated using
                         # the sender and receiver logs, above.
+                        continue
+                    if "RTT ratio" in metric:
+                        # The RTT ratio is calculated using the sender
+                        # and receiver logs, above.
                         continue
                     if "loss rate" in metric:
                         # The loss rate is calculated using the sender
@@ -309,6 +316,10 @@ def parse_pcap(sim_dir, out_dir):
                 if "average inter-arrival time" in metric:
                     # The average inter-arrival time is calculated
                     # using the sender and receiver logs, above.
+                    continue
+                if "average RTT ratio" in metric:
+                    # The average RTT ratio time is calculated using
+                    # the sender and receiver logs, above.
                     continue
                 if "loss rate" in metric:
                     # The loss rate is calculated using the sender
