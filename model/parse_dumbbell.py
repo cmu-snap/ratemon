@@ -146,17 +146,16 @@ def parse_pcap(sim_dir, out_dir):
                 send_pkt_seq = send_pkts[j + packet_loss][0]
             curr_loss = packet_loss - prev_loss
 
-            # Calculate the true RTT ratio as the actual one-way delay
-            # divided by the minimum one-way delay. Of course, this
-            # may not be the same as the true RTT divided by the
-            # minimum RTT, since packets on the reverse path likely
-            # experience less queuing. Therefore, this can be thought
-            # of as an upper bound on the true RTT ratio.
+            # Calculate the true RTT ratio.
             output[j]["true RTT ratio"] = (
-                (curr_recv_time -
-                 # Calculate the send time of this packet.
-                 send_pkts[j + packet_loss][1]) /
-                one_way_us)
+                # Look up the send time of this packet to calculate
+                # the true sender-receiver delay.
+                (curr_recv_time - send_pkts[j + packet_loss][1] +
+                 # Assume that, on the reverse path, packets will
+                 # experience no queuing delay.
+                 one_way_us) /
+                # Compare to the minimum RTT.
+                (2 * one_way_us))
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
