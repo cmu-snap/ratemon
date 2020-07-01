@@ -197,7 +197,7 @@ def parse_pcap(sim_dir, out_dir):
                     # First loss event
                     curr_event_start_idx = curr_loss_start
                     curr_event_start_time = send_pkts[curr_event_start_idx][1]
-                    return 1 / (1.0 * (curr_loss + 1))
+                    output[j]["loss event rate"] = 1 / (1.0 * (curr_loss + 1))
                 else:
                     # See if any loss packets start a new interval
                     prev_recv_time = recv_pkts[j - 1][1]
