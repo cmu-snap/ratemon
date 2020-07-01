@@ -24,7 +24,8 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time", "int32"),
     ("inter-arrival time", "int32"),
-    ("true RTT ratio", "float")
+    ("true RTT ratio", "float"),
+    ("loss event rate", "float"),
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -47,7 +48,8 @@ ALPHAS = [i / 10 for i in range(1, 11)]
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
 WINDOWS = [2**i for i in range(0, 11)]
-
+# Number of RTTs for computing loss event rate
+NUM_INTERVALS = 8
 
 def make_ewma_metric(metric, alpha):
     """ Format the name of an EWMA metric. """
@@ -71,6 +73,30 @@ def update_ewma(prev_ewma, new_val, alpha):
     """ Update an exponentially weighted moving average. """
     return alpha * new_val + (1 - alpha) * prev_ewma
 
+def make_interval_weight():
+    weight = [1.0] * NUM_INTERVALS
+    for i in range(NUM_INTERVALS):
+        if i < NUM_INTERVALS / 2:
+            weight[i] = 1.0
+        else:
+            weight[i] = 2 * (i - 1) / (1.0 * (i + 2))
+    return weight
+
+def compute_weighted_average(curr_event_size, loss_event_intervals,
+                             loss_interval_weight):
+    i_tot0 = curr_event_size
+    i_tot1 = 0
+    w_tot = 1.0
+    for i in range(len(loss_event_intervals) - 1):
+        i_tot0 += loss_event_intervals[i] * loss_interval_weight[i + 1]
+        w_tot += loss_interval_weight[i + 1]
+
+    for i in range(len(loss_event_intervals)):
+        i_tot1 += loss_event_intervals[i] * loss_interval_weight[i]
+
+    i_tot = max(i_tot0, i_tot1)
+    i_mean = i_tot / w_tot
+    return 1.0 / i_mean
 
 def parse_pcap(sim_dir, out_dir):
     """Parse a PCAP file.
@@ -93,6 +119,10 @@ def parse_pcap(sim_dir, out_dir):
 
     unfair_flws = []
     min_rtts_us = []
+    loss_interval_weight = make_interval_weight()
+    loss_event_intervals = deque()
+    curr_event_start_idx = 0
+    curr_event_start_time = 0
 
     for unfair_idx in range(sim.unfair_flws):
         one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx] * 1.0
@@ -156,6 +186,47 @@ def parse_pcap(sim_dir, out_dir):
                  one_way_us) /
                 # Compare to the minimum RTT.
                 (2 * one_way_us))
+
+            # Calculate loss event rate
+            if packet_loss == 0:
+                output[j]["loss event rate"] = 0.0
+
+            if curr_loss > 0:
+                curr_loss_start = j + packet_loss - curr_loss
+                if curr_event_start_idx == 0:
+                    # First loss event
+                    curr_event_start_idx = curr_loss_start
+                    curr_event_start_time = send_pkts[curr_event_start_idx][1]
+                    return 1 / (1.0 * (curr_loss + 1))
+                else:
+                    # See if any loss packets start a new interval
+                    prev_recv_time = recv_pkts[j - 1][1]
+                    loss_interval = (
+                        curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
+                    for k in range(0, curr_loss):
+                        loss_time = prev_recv_time + (k + 1) * loss_interval
+                        if (loss_time - curr_event_start_time >=
+                                output[j]["true RTT ratio"] * 2 * one_way_us):
+                            # Start of a new event - first store the previous event
+                            loss_event_intervals.appendleft(curr_loss_start + k -
+                                                            curr_event_start_idx)
+                            if len(loss_event_intervals) > NUM_INTERVALS:
+                                loss_event_intervals.pop()
+                            curr_event_start_time = loss_time
+                            curr_event_start_idx = curr_loss_start + k
+                    curr_event_size = j + packet_loss - curr_event_start_idx
+                    output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
+                                                                            loss_event_intervals,
+                                                                            loss_interval_weight)
+            else:
+                if packet_loss == 0:
+                    output[j]["loss event rate"] = 0.0
+                else:
+                    # Increase current event size
+                    curr_event_size = j + packet_loss - curr_event_start_idx
+                    output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
+                                                                            loss_event_intervals,
+                                                                            loss_interval_weight)
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
