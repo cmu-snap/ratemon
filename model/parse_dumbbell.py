@@ -33,6 +33,7 @@ REGULAR = [
 # that are recorded for various values of alpha.
 EWMAS = [
     ("inter-arrival time ewma", "float"),
+    ("throughput ewma", "float"),
     ("RTT ratio ewma", "float"),
     ("loss rate ewma", "float"),
     ("queue occupancy ewma", "float")
@@ -41,6 +42,7 @@ EWMAS = [
 # window sizes.
 WINDOWED = [
     ("average inter-arrival time windowed", "float"),
+    ("average throughput windowed", "float"),
     ("average RTT ratio windowed", "float"),
     ("loss rate windowed", "float"),
     ("queue occupancy windowed", "float")
@@ -321,6 +323,15 @@ def parse_pcap(sim_dir, out_dir):
                 if j > 0:
                     if "inter-arrival time" in metric:
                         new = interarrival_time
+
+                        tput_metric = make_ewma_metric("throughput ewma", alpha)
+                        new_tput = 0 if interarrival_time == 0 else 1 / interarrival_time
+                        output[j][tput_metric] = update_ewma(
+                            output[j - 1][tput_metric], new_tput, alpha)
+                    elif "throughput" in metric:
+                        # The throughput is calculated during the
+                        # inter-arrival time calculation, above.
+                        continue
                     elif "RTT ratio" in metric:
                         # TODO: RTT ratio EWMA
                         new = 0
@@ -350,6 +361,10 @@ def parse_pcap(sim_dir, out_dir):
                 if "average inter-arrival time" in metric:
                     # This is calculated as part of the loss rate
                     # calculation, below.
+                    continue
+                if "average throughput" in metric:
+                    # The average throughput is calculated as part of
+                    # the loss rate calculation, below.
                     continue
                 if "average RTT ratio" in metric:
                     # TODO: Average RTT ratio over a window.
@@ -391,11 +406,15 @@ def parse_pcap(sim_dir, out_dir):
                         new = 0
 
                     # Calculate the average inter-arrival time.
+                    avg_interarrival_time = (
+                        (curr_recv_time -
+                         recv_pkts[j - state["window_start"]][1]) /
+                        (j - state["window_start"] + 1))
                     output[j][make_win_metric(
-                        "average inter-arrival time windowed", win)] = (
-                            (curr_recv_time -
-                             recv_pkts[j - state["window_start"]][1]) /
-                            (j - state["window_start"] + 1))
+                        "average inter-arrival time windowed", win)] = avg_interarrival_time
+                    new_tput = 0 if avg_interarrival_time == 0 else 1 / avg_interarrival_time
+                    output[j][make_win_metric(
+                        "average throughput windowed", win)] = new_tput
                 elif "queue occupancy" in metric:
                     # Queue occupancy is calculated using the router's
                     # PCAP files, below.
@@ -457,6 +476,10 @@ def parse_pcap(sim_dir, out_dir):
                         # The inter-arrival time is calculated using
                         # the sender and receiver logs, above.
                         continue
+                    if "throughput" in metric:
+                        # The throughput is calculated using the
+                        # sender and receiver logs, above.
+                        continue
                     if "RTT ratio" in metric:
                         # The RTT ratio is calculated using the sender
                         # and receiver logs, above.
@@ -495,6 +518,10 @@ def parse_pcap(sim_dir, out_dir):
                 if "average inter-arrival time" in metric:
                     # The average inter-arrival time is calculated
                     # using the sender and receiver logs, above.
+                    continue
+                if "average throughput" in metric:
+                    # The average throughput is calculated using the
+                    # sender and receiver logs, above.
                     continue
                 if "average RTT ratio" in metric:
                     # The average RTT ratio time is calculated using
