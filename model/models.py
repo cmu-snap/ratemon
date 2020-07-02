@@ -515,22 +515,21 @@ class SvmSklearnWrapper(SvmWrapper):
             penalty="l1", dual=False, class_weight="balanced", max_iter=10000)
         return self.net
 
-    def train(self, dataset):
+    def train(self, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
-        self.net.fit(*dataset.raw())
+        self.net.fit(dat_in, dat_out)
 
-    def test(self, dataset):
+    def test(self, dat_in, dat_out):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
         """
-        # Compare dat_out and pred to determine accuracy
-        dat_in, dat_out = dataset.raw()
-        # Evaluate the model on the input data, convert the result to
-        # a tensor for each manipulation, and compare it to the ground
-        # truth. self.check_output() returns the number of examples
-        # classifier correctly, so dividing by the total number of
-        # samples yields the accuracy.
+        # Compare dat_out andthe predictions to determine
+        # accuracy. Evaluate the model on the input data, convert the
+        # result to a tensor for each manipulation, and compare it to
+        # the ground truth. self.check_output() returns the number of
+        # examples classifier correctly, so dividing by the total
+        # number of samples yields the accuracy.
         acc_tst = self.check_output(
             torch.tensor(self.net.predict(dat_in)), dat_out) / dat_in.size()[0]
         print(f"Test accuracy: {acc_tst * 100:.2f}%")

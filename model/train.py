@@ -491,7 +491,7 @@ def run_sklearn(args, dat_in, dat_out, out_flp):
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(ldr_trn.dataset)
+    net.train(*ldr_trn.dataset.raw())
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
     # Save the model.
     print(f"Saving: {out_flp}")
@@ -500,7 +500,7 @@ def run_sklearn(args, dat_in, dat_out, out_flp):
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
-    los_tst = net.test(ldr_tst.dataset)
+    los_tst = net.test(*ldr_tst.dataset.raw())
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     return los_tst
 
