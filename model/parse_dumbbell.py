@@ -3,7 +3,6 @@
 
 import argparse
 import itertools
-import math
 import multiprocessing
 import os
 from os import path
@@ -287,7 +286,6 @@ def parse_pcap(sim_dir, out_dir):
                     curr_event_start_time = send_pkts[curr_event_start_idx][1]
                     loss_event_rate = 1 / (1.0 * (curr_loss + 1))
                     output[j]["loss event rate"] = loss_event_rate
-                    output[j]["loss event rate sqrt"] = math.sqrt(loss_event_rate)
                 else:
                     # See if any loss packets start a new interval
                     prev_recv_time = recv_pkts[j - 1][1]
@@ -378,7 +376,6 @@ def parse_pcap(sim_dir, out_dir):
                         for k in range(0, curr_loss):
                             state["loss_queue"].append(
                                 prev_recv_time + (k + 1) * loss_interval)
-
                     # Pop out earlier loss.
                     while (state["loss_queue"] and
                            (state["loss_queue"][0] <
@@ -422,6 +419,9 @@ def parse_pcap(sim_dir, out_dir):
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
+        valid = np.where(output["loss event rate"] > 0)
+        output["loss event rate sqrt"][valid] = np.reciprocal(
+            np.sqrt(output["loss event rate"][valid]))
         unfair_flws.append(output)
 
         # print(f"total losses detected: {packet_loss}")
