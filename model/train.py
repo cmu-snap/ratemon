@@ -135,6 +135,16 @@ def process_sim(idx, total, net, sim_flp, warmup):
     # Convert output features to class labels.
     dat_out = net.convert_to_class(sim, dat_out)
 
+    # chk_nan = lambda arr: [np.isnan(arr[fet]).any() for fet in arr.dtype.names]
+    def has_nan(arr):
+        for fet in arr.dtype.names:
+            if np.isnan(arr[fet]).any():
+                print(f"    Simulation {sim_flp} has NaNs in feature {fet}")
+                return True
+        return False
+    if has_nan(dat_in) or has_nan(dat_out):
+        return None
+
     # Verify data.
     assert dat_in.shape[0] == dat_out.shape[0], \
         f"{sim_flp}: Input and output should have the same number of rows."
@@ -173,6 +183,10 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
         with multiprocessing.Pool() as pol:
             # Each element of dat_all corresponds to a single simulation.
             dat_all = pol.starmap(process_sim, sims_args)
+    # Throw away results from simulations that could not be parsed.
+    dat_all = [dat for dat in dat_all if dat is not None]
+    print(f"Discarded {tot_sims - len(dat_all)} simulations!")
+    assert dat_all, "No valid simulations found!"
 
     # Validate data.
     dim_in = None

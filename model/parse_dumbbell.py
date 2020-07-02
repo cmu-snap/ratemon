@@ -584,6 +584,11 @@ def parse_pcap(sim_dir, out_dir):
         # the last packet in this flow is now 1.
         pkts_since_last[sender] = 1
 
+    for flw_dat in unfair_flws:
+        for fet in flw_dat.dtype.names:
+            assert not np.isnan(flw_dat[fet]).any(), \
+                f"Simulation {sim_dir} has NaNs in feature {fet}"
+
     # Write to output
     if path.exists(out_flp):
         print(f"    Output already exists: {out_flp}")
