@@ -435,7 +435,7 @@ class SvmSklearnWrapper(SvmWrapper):
         "inter-arrival time",
         "true RTT ratio",
         "loss event rate",
-        "loss event rate sqrt",
+        # "loss event rate sqrt",
         "inter-arrival time ewma-alpha0.1",
         "inter-arrival time ewma-alpha0.2",
         "inter-arrival time ewma-alpha0.3",
