@@ -61,7 +61,7 @@ VALS_PER_EPC = 15
 SYNC = False
 
 
-def scale_fets(dat, scl_grps, standardize=True):
+def scale_fets(dat, scl_grps, standardize=False):
     """
     Returns a copy of dat with the columns normalized. If standardize
     is True, then the scaling groups are normalized to a mean of 0 and
@@ -96,8 +96,8 @@ def scale_fets(dat, scl_grps, standardize=True):
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [
-            np.mean(fet_values) if standardize else rdc(np.min, fet_values),
-            np.std(fet_values) if standardize else rdc(np.max, fet_values)
+            np.mean(utils.clean(fet_values)) if standardize else rdc(np.min, fet_values),
+            np.std(utils.clean(fet_values)) if standardize else rdc(np.max, fet_values)
         ]
 
     # Create an empty array to hold the min and max values (i.e.,
