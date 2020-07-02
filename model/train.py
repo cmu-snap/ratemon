@@ -61,11 +61,17 @@ VALS_PER_EPC = 15
 SYNC = False
 
 
-def scale_fets(dat, scl_grps):
+def scale_fets(dat, scl_grps, standardize=True):
     """
-    Returns a copy of dat with the columns scaled between 0 and
-    1. Also returns an array of shape (dat_all[0].shape[1], 2) where
-    row i contains the min and the max of column i in dat.
+    Returns a copy of dat with the columns normalized. If standardize
+    is True, then the scaling groups are normalized to a mean of 0 and
+    a variance of 1. If standardize is False, then the scaling groups
+    are normalized to the range [0, 1]. Also returns an array of shape
+    (dat_all[0].shape[1], 2) where row i contains the scaling
+    parameters of column i in dat. If standardize is True, then the
+    scaling parameters are the mean and standard deviation of that
+    column's scaling group. If standardize is False, then the scaling
+    parameters are the min and max of that column's scaling group.
     """
     fets = dat.dtype.names
     assert fets is not None, \
@@ -89,7 +95,10 @@ def scale_fets(dat, scl_grps):
         # Extract the columns corresponding to this scaling group.
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
-        scl_grps_prms[scl_grp] = [rdc(np.min, fet_values), rdc(np.max, fet_values)]
+        scl_grps_prms[scl_grp] = [
+            np.mean(fet_values) if standardize else rdc(np.min, fet_values),
+            np.std(fet_values) if standardize else rdc(np.max, fet_values)
+        ]
 
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
@@ -98,17 +107,31 @@ def scale_fets(dat, scl_grps):
     new = np.empty(dat.shape, dtype=dat.dtype)
     # Rescale each feature based on its scaling group's min and max.
     for fet_idx, fet in enumerate(fets):
-        # Look up the min and max values for this feature's scaling group.
-        min_in, max_in = scl_grps_prms[scl_grps[fet_idx]]
+        # Look up the parameters for this feature's scaling group.
+        prm_1, prm_2 = scl_grps_prms[scl_grps[fet_idx]]
         # Store this min and max in the list of per-column scaling parameters.
-        scl_prms[fet_idx] = np.array([min_in, max_in])
-        #
+        scl_prms[fet_idx] = np.array([prm_1, prm_2])
         fet_values = dat[fet]
-        new[fet] = (
-            # Handle the rare case where all of the feature values are the same.
-            np.zeros(
-                fet_values.shape, dtype=fet_values.dtype) if min_in == max_in
-            else utils.scale(fet_values, min_in, max_in, min_out=0, max_out=1))
+        if standardize:
+            # prm_1 is the mean and prm_2 is the standard deviation.
+            scaled = (
+                # Handle the rare case where the standard deviation is
+                # 0 (meaning that all of the feature values are the
+                # same).
+                np.zeros(
+                    fet_values.shape, dtype=fet_values.dtype) if prm_2 == 0
+                else (fet_values - prm_1) / prm_2)
+        else:
+            # prm_1 is the min and prm_2 is the max.
+            scaled = (
+                # Handle the rare case where the min and the max are
+                # the same (meaning that all of the feature values are
+                # the same.
+                np.zeros(
+                    fet_values.shape, dtype=fet_values.dtype) if prm_1 == prm_2
+                else utils.scale(
+                    fet_values, prm_1, prm_2, min_out=0, max_out=1))
+        new[fet] = scaled
 
     return new, scl_prms
 
