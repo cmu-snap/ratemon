@@ -144,8 +144,9 @@ class Sim():
         self.name = sim
         toks = sim.split("-")
         if sim.endswith(".npz"):
-            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s-2rttW.npz
-            toks = toks[:-1]
+            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s.npz
+            # Remove ".npz" from the last token.
+            toks[-1] = toks[-1][:-4]
         # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
         (bw_Mbps, btl_delay_us, queue_p, unfair_flws, other_flws, edge_delays,
          payload_B, dur_s) = toks
