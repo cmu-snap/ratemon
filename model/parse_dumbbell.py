@@ -315,7 +315,6 @@ def parse_pcap(sim_dir, out_dir):
                     output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
                                                                             loss_event_intervals,
                                                                             loss_interval_weight)
-
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
