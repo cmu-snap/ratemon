@@ -153,6 +153,87 @@ def parse_pcap(sim_dir, out_dir):
         # Final output.
         output = np.empty(len(recv_pkts), dtype=DTYPE)
 
+        # negative_gaps = 0
+        # big_gaps = 0
+        # big_gap_packets = 0
+        # negative_gap_packets = 0
+        # strange_gaps = 0
+        # max_seq = 0
+        # correct_gaps = 0
+        # other = 0
+        # retransmits = 0
+        # for j, recv_pkt in enumerate(recv_pkts):
+        #     cur_seq = recv_pkt[0]
+        #     if cur_seq <= max_seq:
+        #         retransmits += 1
+        #     max_seq = max(max_seq, cur_seq)
+        #     if j == 0:
+        #         continue
+        #     seq_diff = cur_seq - recv_pkts[j - 1][0]
+        #     seq_diff_packets = abs(seq_diff / 1380)
+        #     if seq_diff < 0:
+        #         print(f"negative diff: {seq_diff}")
+        #         negative_gaps += 1
+        #         negative_gap_packets += seq_diff_packets
+        #     elif 0 <= seq_diff < 1380:
+        #         print(f"stange diff: {seq_diff}")
+        #         strange_gaps += 1
+        #     elif seq_diff == 1380:
+        #         correct_gaps += 1
+        #     elif 1380 < seq_diff:
+        #         print(f"big diff: {seq_diff}")
+        #         big_gaps += 1
+        #         big_gap_packets += seq_diff_packets
+        #     else:
+        #         other += 1
+        # num_sent = len(send_pkts)
+        # num_recv = len(recv_pkts)
+        # bdp = sim.bw_Mbps * 1e6 * (2 * sim.edge_delays[unfair_idx] + sim.btl_delay_us) * 1e-6 / (1380 * 8)
+        # total_cap = (10e9 * sim.edge_delays[unfair_idx] * 1e-6 * 2 + sim.bw_Mbps * 1e6 * sim.btl_delay_us * 1e-6) / (1380 * 8)
+        # aligned = np.zeros((num_sent, ), dtype=[("send seq", "int"), ("received?", "int")])
+        # assert num_sent >= num_recv
+        # send_idx = 0
+        # recv_idx = 0
+        # num_valid = None
+        # for send_pkt in send_pkts:
+        #     send_seq = send_pkt[0]
+        #     aligned[send_idx][0] = send_seq
+        #     if recv_idx < num_recv:
+        #         recv_seq = recv_pkts[recv_idx][0]
+        #         if send_seq == recv_seq:
+        #             aligned[send_idx][1] = 1
+        #             recv_idx += 1
+        #     else:
+        #         if num_valid is None:
+        #             num_valid = send_idx
+        #     send_idx += 1
+        # print("Send seq, received?")
+        # for send_seq, was_received in aligned.tolist():
+        #     print(send_seq, "-----------------------------------------------------" if not was_received else "1")
+        # missing = abs(np.sum(aligned['received?'] - 1))
+        # tail = num_sent - num_valid
+        # print(f"missing: {missing}")
+        # print(f"tail: {tail}")
+        # print(f"missing not tail: {missing - tail}")
+        # print(f"BDP no queue: {bdp}")
+        # print(f"BDP with queue: {bdp + sim.queue_p}")
+        # print(f"total capacity no queue: {total_cap}")
+        # print(f"total capacity with queue: {total_cap + sim.queue_p}")
+        # print(f"num packets sent: {num_sent}")
+        # print(f"num packets received: {num_recv}")
+        # print(f"missing packets: {num_sent - num_recv}")
+        # print(f"Big gaps: {big_gaps}")
+        # print(f"Negative gaps: {negative_gaps}")
+        # print(f"strange gaps: {strange_gaps}")
+        # print(f"correct gaps: {correct_gaps}")
+        # print(f"other gaps: {other}")
+        # print(f"Big gap packets: {big_gap_packets}")
+        # print(f"Negative gap packets: {negative_gap_packets}")
+        # print(f"big/negative gap diff: {big_gap_packets - negative_gap_packets}")
+        # print(f"end-to-end seq diff in packets: {(recv_pkts[-1][0] - recv_pkts[0][0]) / 1380}")
+        # print(f"max seq in packets: {max_seq / 1380}")
+        # print(f"retransmits: {retransmits}")
+
         for j, recv_pkt in enumerate(recv_pkts):
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
@@ -177,6 +258,10 @@ def parse_pcap(sim_dir, out_dir):
                 packet_loss += 1
                 send_pkt_seq = send_pkts[j + packet_loss][0]
             curr_loss = packet_loss - prev_loss
+
+            # if curr_loss > 0:
+            #     print(f"Lost packets: {curr_loss}")
+            # continue
 
             # Calculate the true RTT ratio.
             output[j]["true RTT ratio"] = (
@@ -296,6 +381,10 @@ def parse_pcap(sim_dir, out_dir):
                     # received within the RTT window, then output 0
                     # for the loss rate.
                     if j - state["window_start"] > 0:
+                        # len_loss_q = len(state["loss_queue"])
+                        # num_pkts = len_loss_q + j - state["window_start"]
+                        # loss_rate = len_loss_q / num_pkts
+                        # print(f"len_loss_q: {len_loss_q}, num_pkts: {num_pkts}, loss rate: {loss_rate}")
                         new = (len(state["loss_queue"]) / (1.0 * (
                             len(state["loss_queue"]) + j -
                             state["window_start"])))
@@ -316,6 +405,10 @@ def parse_pcap(sim_dir, out_dir):
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
         unfair_flws.append(output)
+
+        # print(f"total losses detected: {packet_loss}")
+        # raise Exception()
+
     # Save memory by explicitly deleting the sent and received packets
     # after they've been parsed. This happens outside of the above
     # for-loop because only the last iteration's sent and received
