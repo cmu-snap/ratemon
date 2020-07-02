@@ -430,8 +430,55 @@ class Svm(torch.nn.Module):
 class SvmSklearnWrapper(SvmWrapper):
     """ Wraps an sklearn SVM. """
 
-    in_spc = ["arrival time", "loss rate"]
-    out_spc = ["queue occupancy"]
+    in_spc = [
+        "arrival time",
+        "inter-arrival time",
+        "loss event rate",
+        "loss event rate sqrt",
+        "inter-arrival time ewma-alpha0.1",
+        "inter-arrival time ewma-alpha0.2",
+        "inter-arrival time ewma-alpha0.3",
+        "inter-arrival time ewma-alpha0.4",
+        "inter-arrival time ewma-alpha0.5",
+        "inter-arrival time ewma-alpha0.6",
+        "inter-arrival time ewma-alpha0.7",
+        "inter-arrival time ewma-alpha0.8",
+        "inter-arrival time ewma-alpha0.9",
+        "inter-arrival time ewma-alpha1.0",
+        "loss rate ewma-alpha0.1",
+        "loss rate ewma-alpha0.2",
+        "loss rate ewma-alpha0.3",
+        "loss rate ewma-alpha0.4",
+        "loss rate ewma-alpha0.5",
+        "loss rate ewma-alpha0.6",
+        "loss rate ewma-alpha0.7",
+        "loss rate ewma-alpha0.8",
+        "loss rate ewma-alpha0.9",
+        "loss rate ewma-alpha1.0",
+        "average inter-arrival time windowed-minRtt1",
+        "average inter-arrival time windowed-minRtt2",
+        "average inter-arrival time windowed-minRtt4",
+        "average inter-arrival time windowed-minRtt8",
+        "average inter-arrival time windowed-minRtt16",
+        "average inter-arrival time windowed-minRtt32",
+        "average inter-arrival time windowed-minRtt64",
+        "average inter-arrival time windowed-minRtt128",
+        "average inter-arrival time windowed-minRtt256",
+        "average inter-arrival time windowed-minRtt512",
+        "average inter-arrival time windowed-minRtt1024",
+        "loss rate windowed-minRtt1",
+        "loss rate windowed-minRtt2",
+        "loss rate windowed-minRtt4",
+        "loss rate windowed-minRtt8",
+        "loss rate windowed-minRtt16",
+        "loss rate windowed-minRtt32",
+        "loss rate windowed-minRtt64",
+        "loss rate windowed-minRtt128",
+        "loss rate windowed-minRtt256",
+        "loss rate windowed-minRtt512",
+        "loss rate windowed-minRtt1024"
+    ]
+    out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
 
