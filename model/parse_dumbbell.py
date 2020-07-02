@@ -3,6 +3,7 @@
 
 import argparse
 import itertools
+import math
 import multiprocessing
 import os
 from os import path
@@ -26,6 +27,7 @@ REGULAR = [
     ("inter-arrival time", "int32"),
     ("true RTT ratio", "float"),
     ("loss event rate", "float"),
+    ("loss event rate sqrt", "float"),
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -190,14 +192,15 @@ def parse_pcap(sim_dir, out_dir):
             # Calculate loss event rate
             if packet_loss == 0:
                 output[j]["loss event rate"] = 0.0
-
             if curr_loss > 0:
                 curr_loss_start = j + packet_loss - curr_loss
                 if curr_event_start_idx == 0:
                     # First loss event
                     curr_event_start_idx = curr_loss_start
                     curr_event_start_time = send_pkts[curr_event_start_idx][1]
-                    output[j]["loss event rate"] = 1 / (1.0 * (curr_loss + 1))
+                    loss_event_rate = 1 / (1.0 * (curr_loss + 1))
+                    output[j]["loss event rate"] = loss_event_rate
+                    output[j]["loss event rate sqrt"] = math.sqrt(loss_event_rate)
                 else:
                     # See if any loss packets start a new interval
                     prev_recv_time = recv_pkts[j - 1][1]
