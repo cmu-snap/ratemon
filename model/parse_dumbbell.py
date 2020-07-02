@@ -584,10 +584,21 @@ def parse_pcap(sim_dir, out_dir):
         # the last packet in this flow is now 1.
         pkts_since_last[sender] = 1
 
-    for flw_dat in unfair_flws:
-        for fet in flw_dat.dtype.names:
-            assert not np.isnan(flw_dat[fet]).any(), \
-                f"Simulation {sim_dir} has NaNs in feature {fet}"
+    # Determine if there are any NaNs in the results. For the results
+    # for each unfair flow, look through all features (columns) and
+    # make a note of the features that contain NaNs. Flatten these
+    # lists of feature names, using a set comprehension to remove
+    # duplicates.
+    nan_fets = {
+        fet for fets in
+        [fet_ for fet_ in flw_dat.dtype.names
+         for flw_dat in unfair_flws if np.isnan(flw_dat[fet_])]
+        for fet in fets}
+    # If there are NaNs, then we do not want to save these results.
+    if nan_fets:
+        print((f"    Discarding simulation {sim_dir} because it has NaNs in "
+               f"features: {nan_fets}"))
+        return
 
     # Write to output
     if path.exists(out_flp):
