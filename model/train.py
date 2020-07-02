@@ -77,7 +77,7 @@ def scale_fets(dat, scl_grps):
     scl_grps_unique = set(scl_grps)
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each scaling group.
-    scl_grps_prms = np.empty((len(scl_grps_unique), 2))
+    scl_grps_prms = np.empty((len(scl_grps_unique), 2), dtype="float64")
     # Function to reduce a structured array.
     rdc = (lambda fnc, arr:
            fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
@@ -93,7 +93,7 @@ def scale_fets(dat, scl_grps):
 
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each column (i.e., feature).
-    scl_prms = np.empty((len(fets), 2))
+    scl_prms = np.empty((len(fets), 2), dtype="float64")
     # Create an empty array to hold the rescaled features.
     new = np.empty(dat.shape, dtype=dat.dtype)
     # Rescale each feature based on its scaling group's min and max.

@@ -24,27 +24,27 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time", "int32"),
     ("inter-arrival time", "int32"),
-    ("true RTT ratio", "float"),
-    ("loss event rate", "float"),
-    ("loss event rate sqrt", "float"),
+    ("true RTT ratio", "float64"),
+    ("loss event rate", "float64"),
+    ("loss event rate sqrt", "float64"),
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
 EWMAS = [
-    ("inter-arrival time ewma", "float"),
-    ("throughput ewma", "float"),
-    ("RTT ratio ewma", "float"),
-    ("loss rate ewma", "float"),
-    ("queue occupancy ewma", "float")
+    ("inter-arrival time ewma", "float64"),
+    ("throughput ewma", "float64"),
+    ("RTT ratio ewma", "float64"),
+    ("loss rate ewma", "float64"),
+    ("queue occupancy ewma", "float64")
 ]
 # These metrics are calculated over an window of packets, for varies
 # window sizes.
 WINDOWED = [
-    ("average inter-arrival time windowed", "float"),
-    ("average throughput windowed", "float"),
-    ("average RTT ratio windowed", "float"),
-    ("loss rate windowed", "float"),
-    ("queue occupancy windowed", "float")
+    ("average inter-arrival time windowed", "float64"),
+    ("average throughput windowed", "float64"),
+    ("average RTT ratio windowed", "float64"),
+    ("loss rate windowed", "float64"),
+    ("queue occupancy windowed", "float64")
 ]
 # The alpha values at which to evaluate the EWMA metrics.
 ALPHAS = [i / 10 for i in range(1, 11)]
