@@ -500,6 +500,8 @@ class SvmSklearnWrapper(SvmWrapper):
         "loss rate windowed-minRtt512",
         "loss rate windowed-minRtt1024"
     ]
+    # in_spc = ["arrival time", "true RTT ratio", "loss event rate", "inter-arrival time ewma-alpha0.5",
+    #           "throughput ewma-alpha0.5"]
     out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
