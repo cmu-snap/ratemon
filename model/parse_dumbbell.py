@@ -8,6 +8,8 @@ import os
 from os import path
 import time
 from collections import deque
+import math
+from statistics import mean
 
 import numpy as np
 
@@ -27,6 +29,8 @@ REGULAR = [
     ("true RTT ratio", "float64"),
     ("loss event rate", "float64"),
     ("loss event rate sqrt", "float64"),
+    # -1 no applicable (no loss yet), 0 lower than fair throughput, 1 higher
+    ("mathis model label", "int32")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -123,14 +127,13 @@ def parse_pcap(sim_dir, out_dir):
     unfair_flws = []
     min_rtts_us = []
     loss_interval_weight = make_interval_weight()
-    loss_event_intervals = deque()
-    curr_event_start_idx = 0
-    curr_event_start_time = 0
 
     for unfair_idx in range(sim.unfair_flws):
         one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx] * 1.0
         min_rtt_us = one_way_us * 2
         min_rtts_us.append(min_rtt_us)
+
+        min_rtt_s = min_rtt_us / 1000000.0
 
         # (Seq, timestamp)
         send_pkts = utils.parse_packets_endpoint(
@@ -153,6 +156,16 @@ def parse_pcap(sim_dir, out_dir):
         packet_loss = 0
         # Final output.
         output = np.empty(len(recv_pkts), dtype=DTYPE)
+        # Loss event rate data
+        loss_event_intervals = deque()
+        curr_event_start_idx = 0
+        curr_event_start_time = 0
+        # Mathis Model loss queue
+        mathis_loss_queue = deque()
+        mathis_fair_throughput = 0.0
+        mathis_8rtt_window_start = 0
+        mathis_1rtt_window_start = 0
+        continuous_loss_interval = []
 
         # negative_gaps = 0
         # big_gaps = 0
@@ -315,6 +328,53 @@ def parse_pcap(sim_dir, out_dir):
                     output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
                                                                             loss_event_intervals,
                                                                             loss_interval_weight)
+
+            # Compute Mathis Model Estimation
+            # First compute loss rate in last eight min RTT
+            prev_recv_time = recv_pkts[j - 1][1]
+            loss_interval = (
+                curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
+            for k in range(0, curr_loss):
+                mathis_loss_queue.append(prev_recv_time + (k + 1) * loss_interval)
+
+            # Pop out early loss
+            while (mathis_loss_queue and
+                   mathis_loss_queue[0] < (curr_recv_time - 8 * min_rtt_us)):
+                mathis_loss_queue.popleft()
+            mathis_loss_count = len(mathis_loss_queue)
+
+            # Update 8rtt window start
+            while curr_recv_time - recv_pkts[mathis_8rtt_window_start][1] > 8 * min_rtt_us:
+                mathis_8rtt_window_start += 1
+
+            # Loss rate over 8rtt window
+            mathis_loss_count = len(mathis_loss_queue)
+            if mathis_loss_count > 0:
+                mathis_loss_rate = (mathis_loss_count /
+                                    (1.0 * j - mathis_8rtt_window_start + mathis_loss_count))
+
+                # Throughput computed by mathis equation (in number of packets per second)
+                mathis_throughput = 1.2247 / (1.0 * min_rtt_s * math.sqrt(mathis_loss_rate))
+
+                continuous_loss_interval.append(mathis_throughput)
+
+                mathis_fair_throughput = mean(continuous_loss_interval)
+            else:
+                if j == 0:
+                    mathis_fair_throughput = 0.0
+                else:
+                    continuous_loss_interval.clear()
+
+            if mathis_fair_throughput == 0.0:
+                output[j]["mathis model label"] = -1
+            else:
+                curr_throughput = (j - mathis_8rtt_window_start) / (8.0 * min_rtt_s)
+                if curr_throughput > mathis_fair_throughput:
+                    output[j]["mathis model label"] = 1
+                else:
+                    output[j]["mathis model label"] = 0
+
+
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
