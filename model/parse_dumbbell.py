@@ -29,7 +29,7 @@ REGULAR = [
     ("true RTT ratio", "float64"),
     ("loss event rate", "float64"),
     ("loss event rate sqrt", "float64"),
-    ("mathis model throughput", "float64"),
+    ("mathis model throughput p/s", "float64"),
     # -1 no applicable (no loss yet), 0 lower than fair throughput, 1 higher
     ("mathis model label", "int32")
 ]
@@ -37,7 +37,7 @@ REGULAR = [
 # that are recorded for various values of alpha.
 EWMAS = [
     ("inter-arrival time ewma", "float64"),
-    ("throughput ewma", "float64"),
+    ("throughput p/s ewma", "float64"),
     ("RTT ratio ewma", "float64"),
     ("loss rate ewma", "float64"),
     ("queue occupancy ewma", "float64")
@@ -46,7 +46,7 @@ EWMAS = [
 # window sizes.
 WINDOWED = [
     ("average inter-arrival time windowed", "float64"),
-    ("average throughput windowed", "float64"),
+    ("average throughput p/s windowed", "float64"),
     ("average RTT ratio windowed", "float64"),
     ("loss rate windowed", "float64"),
     ("queue occupancy windowed", "float64")
@@ -365,7 +365,7 @@ def parse_pcap(sim_dir, out_dir):
                 else:
                     continuous_loss_interval.clear()
 
-            output[j]["mathis model throughput"] = mathis_fair_throughput
+            output[j]["mathis model throughput p/s"] = mathis_fair_throughput
 
             if mathis_fair_throughput == 0.0:
                 mathis_label = -1
@@ -384,10 +384,14 @@ def parse_pcap(sim_dir, out_dir):
                     if "inter-arrival time" in metric:
                         new = interarrival_time
 
-                        tput_metric = make_ewma_metric("throughput ewma", alpha)
-                        new_tput = 0 if interarrival_time == 0 else 1 / interarrival_time
+                        tput_metric = make_ewma_metric(
+                            "throughput p/s ewma", alpha)
+                        # Divide by 1e6 to convert interarrival time to seconds.
                         output[j][tput_metric] = update_ewma(
-                            output[j - 1][tput_metric], new_tput, alpha)
+                            output[j - 1][tput_metric],
+                            new_val=(0 if interarrival_time == 0
+                                     else 1 / (interarrival_time / 1e6)),
+                            alpha=alpha)
                     elif "throughput" in metric:
                         # The throughput is calculated during the
                         # inter-arrival time calculation, above.
@@ -470,10 +474,13 @@ def parse_pcap(sim_dir, out_dir):
                          recv_pkts[j - state["window_start"]][1]) /
                         (j - state["window_start"] + 1))
                     output[j][make_win_metric(
-                        "average inter-arrival time windowed", win)] = avg_interarrival_time
-                    new_tput = 0 if avg_interarrival_time == 0 else 1 / avg_interarrival_time
+                        "average inter-arrival time windowed", win)] = (
+                            avg_interarrival_time)
+                    # Divide by 1e6 to convert interarrival time to seconds.
                     output[j][make_win_metric(
-                        "average throughput windowed", win)] = new_tput
+                        "average throughput p/s windowed", win)] = (
+                            0 if avg_interarrival_time == 0
+                            else 1 / (avg_interarrival_time / 1e6))
                 elif "queue occupancy" in metric:
                     # Queue occupancy is calculated using the router's
                     # PCAP files, below.
