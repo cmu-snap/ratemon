@@ -134,7 +134,7 @@ def parse_pcap(sim_dir, out_dir):
         min_rtt_us = one_way_us * 2
         min_rtts_us.append(min_rtt_us)
 
-        min_rtt_s = min_rtt_us / 1000000.0
+        min_rtt_s = min_rtt_us / 1e6
 
         # (Seq, timestamp)
         send_pkts = utils.parse_packets_endpoint(
@@ -165,7 +165,6 @@ def parse_pcap(sim_dir, out_dir):
         mathis_loss_queue = deque()
         mathis_fair_throughput = 0.0
         mathis_8rtt_window_start = 0
-        mathis_1rtt_window_start = 0
         continuous_loss_interval = []
 
         # negative_gaps = 0
@@ -369,14 +368,14 @@ def parse_pcap(sim_dir, out_dir):
             output[j]["mathis model throughput"] = mathis_fair_throughput
 
             if mathis_fair_throughput == 0.0:
-                output[j]["mathis model label"] = -1
+                mathis_label = -1
             else:
                 curr_throughput = (j - mathis_8rtt_window_start) / (8.0 * min_rtt_s)
                 if curr_throughput > mathis_fair_throughput:
-                    output[j]["mathis model label"] = 1
+                    mathis_label = 1
                 else:
-                    output[j]["mathis model label"] = 0
-
+                    mathis_label = 0
+            output[j]["mathis model label"] = mathis_label
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
@@ -654,8 +653,8 @@ def parse_pcap(sim_dir, out_dir):
     # duplicates.
     nan_fets = {
         fet for fets in
-        [fet_ for fet_ in flw_dat.dtype.names
-         for flw_dat in unfair_flws if np.isnan(flw_dat[fet_])]
+        [fet_ for flw_dat in unfair_flws
+         for fet_ in flw_dat.dtype.names if np.isnan(flw_dat[fet_]).any()]
         for fet in fets}
     # If there are NaNs, then we do not want to save these results.
     if nan_fets:
