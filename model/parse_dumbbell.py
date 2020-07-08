@@ -29,6 +29,7 @@ REGULAR = [
     ("true RTT ratio", "float64"),
     ("loss event rate", "float64"),
     ("loss event rate sqrt", "float64"),
+    ("mathis model throughput", "float64"),
     # -1 no applicable (no loss yet), 0 lower than fair throughput, 1 higher
     ("mathis model label", "int32")
 ]
@@ -364,6 +365,8 @@ def parse_pcap(sim_dir, out_dir):
                     mathis_fair_throughput = 0.0
                 else:
                     continuous_loss_interval.clear()
+
+            output[j]["mathis model throughput"] = mathis_fair_throughput
 
             if mathis_fair_throughput == 0.0:
                 output[j]["mathis model label"] = -1
