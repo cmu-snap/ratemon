@@ -706,7 +706,7 @@ def main():
              for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         random.shuffle(pcaps)
-    pcaps = pcaps[:100]
+    pcaps = pcaps
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
