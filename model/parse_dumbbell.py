@@ -59,6 +59,7 @@ WINDOWS = [2**i for i in range(0, 11)]
 # Number of RTTs for computing loss event rate
 NUM_INTERVALS = 8
 
+
 def make_ewma_metric(metric, alpha):
     """ Format the name of an EWMA metric. """
     return f"{metric}-alpha{alpha}"
@@ -81,6 +82,7 @@ def update_ewma(prev_ewma, new_val, alpha):
     """ Update an exponentially weighted moving average. """
     return alpha * new_val + (1 - alpha) * prev_ewma
 
+
 def make_interval_weight():
     weight = [1.0] * NUM_INTERVALS
     for i in range(NUM_INTERVALS):
@@ -89,6 +91,7 @@ def make_interval_weight():
         else:
             weight[i] = 2 * (i - 1) / (1.0 * (i + 2))
     return weight
+
 
 def compute_weighted_average(curr_event_size, loss_event_intervals,
                              loss_interval_weight):
@@ -105,6 +108,7 @@ def compute_weighted_average(curr_event_size, loss_event_intervals,
     i_tot = max(i_tot0, i_tot1)
     i_mean = i_tot / w_tot
     return 1.0 / i_mean
+
 
 def parse_pcap(sim_dir, out_dir):
     """Parse a PCAP file.
