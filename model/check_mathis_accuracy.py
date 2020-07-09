@@ -25,11 +25,13 @@ def main():
               "(required)."), required=True, type=str)
     args = psr.parse_args()
     exp_dir = args.exp_dir
+    sims = os.listdir(exp_dir)
+    print(f"Found {len(sims)} simulations.")
 
     correct = 0
     total = 0
     total_all = 0
-    for flp in os.listdir(exp_dir):
+    for flp in sims:
         dat = np.load(path.join(exp_dir, flp))
         dat = dat[dat.files[0]]
         sim = utils.Sim(flp)
