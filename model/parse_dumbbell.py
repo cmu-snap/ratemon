@@ -663,10 +663,8 @@ def parse_pcap(sim_dir, out_dir):
     # lists of feature names, using a set comprehension to remove
     # duplicates.
     nan_fets = {
-        fet for fets in
-        [fet_ for flw_dat in unfair_flws
-         for fet_ in flw_dat.dtype.names if np.isnan(flw_dat[fet_]).any()]
-        for fet in fets}
+        fet for flw_dat in unfair_flws
+        for fet in flw_dat.dtype.names if np.isnan(flw_dat[fet]).any()}
     # If there are NaNs, then we do not want to save these results.
     if nan_fets:
         print((f"    Discarding simulation {sim_dir} because it has NaNs in "
