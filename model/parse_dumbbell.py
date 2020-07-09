@@ -6,6 +6,7 @@ import itertools
 import multiprocessing
 import os
 from os import path
+import random
 import time
 from collections import deque
 import math
@@ -693,6 +694,9 @@ def main():
         "--out-dir",
         help="The directory in which to store output files (required).",
         required=True, type=str)
+    psr.add_argument(
+        "--random-order", action="store_true",
+        help="Parse the simulations in a random order.")
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir
@@ -700,6 +704,10 @@ def main():
     # Find all simulations.
     pcaps = [(path.join(exp_dir, sim), out_dir)
              for sim in sorted(os.listdir(exp_dir))]
+    if args.random_order:
+        random.shuffle(pcaps)
+    pcaps = pcaps[:100]
+
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     if SYNC:
