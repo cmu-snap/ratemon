@@ -14,7 +14,8 @@ import torch
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
 
-    def __init__(self, dat_in, dat_out):
+    def __init__(self, dat_in, dat_out, dat_out_raw=None, dat_out_oracle=None,
+                 num_flws=None):
         """
         dat_out is assumed to have only a single practical dimension (e.g.,
         dat_out should be of shape (X,), or (X, 1)).
@@ -31,6 +32,16 @@ class Dataset(torch.utils.data.Dataset):
         # long because the loss functions expect longs.
         self.dat_out = torch.tensor(
             dat_out.reshape(shp_out[0]), dtype=torch.long)
+
+        self.dat_out_raw = (
+            None if dat_out_raw is None
+            else torch.tensor(dat_out_raw, dtype=torch.float))
+        self.dat_out_oracle = (
+            None if dat_out_oracle is None
+            else torch.tensor(dat_out_oracle, dtype=torch.int))
+        self.num_flws = (
+            None if num_flws is None
+            else torch.tensor(num_flws, dtype=torch.int))
 
     def to(self, dev):
         """ Move the entire dataset to the target device. """
@@ -57,7 +68,8 @@ class Dataset(torch.utils.data.Dataset):
 
     def raw(self):
         """ Returns the raw data underlying this dataset. """
-        return self.dat_in, self.dat_out
+        return (self.dat_in, self.dat_out, self.dat_out_raw,
+                self.dat_out_oracle, self.num_flws)
 
 
 class BalancedSampler:

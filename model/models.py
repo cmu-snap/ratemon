@@ -5,6 +5,7 @@ import functools
 import math
 import random
 
+from matplotlib import pyplot
 import numpy as np
 from sklearn import svm
 import torch
@@ -187,7 +188,8 @@ class BinaryModelWrapper(PytorchModelWrapper):
             (f"Error building counts! Bucketed {bucketed_pkts} of {num_pkts} "
              "packets!")
 
-    def __create_buckets(self, sim, dat_in, dat_out):
+    def __create_buckets(self, sim, dat_in, dat_out, dat_out_raw,
+                         dat_out_oracle):
         """
         Divides dat_in into windows and divides each window into self.win
         buckets, which each defines a temporal interval. The value of
@@ -269,6 +271,8 @@ class BinaryModelWrapper(PytorchModelWrapper):
             # value. I.e., the final ground truth value for this window
             # becomes the ground truth for the entire window.
             np.take(dat_out, pkt_idxs),
+            np.take(dat_out_raw, pkt_idxs),
+            np.take(dat_out_oracle, pkt_idxs),
             # The buckets all share a scaling group. Each other
             # feature is part of its own group.
             [0] * self.win +
@@ -318,26 +322,28 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # becomes the ground truth for the entire window.
         return dat_in_new, np.take(dat_out, pkt_idxs), scl_grps
 
-    def modify_data(self, sim, dat_in, dat_out):
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle):
         """
         Extracts from the set of simulations many separate intervals. Each
         interval becomes a training example.
         """
-        dat_in_new, dat_out_new, scl_grps = (
-            self.__create_buckets(sim, dat_in, dat_out) if self.rtt_buckets
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
+            self.__create_buckets(
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle)
+            if self.rtt_buckets
             else self.__create_windows(dat_in, dat_out))
 
-        # If configured to do so, compute 1 / sqrt(x) for any features
-        # that contain "loss rate". We cannot simply look for a single
-        # feature named exactly "loss rate" because if
-        # self.rtt_buckets == False, then there may exist many features of the
-        # form "loss rate_X".
-        if self.sqrt_loss:
-            for fet in dat_in_new.dtype.names:
-                if "loss rate" in fet:
-                    dat_in_new[fet] = np.reciprocal(np.sqrt(dat_in_new[fet]))
+        # # If configured to do so, compute 1 / sqrt(x) for any features
+        # # that contain "loss rate". We cannot simply look for a single
+        # # feature named exactly "loss rate" because if
+        # # self.rtt_buckets == False, then there may exist many features of the
+        # # form "loss rate_X".
+        # if self.sqrt_loss:
+        #     for fet in dat_in_new.dtype.names:
+        #         if "loss rate" in fet:
+        #             dat_in_new[fet] = np.reciprocal(np.sqrt(dat_in_new[fet]))
 
-        return dat_in_new, dat_out_new, scl_grps
+        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 
 class BinaryDnnWrapper(BinaryModelWrapper):
@@ -398,13 +404,14 @@ class SvmWrapper(BinaryModelWrapper):
         self.net = Svm(self.num_ins)
         return self.net
 
-    def modify_data(self, sim, dat_in, dat_out):
-        new_dat_in, new_dat_out, scl_grps = super(SvmWrapper, self).modify_data(
-            sim, dat_in, dat_out)
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle):
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
+            super(SvmWrapper, self).modify_data(
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle))
         # Map [0,1] to [-1, 1]
-        fet = new_dat_out.dtype.names[0]
-        new_dat_out[fet] = new_dat_out[fet] * 2 - 1
-        return new_dat_in, new_dat_out, scl_grps
+        fet = dat_out.dtype.names[0]
+        dat_out[fet] = dat_out[fet] * 2 - 1
+        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
     def _check_output_helper(self, out):
         # Remove a trailing dimension of size 1.
@@ -435,7 +442,9 @@ class SvmSklearnWrapper(SvmWrapper):
         "inter-arrival time",
         "true RTT ratio",
         "loss event rate",
-        # "loss event rate sqrt",
+        "loss event rate sqrt",
+        "mathis model throughput p/s",
+        "mathis model label",
         "inter-arrival time ewma-alpha0.1",
         "inter-arrival time ewma-alpha0.2",
         "inter-arrival time ewma-alpha0.3",
@@ -512,31 +521,69 @@ class SvmSklearnWrapper(SvmWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Increase the maximum number of iterations
-        # from 1000 to 10000.
+        # from 1000 to 100000.
         self.net = svm.LinearSVC(
             penalty="l1", dual=False, class_weight="balanced", verbose=1,
-            max_iter=10000)
+            max_iter=100000)
         return self.net
 
     def train(self, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
 
-    def test(self, dat_in, dat_out):
+    def __evaluate(self, preds, labels, raw, fair, flp):
+        # Compute the absolute distance from fair.
+        diffs = torch.abs(fair - raw)
+        # Sort based on absolute differences.
+        diffs, indices = torch.sort(diffs)
+        preds = preds[indices]
+        labels = labels[indices]
+        # Bucketize and compute bucket accuracies.
+        num_buckets = 20
+        num_samples = preds.size()[0]
+        num_per_bucket = math.floor(num_samples / num_buckets)
+        buckets = [
+            (x,
+             self.check_output(preds_, labels_),
+             preds_.size()[0])
+            for x, preds_, labels_ in [
+                # Each bucket is defined by a tuple of three values:
+                #   (x-axis value for bucket, predictions, ground truth labels).
+                # The x-axis is the mean absolute difference for this bucket.
+                # A few values at the end may be discarded.
+                (torch.mean(diffs[i:i + num_per_bucket]),
+                 preds[i:i + num_per_bucket],
+                 labels[i:i + num_per_bucket])
+                for i in range(0, num_samples, num_per_bucket)]]
+        # Plot each bucket's accuracy.
+        pyplot.plot(
+            [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
+        pyplot.ylim((0, 1))
+        pyplot.xlabel("Magnitude of unfairness (absolute value)")
+        pyplot.ylabel("Classification accuracy")
+        pyplot.savefig(flp)
+        pyplot.close()
+        # Compute the overall accuracy.
+        _, corrects, totals = zip(*buckets)
+        acc = sum(corrects) / sum(totals)
+        print(f"Test accuracy: {acc * 100:.2f}%")
+        return acc
+
+    def test(self, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle, num_flws):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
         """
-        # Compare dat_out andthe predictions to determine
-        # accuracy. Evaluate the model on the input data, convert the
-        # result to a tensor for each manipulation, and compare it to
-        # the ground truth. self.check_output() returns the number of
-        # examples classifier correctly, so dividing by the total
-        # number of samples yields the accuracy.
-        acc_tst = self.check_output(
-            torch.tensor(self.net.predict(dat_in)), dat_out) / dat_in.size()[0]
-        print(f"Test accuracy: {acc_tst * 100:.2f}%")
-        return acc_tst
+        fair = np.reciprocal(num_flws)
+        print("Evaluating SVM:")
+        acc = self.__evaluate(
+            torch.tensor(self.net.predict(dat_in)), dat_out_classes,
+            dat_out_raw, fair, "accuracy_vs_unfairness_svm.pdf")
+        print("Evaluting Mathis Model oracle:")
+        self.__evaluate(
+            dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+            "accuracy_vs_unfairness_mathis.pdf")
+        return acc
 
 
 class LstmWrapper(PytorchModelWrapper):
