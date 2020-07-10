@@ -5,12 +5,34 @@ Tests the accuracy of the Mathis Model in determining whether a flow is behaving
 """
 
 import argparse
+import multiprocessing
 import os
 from os import path
 
 import numpy as np
 
 import utils
+
+
+def process_one(flp):
+    dat = np.load(flp)
+    dat = dat[dat.files[0]]
+    labels = dat["mathis model label"]
+    valid = np.where(labels != -1)
+    sim = utils.Sim(flp)
+    return (
+        (
+            (labels[valid] ==
+             # To determine the ground truth, compare the actual queue
+             # occupancy to the fair queue occupancy (convert to ints to
+             # generate class labels).
+             (dat["queue occupancy ewma-alpha0.5"][valid] > (
+                 1 / (sim.unfair_flws + sim.other_flws))).astype(int)
+             # Count the number of correct predictions by converting
+             # from bools to ints and summing them up.
+            ).astype(int).sum()),
+        len(valid[0]),
+        dat.shape[0])
 
 
 def main():
@@ -25,30 +47,16 @@ def main():
               "(required)."), required=True, type=str)
     args = psr.parse_args()
     exp_dir = args.exp_dir
-    sims = os.listdir(exp_dir)
+    sims = [path.join(exp_dir, sim) for sim in os.listdir(exp_dir)]
     print(f"Found {len(sims)} simulations.")
 
-    correct = 0
-    total = 0
-    total_all = 0
-    for flp in sims:
-        dat = np.load(path.join(exp_dir, flp))
-        dat = dat[dat.files[0]]
-        sim = utils.Sim(flp)
-        labels = dat["mathis model label"]
-        valid = np.where(labels != -1)
-        correct += (
-            (labels[valid] ==
-             # To determine the ground truth, compare the actual queue
-             # occupancy to the fair queue occupancy (convert to ints to
-             # generate class labels).
-             (dat["queue occupancy ewma-alpha0.5"][valid] > (
-                 1 / (sim.unfair_flws + sim.other_flws))).astype(int)
-             # Count the number of correct predictions by converting
-             # from bools to ints and summing them up.
-            ).astype(int).sum())
-        total += len(valid[0])
-        total_all += dat.shape[0]
+    with multiprocessing.Pool() as pol:
+        res = pol.map(process_one, sims)
+
+    correct, total, total_all = zip(*res)
+    correct = sum(correct)
+    total = sum(total)
+    total_all = sum(total_all)
     print(f"Mathis Model accuracy: {(correct / total) * 100:.2f}%")
     print(f"Total: {total} packets")
     print(f"Discarded {total_all - total} packets.")
