@@ -14,17 +14,30 @@ import torch
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
 
-    def __init__(self, dat_in, dat_out, dat_out_raw=None, dat_out_oracle=None,
-                 num_flws=None):
+    def __init__(self, fets, dat_in, dat_out, dat_out_raw=None,
+                 dat_out_oracle=None, num_flws=None):
         """
-        dat_out is assumed to have only a single practical dimension (e.g.,
-        dat_out should be of shape (X,), or (X, 1)).
+        fets: List of input feature names, corresponding to the columns of
+            dat_in.
+        dat_in: Numpy array of input data, with two dimensions.
+        dat_out: Numpy array of output data. Assumed to have a single practical
+            dimension only (e.g., dat_out should be of shape (X,), or (X, 1)).
+        dat_out_raw: Numpy array of raw features values used to create dat_out.
+            Same shape as dat_out.
+        dat_out_oracle: Numpy array of oracle predictions for this data. Same
+            shape as dat_out.
+        num_flws: Numpy array of the total number of flows in each datapoint's
+            experiment. Same shape as dat_out.
         """
         super(Dataset).__init__()
         shp_in = dat_in.shape
         shp_out = dat_out.shape
         assert shp_in[0] == shp_out[0], \
-            "Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
+            f"Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
+        num_fets = len(fets)
+        assert shp_in[1] == num_fets, \
+            f"Mismatched dat_in ({shp_in}) and fets (len: {num_fets})"
+
         # Convert the numpy arrays to Torch tensors.
         self.dat_in = torch.tensor(dat_in, dtype=torch.float)
         # Reshape the output into a 1D array first, because
@@ -33,6 +46,7 @@ class Dataset(torch.utils.data.Dataset):
         self.dat_out = torch.tensor(
             dat_out.reshape(shp_out[0]), dtype=torch.long)
 
+        self.fets = fets
         self.dat_out_raw = (
             None if dat_out_raw is None
             else torch.tensor(dat_out_raw, dtype=torch.float))
@@ -68,7 +82,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def raw(self):
         """ Returns the raw data underlying this dataset. """
-        return (self.dat_in, self.dat_out, self.dat_out_raw,
+        return (self.fets, self.dat_in, self.dat_out, self.dat_out_raw,
                 self.dat_out_oracle, self.num_flws)
 
 

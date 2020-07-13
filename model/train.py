@@ -303,6 +303,7 @@ def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     assert len(dat_out_oracle.shape) == 1
     assert len(num_flws.shape) == 1
 
+    fets = dat_in.dtype.names
     # Destroy columns names to make merging the matrices easier. I.e.,
     # convert from structured to regular numpy arrays.
     dat_in = utils.clean(dat_in)
@@ -343,7 +344,7 @@ def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     dat_trn_out = dat_out[num_val + num_tst:]
 
     # Create the dataloaders.
-    dataset_trn = utils.Dataset(dat_trn_in, dat_trn_out)
+    dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out)
     ldr_trn = (
         torch.utils.data.DataLoader(
             dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
@@ -354,12 +355,12 @@ def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
                 dataset_trn, bch_trn, drop_last=False)))
     ldr_val = (
         torch.utils.data.DataLoader(
-            utils.Dataset(dat_val_in, dat_val_out), batch_size=bch_tst,
+            utils.Dataset(fets, dat_val_in, dat_val_out), batch_size=bch_tst,
             shuffle=False, drop_last=False)
         if use_val else None)
     ldr_tst = torch.utils.data.DataLoader(
         utils.Dataset(
-            dat_tst_in, dat_tst_out, dat_tst_out_raw, dat_tst_out_oracle,
+            fets, dat_tst_in, dat_tst_out, dat_tst_out_raw, dat_tst_out_oracle,
             num_flws_tst),
         batch_size=bch_tst, shuffle=False, drop_last=False)
     return ldr_trn, ldr_val, ldr_tst
@@ -567,7 +568,7 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(*(ldr_trn.dataset.raw()[:2]))
+    net.train(*(ldr_trn.dataset.raw()[1:3]))
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
     # Save the model.
     print(f"Saving: {out_flp}")
