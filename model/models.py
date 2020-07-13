@@ -521,10 +521,10 @@ class SvmSklearnWrapper(SvmWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Increase the maximum number of iterations
-        # from 1000 to 100000.
+        # from 1000 to 10000.
         self.net = svm.LinearSVC(
             penalty="l1", dual=False, class_weight="balanced", verbose=1,
-            max_iter=100000)
+            max_iter=10000)
         return self.net
 
     def train(self, dat_in, dat_out):
