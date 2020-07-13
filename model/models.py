@@ -532,9 +532,10 @@ class SvmSklearnWrapper(SvmWrapper):
         self.net.fit(dat_in, dat_out)
 
     def __evaluate(self, preds, labels, raw, fair, flp):
-        # Compute the absolute distance from fair.
-        diffs = torch.abs(fair - raw)
-        # Sort based on absolute differences.
+        # Compute the absolute distance from fair, then divide by fair
+        # to compute the relative unfairness.
+        diffs = torch.abs(fair - raw) / fair
+        # Sort based on unfairness.
         diffs, indices = torch.sort(diffs)
         preds = preds[indices]
         labels = labels[indices]
@@ -542,6 +543,8 @@ class SvmSklearnWrapper(SvmWrapper):
         num_buckets = 20
         num_samples = preds.size()[0]
         num_per_bucket = math.floor(num_samples / num_buckets)
+        # The resulting buckets are tuples of three values:
+        #   (x-axis value for bucket, number predicted correctly, total)
         buckets = [
             (x,
              self.check_output(preds_, labels_),
@@ -549,8 +552,8 @@ class SvmSklearnWrapper(SvmWrapper):
             for x, preds_, labels_ in [
                 # Each bucket is defined by a tuple of three values:
                 #   (x-axis value for bucket, predictions, ground truth labels).
-                # The x-axis is the mean absolute difference for this bucket.
-                # A few values at the end may be discarded.
+                # The x-axis is the mean relative difference for this
+                # bucket. A few values at the end may be discarded.
                 (torch.mean(diffs[i:i + num_per_bucket]),
                  preds[i:i + num_per_bucket],
                  labels[i:i + num_per_bucket])
@@ -559,7 +562,7 @@ class SvmSklearnWrapper(SvmWrapper):
         pyplot.plot(
             [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
         pyplot.ylim((0, 1))
-        pyplot.xlabel("Magnitude of unfairness (absolute value)")
+        pyplot.xlabel("Unfairness (percent of fair)")
         pyplot.ylabel("Classification accuracy")
         pyplot.savefig(flp)
         pyplot.close()
