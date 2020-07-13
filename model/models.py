@@ -574,7 +574,8 @@ class SvmSklearnWrapper(SvmWrapper):
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
         """
-        fair = np.reciprocal(num_flws)
+        # Convert from int to float to avoid all values being rounded to 0.
+        fair = np.reciprocal(num_flws, dtype="float")
         print("Evaluating SVM:")
         acc = self.__evaluate(
             torch.tensor(self.net.predict(dat_in)), dat_out_classes,
