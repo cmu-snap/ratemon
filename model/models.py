@@ -3,6 +3,8 @@
 
 import functools
 import math
+import os
+from os import path
 import random
 
 from matplotlib import pyplot
@@ -538,17 +540,17 @@ class SvmSklearnWrapper(SvmWrapper):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
 
-    def __evaluate(self, preds, labels, raw, fair, flp):
-        # Compute the absolute distance from fair, then divide by fair
-        # to compute the relative unfairness.
-        diffs = torch.abs(fair - raw) / fair
+    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None):
+        # Compute the distance from fair, then divide by fair to
+        # compute the relative unfairness.
+        diffs = (fair - raw) / fair
         # Sort based on unfairness.
         diffs, indices = torch.sort(diffs)
         preds = preds[indices]
         labels = labels[indices]
         # Bucketize and compute bucket accuracies.
-        num_buckets = 20
         num_samples = preds.size()[0]
+        num_buckets = min(20, num_samples)
         num_per_bucket = math.floor(num_samples / num_buckets)
         assert num_per_bucket > 0, \
             ("There must be at least one sample per bucket, but there are "
@@ -571,9 +573,12 @@ class SvmSklearnWrapper(SvmWrapper):
         # Plot each bucket's accuracy.
         pyplot.plot(
             [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
-        pyplot.ylim((0, 1))
+        pyplot.ylim((-0.1, 1.1))
+        if x_lim is not None:
+            pyplot.xlim((-1.1, x_lim + 0.1))
         pyplot.xlabel("Unfairness (fraction of fair)")
         pyplot.ylabel("Classification accuracy")
+        pyplot.tight_layout()
         pyplot.savefig(flp)
         pyplot.close()
         # Compute the overall accuracy.
@@ -582,29 +587,79 @@ class SvmSklearnWrapper(SvmWrapper):
         print(f"Test accuracy: {acc * 100:.2f}%")
         return acc
 
-    def test(self, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle, num_flws):
+    def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
+             num_flws):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
         """
-        # Convert from int to float to avoid all values being rounded to 0.
-        fair = np.reciprocal(num_flws, dtype="float")
+        # Create the output directory.
+        out_dir = self.name
+        if not path.exists(out_dir):
+            os.makedirs(out_dir)
+        # Compute the fair share. Convert from int to float to avoid
+        # all values being rounded to 0.
+        fair = torch.reciprocal(num_flws.type(torch.float))
+        # Determine the maximum unfairness.
+        max_unfair = ((fair - dat_out_raw) / fair).max()
+
+        # Graphs:
+
+        # Feature importance.
+        imps, names = zip(*reversed(sorted(
+            [(imp, fets[idx]) for idx, imp in enumerate(self.net.coef_[0])],
+            key=lambda t: t[0]
+        )))
+        num_fets = len(names)
+        y_vals = list(range(num_fets))
+        pyplot.figure(figsize=(7, 0.178 * num_fets))
+        pyplot.barh(y_vals, imps, align="center")
+        pyplot.yticks(y_vals, names)
+        pyplot.ylim((-1, num_fets))
+        pyplot.xlabel("Feature coefficient")
+        pyplot.ylabel("Feature name")
+        pyplot.tight_layout()
+        pyplot.savefig(path.join(out_dir, "features.pdf"))
+        pyplot.close()
+
+        # Accuracy vs unfairness for all flows and all degrees of
+        # unfairness, for the model itself.
         print("Evaluating model:")
         acc = self.__evaluate(
             torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-            dat_out_raw, fair, "accuracy_vs_unfairness.pdf")
+            dat_out_raw, fair, path.join(out_dir, "accuracy_vs_unfairness.pdf"),
+            max_unfair)
+        # Accuracy vs. unfairness for all flows and all degrees of
+        # unfairness, for the Mathis Model oracle.
         print("Evaluting Mathis Model oracle:")
         self.__evaluate(
             dat_out_oracle, dat_out_classes, dat_out_raw, fair,
-            "accuracy_vs_unfairness_mathis.pdf")
-        # Make an accuracy graph for each number of flows.
-        for num_flws_selected in set(num_flws.tolist()):
+            path.join(out_dir, "accuracy_vs_unfairness_mathis.pdf"), max_unfair)
+
+        # For each number of flows, accuracy vs. unfairness.
+        flws_accs = []
+        nums_flws = list(set(num_flws.tolist()))
+        for num_flws_selected in nums_flws:
             print(f"Evaluating model for {num_flws_selected} flows:")
-            valid = np.where(num_flws == num_flws_selected)
-            self.__evaluate(
-                torch.tensor(self.net.predict(dat_in[valid])), dat_out_classes[valid],
-                dat_out_raw[valid], fair[valid],
-                f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf")
+            valid = torch.where(num_flws == num_flws_selected)
+            flws_accs.append(self.__evaluate(
+                torch.tensor(self.net.predict(dat_in[valid])),
+                dat_out_classes[valid], dat_out_raw[valid], fair[valid],
+                path.join(
+                    out_dir,
+                    f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf"),
+                max_unfair))
+
+        # Accuracy vs. number of flows.
+        x_vals = list(range(len(flws_accs)))
+        pyplot.bar(x_vals, flws_accs, align="center")
+        pyplot.xticks(x_vals, nums_flws)
+        pyplot.ylim((0, 1.1))
+        pyplot.xlabel("Total flows (1 unfair)")
+        pyplot.ylabel("Classification accuracy")
+        pyplot.tight_layout()
+        pyplot.savefig(path.join(out_dir, "accuracy_vs_num-flows.pdf"))
+        pyplot.close()
         return acc
 
 
