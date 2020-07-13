@@ -81,7 +81,7 @@ class PytorchModelWrapper:
         # eq(): Compare the outputs to the labels.
         # type(): Cast the resulting bools to ints.
         # sum(): Sum them up to get the total number of correct predictions.
-        return out.eq(target).type(torch.IntTensor).sum().item()
+        return out.eq(target).type(torch.int).sum().item()
 
     def _check_output_helper(self, out):
         """ Convert the raw network output into classes. """
