@@ -7,6 +7,7 @@ import random
 
 from matplotlib import pyplot
 import numpy as np
+from sklearn import linear_model
 from sklearn import svm
 import torch
 
@@ -590,6 +591,22 @@ class SvmSklearnWrapper(SvmWrapper):
         return acc
 
 
+class LrSklearnWrapper(SvmSklearnWrapper):
+    """ Wraps ab sklearn Logistic Regression model. """
+
+    def new(self):
+        # Use L1 regularization. Since the number of samples is
+        # greater than the number of features, solve the primal
+        # optimization problem instead of its dual. Automatically set
+        # the class weights based on the class popularity in the
+        # training data. Increase the maximum number of iterations
+        # from 100 to 1000.
+        self.net = linear_model.LogisticRegression(
+            penalty="l1", dual=False, class_weight="balanced",
+            solver="liblinear", max_iter=1000, verbose=1)
+        return self.net
+
+
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
@@ -797,5 +814,6 @@ MODELS = {
     "BinaryDnn": BinaryDnnWrapper,
     "Svm": SvmWrapper,
     "SvmSklearn": SvmSklearnWrapper,
+    "LrSklearn": LrSklearnWrapper,
     "Lstm": LstmWrapper
 }
