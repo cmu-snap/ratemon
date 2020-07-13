@@ -582,7 +582,8 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     return los_tst
 
 
-def run_torch(args, dat_in, dat_out, out_flp):
+def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+              out_flp):
     """
     Trains a PyTorch model according to the supplied parameters. Returns the
     test error (lower is better).
@@ -599,7 +600,8 @@ def run_torch(args, dat_in, dat_out, out_flp):
 
     # Split the data into training, validation, and test loaders.
     ldr_trn, ldr_val, ldr_tst = split_data(
-        net, dat_in, dat_out, args["train_batch"], args["test_batch"])
+        net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+        args["train_batch"], args["test_batch"])
 
     # Explicitly move the training (and maybe validation) data to the target
     # device.
@@ -727,12 +729,8 @@ def run_many(args_):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = (
-            run_sklearn(
-                args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-                out_flp)
-            if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else run_torch(args, dat_in, dat_out, out_flp))
+        res = (run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch)(
+            args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, out_flp)
         if res == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
