@@ -15,6 +15,8 @@ import torch
 class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
 
+    # The name of this model.
+    name = None
     # The specification of the input tensor format.
     in_spc = []
     # The specification of the output tensor format.
@@ -34,6 +36,7 @@ class PytorchModelWrapper:
         """
         Verifies that this PytorchModel instance has been initialized properly.
         """
+        assert self.name is not None, "Empty name!"
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
         assert self.num_clss > 0, "Invalid number of output classes!"
@@ -350,6 +353,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
 class BinaryDnnWrapper(BinaryModelWrapper):
     """ Wraps BinaryDnn. """
 
+    name = "BinaryDnn"
     # in_spc = ["arrival time", "loss rate"]
     in_spc = ["arrival time"]
     # in_spc = ["inter-arrival time", "loss rate"]
@@ -396,6 +400,7 @@ class BinaryDnn(torch.nn.Module):
 class SvmWrapper(BinaryModelWrapper):
     """ Wraps Svm. """
 
+    name = "Svm"
     in_spc = ["arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     los_fnc = torch.nn.HingeEmbeddingLoss
@@ -438,6 +443,7 @@ class Svm(torch.nn.Module):
 class SvmSklearnWrapper(SvmWrapper):
     """ Wraps an sklearn SVM. """
 
+    name = "SvmSklearn"
     in_spc = [
         "arrival time",
         "inter-arrival time",
@@ -605,6 +611,8 @@ class SvmSklearnWrapper(SvmWrapper):
 class LrSklearnWrapper(SvmSklearnWrapper):
     """ Wraps ab sklearn Logistic Regression model. """
 
+    name = "LrSklearn"
+
     def new(self):
         # Use L1 regularization. Since the number of samples is
         # greater than the number of features, solve the primal
@@ -620,6 +628,8 @@ class LrSklearnWrapper(SvmSklearnWrapper):
 
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
+
+    name = "Lstm"
 
     # For now, we do not use RTT ratio because our method of estimating
     # it cannot be performed by a general receiver.
@@ -821,10 +831,10 @@ class FcFour(torch.nn.Module):
 #######################################################################
 
 
-MODELS = {
-    "BinaryDnn": BinaryDnnWrapper,
-    "Svm": SvmWrapper,
-    "SvmSklearn": SvmSklearnWrapper,
-    "LrSklearn": LrSklearnWrapper,
-    "Lstm": LstmWrapper
-}
+MODELS = {mdl.name: mdl for mdl in [
+    BinaryDnnWrapper,
+    SvmWrapper,
+    SvmSklearnWrapper,
+    LrSklearnWrapper,
+    LstmWrapper
+]}
