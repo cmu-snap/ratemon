@@ -591,6 +591,14 @@ class SvmSklearnWrapper(SvmWrapper):
         self.__evaluate(
             dat_out_oracle, dat_out_classes, dat_out_raw, fair,
             "accuracy_vs_unfairness_mathis.pdf")
+        # Make an accuracy graph for each number of flows.
+        for num_flws_selected in set(num_flws.tolist()):
+            print(f"Evaluating model for {num_flws_selected} flows:")
+            valid = np.where(num_flws == num_flws_selected)
+            self.__evaluate(
+                torch.tensor(self.net.predict(dat_in[valid])), dat_out_classes[valid],
+                dat_out_raw[valid], fair[valid],
+                f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf")
         return acc
 
 
