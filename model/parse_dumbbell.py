@@ -59,6 +59,8 @@ ALPHAS = [i / 10 for i in range(1, 11)]
 WINDOWS = [2**i for i in range(0, 11)]
 # Number of RTTs for computing loss event rate
 NUM_INTERVALS = 8
+# Packet size in bytes
+PKT_SIZE = 1380
 
 
 def make_ewma_metric(metric, alpha):
@@ -171,6 +173,10 @@ def parse_pcap(sim_dir, out_dir):
         mathis_fair_throughput = 0.0
         mathis_8rtt_window_start = 0
         continuous_loss_interval = []
+        # Estimate loss rate
+        prev_pkt_seq = 0
+        highest_seq = 0
+        estimated_loss = 0
 
         # negative_gaps = 0
         # big_gaps = 0
@@ -381,6 +387,20 @@ def parse_pcap(sim_dir, out_dir):
                 else:
                     mathis_label = 0
             output[j]["mathis model label"] = mathis_label
+
+
+            # Receiver-side loss rate estimation
+            if recv_pkt_seq != prev_pkt_seq + PKT_SIZE:
+
+                if recv_pkt_seq > highest_seq + PKT_SIZE:
+                    # Loss in new packets
+                    estimated_loss += (recv_pkt_seq - highest_seq - PKT_SIZE) / PKT_SIZE
+                elif recv_pkt_seq < prev_pkt_seq and prev_pkt_seq != highest_seq:
+                    # Loss in retransmission
+                    estimated_loss += 1
+
+            prev_pkt_seq = recv_pkt_seq
+            highest_seq = max(highest_seq, prev_pkt_seq)
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
