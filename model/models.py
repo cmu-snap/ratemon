@@ -543,7 +543,7 @@ class SvmSklearnWrapper(SvmWrapper):
     def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None):
         # Compute the distance from fair, then divide by fair to
         # compute the relative unfairness.
-        diffs = (fair - raw) / fair
+        diffs = (raw - fair) / fair
         # Sort based on unfairness.
         diffs, indices = torch.sort(diffs)
         preds = preds[indices]
@@ -601,7 +601,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # all values being rounded to 0.
         fair = torch.reciprocal(num_flws.type(torch.float))
         # Determine the maximum unfairness.
-        max_unfair = ((fair - dat_out_raw) / fair).max()
+        max_unfair = ((dat_out_raw - fair) / fair).max()
 
         # Graphs:
 
