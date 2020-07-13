@@ -544,6 +544,9 @@ class SvmSklearnWrapper(SvmWrapper):
         num_buckets = 20
         num_samples = preds.size()[0]
         num_per_bucket = math.floor(num_samples / num_buckets)
+        assert num_per_bucket > 0, \
+            ("There must be at least one sample per bucket, but there are "
+             f"{num_samples} samples and only {num_buckets} buckets!")
         # The resulting buckets are tuples of three values:
         #   (x-axis value for bucket, number predicted correctly, total)
         buckets = [
@@ -563,7 +566,7 @@ class SvmSklearnWrapper(SvmWrapper):
         pyplot.plot(
             [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
         pyplot.ylim((0, 1))
-        pyplot.xlabel("Unfairness (percent of fair)")
+        pyplot.xlabel("Unfairness (fraction of fair)")
         pyplot.ylabel("Classification accuracy")
         pyplot.savefig(flp)
         pyplot.close()
@@ -580,10 +583,10 @@ class SvmSklearnWrapper(SvmWrapper):
         """
         # Convert from int to float to avoid all values being rounded to 0.
         fair = np.reciprocal(num_flws, dtype="float")
-        print("Evaluating SVM:")
+        print("Evaluating model:")
         acc = self.__evaluate(
             torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-            dat_out_raw, fair, "accuracy_vs_unfairness_svm.pdf")
+            dat_out_raw, fair, "accuracy_vs_unfairness.pdf")
         print("Evaluting Mathis Model oracle:")
         self.__evaluate(
             dat_out_oracle, dat_out_classes, dat_out_raw, fair,
