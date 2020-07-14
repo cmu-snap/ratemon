@@ -109,7 +109,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
 
     num_clss = 2
 
-    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False):
+    def __init__(self, win=100, rtt_buckets=True):
         super(BinaryModelWrapper, self).__init__()
 
         self.win = win
@@ -117,7 +117,6 @@ class BinaryModelWrapper(PytorchModelWrapper):
         if self.rtt_buckets:
             assert "arrival time" in self.in_spc, \
                 "When bucketizing packets, \"arrival time\" must be a feature."
-        self.sqrt_loss = sqrt_loss
         # Determine layer dimensions. If we are bucketizing packets
         # based on arrival time, then there will be one input feature
         # for every bucket (self.win) plus one input feature for every
@@ -340,17 +339,6 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 sim, dat_in, dat_out, dat_out_raw, dat_out_oracle)
             if self.rtt_buckets
             else self.__create_windows(dat_in, dat_out))
-
-        # # If configured to do so, compute 1 / sqrt(x) for any features
-        # # that contain "loss rate". We cannot simply look for a single
-        # # feature named exactly "loss rate" because if
-        # # self.rtt_buckets == False, then there may exist many features of the
-        # # form "loss rate_X".
-        # if self.sqrt_loss:
-        #     for fet in dat_in_new.dtype.names:
-        #         if "loss rate" in fet:
-        #             dat_in_new[fet] = np.reciprocal(np.sqrt(dat_in_new[fet]))
-
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 
