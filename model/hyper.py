@@ -4,9 +4,11 @@ Hyper-parameter optimization for train.py.
 """
 
 import argparse
+import itertools
 import time
 
 import ax
+import numpy as np
 
 import train
 import models
@@ -25,7 +27,7 @@ def main():
         "--model", default=model_opts[0], help="The model to use.",
         choices=model_opts, type=str)
     psr.add_argument(
-        "--data",
+        "--data-dir",
         help="The path to the training/validation/testing data (required).",
         required=True, type=str)
     psr.add_argument(
@@ -41,6 +43,10 @@ def main():
         "--max-attempts", default=train.DEFAULTS["max_attempts"],
         help=("The maximum number of failed training attempts to survive, per "
               "configuration."), type=int)
+    psr.add_argument(
+        "--exhaustive", action="store_true",
+        help=("Try all combinations of parameters. Incompatible with parameters "
+              "of type \"range\"."))
     psr.add_argument(
         "--no-rand", action="store_true", help="Use a fixed random seed.")
     psr.add_argument(
@@ -58,9 +64,9 @@ def main():
     # Define the optimization parameters.
     params = [
         {
-            "name": "data",
+            "name": "data_dir",
             "type": "fixed",
-            "value": args.data
+            "value": args.data_dir
         },
         {
             "name": "model",
@@ -112,10 +118,17 @@ def main():
             "type": "choice",
             "values": ["linear", "poly", "rbf", "sigmoid"]
         },
+        # {
+        #     "name": "degree",
+        #     "type": "range",
+        #     "bounds": [0, 20]
+        # },
+        # Represent degree as a choice parameter so that it is
+        # compatible with exhaustive mode.
         {
             "name": "degree",
-            "type": "range",
-            "bounds": [0, 20]
+            "type": "choice",
+            "values": list(range(0, 21))
         },
         {
             "name": "penalty",
@@ -168,19 +181,40 @@ def main():
             # },
         ])
 
-    print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
-           "sub-trial(s) for each configuration."))
     tim_srt_s = time.time()
-    best_params, best_vals, _, _ = ax.optimize(
-        parameters=params,
-        evaluation_function=train.run_many,
-        minimize=True,
-        total_trials=args.opt_trials,
-        random_seed=train.SEED if no_rand else None)
+    if args.exhaustive:
+        for param in params:
+            assert param["type"] != "range", \
+                f"Exhaustive mode does not support range parameters: {param}"
+        fixed = {
+            param["name"]: param["value"]
+            for param in params if param["type"] == "fixed"}
+        to_vary = [
+            [(param["name"], value) for value in param["values"]]
+            for param in params if param["type"] == "choice"]
+        print(
+            f"Varying these parameters, with {tls_cnf} sub-trials(s) for each "
+            f"configuration: {[pairs[0][0] for pairs in to_vary]}")
+        cnfs = [{**fixed, **dict(params)} for params in itertools.product(*to_vary)][:2]
+        print(f"Total trials: {len(cnfs) * tls_cnf}")
+        res = [train.run_many(params) for params in cnfs]
+        best_idx = np.argmin(np.array(res))
+        best_err = res[best_idx]
+        best_params = cnfs[best_idx]
+    else:
+        print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
+               "sub-trial(s) for each configuration."))
+        best_params, best_vals, _, _ = ax.optimize(
+            parameters=params,
+            evaluation_function=train.run_many,
+            minimize=True,
+            total_trials=args.opt_trials,
+            random_seed=train.SEED if no_rand else None)
+        best_err = best_vals[0]["objective"]
     print((f"Done with hyper-parameter optimization - "
            f"{time.time() - tim_srt_s:.2f} seconds"))
     print(f"\nBest params: {best_params}")
-    print(f"Best error: {best_vals[0]['objective']:.2f}%")
+    print(f"Best error: {best_err:.2f}%")
 
 
 if __name__ == "__main__":
