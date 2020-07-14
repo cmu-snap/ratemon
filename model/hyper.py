@@ -195,7 +195,7 @@ def main():
         print(
             f"Varying these parameters, with {tls_cnf} sub-trials(s) for each "
             f"configuration: {[pairs[0][0] for pairs in to_vary]}")
-        cnfs = [{**fixed, **dict(params)} for params in itertools.product(*to_vary)][:2]
+        cnfs = [{**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
         res = [train.run_many(params) for params in cnfs]
         best_idx = np.argmin(np.array(res))
@@ -214,7 +214,7 @@ def main():
     print((f"Done with hyper-parameter optimization - "
            f"{time.time() - tim_srt_s:.2f} seconds"))
     print(f"\nBest params: {best_params}")
-    print(f"Best error: {best_err:.2f}%")
+    print(f"Best error: {best_err:.4f}%")
 
 
 if __name__ == "__main__":
