@@ -36,6 +36,7 @@ DEFAULTS = {
     "kernel": "linear",
     "degree": 3,
     "penalty": "l1",
+    "max_iter": 10000,
     "standardize": True,
     "early_stop": False,
     "val_patience": 10,
@@ -659,6 +660,13 @@ def run_many(args_):
     args.update(args_)
     if args["early_stop"]:
         args["epochs"] = EPCS_MAX
+    degree = args["degree"]
+    assert degree >= 0, \
+        ("\"degree\" must be an integer greater than or equal to 0, but is: "
+         f"{degree}")
+    max_iter = args["max_iter"]
+    assert max_iter > 0, \
+        f"\"max_iter\" must be greater than 0, but is: {max_iter}"
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
@@ -811,6 +819,11 @@ def main():
         "--penalty", default=DEFAULTS["penalty"], choices=["l1", "l2"],
         help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
               "then use this type of regularization. Ignored otherwise."))
+    psr.add_argument(
+        "--max-iter", default=DEFAULTS["max_iter"],
+        help=("If the model is an sklearn model, then this is the maximum "
+              "number of iterations to use during the fitting process."),
+        type=int)
     psr.add_argument(
         "--standardize", action="store_true",
         help=("Standardize the data so that it has a mean of 0 and a variance "

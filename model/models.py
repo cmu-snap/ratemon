@@ -513,32 +513,29 @@ class SvmSklearnWrapper(SvmWrapper):
     out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
-    params = ["kernel", "degree", "penalty"]
+    params = ["kernel", "degree", "penalty", "max_iter"]
 
     def new(self, **kwargs):
         for param in self.params:
             assert param in kwargs, f"\"{param}\" not in kwargs: {kwargs}"
         kernel = kwargs["kernel"]
-        degree = kwargs["degree"]
-        assert degree >= 0, \
-            ("Degree must be an integer greater than or equal to 0, but is: "
-             f"{degree}")
+        max_iter = kwargs["max_iter"]
         # Automatically set the class weights based on the class
-        # popularity in the training data. Increase the maximum number
-        # of iterations from 1000 to 10000.
+        # popularity in the training data. Change the maximum number
+        # of iterations.
         self.net = (
             # Use manually-configured regularization. Since the number
             # of samples is greater than the number of features, solve
             # the primal optimization problem instead of its dual.
             svm.LinearSVC(
                 penalty=kwargs["penalty"], dual=False, class_weight="balanced",
-                verbose=1, max_iter=10000)
+                verbose=1, max_iter=max_iter)
             if kernel == "linear" else
             # Supports L2 regularization only. The degree parameter is
             # used only if kernel == "poly".
             svm.SVC(
-                kernel=kernel, degree=degree, class_weight="balanced",
-                verbose=1, max_iter=10000))
+                kernel=kernel, degree=kwargs["degree"], class_weight="balanced",
+                verbose=1, max_iter=max_iter))
         return self.net
 
     def train(self, dat_in, dat_out):
@@ -679,17 +676,17 @@ class LrSklearnWrapper(SvmSklearnWrapper):
     """ Wraps ab sklearn Logistic Regression model. """
 
     name = "LrSklearn"
+    params = ["max_iter"]
 
     def new(self, **kwargs):
         # Use L1 regularization. Since the number of samples is
         # greater than the number of features, solve the primal
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
-        # training data. Increase the maximum number of iterations
-        # from 100 to 10000.
+        # training data.Change the maximum number of iterations.
         self.net = linear_model.LogisticRegression(
             penalty="l1", dual=False, class_weight="balanced",
-            solver="liblinear", max_iter=10000, verbose=1)
+            solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
         return self.net
 
 
