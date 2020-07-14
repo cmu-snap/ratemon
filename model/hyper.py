@@ -64,8 +64,8 @@ def main():
         },
         {
             "name": "model",
-            "type": "fixed",
-            "value": args.model
+            "type": "choice",
+            "values": ["SvmSklearn", "LrSklearn"]
         },
         {
             "name": "conf_trials",
@@ -80,32 +80,47 @@ def main():
         {
             "name": "num_gpus",
             "type": "fixed",
-            "value": 1
+            "value": 0
         },
         {
             "name": "warmup",
             "type": "fixed",
-            "value": 1000
+            "value": 500
         },
         {
             "name": "num_sims",
             "type": "fixed",
-            "value": None
-        },
-        {
-            "name": "train_batch",
-            "type": "fixed",
             "value": 10
         },
+        # {
+        #     "name": "train_batch",
+        #     "type": "fixed",
+        #     "value": 10
+        # },
+        # {
+        #     "name": "learning_rate",
+        #     "type": "range",
+        #     "bounds": [0.0001, 0.01]
+        # },
+        # {
+        #     "name": "momentum",
+        #     "type": "range",
+        #     "bounds": [0.09, 0.99]
+        # },
         {
-            "name": "learning_rate",
-            "type": "range",
-            "bounds": [0.0001, 0.01]
+            "name": "kernel",
+            "type": "choice",
+            "values": ["linear", "poly", "rbf", "sigmoid"]
         },
         {
-            "name": "momentum",
+            "name": "degree",
             "type": "range",
-            "bounds": [0.09, 0.99]
+            "bounds": [0, 20]
+        },
+        {
+            "name": "penalty",
+            "type": "choice",
+            "values": ["l1", "l2"]
         },
         {
             "name": "no_rand",
@@ -146,11 +161,11 @@ def main():
         ])
     else:
         params.extend([
-            {
-                "name": "epochs",
-                "type": "range",
-                "bounds": [1, 100]
-            },
+            # {
+            #     "name": "epochs",
+            #     "type": "range",
+            #     "bounds": [1, 100]
+            # },
         ])
 
     print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
