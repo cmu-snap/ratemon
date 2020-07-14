@@ -520,8 +520,8 @@ class SvmSklearnWrapper(SvmWrapper):
             assert param in kwargs, f"\"{param}\" not in kwargs: {kwargs}"
         kernel = kwargs["kernel"]
         degree = kwargs["degree"]
-        assert degree >= 1, \
-            ("Degree must be an integer greater than or equal to 1, but is: "
+        assert degree >= 0, \
+            ("Degree must be an integer greater than or equal to 0, but is: "
              f"{degree}")
         # Automatically set the class weights based on the class
         # popularity in the training data. Increase the maximum number
