@@ -34,6 +34,7 @@ class PytorchModelWrapper:
 
     def __init__(self):
         self.net = None
+        self.graph = False
         self.__check()
 
     def __check(self):
@@ -513,11 +514,10 @@ class SvmSklearnWrapper(SvmWrapper):
     out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
-    params = ["kernel", "degree", "penalty", "max_iter"]
+    params = ["kernel", "degree", "penalty", "max_iter", "graph"]
 
     def new(self, **kwargs):
-        for param in self.params:
-            assert param in kwargs, f"\"{param}\" not in kwargs: {kwargs}"
+        self.graph = kwargs["graph"]
         kernel = kwargs["kernel"]
         max_iter = kwargs["max_iter"]
         # Automatically set the class weights based on the class
@@ -572,17 +572,18 @@ class SvmSklearnWrapper(SvmWrapper):
                  preds[i:i + num_per_bucket],
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
-        # Plot each bucket's accuracy.
-        pyplot.plot(
-            [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
-        pyplot.ylim((-0.1, 1.1))
-        if x_lim is not None:
-            pyplot.xlim((-1.1, x_lim + 0.1))
-        pyplot.xlabel("Unfairness (fraction of fair)")
-        pyplot.ylabel("Classification accuracy")
-        pyplot.tight_layout()
-        pyplot.savefig(flp)
-        pyplot.close()
+        if self.graph:
+            # Plot each bucket's accuracy.
+            pyplot.plot(
+                [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
+            pyplot.ylim((-0.1, 1.1))
+            if x_lim is not None:
+                pyplot.xlim((-1.1, x_lim + 0.1))
+                pyplot.xlabel("Unfairness (fraction of fair)")
+                pyplot.ylabel("Classification accuracy")
+                pyplot.tight_layout()
+                pyplot.savefig(flp)
+                pyplot.close()
         # Compute the overall accuracy.
         _, corrects, totals = zip(*buckets)
         acc = sum(corrects) / sum(totals)
@@ -595,80 +596,81 @@ class SvmSklearnWrapper(SvmWrapper):
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
         """
-        # Create the output directory.
-        out_dir = self.name
-        if not path.exists(out_dir):
-            os.makedirs(out_dir)
         # Compute the fair share. Convert from int to float to avoid
         # all values being rounded to 0.
         fair = torch.reciprocal(num_flws.type(torch.float))
         # Determine the maximum unfairness.
         max_unfair = ((dat_out_raw - fair) / fair).max()
 
-        # Graphs:
+        out_dir = self.name
+        if self.graph:
+            # Create the output directory.
+            if not path.exists(out_dir):
+                os.makedirs(out_dir)
 
-        # Feature importance.
-        coefs = None
-        try:
-            coefs = self.net.coef_
-        except AttributeError:
-            # Coefficients are only; available with a linear kernel.
-            print("Warning: Unable to extract coefficients!")
-        if coefs is not None:
-            imps, names = zip(*reversed(sorted(
-                [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
-                key=lambda t: t[0]
-            )))
-            num_fets = len(names)
-            y_vals = list(range(num_fets))
-            pyplot.figure(figsize=(7, 0.178 * num_fets))
-            pyplot.barh(y_vals, imps, align="center")
-            pyplot.yticks(y_vals, names)
-            pyplot.ylim((-1, num_fets))
-            pyplot.xlabel("Feature coefficient")
-            pyplot.ylabel("Feature name")
-            pyplot.tight_layout()
-            pyplot.savefig(path.join(out_dir, "features.pdf"))
-            pyplot.close()
+            # Analyze feature importance.
+            coefs = None
+            try:
+                coefs = self.net.coef_
+            except AttributeError:
+                # Coefficients are only; available with a linear kernel.
+                print("Warning: Unable to extract coefficients!")
+            if coefs is not None:
+                imps, names = zip(*reversed(sorted(
+                    [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
+                    key=lambda t: t[0]
+                )))
+                num_fets = len(names)
+                y_vals = list(range(num_fets))
+                pyplot.figure(figsize=(7, 0.178 * num_fets))
+                pyplot.barh(y_vals, imps, align="center")
+                pyplot.yticks(y_vals, names)
+                pyplot.ylim((-1, num_fets))
+                pyplot.xlabel("Feature coefficient")
+                pyplot.ylabel("Feature name")
+                pyplot.tight_layout()
+                pyplot.savefig(path.join(out_dir, "features.pdf"))
+                pyplot.close()
 
-        # Accuracy vs unfairness for all flows and all degrees of
-        # unfairness, for the model itself.
+        # Analyze accuracy vs unfairness for all flows and all degrees
+        # of unfairness, for the model itself.
         print("Evaluating model:")
         acc = self.__evaluate(
             torch.tensor(self.net.predict(dat_in)), dat_out_classes,
             dat_out_raw, fair, path.join(out_dir, "accuracy_vs_unfairness.pdf"),
             max_unfair)
-        # Accuracy vs. unfairness for all flows and all degrees of
-        # unfairness, for the Mathis Model oracle.
-        print("Evaluting Mathis Model oracle:")
-        self.__evaluate(
-            dat_out_oracle, dat_out_classes, dat_out_raw, fair,
-            path.join(out_dir, "accuracy_vs_unfairness_mathis.pdf"), max_unfair)
+        if self.graph:
+            # Analyze accuracy vs. unfairness for all flows and all
+            # degrees of unfairness, for the Mathis Model oracle.
+            print("Evaluting Mathis Model oracle:")
+            self.__evaluate(
+                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+                path.join(out_dir, "accuracy_vs_unfairness_mathis.pdf"), max_unfair)
 
-        # For each number of flows, accuracy vs. unfairness.
-        flws_accs = []
-        nums_flws = list(set(num_flws.tolist()))
-        for num_flws_selected in nums_flws:
-            print(f"Evaluating model for {num_flws_selected} flows:")
-            valid = torch.where(num_flws == num_flws_selected)
-            flws_accs.append(self.__evaluate(
-                torch.tensor(self.net.predict(dat_in[valid])),
-                dat_out_classes[valid], dat_out_raw[valid], fair[valid],
-                path.join(
-                    out_dir,
-                    f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf"),
-                max_unfair))
+            # Analyze, for each number of flows, accuracy vs. unfairness.
+            flws_accs = []
+            nums_flws = list(set(num_flws.tolist()))
+            for num_flws_selected in nums_flws:
+                print(f"Evaluating model for {num_flws_selected} flows:")
+                valid = torch.where(num_flws == num_flws_selected)
+                flws_accs.append(self.__evaluate(
+                    torch.tensor(self.net.predict(dat_in[valid])),
+                    dat_out_classes[valid], dat_out_raw[valid], fair[valid],
+                    path.join(
+                        out_dir,
+                        f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf"),
+                    max_unfair))
 
-        # Accuracy vs. number of flows.
-        x_vals = list(range(len(flws_accs)))
-        pyplot.bar(x_vals, flws_accs, align="center")
-        pyplot.xticks(x_vals, nums_flws)
-        pyplot.ylim((0, 1.1))
-        pyplot.xlabel("Total flows (1 unfair)")
-        pyplot.ylabel("Classification accuracy")
-        pyplot.tight_layout()
-        pyplot.savefig(path.join(out_dir, "accuracy_vs_num-flows.pdf"))
-        pyplot.close()
+            # Analyze accuracy vs. number of flows.
+            x_vals = list(range(len(flws_accs)))
+            pyplot.bar(x_vals, flws_accs, align="center")
+            pyplot.xticks(x_vals, nums_flws)
+            pyplot.ylim((0, 1.1))
+            pyplot.xlabel("Total flows (1 unfair)")
+            pyplot.ylabel("Classification accuracy")
+            pyplot.tight_layout()
+            pyplot.savefig(path.join(out_dir, "accuracy_vs_num-flows.pdf"))
+            pyplot.close()
         return acc
 
 
@@ -676,9 +678,10 @@ class LrSklearnWrapper(SvmSklearnWrapper):
     """ Wraps ab sklearn Logistic Regression model. """
 
     name = "LrSklearn"
-    params = ["max_iter"]
+    params = ["max_iter", "graph"]
 
     def new(self, **kwargs):
+        self.graph = kwargs["graph"]
         # Use L1 regularization. Since the number of samples is
         # greater than the number of features, solve the primal
         # optimization problem instead of its dual. Automatically set

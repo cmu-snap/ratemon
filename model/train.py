@@ -38,6 +38,7 @@ DEFAULTS = {
     "penalty": "l1",
     "max_iter": 10000,
     "standardize": True,
+    "graph": False,
     "early_stop": False,
     "val_patience": 10,
     "val_improvement_thresh": 0.1,
@@ -419,9 +420,6 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
     """ Trains a model. """
     print("Training...")
     los_fnc = net.los_fnc()
-    # Verify that all optimizer parameters are accounted for.
-    for param in net.params:
-        assert param in opt_params, f"\"{param}\" not in opt_params: {opt_params}"
     opt = net.opt(net.net.parameters(), **opt_params)
     # If using early stopping, then this is the lowest validation loss
     # encountered so far.
@@ -679,6 +677,10 @@ def run_many(args_):
         print(f"Output directory does not exist. Creating it: {out_dir}")
         os.makedirs(out_dir)
     net_tmp = models.MODELS[args["model"]]()
+    # Verify that the necessary supplemental parameters are present.
+    for param in net_tmp.params:
+        assert param in args, f"\"{param}\" not in args: {args}"
+    # Assemble the output filepath.
     out_fln = ("model.pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
                else "net.pth")
     out_flp = path.join(args["out_dir"], out_fln)
@@ -822,8 +824,13 @@ def main():
     psr.add_argument(
         "--max-iter", default=DEFAULTS["max_iter"],
         help=("If the model is an sklearn model, then this is the maximum "
-              "number of iterations to use during the fitting process."),
+              "number of iterations to use during the fitting process. Ignored "
+              "otherwise."),
         type=int)
+    psr.add_argument(
+        "--graph", action="store_true",
+        help=("If the model is an sklearn model, then analyze and graph the "
+              "testing results."))
     psr.add_argument(
         "--standardize", action="store_true",
         help=("Standardize the data so that it has a mean of 0 and a variance "
