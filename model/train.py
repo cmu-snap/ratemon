@@ -35,6 +35,8 @@ DEFAULTS = {
     "momentum": 0.9,
     "kernel": "linear",
     "degree": 3,
+    "penalty": "l1",
+    "standardize": True,
     "early_stop": False,
     "val_patience": 10,
     "val_improvement_thresh": 0.1,
@@ -190,7 +192,7 @@ def process_sim(idx, total, net, sim_flp, warmup):
         sim)
 
 
-def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
+def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
     """
     Parses the simulation files in data_dir and transforms them (e.g., by
     scaling) into the correct format for the network.
@@ -275,7 +277,7 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle):
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps)
+    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, standardize)
 
     # Check if any of the data is malformed and discard features if
     # necessary.
@@ -666,6 +668,7 @@ def run_many(args_):
 
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):
+        print(f"Output directory does not exist. Creating it: {out_dir}")
         os.makedirs(out_dir)
     net_tmp = models.MODELS[args["model"]]()
     out_fln = ("model.pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
@@ -700,7 +703,7 @@ def run_many(args_):
         dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, scl_prms = (
             make_datasets(
                 net_tmp, args["data_dir"], args["warmup"], args["num_sims"],
-                SHUFFLE))
+                SHUFFLE, args["standardize"]))
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
         np.savez_compressed(
@@ -795,14 +798,23 @@ def main():
     psr.add_argument(
         "--kernel", default=DEFAULTS["kernel"],
         choices=["linear", "poly", "rbf", "sigmoid"],
-        help=("The kernel to use if the model is of type "
-              f"\"{models.SvmSklearnWrapper().name}\"."),
+        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\", "
+              "then use this type kernel. Ignored otherwise."),
         type=str)
     psr.add_argument(
         "--degree", default=DEFAULTS["degree"],
-        help=("If \"--kernel=poly\", then this is the degree of the polynomial "
+        help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
+              "and \"--kernel=poly\", then this is the degree of the polynomial "
               "that will be fit. Ignored otherwise."),
         type=int)
+    psr.add_argument(
+        "--penalty", default=DEFAULTS["penalty"], choices=["l1", "l2"],
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
+              "then use this type of regularization. Ignored otherwise."))
+    psr.add_argument(
+        "--standardize", action="store_true",
+        help=("Standardize the data so that it has a mean of 0 and a variance "
+              "of 1."))
     psr.add_argument(
         "--early-stop", action="store_true", help="Enable early stopping.")
     psr.add_argument(

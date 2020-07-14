@@ -525,7 +525,7 @@ class SvmSklearnWrapper(SvmWrapper):
     out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
-    params = ["kernel", "degree"]
+    params = ["kernel", "degree", "penalty"]
 
     def new(self, **kwargs):
         for param in self.params:
@@ -539,12 +539,12 @@ class SvmSklearnWrapper(SvmWrapper):
         # popularity in the training data. Increase the maximum number
         # of iterations from 1000 to 10000.
         self.net = (
-            # Use L1 regularization. Since the number of samples is
-            # greater than the number of features, solve the primal
-            # optimization problem instead of its dual.
+            # Use manually-configured regularization. Since the number
+            # of samples is greater than the number of features, solve
+            # the primal optimization problem instead of its dual.
             svm.LinearSVC(
-                penalty="l1", dual=False, class_weight="balanced", verbose=1,
-                max_iter=10000)
+                penalty=kwargs["penalty"], dual=False, class_weight="balanced",
+                verbose=1, max_iter=10000)
             if kernel == "linear" else
             # Supports L2 regularization only. The degree parameter is
             # used only if kernel == "poly".
@@ -698,10 +698,10 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Increase the maximum number of iterations
-        # from 100 to 1000.
+        # from 100 to 10000.
         self.net = linear_model.LogisticRegression(
             penalty="l1", dual=False, class_weight="balanced",
-            solver="liblinear", max_iter=1000, verbose=1)
+            solver="liblinear", max_iter=10000, verbose=1)
         return self.net
 
 
