@@ -27,10 +27,10 @@ import utils
 DEFAULTS = {
     "epochs": 100,
     "num_gpus": 0,
-    "warmup": 1000,
+    "warmup": 500,
     "num_sims": 10,
-    "train_batch": 10,
-    "test_batch": 10_000_000_000_000,
+    "train_batch": sys.maxsize,
+    "test_batch": sys.maxsize,
     "learning_rate": 0.001,
     "momentum": 0.9,
     "kernel": "linear",
