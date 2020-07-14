@@ -33,6 +33,8 @@ DEFAULTS = {
     "test_batch": 10_000_000_000_000,
     "learning_rate": 0.001,
     "momentum": 0.9,
+    "kernel": "linear",
+    "degree": 3,
     "early_stop": False,
     "val_patience": 10,
     "val_improvement_thresh": 0.1,
@@ -409,13 +411,15 @@ def inference(ins, labs, net_raw, dev,
     return los_fnc(out, labs), hidden
 
 
-def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp,
-          val_pat_max, out_flp, lr, momentum, val_imp_thresh,
-          tim_out_s):
+def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
+          val_imp_thresh, tim_out_s, opt_params):
     """ Trains a model. """
     print("Training...")
     los_fnc = net.los_fnc()
-    opt = net.opt(net.net.parameters(), lr=lr)
+    # Verify that all optimizer parameters are accounted for.
+    for param in net.params:
+        assert param in opt_params, f"\"{param}\" not in opt_params: {opt_params}"
+    opt = net.opt(net.net.parameters(), **opt_params)
     # If using early stopping, then this is the lowest validation loss
     # encountered so far.
     los_val_min = None
@@ -560,7 +564,7 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Construct the model.
     print("Building model...")
     net = models.MODELS[args["model"]]()
-    net.new()
+    net.new(**{param: args[param] for param in net.params})
     # Split the data into training, validation, and test loaders.
     ldr_trn, _, ldr_tst = split_data(
         net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
@@ -614,8 +618,9 @@ def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     tim_srt_s = time.time()
     net = train(
         net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
-        args["val_patience"], out_flp, args["learning_rate"], args["momentum"],
-        args["val_improvement_thresh"], args["timeout_s"])
+        args["val_patience"], out_flp, args["val_improvement_thresh"],
+        args["timeout_s"],
+        opt_params={param: args[param] for param in net.params})
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
 
     # Explicitly delete the training and validation data so that they are
@@ -787,6 +792,17 @@ def main():
     psr.add_argument(
         "--momentum", default=DEFAULTS["momentum"],
         help="Momentum for SGD training.", type=float)
+    psr.add_argument(
+        "--kernel", default=DEFAULTS["kernel"],
+        choices=["linear", "poly", "rbf", "sigmoid"],
+        help=("The kernel to use if the model is of type "
+              f"\"{models.SvmSklearnWrapper().name}\"."),
+        type=str)
+    psr.add_argument(
+        "--degree", default=DEFAULTS["degree"],
+        help=("If \"--kernel=poly\", then this is the degree of the polynomial "
+              "that will be fit. Ignored otherwise."),
+        type=int)
     psr.add_argument(
         "--early-stop", action="store_true", help="Enable early stopping.")
     psr.add_argument(

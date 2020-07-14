@@ -29,6 +29,8 @@ class PytorchModelWrapper:
     los_fnc = None
     # The optimizer to use during training.
     opt = None
+    # Model-specific parameters. Each model may use these differently.
+    params = []
 
     def __init__(self):
         self.net = None
@@ -363,6 +365,7 @@ class BinaryDnnWrapper(BinaryModelWrapper):
     out_spc = ["queue occupancy"]
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
+    params = ["lr", "momentum"]
 
     def new(self):
         self.net = BinaryDnn(self.num_ins, self.num_clss)
@@ -407,6 +410,7 @@ class SvmWrapper(BinaryModelWrapper):
     out_spc = ["queue occupancy"]
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
+    params = ["lr", "momentum"]
 
     def new(self):
         self.net = Svm(self.num_ins)
@@ -523,17 +527,32 @@ class SvmSklearnWrapper(SvmWrapper):
     out_spc = ["queue occupancy ewma-alpha0.5"]
     los_fnc = None
     opt = None
+    params = ["kernel", "degree"]
 
-    def new(self):
-        # Use L1 regularization. Since the number of samples is
-        # greater than the number of features, solve the primal
-        # optimization problem instead of its dual. Automatically set
-        # the class weights based on the class popularity in the
-        # training data. Increase the maximum number of iterations
-        # from 1000 to 10000.
-        self.net = svm.LinearSVC(
-            penalty="l1", dual=False, class_weight="balanced", verbose=1,
-            max_iter=10000)
+    def new(self, **kwargs):
+        for param in self.params:
+            assert param in kwargs, f"\"{param}\" not in kwargs: {kwargs}"
+        kernel = kwargs["kernel"]
+        degree = kwargs["degree"]
+        assert degree >= 1, \
+            ("Degree must be an integer greater than or equal to 1, but is: "
+             f"{degree}")
+        # Automatically set the class weights based on the class
+        # popularity in the training data. Increase the maximum number
+        # of iterations from 1000 to 10000.
+        self.net = (
+            # Use L1 regularization. Since the number of samples is
+            # greater than the number of features, solve the primal
+            # optimization problem instead of its dual.
+            svm.LinearSVC(
+                penalty="l1", dual=False, class_weight="balanced", verbose=1,
+                max_iter=10000)
+            if kernel == "linear" else
+            # Supports L2 regularization only. The degree parameter is
+            # used only if kernel == "poly".
+            svm.SVC(
+                kernel=kernel, degree=degree, class_weight="balanced",
+                verbose=1, max_iter=10000))
         return self.net
 
     def train(self, dat_in, dat_out):
@@ -606,21 +625,28 @@ class SvmSklearnWrapper(SvmWrapper):
         # Graphs:
 
         # Feature importance.
-        imps, names = zip(*reversed(sorted(
-            [(imp, fets[idx]) for idx, imp in enumerate(self.net.coef_[0])],
-            key=lambda t: t[0]
-        )))
-        num_fets = len(names)
-        y_vals = list(range(num_fets))
-        pyplot.figure(figsize=(7, 0.178 * num_fets))
-        pyplot.barh(y_vals, imps, align="center")
-        pyplot.yticks(y_vals, names)
-        pyplot.ylim((-1, num_fets))
-        pyplot.xlabel("Feature coefficient")
-        pyplot.ylabel("Feature name")
-        pyplot.tight_layout()
-        pyplot.savefig(path.join(out_dir, "features.pdf"))
-        pyplot.close()
+        coefs = None
+        try:
+            coefs = self.net.coef_
+        except AttributeError:
+            # Coefficients are only; available with a linear kernel.
+            print("Warning: Unable to extract coefficients!")
+        if coefs is not None:
+            imps, names = zip(*reversed(sorted(
+                [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
+                key=lambda t: t[0]
+            )))
+            num_fets = len(names)
+            y_vals = list(range(num_fets))
+            pyplot.figure(figsize=(7, 0.178 * num_fets))
+            pyplot.barh(y_vals, imps, align="center")
+            pyplot.yticks(y_vals, names)
+            pyplot.ylim((-1, num_fets))
+            pyplot.xlabel("Feature coefficient")
+            pyplot.ylabel("Feature name")
+            pyplot.tight_layout()
+            pyplot.savefig(path.join(out_dir, "features.pdf"))
+            pyplot.close()
 
         # Accuracy vs unfairness for all flows and all degrees of
         # unfairness, for the model itself.
@@ -668,7 +694,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
 
     name = "LrSklearn"
 
-    def new(self):
+    def new(self, **kwargs):
         # Use L1 regularization. Since the number of samples is
         # greater than the number of features, solve the primal
         # optimization problem instead of its dual. Automatically set
@@ -685,7 +711,6 @@ class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
     name = "Lstm"
-
     # For now, we do not use RTT ratio because our method of estimating
     # it cannot be performed by a general receiver.
     # in_spc = ["inter-arrival time", "RTT ratio", "loss rate"]
@@ -695,6 +720,7 @@ class LstmWrapper(PytorchModelWrapper):
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.Adam
+    params = ["lr"]
 
     def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
         super(LstmWrapper, self).__init__()
