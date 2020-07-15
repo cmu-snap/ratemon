@@ -681,9 +681,22 @@ def run_many(args_):
     for param in net_tmp.params:
         assert param in args, f"\"{param}\" not in args: {args}"
     # Assemble the output filepath.
-    out_fln = ("model.pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
-               else "net.pth")
-    out_flp = path.join(args["out_dir"], out_fln)
+    out_flp = path.join(
+        args["out_dir"],
+        # Join all the arguments with "-".
+        ("-".join(
+            # Join each key with its value using a ":". Use args_
+            # instead of args to avoid excessively-long filenames by
+            # only including non-default arguments.
+            [":".join([str(x) for x in k_v]) for k_v in args_.items()
+             # Do not include the arguments "data_dir" and "out_dir".
+             if k_v[0] not in ["data_dir", "out_dir"]]
+        ) + (
+            # Determine the proper extension based on the type of
+            # model.
+            ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
+            else ".pth")
+        ))
     # If a trained model file already exists, then delete it.
     if path.exists(out_flp):
         os.remove(out_flp)
