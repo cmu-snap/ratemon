@@ -41,6 +41,7 @@ EWMAS = [
     ("throughput p/s ewma", "float64"),
     ("RTT ratio ewma", "float64"),
     ("loss rate ewma", "float64"),
+    ("estimated loss rate ewma", "float64"),
     ("queue occupancy ewma", "float64")
 ]
 # These metrics are calculated over an window of packets, for varies
@@ -50,6 +51,7 @@ WINDOWED = [
     ("average throughput p/s windowed", "float64"),
     ("average RTT ratio windowed", "float64"),
     ("loss rate windowed", "float64"),
+    ("estimated loss rate windowed", "float64"),
     ("queue occupancy windowed", "float64")
 ]
 # The alpha values at which to evaluate the EWMA metrics.
@@ -158,7 +160,8 @@ def parse_pcap(sim_dir, out_dir):
         # State that the windowed metrics need to track across packets.
         windowed_state = {win: {
             "window_start": 0,
-            "loss_queue": deque()
+            "loss_queue": deque(),
+            "estimated_loss_queue": deque()
         } for win in WINDOWS}
         # Number of packet losses up to the current received packet.
         packet_loss = 0
@@ -177,6 +180,7 @@ def parse_pcap(sim_dir, out_dir):
         prev_pkt_seq = 0
         highest_seq = 0
         estimated_loss = 0
+        curr_estimated_loss = 0
 
         # negative_gaps = 0
         # big_gaps = 0
@@ -394,10 +398,16 @@ def parse_pcap(sim_dir, out_dir):
 
                 if recv_pkt_seq > highest_seq + PKT_SIZE:
                     # Loss in new packets
-                    estimated_loss += (recv_pkt_seq - highest_seq - PKT_SIZE) / PKT_SIZE
+                    curr_estimated_loss = (recv_pkt_seq - highest_seq - PKT_SIZE) / PKT_SIZE
+                    estimated_loss += curr_estimated_loss
                 elif recv_pkt_seq < prev_pkt_seq and prev_pkt_seq != highest_seq:
                     # Loss in retransmission
+                    curr_estimated_loss = 1
                     estimated_loss += 1
+                else:
+                    curr_estimated_loss = 0
+            else:
+                curr_estimated_loss = 0
 
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
@@ -429,7 +439,10 @@ def parse_pcap(sim_dir, out_dir):
                         # over the course of sending (curr_loss + 1)
                         # packets, one got through and curr_loss were
                         # lost.
-                        new = curr_loss / (curr_loss + 1)
+                        if "estimated" in metric:
+                            new = curr_estimated_loss / (1.0 * curr_estimated_loss + 1)
+                        else:
+                            new = curr_loss / (1.0 * curr_loss + 1)
                     elif "queue occupancy" in metric:
                         # Queue occupancy is calculated using the
                         # router's PCAP files, below.
@@ -459,19 +472,35 @@ def parse_pcap(sim_dir, out_dir):
                     # TODO: Average RTT ratio over a window.
                     new = 0
                 elif "loss rate" in metric:
-                    # Process packet loss.
-                    if (curr_loss > 0 and j > 0):
-                        prev_recv_time = recv_pkts[j - 1][1]
-                        loss_interval = (
-                            curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
-                        for k in range(0, curr_loss):
-                            state["loss_queue"].append(
-                                prev_recv_time + (k + 1) * loss_interval)
-                    # Pop out earlier loss.
-                    while (state["loss_queue"] and
-                           (state["loss_queue"][0] <
-                            curr_recv_time - window_size)):
-                        state["loss_queue"].popleft()
+                    if "estimated" in metric:
+                        # Process estimated packet loss
+                        if (curr_estimated_loss > 0 and j > 0):
+                            prev_recv_time = recv_pkts[j - 1][1]
+                            loss_interval = (
+                                curr_recv_time - prev_recv_time) / (curr_estimated_loss + 1.0)
+                            for k in range(0, int(curr_estimated_loss)):
+                                state["estimated_loss_queue"].append(
+                                    prev_recv_time + (k + 1) * loss_interval)
+                        # Pop out earlier loss.
+                        while (state["estimated_loss_queue"] and
+                               (state["estimated_loss_queue"][0] <
+                                curr_recv_time - window_size)):
+                            state["estimated_loss_queue"].popleft()
+
+                    else:
+                        # Process packet loss.
+                        if (curr_loss > 0 and j > 0):
+                            prev_recv_time = recv_pkts[j - 1][1]
+                            loss_interval = (
+                                curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
+                            for k in range(0, curr_loss):
+                                state["loss_queue"].append(
+                                    prev_recv_time + (k + 1) * loss_interval)
+                        # Pop out earlier loss.
+                        while (state["loss_queue"] and
+                               (state["loss_queue"][0] <
+                                curr_recv_time - window_size)):
+                            state["loss_queue"].popleft()
 
                     # Update window_start.
                     while ((curr_recv_time -
@@ -487,9 +516,14 @@ def parse_pcap(sim_dir, out_dir):
                         # num_pkts = len_loss_q + j - state["window_start"]
                         # loss_rate = len_loss_q / num_pkts
                         # print(f"len_loss_q: {len_loss_q}, num_pkts: {num_pkts}, loss rate: {loss_rate}")
-                        new = (len(state["loss_queue"]) / (1.0 * (
-                            len(state["loss_queue"]) + j -
-                            state["window_start"])))
+                        if "estimated" in metric:
+                            new = (len(state["estimated_loss_queue"]) / (1.0 * (
+                                len(state["estimated_loss_queue"]) + j -
+                                state["window_start"])))
+                        else:
+                            new = (len(state["loss_queue"]) / (1.0 * (
+                                len(state["loss_queue"]) + j -
+                                state["window_start"])))
                     else:
                         new = 0
 
