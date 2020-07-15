@@ -204,7 +204,8 @@ def main():
         print(
             f"Varying these parameters, with {tls_cnf} sub-trials(s) for each "
             f"configuration: {[pairs[0][0] for pairs in to_vary]}")
-        cnfs = [{**fixed, **dict(params)} for params in itertools.product(*to_vary)]
+        cnfs = [
+            {**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
         if SYNC:
             res = [train.run_many(cnf) for cnf in cnfs]
