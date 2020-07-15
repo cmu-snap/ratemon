@@ -5,6 +5,8 @@ Hyper-parameter optimization for train.py.
 
 import argparse
 import itertools
+import multiprocessing
+import sys
 import time
 
 import ax
@@ -15,6 +17,9 @@ import models
 
 
 DEFAULT_TLS_OPT = 40
+# When using exhaustive mode, whether to run configurations
+# synchronously or in parallel. Ignored otherwise.
+SYNC = False
 
 
 def main():
@@ -30,6 +35,10 @@ def main():
         "--data-dir",
         help="The path to the training/validation/testing data (required).",
         required=True, type=str)
+    psr.add_argument(
+        "--num-sims", default=sys.maxsize,
+        help="The number of simulations to consider.", type=int)
+    model_opts = sorted(models.MODELS.keys())
     psr.add_argument(
         "--opt-trials", default=DEFAULT_TLS_OPT,
         help="The number of optimization trials to run.", type=int)
@@ -96,7 +105,7 @@ def main():
         {
             "name": "num_sims",
             "type": "fixed",
-            "value": 10
+            "value": args.num_sims
         },
         # {
         #     "name": "train_batch",
@@ -197,10 +206,14 @@ def main():
             f"configuration: {[pairs[0][0] for pairs in to_vary]}")
         cnfs = [{**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
-        res = [train.run_many(params) for params in cnfs]
+        if SYNC:
+            res = [train.run_many(cnf) for cnf in cnfs]
+        else:
+            with multiprocessing.Pool() as pol:
+                res = pol.map(train.run_many, cnfs)
         best_idx = np.argmin(np.array(res))
-        best_err = res[best_idx]
         best_params = cnfs[best_idx]
+        best_err = res[best_idx]
     else:
         print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
                "sub-trial(s) for each configuration."))
