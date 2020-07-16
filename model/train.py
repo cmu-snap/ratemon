@@ -847,7 +847,7 @@ def main():
     psr.add_argument(
         "--standardize", action="store_true",
         help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1."))
+              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
     psr.add_argument(
         "--early-stop", action="store_true", help="Enable early stopping.")
     psr.add_argument(
