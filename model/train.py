@@ -45,7 +45,7 @@ DEFAULTS = {
     "conf_trials": 1,
     "max_attempts": 10,
     "no_rand": False,
-    "timeout_s": -1,
+    "timeout_s": 0,
     "out_dir": "."
 }
 # The maximum number of epochs when using early stopping.
@@ -449,7 +449,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
     # Loop over the dataset multiple times...
     for epoch_idx in range(num_epochs):
         tim_del_s = time.time() - tim_srt_s
-        if tim_out_s != -1 and tim_del_s > tim_out_s:
+        if tim_out_s != 0 and tim_del_s > tim_out_s:
             print((f"Training timed out after after {epoch_idx} epochs "
                    f"({tim_del_s:.2f} seconds)."))
             break
