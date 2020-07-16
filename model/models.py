@@ -227,14 +227,19 @@ class BinaryModelWrapper(PytorchModelWrapper):
         assert start_idx is not None and 0 <= start_idx < num_pkts, \
             f"Invalid start index: {start_idx}"
 
-        # The number of windows is the number of times the window
-        # durations fits within the simulation.
-        num_wins = 10 * math.floor(sim.dur_s * 1e6 / dur_us)
-        # Select random intervals from this simulation to create the
-        # new input data. win_idx is the index into
-        # dat_in_new. pkt_idx is the index of the last packet in this
-        # window.
-        pkt_idxs = random.choices(range(start_idx, num_pkts), k=num_wins)
+        if sequential:
+            # Select all valid windows, in order.
+            num_wins = num_pkts - (start_idx + 1)
+            pkt_idxs = list(range(start_idx, num_pkts))
+        else:
+            # The number of windows is the number of times the window
+            # durations fits within the simulation.
+            num_wins = 10 * math.floor(sim.dur_s * 1e6 / dur_us)
+            # Select random intervals from this simulation to create the
+            # new input data. win_idx is the index into
+            # dat_in_new. pkt_idx is the index of the last packet in this
+            # window.
+            pkt_idxs = random.choices(range(start_idx, num_pkts), k=num_wins)
         # Records the number of packets that arrived during each
         # interval. This is a structured numpy array where each column
         # is named based on its bucket index. We add extra columns for
