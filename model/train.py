@@ -734,19 +734,7 @@ def run_many(args_):
             json.dump(scl_prms.tolist(), fil)
 
     # Visualaize the ground truth data.
-    clss = ([-1, 1] if isinstance(net_tmp, models.SvmWrapper)
-            else list(range(net_tmp.num_clss)))
-    # Assumes that dat_out is a structured numpy array containing a
-    # column named "class".
-    tots = [(dat_out["class"] == cls).sum() for cls in clss]
-    # The total number of class labels extracted in the previous line.
-    tot = sum(tots)
-    print("Ground truth:\n" + "\n".join(
-        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
-         for cls, tot_cls in zip(clss, tots)]))
-    tot_actual = np.prod(np.array(dat_out.shape))
-    assert tot == tot_actual, \
-        f"Error visualizing ground truth! {tot} != {tot_actual}"
+    utils.visualize_classes(net_tmp, dat_out)
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]

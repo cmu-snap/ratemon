@@ -332,3 +332,21 @@ def clean(arr):
     for col in range(num_cols):
         new[:, col] = arr[arr.dtype.names[col]]
     return new
+
+
+def visualize_classes(net, dat):
+    """ Prints statistics about the classes in dat. """
+    # Visualaize the ground truth data.
+    clss = ([-1, 1] if isinstance(net, models.SvmWrapper)
+            else list(range(net.num_clss)))
+    # Assumes that dat is a structured numpy array containing a
+    # column named "class".
+    tots = [(dat["class"] == cls).sum() for cls in clss]
+    # The total number of class labels extracted in the previous line.
+    tot = sum(tots)
+    print("Classes:\n" + "\n".join(
+        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
+         for cls, tot_cls in zip(clss, tots)]))
+    tot_actual = np.prod(np.array(dat.shape))
+    assert tot == tot_actual, \
+        f"Error visualizing ground truth! {tot} != {tot_actual}"
