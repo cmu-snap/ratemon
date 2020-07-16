@@ -620,11 +620,16 @@ class SvmSklearnWrapper(SvmWrapper):
             if coefs is not None:
                 imps, names = zip(*reversed(sorted(
                     [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
-                    key=lambda t: t[0]
-                )))
+                    key=lambda t: t[0])))
+                # Pick the 20 features whose coefficients have the largest magnitude.
+                imps, names = zip(*reversed(sorted(
+                    [(imp, name) for _, imp, name in sorted(
+                        [(abs(imp), imp, name) for imp, name in zip(imps, names)],
+                        key=lambda t: t[0])[len(names) - 20:]],
+                    key=lambda t: t[0])))
                 num_fets = len(names)
                 y_vals = list(range(num_fets))
-                pyplot.figure(figsize=(7, 0.178 * num_fets))
+                pyplot.figure(figsize=(7, 0.2 * num_fets))
                 pyplot.barh(y_vals, imps, align="center")
                 pyplot.yticks(y_vals, names)
                 pyplot.ylim((-1, num_fets))
