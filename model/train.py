@@ -576,10 +576,10 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     tim_srt_s = time.time()
     net.train(*(ldr_trn.dataset.raw()[1:3]))
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
-    # Save the model.
-    print(f"Saving: {out_flp}")
-    with open(out_flp, "wb") as fil:
-        pickle.dump(net.net, fil)
+    # # Save the model.
+    # print(f"Saving: {out_flp}")
+    # with open(out_flp, "wb") as fil:
+    #     pickle.dump(net.net, fil)
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
