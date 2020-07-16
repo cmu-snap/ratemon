@@ -251,7 +251,9 @@ def scale_all(dat, scl_prms, min_out, max_out, standardize):
         prm_1, prm_2 = scl_prms[idx]
         new[fet] = (
             (dat[fet] - prm_1) / prm_2 if standardize else
-            scale(dat[fet], min_in=prm_1, max_in=prm_2, min_out=0, max_out=1))
+            scale(
+                dat[fet], min_in=prm_1, max_in=prm_2, min_out=min_out,
+                max_out=max_out))
     return new
 
 
