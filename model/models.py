@@ -917,3 +917,4 @@ MODELS = {mdl.name: mdl for mdl in [
     LrSklearnWrapper,
     LstmWrapper
 ]}
+MODEL_NAMES = sorted(MODELS.keys())

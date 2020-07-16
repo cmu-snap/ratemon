@@ -10,6 +10,13 @@ import scapy.layers.inet
 import scapy.layers.ppp
 import torch
 
+import models
+
+
+# Arguments to ignore when converting an arguments dictionary to a
+# string.
+ARGS_TO_IGNORE = ["data_dir", "out_dir"]
+
 
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
@@ -193,6 +200,44 @@ class Sim():
         self.payload_B = float(payload_B[:-1])
         # Experiment duration (s).
         self.dur_s = float(dur_s[:-1])
+
+
+def args_to_str(args, order):
+    """
+    Converts the provided arguments dictionary to a string, using the
+    keys in order to determine the order of arguments in the
+    string.
+    """
+    for key in order:
+        assert key in args, f"Key {key} not in args: {args}"
+    return "-".join(
+        [str(args[key]) for key in order if key not in ARGS_TO_IGNORE])
+
+
+def str_to_args(args_str, order):
+    """
+    Converts the provided string of arguments to a dictionary, using
+    the keys in order to determine the identity of each argument in the
+    string.
+    """
+    # Remove extension and split on "-".
+    toks = ".".join(args_str.split(".")[:-1]).split("-")
+    # Remove elements of order that args_to_str() does not use when
+    # encoding strings.
+    order = [key for key in order if key not in ARGS_TO_IGNORE]
+    num_toks = len(toks)
+    num_order = len(order)
+    assert num_toks == num_order, \
+        (f"Mismatched tokens ({num_toks}) and order ({num_order})! "
+         "tokens: {toks}, order: {order}")
+    parsed = {}
+    for arg, tok in zip(order, toks):
+        try:
+            parsed_val = float(tok)
+        except ValueError:
+            parsed_val = tok
+        parsed[arg] = parsed_val
+    return parsed
 
 
 def parse_packets_endpoint(flp, packet_size_B):

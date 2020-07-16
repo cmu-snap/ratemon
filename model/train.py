@@ -25,20 +25,22 @@ import utils
 
 # Parameter defaults.
 DEFAULTS = {
+    "data_dir": ".",
+    "warmup": 0,
+    "num_sims": sys.maxsize,
+    "model": models.MODEL_NAMES[0],
     "epochs": 100,
     "num_gpus": 0,
-    "warmup": 500,
-    "num_sims": 10,
     "train_batch": sys.maxsize,
     "test_batch": sys.maxsize,
     "learning_rate": 0.001,
-    "momentum": 0.9,
+    "momentum": 0.09,
     "kernel": "linear",
     "degree": 3,
     "penalty": "l1",
     "max_iter": 10000,
-    "standardize": True,
     "graph": False,
+    "standardize": True,
     "early_stop": False,
     "val_patience": 10,
     "val_improvement_thresh": 0.1,
@@ -684,20 +686,12 @@ def run_many(args_):
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        # Join all the arguments with "-".
-        ("-".join(
-            # Join each key with its value using a ":". Use args_
-            # instead of args to avoid excessively-long filenames by
-            # only including non-default arguments.
-            [":".join([str(x) for x in k_v]) for k_v in args_.items()
-             # Do not include the arguments "data_dir" and "out_dir".
-             if k_v[0] not in ["data_dir", "out_dir"]]
+        (utils.args_to_str(args, order=sorted(DEFAULTS.keys()))
         ) + (
             # Determine the proper extension based on the type of
             # model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else ".pth")
-        ))
+            else ".pth"))
     # If a trained model file already exists, then delete it.
     if path.exists(out_flp):
         os.remove(out_flp)
@@ -790,17 +784,16 @@ def main():
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(
-        "--warmup", default=0,
+        "--warmup", default=DEFAULTS["warmup"],
         help=("The number of packets to drop from the beginning of each "
               "simulation."),
         type=int)
     psr.add_argument(
-        "--num-sims", default=sys.maxsize,
+        "--num-sims", default=DEFAULTS["num_sims"],
         help="The number of simulations to consider.", type=int)
-    model_opts = sorted(models.MODELS.keys())
     psr.add_argument(
-        "--model", default=model_opts[0], help="The model to use.",
-        choices=model_opts, type=str)
+        "--model", choices=models.MODEL_NAMES, default=DEFAULTS["model"],
+        help="The model to use.", type=str)
     psr.add_argument(
         "--epochs", default=DEFAULTS["epochs"],
         help="The number of epochs to train for.", type=int)
@@ -876,8 +869,11 @@ def main():
     psr.add_argument(
         "--out-dir", default=DEFAULTS["out_dir"],
         help="The directory in which to store output files.", type=str)
-
-    run_many(vars(psr.parse_args()))
+    args = vars(psr.parse_args())
+    # Verify that all arguments are reflected in DEFAULTS.
+    for arg in args.keys():
+        assert arg in DEFAULTS, f"Argument {arg} missing from DEFAULTS!"
+    run_many(args)
 
 
 if __name__ == "__main__":
