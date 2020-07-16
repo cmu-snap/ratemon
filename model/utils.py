@@ -56,13 +56,15 @@ class Dataset(torch.utils.data.Dataset):
         self.fets = fets
         self.dat_out_raw = (
             None if dat_out_raw is None
-            else torch.tensor(dat_out_raw, dtype=torch.float))
+            else torch.tensor(
+                dat_out_raw.reshape(shp_out[0]), dtype=torch.float))
         self.dat_out_oracle = (
             None if dat_out_oracle is None
-            else torch.tensor(dat_out_oracle, dtype=torch.int))
+            else torch.tensor(
+                dat_out_oracle.reshape(shp_out[0]), dtype=torch.int))
         self.num_flws = (
             None if num_flws is None
-            else torch.tensor(num_flws, dtype=torch.int))
+            else torch.tensor(num_flws.reshape(shp_out[0]), dtype=torch.int))
 
     def to(self, dev):
         """ Move the entire dataset to the target device. """
