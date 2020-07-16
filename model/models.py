@@ -197,7 +197,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
              "packets!")
 
     def __create_buckets(self, sim, dat_in, dat_out, dat_out_raw,
-                         dat_out_oracle):
+                         dat_out_oracle, sequential):
         """
         Divides dat_in into windows and divides each window into self.win
         buckets, which each defines a temporal interval. The value of
@@ -286,7 +286,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
             [0] * self.win +
             list(range(1, len(dat_in_new.dtype.names) - self.win + 1)))
 
-    def __create_windows(self, dat_in, dat_out):
+    def __create_windows(self, dat_in, dat_out, sequential):
         """
         Divides dat_in into windows of self.win packets. Flattens the
         features of the packets in a window. The output value for each
@@ -330,16 +330,17 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # becomes the ground truth for the entire window.
         return dat_in_new, np.take(dat_out, pkt_idxs), scl_grps
 
-    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle):
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    sequential):
         """
         Extracts from the set of simulations many separate intervals. Each
         interval becomes a training example.
         """
         dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
             self.__create_buckets(
-                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle)
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential)
             if self.rtt_buckets
-            else self.__create_windows(dat_in, dat_out))
+            else self.__create_windows(dat_in, dat_out, sequential))
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 
@@ -405,10 +406,11 @@ class SvmWrapper(BinaryModelWrapper):
         self.net = Svm(self.num_ins)
         return self.net
 
-    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle):
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    sequential):
         dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
             super(SvmWrapper, self).modify_data(
-                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle))
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential))
         # Map [0,1] to [-1, 1]
         fet = dat_out.dtype.names[0]
         dat_out[fet] = dat_out[fet] * 2 - 1

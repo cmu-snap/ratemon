@@ -142,7 +142,7 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, warmup):
+def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
@@ -190,7 +190,7 @@ def process_sim(idx, total, net, sim_flp, warmup):
             sim, dat_in, dat_out, dat_out_raw,
             # Must put the column name in a list for the result to be
             # a structured array.
-            dat_out_oracle=dat[["mathis model label"]]),
+            dat_out_oracle=dat[["mathis model label"]], sequential=sequential),
         sim)
 
 
