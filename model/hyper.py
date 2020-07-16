@@ -38,7 +38,6 @@ def main():
     psr.add_argument(
         "--num-sims", default=sys.maxsize,
         help="The number of simulations to consider.", type=int)
-    model_opts = sorted(models.MODELS.keys())
     psr.add_argument(
         "--opt-trials", default=DEFAULT_TLS_OPT,
         help="The number of optimization trials to run.", type=int)
