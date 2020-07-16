@@ -58,10 +58,14 @@ def main():
 
     # Parse the model filepath to determine the model type, and instantiate it.
     net = models.MODELS[
-        dict(
-            [k_v.split(":")
-             for k_v in path.basename(mdl_flp).split(".")[0].split("-")]
+        # Convert the model filename to an arguments dictionary, and
+        # extract the "model" key.
+        utils.str_to_args(
+            path.basename(mdl_flp),
+            order=sorted(train.DEFAULTS.keys())
         )["model"]]()
+    # # Manually remove the loss event rate sqrt feature.
+    # net.in_spc.remove("loss event rate sqrt")
     # Load the model.
     if mdl_flp.endswith("pickle"):
         with open(mdl_flp, "rb") as fil:
@@ -71,28 +75,39 @@ def main():
     else:
         raise Exception(f"Unknown model type: {mdl_flp}")
     net.net = mdl
+    net.graph = True
 
     # Load and parse the simulation.
     (dat_in, dat_out, dat_out_raw, dat_out_oracle, _), sim = (
         train.process_sim(
             idx=0, total=1, net=net, sim_flp=sim_flp, warmup=warmup,
             sequential=True))
+
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
         scl_prms = json.load(fil)
+    # Remove "loss event rate sqrt" from the scaling parameters.
+    scl_prms = [scl_prms_ for idx, scl_prms_ in enumerate(scl_prms)]  # if idx != 103]
     dat_in = utils.scale_all(dat_in, scl_prms, 0, 1, args.standardize)
+
+    # Visualize the ground truth data.
+    utils.visualize_classes(net, dat_out)
+
     # Test the simulation.
     net.test(
         *utils.Dataset(
-            dat_in.dtype.names, utils.clean(dat_in), utils.clean(dat_out),
-            utils.clean(dat_out_raw), utils.clean(dat_out_oracle),
+            fets=dat_in.dtype.names,
+            dat_in=utils.clean(dat_in),
+            dat_out=utils.clean(dat_out),
+            dat_out_raw=utils.clean(dat_out_raw),
+            dat_out_oracle=utils.clean(dat_out_oracle),
             num_flws=np.array(
-                [sim.unfair_flws + sim.other_flws] * dat_in.shape[0], dtype=float)
-        ).raw())
-
-    # TODO: For 1000 data, loss event rate sqrt is not part of the
-    #       training data but it is part of the scaling parameters.
-    # TODO: Implement sequential mode in __create_buckets().
+                [sim.unfair_flws + sim.other_flws] * dat_in.shape[0], dtype=float)).raw(),
+        graph_prms={
+            "out_dir": out_dir,
+            "sort_by_unfairness": False,
+            "dur_s": sim.dur_s
+        })
 
 
 if __name__ == "__main__":

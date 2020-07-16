@@ -229,7 +229,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
 
         if sequential:
             # Select all valid windows, in order.
-            num_wins = num_pkts - (start_idx + 1)
+            num_wins = num_pkts - start_idx
             pkt_idxs = list(range(start_idx, num_pkts))
         else:
             # The number of windows is the number of times the window
@@ -549,17 +549,18 @@ class SvmSklearnWrapper(SvmWrapper):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
 
-    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None):
+    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None, sort_by_unfairness=True):
         # Compute the distance from fair, then divide by fair to
         # compute the relative unfairness.
         diffs = (raw - fair) / fair
-        # Sort based on unfairness.
-        diffs, indices = torch.sort(diffs)
-        preds = preds[indices]
-        labels = labels[indices]
+        if sort_by_unfairness:
+            # Sort based on unfairness.
+            diffs, indices = torch.sort(diffs)
+            preds = preds[indices]
+            labels = labels[indices]
         # Bucketize and compute bucket accuracies.
         num_samples = preds.size()[0]
-        num_buckets = min(20, num_samples)
+        num_buckets = min(20 * (1 if sort_by_unfairness else 4), num_samples)
         num_per_bucket = math.floor(num_samples / num_buckets)
         assert num_per_bucket > 0, \
             ("There must be at least one sample per bucket, but there are "
@@ -582,23 +583,25 @@ class SvmSklearnWrapper(SvmWrapper):
         if self.graph:
             # Plot each bucket's accuracy.
             pyplot.plot(
-                [x for x, _, _ in buckets], [c / t for _, c, t in buckets], "bo-")
+                ([x for x, _, _ in buckets]
+                 if sort_by_unfairness else list(range(len(buckets)))),
+                [c / t for _, c, t in buckets], "bo-")
             pyplot.ylim((-0.1, 1.1))
             if x_lim is not None:
-                pyplot.xlim((-1.1, x_lim + 0.1))
-                pyplot.xlabel("Unfairness (fraction of fair)")
-                pyplot.ylabel("Classification accuracy")
-                pyplot.tight_layout()
-                pyplot.savefig(flp)
-                pyplot.close()
+                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+            pyplot.xlabel("Unfairness (fraction of fair)" if sort_by_unfairness else "Time")
+            pyplot.ylabel("Classification accuracy")
+            pyplot.tight_layout()
+            pyplot.savefig(flp)
+            pyplot.close()
         # Compute the overall accuracy.
         _, corrects, totals = zip(*buckets)
         acc = sum(corrects) / sum(totals)
-        print(f"Test accuracy: {acc * 100:.2f}%")
+        print(f"    Test accuracy: {acc * 100:.2f}%")
         return acc
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
-             num_flws):
+             num_flws, arr_times=None, graph_prms=None):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better).
@@ -606,11 +609,16 @@ class SvmSklearnWrapper(SvmWrapper):
         # Compute the fair share. Convert from int to float to avoid
         # all values being rounded to 0.
         fair = torch.reciprocal(num_flws.type(torch.float))
-        # Determine the maximum unfairness.
-        max_unfair = ((dat_out_raw - fair) / fair).max()
 
-        out_dir = self.name
         if self.graph:
+            assert graph_prms is not None, "graph_prms is None!"
+            out_dir = path.join(graph_prms["out_dir"], self.name)
+            sort_by_unfairness = graph_prms["sort_by_unfairness"]
+            # Set the x limits.Determine the maximum unfairness.
+            x_lim = (
+                # Compute the maximum unfairness.
+                (-1, ((dat_out_raw - fair) / fair).max())
+                if sort_by_unfairness else (0, graph_prms["dur_s"]))
             # Create the output directory.
             if not path.exists(out_dir):
                 os.makedirs(out_dir)
@@ -641,23 +649,17 @@ class SvmSklearnWrapper(SvmWrapper):
                 pyplot.xlabel("Feature coefficient")
                 pyplot.ylabel("Feature name")
                 pyplot.tight_layout()
-                pyplot.savefig(path.join(out_dir, "features.pdf"))
+                pyplot.savefig(path.join(out_dir, f"features_{self.name}.pdf"))
                 pyplot.close()
 
-        # Analyze accuracy vs unfairness for all flows and all degrees
-        # of unfairness, for the model itself.
-        print("Evaluating model:")
-        acc = self.__evaluate(
-            torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-            dat_out_raw, fair, path.join(out_dir, "accuracy_vs_unfairness.pdf"),
-            max_unfair)
-        if self.graph:
             # Analyze accuracy vs. unfairness for all flows and all
             # degrees of unfairness, for the Mathis Model oracle.
             print("Evaluting Mathis Model oracle:")
             self.__evaluate(
                 dat_out_oracle, dat_out_classes, dat_out_raw, fair,
-                path.join(out_dir, "accuracy_vs_unfairness_mathis.pdf"), max_unfair)
+                path.join(
+                    out_dir, f"accuracy_vs_unfairness_mathis_{self.name}.pdf"),
+                x_lim, sort_by_unfairness)
 
             # Analyze, for each number of flows, accuracy vs. unfairness.
             flws_accs = []
@@ -670,8 +672,9 @@ class SvmSklearnWrapper(SvmWrapper):
                     dat_out_classes[valid], dat_out_raw[valid], fair[valid],
                     path.join(
                         out_dir,
-                        f"accuracy_vs_unfairness_{num_flws_selected}flows.pdf"),
-                    max_unfair))
+                        (f"accuracy_vs_unfairness_{num_flws_selected}flows_"
+                         f"{self.name}.pdf")),
+                    x_lim, sort_by_unfairness))
 
             # Analyze accuracy vs. number of flows.
             x_vals = list(range(len(flws_accs)))
@@ -681,9 +684,21 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.xlabel("Total flows (1 unfair)")
             pyplot.ylabel("Classification accuracy")
             pyplot.tight_layout()
-            pyplot.savefig(path.join(out_dir, "accuracy_vs_num-flows.pdf"))
+            pyplot.savefig(path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
-        return acc
+        else:
+            out_dir = "."
+            sort_by_unfairness = False
+            x_lim = None
+
+        # Analyze accuracy vs unfairness for all flows and all degrees
+        # of unfairness, for the model itself.
+        print("Evaluating model:")
+        return self.__evaluate(
+            torch.tensor(self.net.predict(dat_in)), dat_out_classes,
+            dat_out_raw, fair,
+            path.join(out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
+            x_lim, sort_by_unfairness)
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
