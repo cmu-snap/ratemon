@@ -165,14 +165,15 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
     dat_out_raw = dat_out
     dat_out = net.convert_to_class(sim, dat_out)
 
-    # chk_nan = lambda arr: [np.isnan(arr[fet]).any() for fet in arr.dtype.names]
-    def has_nan(arr):
+    # If the results contains NaNs or Infs, then discard this
+    # simulation.
+    def has_non_finite(arr):
         for fet in arr.dtype.names:
-            if np.isnan(arr[fet]).any():
-                print(f"    Simulation {sim_flp} has NaNs in feature {fet}")
+            if not np.isfinite(arr[fet]).all():
+                print(f"    Simulation {sim_flp} has NaNs of Infs in feature {fet}")
                 return True
         return False
-    if has_nan(dat_in) or has_nan(dat_out):
+    if has_non_finite(dat_in) or has_non_finite(dat_out):
         return None
 
     # Verify data.
@@ -281,17 +282,17 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
     # parameters.
     dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, standardize)
 
-    # Check if any of the data is malformed and discard features if
-    # necessary.
-    fets = []
-    for fet in dat_in_all.dtype.names:
-        fet_values = dat_in_all[fet]
-        if ((not np.isnan(fet_values).any()) and
-                (not np.isinf(fet_values).any())):
-            fets.append(fet)
-        else:
-            print(f"Discarding: {fet}")
-    dat_in_all = dat_in_all[fets]
+    # # Check if any of the data is malformed and discard features if
+    # # necessary.
+    # fets = []
+    # for fet in dat_in_all.dtype.names:
+    #     fet_values = dat_in_all[fet]
+    #     if ((not np.isnan(fet_values).any()) and
+    #             (not np.isinf(fet_values).any())):
+    #         fets.append(fet)
+    #     else:
+    #         print(f"Discarding: {fet}")
+    # dat_in_all = dat_in_all[fets]
 
     return (dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
             prms_in)
