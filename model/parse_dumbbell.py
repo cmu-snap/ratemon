@@ -145,11 +145,20 @@ def parse_pcap(sim_dir, out_dir):
 
         min_rtt_s = min_rtt_us / 1e6
 
-        # (Seq, timestamp)
+        # (Seq, timestamp, timestamp option)
         send_pkts = utils.parse_packets_endpoint(
             path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
             sim.payload_B)
         recv_pkts = utils.parse_packets_endpoint(
+            path.join(
+                sim_dir,
+                (f"{sim.name}-"
+                 f"{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0"
+                 ".pcap")),
+            sim.payload_B)
+
+        # Ack packets for RTT calculation
+        ack_pkts = utils.parse_timestamp_option(
             path.join(
                 sim_dir,
                 (f"{sim.name}-"
@@ -181,6 +190,10 @@ def parse_pcap(sim_dir, out_dir):
         highest_seq = 0
         estimated_loss = 0
         curr_estimated_loss = 0
+        # Timestamp option
+        curr_ts_option = 0
+        ack_ts_idx = 0
+        rtt_estimate_us = 0
 
         # negative_gaps = 0
         # big_gaps = 0
@@ -412,6 +425,17 @@ def parse_pcap(sim_dir, out_dir):
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
 
+
+            # RTT estimation with timestamp option
+            recv_ts_option = recv_pkt[2]
+            if recv_ts_option != curr_ts_option:
+                curr_ts_option = recv_ts_option
+                # Move ack_ts_idx to the first occurance of the timestamp option
+                while ack_pkts[ack_ts_idx][0] != recv_ts_option:
+                    ack_ts_idx += 1
+                rtt_estimate_us = curr_recv_time - ack_pkts[ack_ts_idx][1]
+
+
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
@@ -432,8 +456,7 @@ def parse_pcap(sim_dir, out_dir):
                         # inter-arrival time calculation, above.
                         continue
                     elif "RTT ratio" in metric:
-                        # TODO: RTT ratio EWMA
-                        new = 0
+                        new = rtt_estimate_us
                     elif "loss rate" in metric:
                         # Divide curr_loss by (curr_loss + 1) because
                         # over the course of sending (curr_loss + 1)
