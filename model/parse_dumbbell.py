@@ -142,29 +142,22 @@ def parse_pcap(sim_dir, out_dir):
         one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx] * 1.0
         min_rtt_us = one_way_us * 2
         min_rtts_us.append(min_rtt_us)
-
         min_rtt_s = min_rtt_us / 1e6
 
-        # (Seq, timestamp, timestamp option)
-        send_pkts = utils.parse_packets_endpoint(
+        # Packet lists are of tuples of the form:
+        #     (seq, sender, timestamp us, timestamp option)
+        send_pkts = utils.parse_packets(
             path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
-            sim.payload_B)
-        recv_pkts = utils.parse_packets_endpoint(
-            path.join(
-                sim_dir,
-                (f"{sim.name}-"
-                 f"{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0"
-                 ".pcap")),
-            sim.payload_B)
-
+            sim.payload_B, direction="data")
+        recv_pcap_flp = path.join(
+            sim_dir,
+            (f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0"
+             ".pcap"))
+        recv_pkts = utils.parse_packets(
+            recv_pcap_flp, sim.payload_B, direction="data")
         # Ack packets for RTT calculation
-        ack_pkts = utils.parse_timestamp_option(
-            path.join(
-                sim_dir,
-                (f"{sim.name}-"
-                 f"{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0"
-                 ".pcap")),
-            sim.payload_B)
+        ack_pkts = utils.parse_packets(
+            recv_pcap_flp, sim.payload_B, direction="ack")
 
         # State that the windowed metrics need to track across packets.
         windowed_state = {win: {
@@ -280,10 +273,10 @@ def parse_pcap(sim_dir, out_dir):
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             output[j]["seq"] = recv_pkt_seq
-            curr_recv_time = recv_pkt[1]
+            curr_recv_time = recv_pkt[2]
             output[j]["arrival time"] = curr_recv_time
             if j > 0:
-                interarrival_time = curr_recv_time - recv_pkts[j - 1][1]
+                interarrival_time = curr_recv_time - recv_pkts[j - 1][2]
             else:
                 interarrival_time = 0
             output[j]["inter-arrival time"] = interarrival_time
@@ -309,7 +302,7 @@ def parse_pcap(sim_dir, out_dir):
             output[j]["true RTT ratio"] = (
                 # Look up the send time of this packet to calculate
                 # the true sender-receiver delay.
-                (curr_recv_time - send_pkts[j + packet_loss][1] +
+                (curr_recv_time - send_pkts[j + packet_loss][2] +
                  # Assume that, on the reverse path, packets will
                  # experience no queuing delay.
                  one_way_us) /
@@ -324,12 +317,12 @@ def parse_pcap(sim_dir, out_dir):
                 if curr_event_start_idx == 0:
                     # First loss event
                     curr_event_start_idx = curr_loss_start
-                    curr_event_start_time = send_pkts[curr_event_start_idx][1]
+                    curr_event_start_time = send_pkts[curr_event_start_idx][2]
                     loss_event_rate = 1 / (1.0 * (curr_loss + 1))
                     output[j]["loss event rate"] = loss_event_rate
                 else:
                     # See if any loss packets start a new interval
-                    prev_recv_time = recv_pkts[j - 1][1]
+                    prev_recv_time = recv_pkts[j - 1][2]
                     loss_interval = (
                         curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
                     for k in range(0, curr_loss):
@@ -359,7 +352,7 @@ def parse_pcap(sim_dir, out_dir):
 
             # Compute Mathis Model Estimation
             # First compute loss rate in last eight min RTT
-            prev_recv_time = recv_pkts[j - 1][1]
+            prev_recv_time = recv_pkts[j - 1][2]
             loss_interval = (
                 curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
             for k in range(0, curr_loss):
@@ -372,7 +365,7 @@ def parse_pcap(sim_dir, out_dir):
             mathis_loss_count = len(mathis_loss_queue)
 
             # Update 8rtt window start
-            while curr_recv_time - recv_pkts[mathis_8rtt_window_start][1] > 8 * min_rtt_us:
+            while curr_recv_time - recv_pkts[mathis_8rtt_window_start][2] > 8 * min_rtt_us:
                 mathis_8rtt_window_start += 1
 
             # Loss rate over 8rtt window
@@ -427,13 +420,13 @@ def parse_pcap(sim_dir, out_dir):
 
 
             # RTT estimation with timestamp option
-            recv_ts_option = recv_pkt[2]
+            recv_ts_option = recv_pkt[3]
             if recv_ts_option != curr_ts_option:
                 curr_ts_option = recv_ts_option
                 # Move ack_ts_idx to the first occurance of the timestamp option
-                while ack_pkts[ack_ts_idx][0] != recv_ts_option:
+                while ack_pkts[ack_ts_idx][3] != recv_ts_option:
                     ack_ts_idx += 1
-                rtt_estimate_us = curr_recv_time - ack_pkts[ack_ts_idx][1]
+                rtt_estimate_us = curr_recv_time - ack_pkts[ack_ts_idx][2]
 
 
             # EWMA metrics.
@@ -498,7 +491,7 @@ def parse_pcap(sim_dir, out_dir):
                     if "estimated" in metric:
                         # Process estimated packet loss
                         if (curr_estimated_loss > 0 and j > 0):
-                            prev_recv_time = recv_pkts[j - 1][1]
+                            prev_recv_time = recv_pkts[j - 1][2]
                             loss_interval = (
                                 curr_recv_time - prev_recv_time) / (curr_estimated_loss + 1.0)
                             for k in range(0, int(curr_estimated_loss)):
@@ -513,7 +506,7 @@ def parse_pcap(sim_dir, out_dir):
                     else:
                         # Process packet loss.
                         if (curr_loss > 0 and j > 0):
-                            prev_recv_time = recv_pkts[j - 1][1]
+                            prev_recv_time = recv_pkts[j - 1][2]
                             loss_interval = (
                                 curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
                             for k in range(0, curr_loss):
@@ -527,7 +520,7 @@ def parse_pcap(sim_dir, out_dir):
 
                     # Update window_start.
                     while ((curr_recv_time -
-                            recv_pkts[state["window_start"]][1]) > window_size):
+                            recv_pkts[state["window_start"]][2]) > window_size):
                         state["window_start"] += 1
 
                     # If it's processing the first packet
@@ -553,7 +546,7 @@ def parse_pcap(sim_dir, out_dir):
                     # Calculate the average inter-arrival time.
                     avg_interarrival_time = (
                         (curr_recv_time -
-                         recv_pkts[j - state["window_start"]][1]) /
+                         recv_pkts[j - state["window_start"]][2]) /
                         (j - state["window_start"] + 1))
                     output[j][make_win_metric(
                         "average inter-arrival time windowed", win)] = (
@@ -588,10 +581,11 @@ def parse_pcap(sim_dir, out_dir):
     del recv_pkts
 
     # Process pcap files from the bottleneck router to determine queue
-    # occupency. router_pkts is a list of tuples of the form:
-    #     (sender, timestamp)
-    router_pkts = utils.parse_packets_router(
-        path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B)
+    # occupency. Packet lists are of tuples of the form:
+    #     (seq, sender, timestamp us, timestamp option)
+    router_pkts = utils.parse_packets(
+        path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B,
+        direction="data")
     # Index of the output array where the queue occupency result
     # should be appended. Once for each unfair flow, since the
     # per-flow output is stored separately.
@@ -609,7 +603,7 @@ def parse_pcap(sim_dir, out_dir):
     # router. Note that we process all flows at once.
     for j, router_pkt in enumerate(router_pkts):
         # The flow to which this packet belongs.
-        sender, curr_time = router_pkt
+        _, sender, curr_time, _ = router_pkt
         # Process only packets that are part of one of the unfair
         # flows. Discard packets that did not make it to the receiver
         # (e.g., at the end of the experiment).
@@ -699,20 +693,20 @@ def parse_pcap(sim_dir, out_dir):
                     # To avoid the window size bouncing back and
                     # forth, only allow the window to grow/shrink in
                     # one direction.
-                    if curr_time - router_pkts[window_start][1] > window_size:
-                        while (curr_time - router_pkts[window_start][1] >
+                    if curr_time - router_pkts[window_start][2] > window_size:
+                        while (curr_time - router_pkts[window_start][2] >
                                window_size):
                             # Check if this packet is part of the same flow.
-                            if router_pkts[window_start][0] == sender:
+                            if router_pkts[window_start][1] == sender:
                                 state["window_pkt_count"] -= 1
                             window_start += 1
                     # Grow the window size to eariler packets
-                    elif curr_time - router_pkts[window_start][1] < window_size:
+                    elif curr_time - router_pkts[window_start][2] < window_size:
                         while (window_start > 0 and
-                               (curr_time - router_pkts[window_start][1] <
+                               (curr_time - router_pkts[window_start][2] <
                                 window_size)):
                             # Check if this packet is part of the same flow.
-                            if router_pkts[window_start][0] == sender:
+                            if router_pkts[window_start][1] == sender:
                                 state["window_pkt_count"] += 1
                             window_start -= 1
 

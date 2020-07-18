@@ -242,48 +242,32 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets_endpoint(flp, packet_size_B):
+def parse_packets(flp, packet_size_B, direction="data"):
     """
-    Takes in a file path and returns (seq, timestamp, timestamp option).
+    Parses a PCAP file. Returns a list of tuples of the form:
+        (seq, sender, timestamp us, timestamp option)
+    with one entry for every packet. Considers only packets in either the "ack"
+    or "data" direction.
     """
-    # Not using parse_time_us for efficiency purpose
+    dir_opts = ["ack", "data"]
+    assert direction in dir_opts, \
+        f"\"direction\" must be one of {dir_opts}, but is: {direction}"
     return [
+        # Sequence number.
         (scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].seq,
+         # Sender.
+         int(scapy.layers.ppp.PPP(pkt_dat)[
+             scapy.layers.inet.IP].src.split(".")[2]),
+         # Timestamp. Not using parse_time_us for efficiency purpose.
          pkt_mdat.sec * 1e6 + pkt_mdat.usec,
+         # Timestamp option.
          scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].options[0][1][1])
         for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Ignore non-data packets.
-        if pkt_mdat.wirelen >= packet_size_B
+        # Select either data or ACK packets.
+        if ((direction == "data" and pkt_mdat.wirelen >= packet_size_B) or
+            direction == "ack")
     ]
 
-
-def parse_packets_router(flp, packet_size_B):
-    """
-    Takes in a file path and returns (sender, timestamp).
-    """
-    # Not using parse_time_us for efficiency purpose
-    return [
-        # Parse each packet as a PPP packet.
-        (int(scapy.layers.ppp.PPP(pkt_dat)[
-            scapy.layers.inet.IP].src.split(".")[2]),
-         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
-        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Ignore non-data packets.
-        if pkt_mdat.wirelen >= packet_size_B
-    ]
-
-
-def parse_timestamp_option(flp, packet_size_B):
-    """
-    Takes in a file path and returns (timestamp option, timestamp).
-    """
-    return [
-        (scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].options[0][1][0],
-         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
-        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Only ack packets
-        if pkt_mdat.wirelen < packet_size_B
-    ]
 
 def scale(val, min_in, max_in, min_out, max_out):
     """
