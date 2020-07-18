@@ -349,3 +349,16 @@ def visualize_classes(net, dat):
     tot_actual = np.prod(np.array(dat.shape))
     assert tot == tot_actual, \
         f"Error visualizing ground truth! {tot} != {tot_actual}"
+
+
+def get_mathis_label(tput_true, tput_mathis):
+    return (
+        # -1 if the Mathis model throughput could not be calculated.
+        -1 if tput_mathis == 0
+        else (
+            # 1 if the current throughput is greater than the Mathis
+            # model throughput.
+            1 if tput_true > tput_mathis
+            # 0 if the current throughput is less than or equal to the
+            # Mathis model throughput.
+            else 0))

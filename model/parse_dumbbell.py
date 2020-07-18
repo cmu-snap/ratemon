@@ -1,4 +1,4 @@
-#! /usr/bin/env python3
+.#! /usr/bin/env python3
 """Parses the pcap file of dumbbell topology. """
 
 import argparse
@@ -19,58 +19,64 @@ import utils
 
 # Whether to parse PCAP files synchronously or in parallel.
 SYNC = False
-
 # Assemble the output dtype.
 #
 # These metrics do not change.
 REGULAR = [
     ("seq", "int32"),
-    ("arrival time", "int32"),
-    ("inter-arrival time", "int32"),
-    ("true RTT ratio", "float64"),
-    ("loss event rate", "float64"),
-    ("loss event rate sqrt", "float64"),
-    ("mathis model throughput p/s", "float64"),
-    # -1 no applicable (no loss yet), 0 lower than fair throughput, 1 higher
-    ("mathis model label", "int32")
+    ("arrival time us", "int32"),
+    ("interarrival time us", "int32"),
+    ("RTT ratio true", "float64")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
 EWMAS = [
-    ("inter-arrival time ewma", "float64"),
-    ("throughput p/s ewma", "float64"),
-    ("RTT ratio ewma", "float64"),
-    ("loss rate ewma", "float64"),
-    ("estimated loss rate ewma", "float64"),
-    ("queue occupancy ewma", "float64")
+    ("interarrival time us", "float64"),
+    ("throughput p/s", "float64"),
+    ("RTT ratio estimated", "float64"),
+    ("loss rate true", "float64"),
+    ("loss rate estimated", "float64"),
+    ("queue occupancy", "float64")
+    ("mathis model throughput p/s", "float64"),
+    # -1 no applicable (no loss yet), 0 lower than or equal to fair
+    # throughput, 1 higher. This is not an EWMA metric itself, but is
+    # based on the "mathis model throughput p/s" metric.
+    ("mathis model label", "int32")
 ]
 # These metrics are calculated over an window of packets, for varies
 # window sizes.
 WINDOWED = [
-    ("average inter-arrival time windowed", "float64"),
-    ("average throughput p/s windowed", "float64"),
-    ("average RTT ratio windowed", "float64"),
-    ("loss rate windowed", "float64"),
-    ("estimated loss rate windowed", "float64"),
-    ("queue occupancy windowed", "float64")
+    ("average interarrival time us", "float64"),
+    ("average throughput p/s", "float64"),
+    ("average RTT ratio estimated", "float64"),
+    ("loss event rate", "float64"),
+    ("loss event rate sqrt", "float64"),
+    ("loss rate true", "float64"),
+    ("loss rate estimated", "float64"),
+    ("queue occupancy", "float64")
+    ("mathis model throughput p/s", "float64"),
+    # -1 no applicable (no loss yet), 0 lower than or equal to fair
+    # throughput, 1 higher. This is not a windowed metric itself, but
+    # is based on the "mathis model throughput p/s" metric.
+    ("mathis model label", "int32")
 ]
 # The alpha values at which to evaluate the EWMA metrics.
 ALPHAS = [i / 10 for i in range(1, 11)]
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
-WINDOWS = [2**i for i in range(0, 11)]
-# Number of RTTs for computing loss event rate
-NUM_INTERVALS = 8
+WINDOWS = [2**i for i in range(11)]
+# Mathis model constant.
+MATHIS_C = math.sqrt(3 / 2)
 
 
 def make_ewma_metric(metric, alpha):
     """ Format the name of an EWMA metric. """
-    return f"{metric}-alpha{alpha}"
+    return f"{metric}-ewma-alpha{alpha}"
 
 
 def make_win_metric(metric, win):
     """ Format the name of a windowed metric. """
-    return f"{metric}-minRtt{win}"
+    return f"{metric}-windowed-minRtt{win}"
 
 
 # The final dtype combines each metric at multiple granularities.
@@ -87,12 +93,12 @@ def update_ewma(prev_ewma, new_val, alpha):
 
 
 def make_interval_weight():
-    weight = [1.0] * NUM_INTERVALS
+    weight = [1] * NUM_INTERVALS
     for i in range(NUM_INTERVALS):
         if i < NUM_INTERVALS / 2:
-            weight[i] = 1.0
+            weight[i] = 1
         else:
-            weight[i] = 2 * (i - 1) / (1.0 * (i + 2))
+            weight[i] = 2 * (i - 1) / (i + 2)
     return weight
 
 
@@ -100,7 +106,7 @@ def compute_weighted_average(curr_event_size, loss_event_intervals,
                              loss_interval_weight):
     i_tot0 = curr_event_size
     i_tot1 = 0
-    w_tot = 1.0
+    w_tot = 1
     for i in range(len(loss_event_intervals) - 1):
         i_tot0 += loss_event_intervals[i] * loss_interval_weight[i + 1]
         w_tot += loss_interval_weight[i + 1]
@@ -110,13 +116,13 @@ def compute_weighted_average(curr_event_size, loss_event_intervals,
 
     i_tot = max(i_tot0, i_tot1)
     i_mean = i_tot / w_tot
-    return 1.0 / i_mean
+    return 1 / i_mean
 
 
 def parse_pcap(sim_dir, out_dir):
     """Parse a PCAP file.
     Writes a npz file that contains the sequence number, RTT ratio,
-    inter-arrival time, loss rate, and queue occupency percentage in
+    interarrival time, loss rate, and queue occupency percentage in
     the last n RTT (default set to be 2 RTT).
     """
     print(f"Parsing: {sim_dir}")
@@ -137,14 +143,15 @@ def parse_pcap(sim_dir, out_dir):
     loss_interval_weight = make_interval_weight()
 
     for unfair_idx in range(sim.unfair_flws):
-        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx] * 1.0
+        # TODO: Calculate minRTT using first TCP timestamp echo
+        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
         min_rtt_us = one_way_us * 2
         min_rtts_us.append(min_rtt_us)
         min_rtt_s = min_rtt_us / 1e6
 
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
-        send_pkts = utils.parse_packets(
+        sent_pkts = utils.parse_packets(
             path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
             sim.payload_B, direction="data")
         recv_pcap_flp = path.join(
@@ -159,307 +166,147 @@ def parse_pcap(sim_dir, out_dir):
 
         # State that the windowed metrics need to track across packets.
         windowed_state = {win: {
-            "window_start": 0,
-            "loss_queue": deque(),
+            "true_window_start": 0,
+            "estimated_window_start": 0,
+            "true_loss_queue": deque(),
             "estimated_loss_queue": deque()
         } for win in WINDOWS}
-        # Number of packet losses up to the current received packet.
-        packet_loss = 0
+
         # Final output.
         output = np.empty(len(recv_pkts), dtype=DTYPE)
+
+        # Total number of packet losses up to the current received
+        # packet, calculated using the sender logs.
+        pkt_loss_total_true = 0
+
         # Loss event rate data
         loss_event_intervals = deque()
         curr_event_start_idx = 0
         curr_event_start_time = 0
-        # Mathis Model loss queue
-        mathis_loss_queue = deque()
-        mathis_fair_throughput = 0.0
-        mathis_8rtt_window_start = 0
-        continuous_loss_interval = []
+
         # Estimate loss rate
         prev_pkt_seq = 0
         highest_seq = 0
         estimated_loss = 0
         curr_estimated_loss = 0
-        # Timestamp option
+
         curr_ts_option = 0
         ack_ts_idx = 0
+        # The running RTT estimate. If we cannot determine an RTT
+        # estimate for a new packet, then the value from the previous
+        # packet is used.
         rtt_estimate_us = 0
-
-        # negative_gaps = 0
-        # big_gaps = 0
-        # big_gap_packets = 0
-        # negative_gap_packets = 0
-        # strange_gaps = 0
-        # max_seq = 0
-        # correct_gaps = 0
-        # other = 0
-        # retransmits = 0
-        # for j, recv_pkt in enumerate(recv_pkts):
-        #     cur_seq = recv_pkt[0]
-        #     if cur_seq <= max_seq:
-        #         retransmits += 1
-        #     max_seq = max(max_seq, cur_seq)
-        #     if j == 0:
-        #         continue
-        #     seq_diff = cur_seq - recv_pkts[j - 1][0]
-        #     seq_diff_packets = abs(seq_diff / 1380)
-        #     if seq_diff < 0:
-        #         print(f"negative diff: {seq_diff}")
-        #         negative_gaps += 1
-        #         negative_gap_packets += seq_diff_packets
-        #     elif 0 <= seq_diff < 1380:
-        #         print(f"stange diff: {seq_diff}")
-        #         strange_gaps += 1
-        #     elif seq_diff == 1380:
-        #         correct_gaps += 1
-        #     elif 1380 < seq_diff:
-        #         print(f"big diff: {seq_diff}")
-        #         big_gaps += 1
-        #         big_gap_packets += seq_diff_packets
-        #     else:
-        #         other += 1
-        # num_sent = len(send_pkts)
-        # num_recv = len(recv_pkts)
-        # bdp = sim.bw_Mbps * 1e6 * (2 * sim.edge_delays[unfair_idx] + sim.btl_delay_us) * 1e-6 / (1380 * 8)
-        # total_cap = (10e9 * sim.edge_delays[unfair_idx] * 1e-6 * 2 + sim.bw_Mbps * 1e6 * sim.btl_delay_us * 1e-6) / (1380 * 8)
-        # aligned = np.zeros((num_sent, ), dtype=[("send seq", "int"), ("received?", "int")])
-        # assert num_sent >= num_recv
-        # send_idx = 0
-        # recv_idx = 0
-        # num_valid = None
-        # for send_pkt in send_pkts:
-        #     send_seq = send_pkt[0]
-        #     aligned[send_idx][0] = send_seq
-        #     if recv_idx < num_recv:
-        #         recv_seq = recv_pkts[recv_idx][0]
-        #         if send_seq == recv_seq:
-        #             aligned[send_idx][1] = 1
-        #             recv_idx += 1
-        #     else:
-        #         if num_valid is None:
-        #             num_valid = send_idx
-        #     send_idx += 1
-        # print("Send seq, received?")
-        # for send_seq, was_received in aligned.tolist():
-        #     print(send_seq, "-----------------------------------------------------" if not was_received else "1")
-        # missing = abs(np.sum(aligned['received?'] - 1))
-        # tail = num_sent - num_valid
-        # print(f"missing: {missing}")
-        # print(f"tail: {tail}")
-        # print(f"missing not tail: {missing - tail}")
-        # print(f"BDP no queue: {bdp}")
-        # print(f"BDP with queue: {bdp + sim.queue_p}")
-        # print(f"total capacity no queue: {total_cap}")
-        # print(f"total capacity with queue: {total_cap + sim.queue_p}")
-        # print(f"num packets sent: {num_sent}")
-        # print(f"num packets received: {num_recv}")
-        # print(f"missing packets: {num_sent - num_recv}")
-        # print(f"Big gaps: {big_gaps}")
-        # print(f"Negative gaps: {negative_gaps}")
-        # print(f"strange gaps: {strange_gaps}")
-        # print(f"correct gaps: {correct_gaps}")
-        # print(f"other gaps: {other}")
-        # print(f"Big gap packets: {big_gap_packets}")
-        # print(f"Negative gap packets: {negative_gap_packets}")
-        # print(f"big/negative gap diff: {big_gap_packets - negative_gap_packets}")
-        # print(f"end-to-end seq diff in packets: {(recv_pkts[-1][0] - recv_pkts[0][0]) / 1380}")
-        # print(f"max seq in packets: {max_seq / 1380}")
-        # print(f"retransmits: {retransmits}")
 
         for j, recv_pkt in enumerate(recv_pkts):
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             output[j]["seq"] = recv_pkt_seq
-            curr_recv_time = recv_pkt[2]
-            output[j]["arrival time"] = curr_recv_time
+            recv_time_cur = recv_pkt[2]
+            output[j]["arrival time"] = recv_time_cur
             if j > 0:
-                interarrival_time = curr_recv_time - recv_pkts[j - 1][2]
+                interarr_time_us = recv_time_cur - recv_pkts[j - 1][2]
             else:
-                interarrival_time = 0
-            output[j]["inter-arrival time"] = interarrival_time
+                interarr_time_us = 0
+            output[j]["interarrival time us"] = interarr_time_us
 
-            # Process packet loss -
-            # Count the number of dropped packets by checking if the
-            # sequence numbers at sender and receiver are the same. If
-            # not, the packet is dropped, and the packet_loss counter
-            # increases by one to keep the index offset at sender
-            send_pkt_seq = send_pkts[j + packet_loss][0]
-            prev_loss = packet_loss
-            while send_pkt_seq != recv_pkt_seq:
+            # Calculate the true packet loss rate. Count the number of
+            # dropped packets by checking if the sequence numbers at
+            # sender and receiver are the same. If not, the packet is
+            # dropped, and the pkt_loss_total_true counter increases
+            # by one to keep the index offset at sender
+            sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+            pkt_loss_total_true_prev = pkt_loss_total_true
+            while sent_pkt_seq != recv_pkt_seq:
                 # Packet loss
-                packet_loss += 1
-                send_pkt_seq = send_pkts[j + packet_loss][0]
-            curr_loss = packet_loss - prev_loss
-
-            # if curr_loss > 0:
-            #     print(f"Lost packets: {curr_loss}")
-            # continue
+                pkt_loss_total_true += 1
+                sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+            # Calculate how many packets were lost since receiving the
+            # last packet.
+            pkt_loss_cur_true = pkt_loss_total_true - pkt_loss_total_true_prev
 
             # Calculate the true RTT ratio.
             output[j]["true RTT ratio"] = (
                 # Look up the send time of this packet to calculate
                 # the true sender-receiver delay.
-                (curr_recv_time - send_pkts[j + packet_loss][2] +
+                (recv_time_cur - sent_pkts[j + pkt_loss_total_true][2] +
                  # Assume that, on the reverse path, packets will
                  # experience no queuing delay.
                  one_way_us) /
                 # Compare to the minimum RTT.
                 (2 * one_way_us))
 
-            # Calculate loss event rate
-            if packet_loss == 0:
-                output[j]["loss event rate"] = 0.0
-            if curr_loss > 0:
-                curr_loss_start = j + packet_loss - curr_loss
-                if curr_event_start_idx == 0:
-                    # First loss event
-                    curr_event_start_idx = curr_loss_start
-                    curr_event_start_time = send_pkts[curr_event_start_idx][2]
-                    loss_event_rate = 1 / (1.0 * (curr_loss + 1))
-                    output[j]["loss event rate"] = loss_event_rate
-                else:
-                    # See if any loss packets start a new interval
-                    prev_recv_time = recv_pkts[j - 1][2]
-                    loss_interval = (
-                        curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
-                    for k in range(0, curr_loss):
-                        loss_time = prev_recv_time + (k + 1) * loss_interval
-                        if (loss_time - curr_event_start_time >=
-                                output[j]["true RTT ratio"] * 2 * one_way_us):
-                            # Start of a new event - first store the previous event
-                            loss_event_intervals.appendleft(curr_loss_start + k -
-                                                            curr_event_start_idx)
-                            if len(loss_event_intervals) > NUM_INTERVALS:
-                                loss_event_intervals.pop()
-                            curr_event_start_time = loss_time
-                            curr_event_start_idx = curr_loss_start + k
-                    curr_event_size = j + packet_loss - curr_event_start_idx
-                    output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
-                                                                            loss_event_intervals,
-                                                                            loss_interval_weight)
-            else:
-                if packet_loss == 0:
-                    output[j]["loss event rate"] = 0.0
-                else:
-                    # Increase current event size
-                    curr_event_size = j + packet_loss - curr_event_start_idx
-                    output[j]["loss event rate"] = compute_weighted_average(curr_event_size,
-                                                                            loss_event_intervals,
-                                                                            loss_interval_weight)
-
-            # Compute Mathis Model Estimation
-            # First compute loss rate in last eight min RTT
-            prev_recv_time = recv_pkts[j - 1][2]
-            loss_interval = (
-                curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
-            for k in range(0, curr_loss):
-                mathis_loss_queue.append(prev_recv_time + (k + 1) * loss_interval)
-
-            # Pop out early loss
-            while (mathis_loss_queue and
-                   mathis_loss_queue[0] < (curr_recv_time - 8 * min_rtt_us)):
-                mathis_loss_queue.popleft()
-            mathis_loss_count = len(mathis_loss_queue)
-
-            # Update 8rtt window start
-            while curr_recv_time - recv_pkts[mathis_8rtt_window_start][2] > 8 * min_rtt_us:
-                mathis_8rtt_window_start += 1
-
-            # Loss rate over 8rtt window
-            mathis_loss_count = len(mathis_loss_queue)
-            if mathis_loss_count > 0:
-                mathis_loss_rate = (mathis_loss_count /
-                                    (1.0 * j - mathis_8rtt_window_start + mathis_loss_count))
-
-                # Throughput computed by mathis equation (in number of packets per second)
-                mathis_throughput = 1.2247 / (1.0 * min_rtt_s * math.sqrt(mathis_loss_rate))
-
-                continuous_loss_interval.append(mathis_throughput)
-
-                mathis_fair_throughput = mean(continuous_loss_interval)
-            else:
-                if j == 0:
-                    mathis_fair_throughput = 0.0
-                else:
-                    continuous_loss_interval.clear()
-
-            output[j]["mathis model throughput p/s"] = mathis_fair_throughput
-
-            if mathis_fair_throughput == 0.0:
-                mathis_label = -1
-            else:
-                curr_throughput = (j - mathis_8rtt_window_start) / (8.0 * min_rtt_s)
-                if curr_throughput > mathis_fair_throughput:
-                    mathis_label = 1
-                else:
-                    mathis_label = 0
-            output[j]["mathis model label"] = mathis_label
-
-
-            # Receiver-side loss rate estimation
-            if recv_pkt_seq != prev_pkt_seq + sim.payload_B:
-
-                if recv_pkt_seq > highest_seq + sim.payload_B:
-                    # Loss in new packets
-                    curr_estimated_loss = (recv_pkt_seq - highest_seq - sim.payload_B) / sim.payload_B
-                    estimated_loss += curr_estimated_loss
-                elif recv_pkt_seq < prev_pkt_seq and prev_pkt_seq != highest_seq:
-                    # Loss in retransmission
-                    curr_estimated_loss = 1
-                    estimated_loss += 1
-                else:
-                    curr_estimated_loss = 0
-            else:
-                curr_estimated_loss = 0
-
+            # Receiver-side loss rate estimation. Estimate the losses
+            # since the last packet.
+            pkt_loss_cur_estimated = (
+                0 if recv_pkt_seq == prev_pkt_seq + sim.payload_B
+                else (
+                    ((recv_pkt_seq - highest_seq - sim.payload_B) /
+                     sim.payload_B)
+                    if recv_pkt_seq > highest_seq + sim.payload_B
+                    else (
+                        1
+                        if (recv_pkt_seq < prev_pkt_seq and
+                            prev_pkt_seq != highest_seq)
+                        else 0)))
+            pkt_los_total_estimated += pkt_loss_cur_estimated
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
 
-
-            # RTT estimation with timestamp option
+            # Receiver-side RTT estimation using TCP timestamp option.
             recv_ts_option = recv_pkt[3]
             if recv_ts_option != curr_ts_option:
                 curr_ts_option = recv_ts_option
                 # Move ack_ts_idx to the first occurance of the timestamp option
                 while ack_pkts[ack_ts_idx][3] != recv_ts_option:
                     ack_ts_idx += 1
-                rtt_estimate_us = curr_recv_time - ack_pkts[ack_ts_idx][2]
-
+                rtt_estimate_us = recv_time_cur - ack_pkts[ack_ts_idx][2]
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
                 if j > 0:
-                    if "inter-arrival time" in metric:
-                        new = interarrival_time
-
-                        tput_metric = make_ewma_metric(
-                            "throughput p/s ewma", alpha)
-                        # Divide by 1e6 to convert interarrival time to seconds.
-                        output[j][tput_metric] = update_ewma(
-                            output[j - 1][tput_metric],
-                            new_val=(0 if interarrival_time == 0
-                                     else 1 / (interarrival_time / 1e6)),
-                            alpha=alpha)
-                    elif "throughput" in metric:
-                        # The throughput is calculated during the
-                        # inter-arrival time calculation, above.
-                        continue
-                    elif "RTT ratio" in metric:
+                    if "interarrival time us" in metric:
+                        new = interarr_time_us
+                    elif "throughput p/s" in metric:
+                        interarr_time_us = output[j][make_ewma_metric(
+                            "interarrival time us", alpha)]
+                        # Divide by 1e6 to convert from microseconds
+                        # to seconds.
+                        new = (0 if interarr_time_us == 0
+                               else 1 / (interarr_time_us / 1e6)),
+                    elif "RTT ratio estimated" in metric:
                         new = rtt_estimate_us
-                    elif "loss rate" in metric:
-                        # Divide curr_loss by (curr_loss + 1) because
-                        # over the course of sending (curr_loss + 1)
-                        # packets, one got through and curr_loss were
-                        # lost.
-                        if "estimated" in metric:
-                            new = curr_estimated_loss / (1.0 * curr_estimated_loss + 1)
-                        else:
-                            new = curr_loss / (1.0 * curr_loss + 1)
+                    elif "loss rate true" in metric:
+                        # Divide the pkt_loss_cur_true by
+                        # (pkt_loss_cur_true + 1) because over the course of
+                        # sending (pkt_loss_cur_true + 1) packets, one got
+                        # through and pkt_loss_cur_true were lost.
+                        new = pkt_loss_cur_true / (pkt_loss_cur_true + 1)
+                    elif "loss rate estimated" in metric:
+                        # See comment in case for "loss rate true".
+                        new = pkt_loss_cur_estimated / (
+                            pkt_loss_cur_estimated + 1)
                     elif "queue occupancy" in metric:
                         # Queue occupancy is calculated using the
                         # router's PCAP files, below.
+                        continue
+                    elif "mathis model throughput p/s" in metric:
+                        # Use the estimated loss rate to compute the
+                        # Mathis model fair throughput.
+                        new = MATHIS_C / (min_rtt_s * math.sqrt(
+                            output[j][make_ewma_metric(
+                                "loss rate estimated", alpha)]))
+                    elif "mathis model label" in metric:
+                        # Use the current throughput and the Mathis
+                        # model fair throughput to compute the Mathis
+                        # model label.
+                        output[j][metric] = utils.get_mathis_label(
+                            output[j][make_ewma_metric(
+                                "throughput p/s", alpha)],
+                            output[j][make_ewma_metric(
+                                "mathis model throughput p/s", alpha)])
+                        # Continue because the value of this metric is
+                        # now an EWMA.
                         continue
                     else:
                         raise Exception(f"Unknown EWMA metric: {metric}")
@@ -474,7 +321,7 @@ def parse_pcap(sim_dir, out_dir):
                 window_size = win * min_rtt_us
                 state = windowed_state[win]
 
-                if "average inter-arrival time" in metric:
+                if "average interarrival time us" in metric:
                     # This is calculated as part of the loss rate
                     # calculation, below.
                     continue
@@ -483,41 +330,77 @@ def parse_pcap(sim_dir, out_dir):
                     # the loss rate calculation, below.
                     continue
                 if "average RTT ratio" in metric:
+                    # The average RTT ratio over a window is
+                    # calculated as part of the loss rate calculation,
+                    # below.
                     # TODO: Average RTT ratio over a window.
-                    new = 0
-                elif "loss rate" in metric:
-                    if "estimated" in metric:
-                        # Process estimated packet loss
-                        if (curr_estimated_loss > 0 and j > 0):
+                    continue
+                elif "loss event rate" in metric:
+                    # Calculate the loss event rate.
+                    if pkt_loss_total_true == 0:
+                        output[j]["loss event rate"] = 0
+                    if curr_loss > 0:
+                        curr_loss_start = j + pkt_loss_total_true - curr_loss
+                        if curr_event_start_idx == 0:
+                            # First loss event
+                            curr_event_start_idx = curr_loss_start
+                            curr_event_start_time = sent_pkts[curr_event_start_idx][2]
+                            loss_event_rate = 1 / (curr_loss + 1)
+                            output[j]["loss event rate"] = loss_event_rate
+                        else:
+                            # See if any loss packets start a new interval
                             prev_recv_time = recv_pkts[j - 1][2]
                             loss_interval = (
-                                curr_recv_time - prev_recv_time) / (curr_estimated_loss + 1.0)
-                            for k in range(0, int(curr_estimated_loss)):
-                                state["estimated_loss_queue"].append(
-                                    prev_recv_time + (k + 1) * loss_interval)
-                        # Pop out earlier loss.
-                        while (state["estimated_loss_queue"] and
-                               (state["estimated_loss_queue"][0] <
-                                curr_recv_time - window_size)):
-                            state["estimated_loss_queue"].popleft()
-
+                                recv_time_cur - prev_recv_time) / (curr_loss + 1)
+                            for k in range(curr_loss):
+                                loss_time = prev_recv_time + (k + 1) * loss_interval
+                                if (loss_time - curr_event_start_time >=
+                                    output[j]["true RTT ratio"] * 2 * one_way_us):
+                                    # Start of a new event. First store the
+                                    # previous event.
+                                    loss_event_intervals.appendleft(
+                                        curr_loss_start + k - curr_event_start_idx)
+                                    if len(loss_event_intervals) > NUM_INTERVALS:
+                                        loss_event_intervals.pop()
+                                    curr_event_start_time = loss_time
+                                    curr_event_start_idx = curr_loss_start + k
+                            curr_event_size = j + pkt_loss_total_true - curr_event_start_idx
+                            output[j]["loss event rate"] = compute_weighted_average(
+                                curr_event_size, loss_event_intervals, loss_interval_weight)
                     else:
-                        # Process packet loss.
-                        if (curr_loss > 0 and j > 0):
-                            prev_recv_time = recv_pkts[j - 1][2]
-                            loss_interval = (
-                                curr_recv_time - prev_recv_time) / (curr_loss + 1.0)
-                            for k in range(0, curr_loss):
-                                state["loss_queue"].append(
-                                    prev_recv_time + (k + 1) * loss_interval)
-                        # Pop out earlier loss.
-                        while (state["loss_queue"] and
-                               (state["loss_queue"][0] <
-                                curr_recv_time - window_size)):
-                            state["loss_queue"].popleft()
+                        if pkt_loss_total_true > 0:
+                            # Increase current event size.
+                            curr_event_size = j + pkt_loss_total_true - curr_event_start_idx
+                            output[j]["loss event rate"] = compute_weighted_average(
+                                curr_event_size, loss_event_intervals, loss_interval_weight)
+                elif "loss event rate sqrt" in metric:
+                    # Use the loss event rate to compute
+                    # 1 / sqrt(loss event rate). Perform this calculation only
+                    # if the packet's loss event rate is greater than 0.
+                    loss_event_rate = output[j][
+                        make_win_metric("loss event rate", win)]
+                    new = (
+                        np.reciprocal(np.sqrt(
+                            output[j][make_win_metric("loss event rate", win)]))
+                        if loss_event_rate > 0 else 0)
+                elif "loss rate true" in metric:
+                    # Process packet loss.
+                    if (curr_loss > 0 and j > 0):
+                        prev_recv_time = recv_pkts[j - 1][2]
+                        loss_interval = (
+                            recv_time_cur - prev_recv_time) / (curr_loss + 1)
+                        for k in range(curr_loss):
+                            state["true_loss_queue"].append(
+                                prev_recv_time + (k + 1) * loss_interval)
+
+                    # Pop out earlier loss.
+                    while (state["true_loss_queue"] and
+                           (state["true_loss_queue"][0] <
+                            recv_time_cur - window_size)):
+                        state["true_loss_queue"].popleft()
 
                     # Update window_start.
-                    while ((curr_recv_time -
+                    while ((recv_time_cur -
                             recv_pkts[state["window_start"]][2]) > window_size):
                         state["window_start"] += 1
 
@@ -526,56 +409,87 @@ def parse_pcap(sim_dir, out_dir):
                     # received within the RTT window, then output 0
                     # for the loss rate.
                     if j - state["window_start"] > 0:
-                        # len_loss_q = len(state["loss_queue"])
-                        # num_pkts = len_loss_q + j - state["window_start"]
-                        # loss_rate = len_loss_q / num_pkts
-                        # print(f"len_loss_q: {len_loss_q}, num_pkts: {num_pkts}, loss rate: {loss_rate}")
-                        if "estimated" in metric:
-                            new = (len(state["estimated_loss_queue"]) / (1.0 * (
-                                len(state["estimated_loss_queue"]) + j -
-                                state["window_start"])))
-                        else:
-                            new = (len(state["loss_queue"]) / (1.0 * (
-                                len(state["loss_queue"]) + j -
-                                state["window_start"])))
+                        new = (len(state["true_loss_queue"]) / (
+                            len(state["true_loss_queue"]) + j -
+                            state["window_start"]))
+                    else:
+                        new = 0
+                elif "loss rate estimated" in metric:
+                    # Process estimated packet loss
+                    if (curr_estimated_loss > 0 and j > 0):
+                        prev_recv_time = recv_pkts[j - 1][2]
+                        loss_interval = (
+                            recv_time_cur - prev_recv_time) / (curr_estimated_loss + 1)
+                        for k in range(int(curr_estimated_loss)):
+                            state["estimated_loss_queue"].append(
+                                prev_recv_time + (k + 1) * loss_interval)
+                    # Pop out earlier loss.
+                    while (state["estimated_loss_queue"] and
+                           (state["estimated_loss_queue"][0] <
+                            recv_time_cur - window_size)):
+                        state["estimated_loss_queue"].popleft()
+
+                    # Update window_start.
+                    while ((recv_time_cur -
+                            recv_pkts[state["window_start"]][2]) > window_size):
+                        state["window_start"] += 1
+
+                    # If it's processing the first packet
+                    # (j == window_start == 0) or no other packets were
+                    # received within the RTT window, then output 0
+                    # for the loss rate.
+                    if j - state["window_start"] > 0:
+                        new = (len(state["estimated_loss_queue"]) / (
+                            len(state["estimated_loss_queue"]) + j -
+                            state["window_start"]))
                     else:
                         new = 0
 
-                    # Calculate the average inter-arrival time.
-                    avg_interarrival_time = (
-                        (curr_recv_time -
+                    # Calculate the average interarrival time.
+                    avg_interarr_time_us = (
+                        (recv_time_cur -
                          recv_pkts[j - state["window_start"]][2]) /
                         (j - state["window_start"] + 1))
                     output[j][make_win_metric(
-                        "average inter-arrival time windowed", win)] = (
-                            avg_interarrival_time)
+                        "average interarrival time us", win)] = (
+                            avg_interarr_time_us)
                     # Divide by 1e6 to convert interarrival time to seconds.
                     output[j][make_win_metric(
-                        "average throughput p/s windowed", win)] = (
-                            0 if avg_interarrival_time == 0
-                            else 1 / (avg_interarrival_time / 1e6))
+                        "average throughput p/s", win)] = (
+                            0 if avg_interarr_time_us == 0
+                            else 1 / (avg_interarr_time_us / 1e6))
                 elif "queue occupancy" in metric:
                     # Queue occupancy is calculated using the router's
                     # PCAP files, below.
                     continue
+                elif "mathis model throughput p/s" in metric:
+                    # Use the estimated loss rate to compute the
+                    # Mathis model fair throughput.
+                    new = MATHIS_C / (min_rtt_s * math.sqrt(
+                        output[j][make_win_metric(
+                            "loss rate estimated", win)]))
+                elif "mathis model label" in metric:
+                    # Use the current throughput and Mathis model
+                    # fair throughput to compute the Mathis model
+                    # label.
+                    output[j][metric] = utils.get_mathis_label(
+                        output[j][make_win_metric(
+                            "throughput p/s", alpha)],
+                        output[j][make_win_metric(
+                            "mathis model throughput p/s", alpha)])
+                    continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
-        valid = np.where(output["loss event rate"] > 0)
-        output["loss event rate sqrt"][valid] = np.reciprocal(
-            np.sqrt(output["loss event rate"][valid]))
         unfair_flws.append(output)
 
-        # print(f"total losses detected: {packet_loss}")
-        # raise Exception()
-
     # Save memory by explicitly deleting the sent and received packets
-    # after they've been parsed. This happens outside of the above
+    # after they have been parsed. This happens outside of the above
     # for-loop because only the last iteration's sent and received
     # packets are not automatically cleaned up by now (they go out of
-    # scope when the send_pkts and recv_pkts variables are overwritten
+    # scope when the sent_pkts and recv_pkts variables are overwritten
     # by the next loop).
-    del send_pkts
+    del sent_pkts
     del recv_pkts
 
     # Process pcap files from the bottleneck router to determine queue
@@ -615,21 +529,25 @@ def parse_pcap(sim_dir, out_dir):
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
                 if j > 0:
-                    if "inter-arrival time" in metric:
-                        # The inter-arrival time is calculated using
-                        # the sender and receiver logs, above.
+                    if "interarrival time us" in metric:
+                        # The interarrival time is calculated using
+                        # the sender and/or receiver logs, above.
                         continue
-                    if "throughput" in metric:
+                    if "throughput p/s" in metric:
                         # The throughput is calculated using the
-                        # sender and receiver logs, above.
+                        # sender and/or receiver logs, above.
                         continue
-                    if "RTT ratio" in metric:
+                    if "RTT ratio estimated" in metric:
                         # The RTT ratio is calculated using the sender
-                        # and receiver logs, above.
+                        # and/or receiver logs, above.
                         continue
-                    if "loss rate" in metric:
-                        # The loss rate is calculated using the sender
-                        # and receiver logs, above.
+                    if "loss rate true" in metric:
+                        # The true loss rate is calculated using the sender
+                        # and/or receiver logs, above.
+                        continue
+                    if "loss rate estimated" in metric:
+                        # The estiamted loss rate is calculated using
+                        # the sender and/or receiver logs, above.
                         continue
                     if "queue occupancy" in metric:
                         # Extra safety check to avoid divide-by-zero
@@ -645,6 +563,15 @@ def parse_pcap(sim_dir, out_dir):
                         # this flow, over the time since when the
                         # flow's last packet arrived.
                         new = 1 / pkts_since_last[sender]
+                    if "mathis model throughput p/s" in metric:
+                        # The Mathis model fair throughput is
+                        # calculated using the sender and/or receiver
+                        # logs, above.
+                        continue
+                    if "mathis model label" in metric:
+                        # The Mathis model label is calculated using
+                        # the sender and/or receiver logs, above.
+                        continue
                     else:
                         raise Exception(f"Unknown EWMA metric: {metric}")
                     new_ewma = update_ewma(
@@ -658,21 +585,33 @@ def parse_pcap(sim_dir, out_dir):
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
                 metric = make_win_metric(metric, win)
                 state = windowed_state[win]
-                if "average inter-arrival time" in metric:
-                    # The average inter-arrival time is calculated
-                    # using the sender and receiver logs, above.
+                if "average interarrival time us" in metric:
+                    # The average interarrival time is calculated
+                    # using the sender and/or receiver logs, above.
                     continue
-                if "average throughput" in metric:
+                if "average throughput p/s" in metric:
                     # The average throughput is calculated using the
-                    # sender and receiver logs, above.
+                    # sender and/or receiver logs, above.
                     continue
-                if "average RTT ratio" in metric:
-                    # The average RTT ratio time is calculated using
-                    # the sender and receiver logs, above.
+                if "average RTT ratio estimated" in metric:
+                    # The average RTT ratio is calculated using the
+                    # sender and/or receiver logs, above.
                     continue
-                if "loss rate" in metric:
-                    # The loss rate is calculated using the sender
-                    # and receiver logs, above.
+                if "loss event rate" in metric:
+                    # The loss event rate is calcualted using the
+                    # sender and/or receiver logs, above.
+                    continue
+                if "loss event rate sqrt" in metric:
+                    # The reciprocal of the square root of the loss
+                    # event rate is calculated using the sender and/or
+                    # receiver logs, above.
+                if "loss rate true" in metric:
+                    # The true loss rate is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
+                if "loss rate estimated" in metric:
+                    # The estimated loss rate is calcualted using the
+                    # sender and/or reciever logs, above.
                     continue
                 if "queue occupancy" in metric:
                     state["window_pkt_count"] += 1
@@ -712,6 +651,14 @@ def parse_pcap(sim_dir, out_dir):
                     state["window_start"] = window_start
                     # Get queue occupency
                     new = state["window_pkt_count"] / (j - window_start + 1)
+                elif "mathis model throughput p/s" in metric:
+                    # The Mathis model fair throughput is calculated
+                    # using the sender and/or receiver logs, above.
+                    continue
+                elif "mathis model label" in metric:
+                    # The Mathis model label is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 unfair_flws[sender][output_idx][metric] = new
@@ -727,21 +674,18 @@ def parse_pcap(sim_dir, out_dir):
         # the last packet in this flow is now 1.
         pkts_since_last[sender] = 1
 
-    # Determine if there are any NaNs in the results. For the results
-    # for each unfair flow, look through all features (columns) and
-    # make a note of the features that contain NaNs. Flatten these
-    # lists of feature names, using a set comprehension to remove
-    # duplicates.
-    nan_fets = {
+    # Determine if there are any NaNs or Infs in the results. For the
+    # results for each unfair flow, look through all features
+    # (columns) and make a note of the features that bad
+    # values. Flatten these lists of feature names, using a set
+    # comprehension to remove duplicates.
+    bad_fets = {
         fet for flw_dat in unfair_flws
-        for fet in flw_dat.dtype.names if np.isnan(flw_dat[fet]).any()}
-    # If there are NaNs, then we do not want to save these results.
-    if nan_fets:
-        print((f"    Discarding simulation {sim_dir} because it has NaNs in "
-               f"features: {nan_fets}"))
-        return
+        for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
+    if bad_fets:
+        print((f"    Simulation {sim_dir} hashas NaNs of Infs in features: {bad_fets}"))
 
-    # Write to output
+    # Save the results.
     if path.exists(out_flp):
         print(f"    Output already exists: {out_flp}")
     else:
@@ -775,6 +719,7 @@ def main():
              for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         random.shuffle(pcaps)
+    pcaps = pcaps[:1]
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
