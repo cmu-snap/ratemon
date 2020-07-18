@@ -61,8 +61,6 @@ ALPHAS = [i / 10 for i in range(1, 11)]
 WINDOWS = [2**i for i in range(0, 11)]
 # Number of RTTs for computing loss event rate
 NUM_INTERVALS = 8
-# Packet size in bytes
-PKT_SIZE = 1380
 
 
 def make_ewma_metric(metric, alpha):
@@ -400,11 +398,11 @@ def parse_pcap(sim_dir, out_dir):
 
 
             # Receiver-side loss rate estimation
-            if recv_pkt_seq != prev_pkt_seq + PKT_SIZE:
+            if recv_pkt_seq != prev_pkt_seq + sim.payload_B:
 
-                if recv_pkt_seq > highest_seq + PKT_SIZE:
+                if recv_pkt_seq > highest_seq + sim.payload_B:
                     # Loss in new packets
-                    curr_estimated_loss = (recv_pkt_seq - highest_seq - PKT_SIZE) / PKT_SIZE
+                    curr_estimated_loss = (recv_pkt_seq - highest_seq - sim.payload_B) / sim.payload_B
                     estimated_loss += curr_estimated_loss
                 elif recv_pkt_seq < prev_pkt_seq and prev_pkt_seq != highest_seq:
                     # Loss in retransmission
