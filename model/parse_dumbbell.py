@@ -202,7 +202,7 @@ def parse_pcap(sim_dir, out_dir):
         } for win in WINDOWS}
 
         # Final output.
-        output = np.empty(len(recv_pkts), dtype=DTYPE)
+        output = np.zeros(len(recv_pkts), dtype=DTYPE)
         # Total number of packet losses up to the current received
         # packet.
         pkt_loss_total_true = 0
