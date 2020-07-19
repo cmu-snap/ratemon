@@ -1,16 +1,15 @@
-.#! /usr/bin/env python3
+#! /usr/bin/env python3
 """Parses the pcap file of dumbbell topology. """
 
 import argparse
+import collections
 import itertools
+import math
 import multiprocessing
 import os
 from os import path
 import random
 import time
-from collections import deque
-import math
-from statistics import mean
 
 import numpy as np
 
@@ -38,7 +37,7 @@ EWMAS = [
     ("RTT ratio estimated", "float64"),
     ("loss rate true", "float64"),
     ("loss rate estimated", "float64"),
-    ("queue occupancy", "float64")
+    ("queue occupancy", "float64"),
     ("mathis model throughput p/s", "float64"),
     # -1 no applicable (no loss yet), 0 lower than or equal to fair
     # throughput, 1 higher. This is not an EWMA metric itself, but is
@@ -55,7 +54,7 @@ WINDOWED = [
     ("1/sqrt loss event rate ", "float64"),
     ("loss rate true", "float64"),
     ("loss rate estimated", "float64"),
-    ("queue occupancy", "float64")
+    ("queue occupancy", "float64"),
     ("mathis model throughput p/s", "float64"),
     # -1 no applicable (no loss yet), 0 lower than or equal to fair
     # throughput, 1 higher. This is not a windowed metric itself, but
@@ -98,38 +97,31 @@ def update_ewma(prev_ewma, new_val, alpha):
 
 
 def make_interval_weight(num_intervals):
-    weight = [1] * num_intervals
-    for i in range(num_intervals):
-        if i < num_intervals / 2:
-            weight[i] = 1
-        else:
-            weight[i] = 2 * (i - 1) / (i + 2)
-    return weight
+    return [
+        1 if i < num_intervals / 2 else 2 * (i - 1) / (i + 2)
+        for i in range(num_intervals)]
 
 
 def compute_weighted_average(curr_event_size, loss_event_intervals,
-                             loss_interval_weight):
-    i_tot0 = curr_event_size
-    i_tot1 = 0
-    w_tot = 1
-    for i in range(len(loss_event_intervals) - 1):
-        i_tot0 += loss_event_intervals[i] * loss_interval_weight[i + 1]
-        w_tot += loss_interval_weight[i + 1]
-
-    for i in range(len(loss_event_intervals)):
-        i_tot1 += loss_event_intervals[i] * loss_interval_weight[i]
-
-    i_tot = max(i_tot0, i_tot1)
-    i_mean = i_tot / w_tot
-    return 1 / i_mean
+                             loss_interval_weights):
+    weight_total = 1 + sum(loss_interval_weights[1:])
+    interval_total_0 = (curr_event_size + sum(
+        interval * weight
+        for interval, weight in zip(
+            loss_event_intervals[:-1], loss_interval_weights[1:])))
+    interval_total_1 = sum(
+        interval * weight
+        for interval, weight in zip(
+            loss_event_intervals, loss_interval_weights))
+    return weight_total / max(interval_total_0, interval_total_1)
 
 
 def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
-              recv_time_prev):
+              recv_time_prev, win_size_us, pkt_idx):
     """ Calculates the loss rate over a window. """
     # If there were packet losses since the last received packet, then
     # add them to the loss queue.
-    if pkt_loss_cur_true > 0:
+    if pkt_loss_cur > 0 and pkt_idx > 0:
         # The average time between when packets should have arrived,
         # since we received the last packet.
         loss_interval = ((recv_time_cur - recv_time_prev) / (pkt_loss_cur + 1))
@@ -140,17 +132,16 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
             loss_q.append(recv_time_prev + (k + 1) * loss_interval)
 
     # Discard old losses.
-    while loss_q and (loss_queue[0] < recv_time_cur - win_size_us):
+    while loss_q and (loss_q[0] < recv_time_cur - win_size_us):
         loss_q.popleft()
 
     # The loss rate is the number of losses in the window divided by
     # the total number of packets in the window.
     win_losses = len(loss_q)
-    win_start_idx = win_state[win]["window_start_idx"]
     return (
         loss_q,
-        ((win_losses / (j + win_loss - win_start_idx))
-         if j - win_start_idx > 0 else 0))
+        ((win_losses / (pkt_idx + win_losses - win_start_idx))
+         if pkt_idx - win_start_idx > 0 else 0))
 
 
 def parse_pcap(sim_dir, out_dir):
@@ -170,17 +161,15 @@ def parse_pcap(sim_dir, out_dir):
         print(f"    Already parsed: {sim_dir}")
         return
 
-    # Process PCAP files from unfair senders and receivers
-
+    # Process PCAP files from unfair senders and receivers.
+    #
+    # The final output, with one entry per unfair flow.
     unfair_flws = []
-    min_rtts_us = []
-
     for unfair_idx in range(sim.unfair_flws):
-        # TODO: Calculate minRTT using first TCP timestamp echo
-        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
-        min_rtt_us = one_way_us * 2
-        min_rtts_us.append(min_rtt_us)
-        min_rtt_s = min_rtt_us / 1e6
+        # We will estimate the min RTT using the first TCP timestamp
+        # option echo.
+        min_rtt_us = -1
+        min_rtt_s = -1
 
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
@@ -202,14 +191,14 @@ def parse_pcap(sim_dir, out_dir):
             # The index at which this window starts.
             "window_start_idx": 0,
             # The "loss event rate".
-            "loss_interval_weight": make_interval_weight(win),
-            "loss_event_intervals": deque(),
+            "loss_interval_weights": make_interval_weight(win),
+            "loss_event_intervals": collections.deque(),
             "current_loss_event_start_idx": 0,
             "current_loss_event_start_time": 0,
             # For "loss rate true".
-            "true_loss_queue": deque(),
+            "loss_queue_true": collections.deque(),
             # For "loss rate estimated".
-            "estimated_loss_queue": deque()
+            "loss_queue_estimated": collections.deque()
         } for win in WINDOWS}
 
         # Final output.
@@ -222,8 +211,6 @@ def parse_pcap(sim_dir, out_dir):
         # Estimate loss rate
         prev_pkt_seq = 0
         highest_seq = 0
-        estimated_loss = 0
-        curr_estimated_loss = 0
 
         curr_ts_option = 0
         ack_ts_idx = 0
@@ -263,7 +250,10 @@ def parse_pcap(sim_dir, out_dir):
             # last packet.
             pkt_loss_cur_true = pkt_loss_total_true - pkt_loss_total_true_prev
 
-            # Calculate the true RTT ratio.
+            # Calculate the true RTT ratio. Since this will not be
+            # used in practice, we can calculate the min RTT using the
+            # simulation's parameters.
+            one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
             output[j]["RTT ratio true"] = (
                 # Look up the send time of this packet to calculate
                 # the true sender-receiver delay.
@@ -287,7 +277,7 @@ def parse_pcap(sim_dir, out_dir):
                         if (recv_pkt_seq < prev_pkt_seq and
                             prev_pkt_seq != highest_seq)
                         else 0)))
-            pkt_los_total_estimated += pkt_loss_cur_estimated
+            pkt_loss_total_estimated += pkt_loss_cur_estimated
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
 
@@ -299,6 +289,9 @@ def parse_pcap(sim_dir, out_dir):
                 while ack_pkts[ack_ts_idx][3] != recv_ts_option:
                     ack_ts_idx += 1
                 rtt_estimate_us = recv_time_cur - ack_pkts[ack_ts_idx][2]
+            if min_rtt_us == -1:
+                min_rtt_us = rtt_estimate_us
+                min_rtt_s = min_rtt_us / 1e6
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
@@ -312,7 +305,7 @@ def parse_pcap(sim_dir, out_dir):
                         # Divide by 1e6 to convert from microseconds
                         # to seconds.
                         new = (0 if interarr_time_us == 0
-                               else 1 / (interarr_time_us / 1e6)),
+                               else 1 / (interarr_time_us / 1e6))
                     elif "RTT ratio estimated" in metric:
                         new = rtt_estimate_us
                     elif "loss rate true" in metric:
@@ -331,9 +324,16 @@ def parse_pcap(sim_dir, out_dir):
                         continue
                     elif "mathis model throughput p/s" in metric:
                         # Use the estimated loss rate to compute the
-                        # Mathis model fair throughput.
-                        new = MATHIS_C / (min_rtt_s * math.sqrt(output[j][
-                            make_ewma_metric("loss rate estimated", alpha)]))
+                        # Mathis model fair throughput. If we have not
+                        # been able to estimate the min RTT yet, then
+                        # we cannot compute the Mathis model fair
+                        # throughput.
+                        new = (
+                            0 if min_rtt_s == -1
+                            else (MATHIS_C / (
+                                min_rtt_s * math.sqrt(output[j][
+                                    make_ewma_metric(
+                                        "loss rate estimated", alpha)]))))
                     elif "mathis model label" in metric:
                         # Use the current throughput and the Mathis
                         # model fair throughput to compute the Mathis
@@ -356,6 +356,12 @@ def parse_pcap(sim_dir, out_dir):
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
                 metric = make_win_metric(metric, win)
+                # If we have not been able to estimate the min RTT
+                # yet, then we cannot compute any of the windowed
+                # metrics.
+                if min_rtt_us == -1:
+                    output[j][metric] = 0
+                    continue
                 win_size_us = win * min_rtt_us
 
                 # Move the start of the window forward.
@@ -369,7 +375,7 @@ def parse_pcap(sim_dir, out_dir):
                     new = ((recv_time_cur - recv_pkts[j - win_start_idx][2]) /
                            (j - win_start_idx + 1))
                 elif "average throughput p/s" in metric:
-                    avg_interarr_time_us = outputp[j][
+                    avg_interarr_time_us = output[j][
                         make_win_metric("average interarrival time us", win)]
                     # Divide by 1e6 to convert interarrival time to seconds.
                     new = (0 if avg_interarr_time_us == 0
@@ -382,12 +388,15 @@ def parse_pcap(sim_dir, out_dir):
                         make_ewma_metric("RTT ratio estimated", alpha=1.)][
                             j - win_start_idx + 1, j + 1])
                 elif "loss event rate" in metric:
-                    cur_start_idx = win_state[win]["current_loss_event_start_idx"]
-                    cur_start_time = win_state[win]["current_loss_event_start_time"]
+                    cur_start_idx = win_state[
+                        win]["current_loss_event_start_idx"]
+                    cur_start_time = win_state[
+                        win]["current_loss_event_start_time"]
 
                     # If there was a loss since the last packet...
                     if pkt_loss_cur_estimated > 0:
-                        # The index of the first packet in the current loss event.
+                        # The index of the first packet in the current
+                        # loss event.
                         new_start_idx = (j + pkt_loss_total_estimated -
                                          pkt_loss_cur_estimated)
 
@@ -411,7 +420,8 @@ def parse_pcap(sim_dir, out_dir):
                                 # Compute the approximate time at
                                 # which the packet should have been
                                 # received if it had not been lost.
-                                loss_time = recv_time_prev + (k + 1) * loss_interval
+                                loss_time = (
+                                    recv_time_prev + (k + 1) * loss_interval)
 
                                 # If the time of this loss is more
                                 # than an RTT from the time of the
@@ -423,12 +433,14 @@ def parse_pcap(sim_dir, out_dir):
                                     # between the start of the new
                                     # loss event and the start of the
                                     # previous loss event.
-                                    win_state[win][
-                                        "loss_event_intervals"].appendleft(
+                                    win_state[
+                                        win]["loss_event_intervals"].appendleft(
                                             new_start_idx - cur_start_idx)
                                     # Potentially discard an old event.
-                                    if len(win_state[win]["loss_event_intervals"]) > win:
-                                        win_state[win]["loss_event_intervals"].pop()
+                                    if len(win_state[
+                                            win]["loss_event_intervals"]) > win:
+                                        win_state[
+                                            win]["loss_event_intervals"].pop()
 
                                     cur_start_idx = new_start_idx
                                     cur_start_time = loss_time
@@ -440,7 +452,7 @@ def parse_pcap(sim_dir, out_dir):
                                 (j + pkt_loss_total_estimated -
                                  cur_start_idx),
                                 win_state[win]["loss_event_intervals"],
-                                loss_interval_weight[win])
+                                win_state[win]["loss_interval_weights"])
                     else:
                         # If there have been no losses since the
                         # last packet...
@@ -452,30 +464,34 @@ def parse_pcap(sim_dir, out_dir):
                                 (j + pkt_loss_total_estimated -
                                  cur_start_idx),
                                 win_state[win]["loss_event_intervals"],
-                                loss_interval_weight[win])
+                                win_state[win]["loss_interval_weights"])
                         else:
                             # ...and there have never been any losses,
                             # then the loss event rate is 0.
                             new = 0
                     # Record the new values of the state variables.
-                    win_state[win]["current_loss_event_start_idx"] = cur_start_idx
-                    win_state[win]["current_loss_event_start_time"] = cur_start_time
+                    win_state[
+                        win]["current_loss_event_start_idx"] = cur_start_idx
+                    win_state[
+                        win]["current_loss_event_start_time"] = cur_start_time
                 elif "1/sqrt loss event rate" in metric:
                     # Use the loss event rate to compute
                     # 1 / sqrt(loss event rate). Perform this calculation only
                     # if the packet's loss event rate is greater than 0.
-                    loss_event_rate = output[j][
-                        make_win_metric("loss event rate", win)]
+                    loss_event_rate = output[
+                        j][make_win_metric("loss event rate", win)]
                     new = (1 / math.sqrt(loss_event_rate)
                            if loss_event_rate > 0 else 0)
                 elif "loss rate true" in metric:
                     win_state[win]["loss_queue_true"], new = loss_rate(
                         win_state[win]["loss_queue_true"], win_start_idx,
-                        pkt_loss_cur_true, recv_time_cur, recv_time_prev)
+                        pkt_loss_cur_true, recv_time_cur, recv_time_prev,
+                        win_size_us, j)
                 elif "loss rate estimated" in metric:
                     win_state[win]["loss_queue_estimated"], new = loss_rate(
                         win_state[win]["loss_queue_estimated"], win_start_idx,
-                        pkt_loss_cur_estimated, recv_time_cur, recv_time_prev)
+                        pkt_loss_cur_estimated, recv_time_cur, recv_time_prev,
+                        win_size_us, j)
                 elif "queue occupancy" in metric:
                     # Queue occupancy is calculated using the router
                     # logs, below.
@@ -491,9 +507,9 @@ def parse_pcap(sim_dir, out_dir):
                     # label.
                     new = utils.get_mathis_label(
                         output[j][make_win_metric(
-                            "average throughput p/s", alpha)],
+                            "average throughput p/s", win)],
                         output[j][make_win_metric(
-                            "mathis model throughput p/s", alpha)])
+                            "mathis model throughput p/s", win)])
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
@@ -522,7 +538,7 @@ def parse_pcap(sim_dir, out_dir):
             "output_idx": 0,
             # The number of other flows' packets that have arrived
             # since the last packet for this flow.
-            "packets_since_last": 0
+            "packets_since_last": 0,
             # The number of packets from this flow currently in the
             # window.
             "window_flow_packets": {win: 0 for win in WINDOWS}
@@ -552,23 +568,23 @@ def parse_pcap(sim_dir, out_dir):
                         # The interarrival time is calculated using
                         # the sender and/or receiver logs, above.
                         continue
-                    elif "throughput p/s" in metric:
+                    if "throughput p/s" in metric:
                         # The throughput is calculated using the
                         # sender and/or receiver logs, above.
                         continue
-                    elif "RTT ratio estimated" in metric:
+                    if "RTT ratio estimated" in metric:
                         # The RTT ratio is calculated using the sender
                         # and/or receiver logs, above.
                         continue
-                    elif "loss rate true" in metric:
+                    if "loss rate true" in metric:
                         # The true loss rate is calculated using the sender
                         # and/or receiver logs, above.
                         continue
-                    elif "loss rate estimated" in metric:
+                    if "loss rate estimated" in metric:
                         # The estiamted loss rate is calculated using
                         # the sender and/or receiver logs, above.
                         continue
-                    elif "queue occupancy" in metric:
+                    if "queue occupancy" in metric:
                         # Extra safety check to avoid divide-by-zero
                         # errors.
                         assert j > 0, \
@@ -607,31 +623,32 @@ def parse_pcap(sim_dir, out_dir):
                     # The average interarrival time is calculated
                     # using the sender and/or receiver logs, above.
                     continue
-                elif "average throughput p/s" in metric:
+                if "average throughput p/s" in metric:
                     # The average throughput is calculated using the
                     # sender and/or receiver logs, above.
                     continue
-                elif "average RTT ratio estimated" in metric:
+                if "average RTT ratio estimated" in metric:
                     # The average RTT ratio is calculated using the
                     # sender and/or receiver logs, above.
                     continue
-                elif "loss event rate" in metric:
+                if "loss event rate" in metric:
                     # The loss event rate is calcualted using the
                     # sender and/or receiver logs, above.
                     continue
-                elif "1/sqrt loss event rate" in metric:
+                if "1/sqrt loss event rate" in metric:
                     # The reciprocal of the square root of the loss
                     # event rate is calculated using the sender and/or
                     # receiver logs, above.
-                elif "loss rate true" in metric:
+                    continue
+                if "loss rate true" in metric:
                     # The true loss rate is calculated using the
                     # sender and/or receiver logs, above.
                     continue
-                elif "loss rate estimated" in metric:
+                if "loss rate estimated" in metric:
                     # The estimated loss rate is calcualted using the
                     # sender and/or reciever logs, above.
                     continue
-                elif "queue occupancy" in metric:
+                if "queue occupancy" in metric:
                     win_start_idx = win_start_idxs[win]
                     # By definition, the window now contains one more
                     # packet from this flow.
@@ -676,10 +693,11 @@ def parse_pcap(sim_dir, out_dir):
                     # The queue occupancy is the number of this flow's
                     # packets in the window divided by the total
                     # number of packets in the window.
-                    new = win_flw_pkts / (j - window_start + 1)
+                    new = win_flw_pkts / (j - win_start_idx + 1)
                     # Record the new values of the state variables.
                     win_start_idxs[win] = win_start_idx
-                    flw_state[sender]["window_flow_packets"][win] = win_flw_pkts
+                    flw_state[
+                        sender]["window_flow_packets"][win] = win_flw_pkts
                 elif "mathis model throughput p/s" in metric:
                     # The Mathis model fair throughput is calculated
                     # using the sender and/or receiver logs, above.
@@ -691,7 +709,7 @@ def parse_pcap(sim_dir, out_dir):
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 unfair_flws[sender][output_idx][metric] = new
-            output_idxs[sender] += 1
+            flw_state[sender]["output_idx"] += 1
 
         # For each unfair flow except the current packet's flow,
         # increment the number of packets since the last packet from
@@ -712,7 +730,8 @@ def parse_pcap(sim_dir, out_dir):
         fet for flw_dat in unfair_flws
         for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
     if bad_fets:
-        print((f"    Simulation {sim_dir} hashas NaNs of Infs in features: {bad_fets}"))
+        print(f"    Simulation {sim_dir} has NaNs of Infs in features: "
+              f"{bad_fets}")
 
     # Save the results.
     if path.exists(out_flp):
