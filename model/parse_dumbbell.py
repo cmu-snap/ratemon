@@ -386,9 +386,10 @@ def parse_pcap(sim_dir, out_dir):
                     # For each packet in the window, extract the EWMA
                     # metric for RTT ratio with alpha = 1.0, which
                     # corresponds to an EWMA with no history.
-                    new = np.mean(output[
-                        make_ewma_metric("RTT ratio estimated", alpha=1.)][
-                            j - win_start_idx + 1:j + 1])
+                    new = (0 if j == win_start_idx else
+                           np.mean(output[make_ewma_metric(
+                               "RTT ratio estimated", alpha=1.)][
+                                   win_start_idx:j + 1]))
                 elif "loss event rate" in metric:
                     cur_start_idx = win_state[
                         win]["current_loss_event_start_idx"]
