@@ -51,7 +51,7 @@ WINDOWED = [
     ("average throughput p/s", "float64"),
     ("average RTT ratio estimated", "float64"),
     ("loss event rate", "float64"),
-    ("1/sqrt loss event rate ", "float64"),
+    ("1/sqrt loss event rate", "float64"),
     ("loss rate true", "float64"),
     ("loss rate estimated", "float64"),
     ("queue occupancy", "float64"),
@@ -108,7 +108,7 @@ def compute_weighted_average(curr_event_size, loss_event_intervals,
     interval_total_0 = (curr_event_size + sum(
         interval * weight
         for interval, weight in zip(
-            loss_event_intervals[:-1], loss_interval_weights[1:])))
+            list(loss_event_intervals)[:-1], loss_interval_weights[1:])))
     interval_total_1 = sum(
         interval * weight
         for interval, weight in zip(
@@ -265,7 +265,7 @@ def parse_pcap(sim_dir, out_dir):
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
-            pkt_loss_cur_estimated = (
+            pkt_loss_cur_estimated = math.ceil(
                 0 if recv_pkt_seq == prev_pkt_seq + sim.payload_B
                 else (
                     ((recv_pkt_seq - highest_seq - sim.payload_B) /
@@ -276,6 +276,7 @@ def parse_pcap(sim_dir, out_dir):
                         if (recv_pkt_seq < prev_pkt_seq and
                             prev_pkt_seq != highest_seq)
                         else 0)))
+
             pkt_loss_total_estimated += pkt_loss_cur_estimated
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
@@ -331,7 +332,8 @@ def parse_pcap(sim_dir, out_dir):
                         # model fair throughput.
                         new = (
                             0 if (min_rtt_s == -1 or
-                                  loss_rate_estimated == 0)
+                                  min_rtt_s == 0 or
+                                  loss_rate_estimated <= 0)
                             else (MATHIS_C /
                                   (min_rtt_s * math.sqrt(loss_rate_estimated))))
                     elif "mathis model label" in metric:
@@ -480,8 +482,8 @@ def parse_pcap(sim_dir, out_dir):
                     # if the packet's loss event rate is greater than 0.
                     loss_event_rate = output[
                         j][make_win_metric("loss event rate", win)]
-                    new = (1 / math.sqrt(loss_event_rate)
-                           if loss_event_rate > 0 else 0)
+                    new = (0 if loss_event_rate <= 0 else
+                           1 / math.sqrt(loss_event_rate))
                 elif "loss rate true" in metric:
                     win_state[win]["loss_queue_true"], new = loss_rate(
                         win_state[win]["loss_queue_true"], win_start_idx,
@@ -500,7 +502,7 @@ def parse_pcap(sim_dir, out_dir):
                     # Use the loss event rate to compute the Mathis
                     # model fair throughput.
                     loss_event_rate = output[j][make_win_metric("loss event rate", win)]
-                    new = (0 if loss_event_rate == 0 else
+                    new = (0 if min_rtt_s == 0 or loss_event_rate <= 0 else
                            MATHIS_C / (min_rtt_s * math.sqrt(loss_event_rate)))
                 elif "mathis model label" in metric:
                     # Use the current throughput and Mathis model
@@ -711,16 +713,15 @@ def parse_pcap(sim_dir, out_dir):
                     raise Exception(f"Unknown windowed metric: {metric}")
                 unfair_flws[sender][output_idx][metric] = new
             flw_state[sender]["output_idx"] += 1
-
+            # For the current packet's flow, the number of packets
+            # since the last packet in this flow is now 1.
+            flw_state[sender]["packets_since_last"] = 1
         # For each unfair flow except the current packet's flow,
         # increment the number of packets since the last packet from
         # that flow.
         for flw in range(sim.unfair_flws):
             if flw != sender:
                 flw_state[flw]["packets_since_last"] += 1
-        # For the current packet's flw, the number of packets since
-        # the last packet in this flow is now 1.
-        flw_state[sender]["packets_since_last"] = 1
 
     # Determine if there are any NaNs or Infs in the results. For the
     # results for each unfair flow, look through all features
