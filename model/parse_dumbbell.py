@@ -203,15 +203,14 @@ def parse_pcap(sim_dir, out_dir):
 
         # Final output.
         output = np.empty(len(recv_pkts), dtype=DTYPE)
-
         # Total number of packet losses up to the current received
-        # packet, calculated using the sender logs.
+        # packet.
         pkt_loss_total_true = 0
-
-        # Estimate loss rate
+        pkt_loss_total_estimated = 0
+        # Loss rate estimation.
         prev_pkt_seq = 0
         highest_seq = 0
-
+        # RTT estimation.
         curr_ts_option = 0
         ack_ts_idx = 0
         # The running RTT estimate. If we cannot determine an RTT
@@ -324,16 +323,17 @@ def parse_pcap(sim_dir, out_dir):
                         continue
                     elif "mathis model throughput p/s" in metric:
                         # Use the estimated loss rate to compute the
-                        # Mathis model fair throughput. If we have not
-                        # been able to estimate the min RTT yet, then
-                        # we cannot compute the Mathis model fair
-                        # throughput.
+                        # Mathis model fair throughput.
+                        loss_rate_estimated = output[
+                            j][make_ewma_metric("loss rate estimated", alpha)]
+                        # If we have not been able to estimate the min
+                        # RTT yet, then we cannot compute the Mathis
+                        # model fair throughput.
                         new = (
-                            0 if min_rtt_s == -1
-                            else (MATHIS_C / (
-                                min_rtt_s * math.sqrt(output[j][
-                                    make_ewma_metric(
-                                        "loss rate estimated", alpha)]))))
+                            0 if (min_rtt_s == -1 or
+                                  loss_rate_estimated == 0)
+                            else (MATHIS_C /
+                                  (min_rtt_s * math.sqrt(loss_rate_estimated))))
                     elif "mathis model label" in metric:
                         # Use the current throughput and the Mathis
                         # model fair throughput to compute the Mathis
@@ -386,7 +386,7 @@ def parse_pcap(sim_dir, out_dir):
                     # corresponds to an EWMA with no history.
                     new = np.mean(output[
                         make_ewma_metric("RTT ratio estimated", alpha=1.)][
-                            j - win_start_idx + 1, j + 1])
+                            j - win_start_idx + 1:j + 1])
                 elif "loss event rate" in metric:
                     cur_start_idx = win_state[
                         win]["current_loss_event_start_idx"]
@@ -499,8 +499,9 @@ def parse_pcap(sim_dir, out_dir):
                 elif "mathis model throughput p/s" in metric:
                     # Use the loss event rate to compute the Mathis
                     # model fair throughput.
-                    new = MATHIS_C / (min_rtt_s * math.sqrt(
-                        output[j][make_win_metric("loss event rate", win)]))
+                    loss_event_rate = output[j][make_win_metric("loss event rate", win)]
+                    new = (0 if loss_event_rate == 0 else
+                           MATHIS_C / (min_rtt_s * math.sqrt(loss_event_rate)))
                 elif "mathis model label" in metric:
                     # Use the current throughput and Mathis model
                     # fair throughput to compute the Mathis model
