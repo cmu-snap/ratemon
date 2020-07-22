@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 """ Utility functions. """
 
+import math
 from os import path
 
 import numpy as np
@@ -9,8 +10,6 @@ import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
 import torch
-
-import models
 
 
 # Arguments to ignore when converting an arguments dictionary to a
@@ -261,7 +260,7 @@ def parse_packets(flp, packet_size_B, direction="data"):
          # Timestamp. Not using parse_time_us for efficiency purpose.
          pkt_mdat.sec * 1e6 + pkt_mdat.usec,
          # Timestamp option.
-         scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].options[0][1][1])
+         scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].options[0][1])
         for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
         # Select either data or ACK packets.
         if ((direction == "data" and pkt_mdat.wirelen >= packet_size_B) or
@@ -333,10 +332,10 @@ def clean(arr):
     return new
 
 
-def visualize_classes(net, dat):
+def visualize_classes(net, dat, is_svm):
     """ Prints statistics about the classes in dat. """
     # Visualaize the ground truth data.
-    clss = ([-1, 1] if isinstance(net, models.SvmWrapper)
+    clss = ([-1, 1] if is_svm
             else list(range(net.num_clss)))
     # Assumes that dat is a structured numpy array containing a
     # column named "class".
@@ -351,14 +350,79 @@ def visualize_classes(net, dat):
         f"Error visualizing ground truth! {tot} != {tot_actual}"
 
 
-def get_mathis_label(tput_true, tput_mathis):
+def safe_mathis_label(tput_true, tput_mathis):
+    """
+    Returns the Mathis model label based on the true throughput and
+    Mathis model fair throughput. If either component value is -1
+    (unknown), then the resulting label is -1 (unknown).
+    """
     return (
-        # -1 if the Mathis model throughput could not be calculated.
-        -1 if tput_mathis == 0
-        else (
-            # 1 if the current throughput is greater than the Mathis
-            # model throughput.
-            1 if tput_true > tput_mathis
-            # 0 if the current throughput is less than or equal to the
-            # Mathis model throughput.
-            else 0))
+        -1 if tput_true == -1 or tput_mathis == -1 else
+        int(tput_true > tput_mathis))
+
+
+def safe_min(val1, val2):
+    """
+    Safely computes the min of two values. If either value is -1 or 0,
+    then that value is discarded and the other value becomes the
+    min. If both values are discarded, then the min is -1 (unknown).
+    """
+    unsafe = (-1, 0)
+    return (
+        -1 if val1 in unsafe and val2 in unsafe else (
+            val2 if val1 in unsafe else (
+                val1 if val2 in unsafe else (
+                    min(val1, val2)))))
+
+
+def safe_mul(val1, val2):
+    """
+    Safely multiplies two values. If either value is -1, then the
+    result is -1 (unknown).
+    """
+    return -1 if val1 == -1 or val2 == -1 else val1 * val2
+
+
+def safe_div(num, den):
+    """
+    Safely divides two values. If either value is -1 or the
+    denominator is 0, then the result is -1 (unknown).
+    """
+    return -1 if num == -1 or den in (-1, 0) else num / den
+
+
+def safe_sqrt(val):
+    """
+    Safely calculates the square root of a value. If the value is less
+    than or equal to 0, then the result is -1 (unknown).
+    """
+    return -1 if val <= 0 else math.sqrt(val)
+
+
+def safe_mean(dat, start_idx, end_idx):
+
+    """
+    Safely calculates a mean over a window. Any values that are -1
+    (unknown) are discarded. The mean of an empty window if -1
+    (unknown).
+    """
+    # Extract the window.
+    dat_win = dat[start_idx:end_idx + 1]
+    # Convert from a structured to an unstructured
+    # array to enable filtering.
+    dat_win = clean(dat_win)
+    # Eliminate values that are -1 (unknown).
+    dat_win = dat_win[dat_win != -1]
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_win.shape[0] == 0 else np.mean(dat_win)
+
+
+def safe_update_ewma(prev_ewma, new_val, alpha):
+    """
+    Safely updates an exponentially weighted moving average. If the
+    previous EWMA is -1 (unknown), then the new EWMA is assumed to be
+    the unweighted new value.
+    """
+    return (
+        new_val if prev_ewma == -1 else
+        alpha * new_val + (1 - alpha) * prev_ewma)

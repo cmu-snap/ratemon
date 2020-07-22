@@ -734,7 +734,8 @@ def run_many(args_):
             json.dump(scl_prms.tolist(), fil)
 
     # Visualaize the ground truth data.
-    utils.visualize_classes(net_tmp, dat_out)
+    utils.visualize_classes(
+        net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]

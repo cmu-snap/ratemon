@@ -91,7 +91,7 @@ def main():
     dat_in = utils.scale_all(dat_in, scl_prms, 0, 1, args.standardize)
 
     # Visualize the ground truth data.
-    utils.visualize_classes(net, dat_out)
+    utils.visualize_classes(net, dat_out, isinstance(net, models.SvmWrapper))
 
     # Test the simulation.
     net.test(
