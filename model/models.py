@@ -12,6 +12,7 @@ import numpy as np
 from sklearn import linear_model
 from sklearn import svm
 import torch
+from statistics import mean
 
 
 class PytorchModelWrapper:
@@ -600,6 +601,49 @@ class SvmSklearnWrapper(SvmWrapper):
         print(f"    Test accuracy: {acc * 100:.2f}%")
         return acc
 
+
+    def __plotThroughput(self, preds, labels, raw, fair, flp, x_lim=None):
+        raw = raw.tolist()
+        fair = fair.tolist()
+
+        # Convert labels from -1 and 1 to 0 and 1
+        labels = (labels + 1) / 2
+        labels = labels.tolist()
+
+        # Bucketize and compute bucket accuracies.
+        num_samples = preds.size()[0]
+        num_buckets = min(20 * 4, num_samples)
+        num_per_bucket = math.floor(num_samples / num_buckets)
+        assert num_per_bucket > 0, \
+            ("There must be at least one sample per bucket, but there are "
+             f"{num_samples} samples and only {num_buckets} buckets!")
+        buckets = [ 
+            (mean(throughput_),
+             mean(labels_))
+            for throughput_, labels_ in [
+                (raw[i:i + num_per_bucket],
+                 labels[i:i + num_per_bucket])
+                for i in range(0, num_samples, num_per_bucket)]]
+        if self.graph:
+            # Plot each bucket's accuracy.
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [throughput for throughput, _ in buckets], "b-")
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [fair] * len(buckets), "g--")
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [label for _, label in buckets], "r^")
+            if x_lim is not None:
+                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+            pyplot.xlabel("Time")
+            pyplot.ylabel("Throughput vs Fair throughput")
+            pyplot.tight_layout()
+            pyplot.savefig(flp)
+            pyplot.close()
+
+
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
              num_flws, arr_times=None, graph_prms=None):
         """
@@ -686,6 +730,10 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.tight_layout()
             pyplot.savefig(path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
+
+            # Plot throughput
+            self.__plotThroughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
+                             out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
         else:
             out_dir = "."
             sort_by_unfairness = False
