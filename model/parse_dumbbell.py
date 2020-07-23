@@ -83,7 +83,7 @@ def make_win_metric(metric, win):
     # The "queue occupancy" metric is over the estimated RTT instead
     # of the minimum RTT.
     return (f"{metric}-windowed-"
-            f"{'' if metric == 'queue occupancy' else 'min'}Rtt{win}")
+            f"{'r' if metric == 'queue occupancy' else 'minR'}tt{win}")
 
 
 # The final dtype combines each metric at multiple granularities.
@@ -196,7 +196,7 @@ def parse_pcap(sim_dir, out_dir):
 
         # The final output. -1 implies that a value was unable to be
         # calculated.
-        output = np.zeros(len(recv_pkts), dtype=DTYPE)
+        output = np.empty(len(recv_pkts), dtype=DTYPE)
         output.fill(-1)
         # Total number of packet losses up to the current received
         # packet.
@@ -221,12 +221,12 @@ def parse_pcap(sim_dir, out_dir):
                 # ack_idx to the first occurance of the timestamp
                 # option TSval corresponding to the current packet's
                 # TSecr.
-                tsval = ack_pkts[ack_idx][3]
+                tsval = ack_pkts[ack_idx][3][0]
                 tsecr = recv_pkt[3][1]
                 ack_idx_old = ack_idx
                 while tsval != tsecr and ack_idx < len(ack_pkts) and ack_idx <= j:
                     ack_idx += 1
-                    tsval = ack_pkts[ack_idx][3]
+                    tsval = ack_pkts[ack_idx][3][0]
                 if tsval == tsecr:
                     # If we found a timestamp option match, then
                     # update the RTT estimate.
@@ -299,83 +299,80 @@ def parse_pcap(sim_dir, out_dir):
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
-                if j > 0:
-                    if "interarrival time us" in metric:
-                        new = interarr_time_us
-                    elif "throughput p/s" in metric:
-                        # Do not use the existing interarrival EWMA to
-                        # calculate the throughput. Instead, use the
-                        # true interarrival time so that the value
-                        # used to update the throughput EWMA is not
-                        # "EWMA-ified" twice. Divide by 1e6 to convert
-                        # from microseconds to seconds.
-                        new = utils.safe_div(
-                            1, utils.safe_div(interarr_time_us, 1e6))
-                    elif "RTT estimate us" in metric:
-                        new = rtt_estimate_us
-                    elif "RTT estimate ratio" in metric:
-                        new = rtt_estimate_ratio
-                    elif "RTT true us" in metric:
-                        new = rtt_true_us
-                    elif "RTT true ratio" in metric:
-                        new = rtt_true_ratio
-                    elif "loss rate estimate" in metric:
-                        # See comment in case for "loss rate true".
-                        new = pkt_loss_cur_estimate / (
-                            pkt_loss_cur_estimate + 1)
-                    elif "loss rate true" in metric:
-                        # Divide the pkt_loss_cur_true by
-                        # (pkt_loss_cur_true + 1) because over the course of
-                        # sending (pkt_loss_cur_true + 1) packets, one got
-                        # through and pkt_loss_cur_true were lost.
-                        new = pkt_loss_cur_true / (pkt_loss_cur_true + 1)
-                    elif "queue occupancy" in metric:
-                        # Queue occupancy is calculated using the
-                        # router logs, below.
-                        continue
-                    elif "mathis model throughput p/s" in metric:
-                        # Use the estimated loss rate to compute the
-                        # Mathis model fair throughput. Contrary to
-                        # the decision for interarrival time, above,
-                        # here we use the value of another EWMA (loss
-                        # rate estimate) to compute the new value for
-                        # the Mathis model throughput EWMA. I believe
-                        # that this is desirable because we want to
-                        # see how the metric as a whole reacts to a
-                        # certain degree of memory.
-                        loss_rate_estimate = output[
-                            j][make_ewma_metric("loss rate estimate", alpha)]
-                        # Use "safe" operations in case any of the
-                        # supporting values are -1 (unknown).
-                        new = (
-                            -1 if loss_rate_estimate <= 0 else
+                if "interarrival time us" in metric:
+                    new = interarr_time_us
+                elif "throughput p/s" in metric:
+                    # Do not use the existing interarrival EWMA to
+                    # calculate the throughput. Instead, use the true
+                    # interarrival time so that the value used to
+                    # update the throughput EWMA is not "EWMA-ified"
+                    # twice. Divide by 1e6 to convert from
+                    # microseconds to seconds.
+                    new = utils.safe_div(
+                        1, utils.safe_div(interarr_time_us, 1e6))
+                elif "RTT estimate us" in metric:
+                    new = rtt_estimate_us
+                elif "RTT estimate ratio" in metric:
+                    new = rtt_estimate_ratio
+                elif "RTT true us" in metric:
+                    new = rtt_true_us
+                elif "RTT true ratio" in metric:
+                    new = rtt_true_ratio
+                elif "loss rate estimate" in metric:
+                    # See comment in case for "loss rate true".
+                    new = pkt_loss_cur_estimate / (
+                        pkt_loss_cur_estimate + 1)
+                elif "loss rate true" in metric:
+                    # Divide the pkt_loss_cur_true by
+                    # (pkt_loss_cur_true + 1) because over the course
+                    # of sending (pkt_loss_cur_true + 1) packets, one
+                    # got through and pkt_loss_cur_true were lost.
+                    new = pkt_loss_cur_true / (pkt_loss_cur_true + 1)
+                elif "queue occupancy" in metric:
+                    # Queue occupancy is calculated using the router
+                    # logs, below.
+                    continue
+                elif "mathis model throughput p/s" in metric:
+                    # Use the estimated loss rate to compute the
+                    # Mathis model fair throughput. Contrary to the
+                    # decision for interarrival time, above, here we
+                    # use the value of another EWMA (loss rate
+                    # estimate) to compute the new value for the
+                    # Mathis model throughput EWMA. I believe that
+                    # this is desirable because we want to see how the
+                    # metric as a whole reacts to a certain degree of
+                    # memory.
+                    loss_rate_estimate = output[
+                        j][make_ewma_metric("loss rate estimate", alpha)]
+                    # Use "safe" operations in case any of the
+                    # supporting values are -1 (unknown).
+                    new = (
+                        -1 if loss_rate_estimate <= 0 else
+                        utils.safe_div(
+                            MATHIS_C,
                             utils.safe_div(
-                                MATHIS_C,
-                                utils.safe_div(
-                                    utils.safe_mul(
-                                        min_rtt_us,
-                                        utils.safe_sqrt(loss_rate_estimate)),
-                                    1e6)))
-                    elif "mathis model label" in metric:
-                        # Use the current throughput and the Mathis
-                        # model fair throughput to compute the Mathis
-                        # model label.
-                        output[j][metric] = utils.safe_mathis_label(
-                            output[j][make_ewma_metric(
-                                "throughput p/s", alpha)],
-                            output[j][make_ewma_metric(
-                                "mathis model throughput p/s", alpha)])
-                        # Continue because the value of this metric is
-                        # not an EWMA.
-                        continue
-                    else:
-                        raise Exception(f"Unknown EWMA metric: {metric}")
-                    # Update the EWMA.
-                    new_ewma = utils.safe_update_ewma(
-                        output[j - 1][metric], new, alpha)
+                                utils.safe_mul(
+                                    min_rtt_us,
+                                    utils.safe_sqrt(loss_rate_estimate)),
+                                1e6)))
+                elif "mathis model label" in metric:
+                    # Use the current throughput and the Mathis model
+                    # fair throughput to compute the Mathis model
+                    # label.
+                    output[j][metric] = utils.safe_mathis_label(
+                        output[j][make_ewma_metric(
+                            "throughput p/s", alpha)],
+                        output[j][make_ewma_metric(
+                            "mathis model throughput p/s", alpha)])
+                    # Continue because the value of this metric is not
+                    # an EWMA.
+                    continue
                 else:
-                    new_ewma = 0
-                output[j][metric] = new_ewma
+                    raise Exception(f"Unknown EWMA metric: {metric}")
+                # Update the EWMA.
+                output[j][metric] = utils.safe_update_ewma(
+                    -1 if j == 0 else output[j - 1][metric], new, alpha)
+
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
@@ -395,7 +392,7 @@ def parse_pcap(sim_dir, out_dir):
                 win_start_idx = win_state[win]["window_start_idx"]
 
                 if "average interarrival time us" in metric:
-                    new = ((recv_time_cur - recv_pkts[j - win_start_idx][2]) /
+                    new = ((recv_time_cur - recv_pkts[win_start_idx][2]) /
                            (j - win_start_idx + 1))
                 elif "average throughput p/s" in metric:
                     # We base the throughput calculation on the
@@ -614,70 +611,61 @@ def parse_pcap(sim_dir, out_dir):
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
-                if j > 0:
-                    if "interarrival time us" in metric:
-                        # The interarrival time is calculated using
-                        # the sender and/or receiver logs, above.
-                        continue
-                    if "throughput p/s" in metric:
-                        # The throughput is calculated using the
-                        # sender and/or receiver logs, above.
-                        continue
-                    if "RTT estimate us" in metric:
-                        # The RTT is calculated using the sender
-                        # and/or receiver logs, above.
-                        continue
-                    if "RTT estimate ratio" in metric:
-                        # The RTT ratio is calculated using the sender
-                        # and/or receiver logs, above.
-                        continue
-                    if "RTT true us" in metric:
-                        # The RTT is calculated using the sender
-                        # and/or receiver logs, above.
-                        continue
-                    if "RTT true ratio" in metric:
-                        # The RTT ratio is calculated using the sender
-                        # and/or receiver logs, above.
-                        continue
-                    if "loss rate estimate" in metric:
-                        # The estiamted loss rate is calculated using
-                        # the sender and/or receiver logs, above.
-                        continue
-                    if "loss rate true" in metric:
-                        # The true loss rate is calculated using the sender
-                        # and/or receiver logs, above.
-                        continue
-                    if "queue occupancy" in metric:
-                        # Extra safety check to avoid divide-by-zero
-                        # errors.
-                        assert j > 0, \
-                            ("Cannot calculate queue occupancy EWMA for the "
-                             "first packet.")
-                        # The instanteneous queue occupancy is 1
-                        # divided by the number of packets that have
-                        # entered the queue since the last packet from
-                        # the same flow. This is the fraction of
-                        # packets added to the queue corresponding to
-                        # this flow, over the time since when the
-                        # flow's last packet arrived.
-                        new = 1 / flw_state[sender]["packets_since_last"]
-                    elif "mathis model throughput p/s" in metric:
-                        # The Mathis model fair throughput is
-                        # calculated using the sender and/or receiver
-                        # logs, above.
-                        continue
-                    elif "mathis model label" in metric:
-                        # The Mathis model label is calculated using
-                        # the sender and/or receiver logs, above.
-                        continue
-                    else:
-                        raise Exception(f"Unknown EWMA metric: {metric}")
-                    new_ewma = utils.safe_update_ewma(
-                        unfair_flws[sender][output_idx - 1][metric],
-                        new, alpha)
+                if "interarrival time us" in metric:
+                    # The interarrival time is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
+                if "throughput p/s" in metric:
+                    # The throughput is calculated using the sender
+                    # and/or receiver logs, above.
+                    continue
+                if "RTT estimate us" in metric:
+                    # The RTT is calculated using the sender and/or
+                    # receiver logs, above.
+                    continue
+                if "RTT estimate ratio" in metric:
+                    # The RTT ratio is calculated using the sender
+                    # and/or receiver logs, above.
+                    continue
+                if "RTT true us" in metric:
+                    # The RTT is calculated using the sender and/or
+                    # receiver logs, above.
+                    continue
+                if "RTT true ratio" in metric:
+                    # The RTT ratio is calculated using the sender
+                    # and/or receiver logs, above.
+                    continue
+                if "loss rate estimate" in metric:
+                    # The estiamted loss rate is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
+                if "loss rate true" in metric:
+                    # The true loss rate is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
+                if "queue occupancy" in metric:
+                    # The instanteneous queue occupancy is 1 divided
+                    # by the number of packets that have entered the
+                    # queue since the last packet from the same
+                    # flow. This is the fraction of packets added to
+                    # the queue corresponding to this flow, over the
+                    # time since when the flow's last packet arrived.
+                    new = utils.safe_div(
+                        1, flw_state[sender]["packets_since_last"])
+                elif "mathis model throughput p/s" in metric:
+                    # The Mathis model fair throughput is calculated
+                    # using the sender and/or receiver logs, above.
+                    continue
+                elif "mathis model label" in metric:
+                    # The Mathis model label is calculated using the
+                    # sender and/or receiver logs, above.
+                    continue
                 else:
-                    new_ewma = 0
-                unfair_flws[sender][output_idx][metric] = new_ewma
+                    raise Exception(f"Unknown EWMA metric: {metric}")
+                unfair_flws[sender][output_idx][metric] = (
+                    utils.safe_update_ewma(
+                        unfair_flws[sender][output_idx - 1][metric],
+                        new, alpha))
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):

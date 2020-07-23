@@ -396,7 +396,7 @@ def safe_sqrt(val):
     Safely calculates the square root of a value. If the value is less
     than or equal to 0, then the result is -1 (unknown).
     """
-    return -1 if val <= 0 else math.sqrt(val)
+    return -1 if val < 0 else math.sqrt(val)
 
 
 def safe_mean(dat, start_idx, end_idx):
@@ -408,9 +408,6 @@ def safe_mean(dat, start_idx, end_idx):
     """
     # Extract the window.
     dat_win = dat[start_idx:end_idx + 1]
-    # Convert from a structured to an unstructured
-    # array to enable filtering.
-    dat_win = clean(dat_win)
     # Eliminate values that are -1 (unknown).
     dat_win = dat_win[dat_win != -1]
     # If the window is empty, then the mean is -1 (unknown).
