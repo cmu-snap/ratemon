@@ -840,8 +840,10 @@ def main():
     pcaps = [(path.join(exp_dir, sim), out_dir)
              for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
+        # Set the random seed so that multiple parallel instances of
+        # this script see the same random order.
+        random.seed(0)
         random.shuffle(pcaps)
-    pcaps = pcaps[:1]
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
