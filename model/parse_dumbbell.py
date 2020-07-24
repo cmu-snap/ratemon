@@ -420,7 +420,7 @@ def parse_pcap(sim_dir, out_dir):
                     new = utils.safe_mean(
                         output[make_ewma_metric("RTT true ratio", alpha=1.)],
                         win_start_idx, j)
-                elif "loss event rate" in metric:
+                elif "loss event rate" in metric and "1/sqrt" not in metric:
                     rtt_estimate_us = output[
                         j][make_win_metric("average RTT estimate us", win)]
                     if rtt_estimate_us == -1:
