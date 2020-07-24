@@ -19,8 +19,7 @@ import utils
 def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(
-        description="Hyper-parameter optimizer for train.py.")
+    psr = argparse.ArgumentParser(description="Evaluate a single simulation.")
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
