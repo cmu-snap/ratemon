@@ -625,7 +625,6 @@ class SvmSklearnWrapper(SvmWrapper):
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
-            # Plot each bucket's accuracy.
             pyplot.plot(
                 (list(range(len(buckets)))),
                 [throughput for throughput, _ in buckets], "b-")
@@ -638,7 +637,7 @@ class SvmSklearnWrapper(SvmWrapper):
             if x_lim is not None:
                 pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
             pyplot.xlabel("Time")
-            pyplot.ylabel("Throughput vs Fair throughput")
+            pyplot.ylabel("Queue occupancy vs Fair queue occupancy")
             pyplot.tight_layout()
             pyplot.savefig(flp)
             pyplot.close()
