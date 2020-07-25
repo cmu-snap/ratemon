@@ -449,6 +449,7 @@ def parse_pcap(sim_dir, out_dir):
                             # This is not the first loss event. See if
                             # any of the newly-lost packets start a
                             # new loss event.
+                            #
                             # The average time between when packets
                             # should have arrived, since we received
                             # the last packet.
@@ -464,7 +465,7 @@ def parse_pcap(sim_dir, out_dir):
                                     recv_time_prev + (k + 1) * loss_interval)
 
                                 # If the time of this loss is more
-                                # than an RTT from the time of the
+                                # than one RTT from the time of the
                                 # start of the current loss event,
                                 # then this is a new loss event.
                                 if (loss_time - cur_start_time >=
