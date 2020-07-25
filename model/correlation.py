@@ -17,8 +17,9 @@ import train
 def run_cnfs(cnfs):
     """ Trains a model for each provided configuration. """
     with multiprocessing.Pool() as pol:
+        # Note that accuracy = 1 - loss.
         return dict(zip(
-            (",".join(cnf["features"]) for cnf in cnfs),
+            (cnf["features"] for cnf in cnfs),
             1 - np.array(pol.starmap(train.run_many, cnfs))))
 
 
@@ -83,31 +84,39 @@ def main():
     all_fets = sorted(models.MODELS[args.model].in_spc)
     accs_single = run_cnfs(
         [{"features": fet, **vars(args)} for fet in all_fets])
+    # To remove duplicates first create a set of all feature pairs,
+    # where each pair is sorted.
     accs_pairs = run_cnfs([
-        {"features": fets, **vars(args)}
-        for fets in itertools.product(all_fets, all_fets)])
+        {"features": fets, **vars(args)} for fets in
+        {tuple(sorted(fets))
+         for fets in itertools.product(all_fets, all_fets)}])
 
-    # Compute the correlation.
+    # Calculate the accuracy ratios.
     lbls_x = list(reversed(all_fets))
     lbls_y = all_fets
+    # For a pair of features (fet1, fet2), only the pair sorted((fet1, fet2))
+    # will be present in accs_pairs. For the missing "backwards" pair, record a
+    # 0. These 0s will be masked out, below.
     accs_ratios = np.array(
-        [[accs_pairs[f"{fet1},{fet2}"] / accs_single[fet1]
+        [[accs_pairs[(fet1, fet2)] / accs_single[fet1]
+          if (fet1, fet2) in accs_pairs else 0
           for fet2 in lbls_x]
          for fet1 in lbls_y])
 
     # Graph results.
     mask = np.zeros_like(accs_ratios)
+    # Mask out feature pairs that were duplicates.
     mask[np.triu_indices_from(mask, k=1)] = True
-    out_flp = path.join(args.out_dir, "out.pdf")
+    f, ax = plt.subplots(figsize=(25, 20))
     with sns.axes_style("white"):
-        f, ax = plt.subplots(figsize=(25, 20))
         ax = sns.heatmap(
             accs_ratios, mask=mask, linewidth=0.5, center=1, xticklabels=lbls_x,
             yticklabels=lbls_y, square=True, annot=True, fmt=".2f",
             annot_kws={"fontsize":5})
-        plt.tight_layout()
-        plt.savefig(out_flp)
-        print(f"Saved: {out_flp}")
+    plt.tight_layout()
+    out_flp = path.join(args.out_dir, "out.pdf")
+    plt.savefig(out_flp)
+    print(f"Saved: {out_flp}")
 
 
 if __name__ == "__main__":
