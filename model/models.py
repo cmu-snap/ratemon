@@ -732,7 +732,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
             # Plot throughput
             self.__plotThroughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
-                             out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
+                out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
         else:
             out_dir = "."
             sort_by_unfairness = False
