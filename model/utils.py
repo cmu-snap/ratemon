@@ -251,21 +251,25 @@ def parse_packets(flp, packet_size_B, direction="data"):
     dir_opts = ["ack", "data"]
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
-    return [
-        # Sequence number.
-        (scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].seq,
-         # Sender.
-         int(scapy.layers.ppp.PPP(pkt_dat)[
-             scapy.layers.inet.IP].src.split(".")[2]),
-         # Timestamp. Not using parse_time_us for efficiency purpose.
-         pkt_mdat.sec * 1e6 + pkt_mdat.usec,
-         # Timestamp option.
-         scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].options[0][1])
-        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Select either data or ACK packets.
-        if ((direction == "data" and pkt_mdat.wirelen >= packet_size_B) or
-            direction == "ack")
-    ]
+
+    pkts = []
+    for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp):
+        ppp = scapy.layers.ppp.PPP(pkt_dat)
+        src = [int(part) for part in ppp[scapy.layers.inet.IP].src.split(".")]
+        if ((direction == "data" and src[0] == 10 and
+             pkt_mdat.wirelen >= packet_size_B) or
+                (direction == "ack" and src[0] == 20)):
+            tcp = ppp[scapy.layers.inet.TCP]
+            pkts.append((
+                # Sequence number.
+                tcp.seq,
+                # Sender.
+                src[2],
+                # Timestamp. Not using parse_time_us for efficiency purpose.
+                pkt_mdat.sec * 1e6 + pkt_mdat.usec,
+                # Timestamp option.
+                tcp.options[0][1]))
+    return pkts
 
 
 def scale(val, min_in, max_in, min_out, max_out):
