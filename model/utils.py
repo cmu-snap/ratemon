@@ -14,7 +14,7 @@ import torch
 
 # Arguments to ignore when converting an arguments dictionary to a
 # string.
-ARGS_TO_IGNORE = ["data_dir", "out_dir"]
+ARGS_TO_IGNORE = ["data_dir", "out_dir", "features"]
 
 
 class Dataset(torch.utils.data.Dataset):

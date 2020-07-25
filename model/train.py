@@ -29,6 +29,7 @@ DEFAULTS = {
     "warmup": 0,
     "num_sims": sys.maxsize,
     "model": models.MODEL_NAMES[0],
+    "features": [],
     "epochs": 100,
     "num_gpus": 0,
     "train_batch": sys.maxsize,
@@ -692,6 +693,11 @@ def run_many(args_):
             # model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
             else ".pth"))
+    # If custom features are specified, then overwrite the model's
+    # default features.
+    fets = args["features"]
+    if fets:
+        net_tmp.in_spc = fets
     # If a trained model file already exists, then delete it.
     if path.exists(out_flp):
         os.remove(out_flp)
