@@ -444,12 +444,14 @@ def parse_pcap(sim_dir, out_dir):
 
                         if cur_start_idx == 0:
                             # This is the first loss event.
-                            # Naive fix for the loss event rate calculation
-                            # The described method in RFC is complicated 
-                            # for the first event handling
+                            #
+                            # Naive fix for the loss event rate
+                            # calculation The described method in the
+                            # RFC is complicated for the first event
+                            # handling.
                             cur_start_idx = 1
                             cur_start_time = 0
-                            new = 1 / (1.0 * j)
+                            new = 1 / j
                         else:
                             # This is not the first loss event. See if
                             # any of the newly-lost packets start a
