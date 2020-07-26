@@ -65,9 +65,7 @@ WINDOWED = [
     ("mathis model label", "int32")
 ]
 # The alpha values at which to evaluate the EWMA metrics.
-ALPHAS = ([i / 1000 for i in range(1, 10)] +
-          [i / 100 for i in range(1, 10)] +
-          [i / 10 for i in range(1, 11)])
+ALPHAS = [i / 1000 for i in range(1, 11)] + [i / 10 for i in range(1, 11)]
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
 WINDOWS = [2**i for i in range(11)]
