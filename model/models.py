@@ -111,23 +111,27 @@ class BinaryModelWrapper(PytorchModelWrapper):
 
     num_clss = 2
 
-    def __init__(self, win=100, rtt_buckets=True):
+    def __init__(self, win=100, rtt_buckets=False, windows=False):
         super(BinaryModelWrapper, self).__init__()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
-        if self.rtt_buckets:
-            assert "arrival time" in self.in_spc, \
-                "When bucketizing packets, \"arrival time\" must be a feature."
+        self.windows = windows
+        if self.rtt_buckets or self.windows:
+            assert "arrival time us" in self.in_spc, \
+                ("When bucketizing packets, \"arrival time us\" must be a "
+                 "feature.")
         # Determine layer dimensions. If we are bucketizing packets
         # based on arrival time, then there will be one input feature
         # for every bucket (self.win) plus one input feature for every
-        # entry in self.in_spc *except* for "arrival time". If we are
+        # entry in self.in_spc *except* for "arrival time us". If we are
         # not bucketizing packets, then there will be one input
         # feature for each entry in self.in_spc for each packet
         # (self.win).
-        self.num_ins = (self.win + len(self.in_spc) - 1 if self.rtt_buckets
-                        else len(self.in_spc) * self.win)
+        self.num_ins = (
+            self.win + len(self.in_spc) - 1 if self.rtt_buckets else (
+                len(self.in_spc) * self.win if self.windows else
+                len(self.in_spc)))
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -152,7 +156,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
     def __bucketize(dat_in, dat_in_start_idx, dat_in_end_idx, dat_in_new,
                     dat_in_new_idx, dur_us, num_buckets):
         """
-        Uses dat_in["arrival time"] to divide the arriving packets from
+        Uses dat_in["arrival time us"] to divide the arriving packets from
         the range [dat_in_start_idx, dat_in_end_idx] into num_buckets
         intervals. Each interval has duration dur_us / num_buckets.
         Stores the resulting histogram in dat_in_new, at the row
@@ -161,15 +165,16 @@ class BinaryModelWrapper(PytorchModelWrapper):
         nothing.
         """
         fets = dat_in.dtype.names
-        assert "arrival time" in fets, f"Missing \"arrival time\": {fets}"
-        arr_times = dat_in["arrival time"][dat_in_start_idx:dat_in_end_idx + 1]
+        assert "arrival time us" in fets, f"Missing \"arrival time us\": {fets}"
+        arr_times = dat_in[
+            "arrival time us"][dat_in_start_idx:dat_in_end_idx + 1]
         num_pkts = arr_times.shape[0]
         assert num_pkts > 0, "Need more than 0 packets!"
 
         # We are turning the arrival times into buckets, but there are
         # other features that must be preserved.
         other_fets = [col for col in dat_in.dtype.descr
-                      if col[0] != "arrival time" and col[0] != ""]
+                      if col[0] != "arrival time us" and col[0] != ""]
         # The duration of each interval.
         interval_us = dur_us / num_buckets
         # The arrival time of the first packet, and therefore the
@@ -206,9 +211,10 @@ class BinaryModelWrapper(PytorchModelWrapper):
         interval. The output value for each window is the output of
         the last packet in the window.
         """
+        print("Creating arrival time buckets...")
         fets = dat_in.dtype.names
-        assert "arrival time" in fets, f"Missing \"arrival time\": {fets}"
-        arr_times = dat_in["arrival time"]
+        assert "arrival time us" in fets, f"Missing \"arrival time us\": {fets}"
+        arr_times = dat_in["arrival time us"]
 
         # 100x the min RTT (as determined by the simulation parameters).
         dur_us = 100 * 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
@@ -249,7 +255,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
             (num_wins,),
             dtype=([(f"bucket_{bkt}", "float") for bkt in range(self.win)] +
                    [col for col in dat_in.dtype.descr
-                    if col[0] != "arrival time" and col[0] != ""]))
+                    if col[0] != "arrival time us" and col[0] != ""]))
 
         for win_idx, pkt_idx in enumerate(pkt_idxs):
             # Find the first packet in this window (whose index will
@@ -298,6 +304,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         features of the packets in a window. The output value for each
         window is the output of the last packet in the window.
         """
+        print("Creating windows...")
         num_pkts = dat_in.shape[0]
         num_wins = math.ceil(num_pkts / self.win)
         fets = [(name, typ) for name, typ in dat_in.dtype.descr if name != ""]
@@ -345,8 +352,10 @@ class BinaryModelWrapper(PytorchModelWrapper):
         dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
             self.__create_buckets(
                 sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential)
-            if self.rtt_buckets
-            else self.__create_windows(dat_in, dat_out, sequential))
+            if self.rtt_buckets else (
+                self.__create_windows(dat_in, dat_out, sequential)
+                if self.windows else (
+                    dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps)))
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 
@@ -617,7 +626,7 @@ class SvmSklearnWrapper(SvmWrapper):
         assert num_per_bucket > 0, \
             ("There must be at least one sample per bucket, but there are "
              f"{num_samples} samples and only {num_buckets} buckets!")
-        buckets = [ 
+        buckets = [
             (mean(throughput_),
              mean(labels_))
             for throughput_, labels_ in [
