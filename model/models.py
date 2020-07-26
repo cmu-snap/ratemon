@@ -6,13 +6,13 @@ import math
 import os
 from os import path
 import random
+from statistics import mean
 
 from matplotlib import pyplot
 import numpy as np
 from sklearn import linear_model
 from sklearn import svm
 import torch
-from statistics import mean
 
 
 class PytorchModelWrapper:
