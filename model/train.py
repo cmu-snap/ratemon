@@ -281,6 +281,14 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
     dat_out_all_raw = np.concatenate(dat_out_all_raw, axis=0)
     dat_out_all_oracle = np.concatenate(dat_out_all_oracle, axis=0)
 
+    # Convert all instances of -1 (feature value unknown) to the mean
+    # for that feature.
+    for fet in dat_in_all.dtype.names:
+        fet_values = dat_in_all[fet]
+        dat_in_all[fet] = np.where(
+            fet_values == -1, np.mean(fet_values), fet_values)
+        assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
+
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
