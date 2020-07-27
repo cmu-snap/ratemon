@@ -943,7 +943,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         # greater than the number of features, solve the primal
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
-        # training data.Change the maximum number of iterations.
+        # training data. Change the maximum number of iterations.
         self.net = linear_model.LogisticRegression(
             penalty="l1", dual=False, class_weight="balanced",
             solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
