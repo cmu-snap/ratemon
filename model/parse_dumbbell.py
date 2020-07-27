@@ -301,7 +301,8 @@ def parse_pcap(sim_dir, out_dir):
                 metric = make_ewma_metric(metric, alpha)
                 if "interarrival time us" in metric:
                     new = interarr_time_us
-                elif "throughput p/s" in metric:
+                elif ("throughput p/s" in metric and
+                      "mathis model" not in metric):
                     # Do not use the existing interarrival EWMA to
                     # calculate the throughput. Instead, use the true
                     # interarrival time so that the value used to
