@@ -310,26 +310,26 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
             prms_in)
 
 
-def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+def split_data(fets, net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
                bch_trn, bch_tst, use_val=False):
     """
     Divides the input and output data into training, validation, and
     testing sets and constructs data loaders.
     """
     print("Creating train/val/test data...")
-    assert len(dat_out.shape) == 1
-    assert len(dat_out_raw.shape) == 1
-    assert len(dat_out_oracle.shape) == 1
-    assert len(num_flws.shape) == 1
+    #assert len(dat_out.shape) == 1
+    #assert len(dat_out_raw.shape) == 1
+    #assert len(dat_out_oracle.shape) == 1
+    #assert len(num_flws.shape) == 1
 
-    fets = dat_in.dtype.names
+    #fets = dat_in.dtype.names
     # Destroy columns names to make merging the matrices easier. I.e.,
     # convert from structured to regular numpy arrays.
-    dat_in = utils.clean(dat_in)
-    dat_out = utils.clean(dat_out)
-    dat_out_raw = utils.clean(dat_out_raw)
-    dat_out_oracle = utils.clean(dat_out_oracle)
-    num_flws = utils.clean(num_flws)
+    # dat_in = utils.clean(dat_in)
+    # dat_out = utils.clean(dat_out)
+    # dat_out_raw = utils.clean(dat_out_raw)
+    # dat_out_oracle = utils.clean(dat_out_oracle)
+    # num_flws = utils.clean(num_flws)
     # Shuffle the data to ensure that the training, validation, and
     # test sets are uniformly sampled. To shuffle all of the arrays
     # together, we must first merge them into a combined matrix.
@@ -580,7 +580,7 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     net = models.MODELS[args["model"]]()
     net.new(**{param: args[param] for param in net.params})
     # Split the data into training, validation, and test loaders.
-    ldr_trn, _, ldr_tst = split_data(
+    ldr_trn, _, ldr_tst = split_data(args["features"],
         net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
         args["train_batch"], args["test_batch"])
     # Training.
@@ -707,6 +707,9 @@ def run_many(args_):
     fets = args["features"]
     if fets:
         net_tmp.in_spc = fets
+    else:
+        assert "arrival time us" not in args["features"]
+        args["features"] = net_tmp.in_spc
     # If a trained model file already exists, then delete it.
     if path.exists(out_flp):
         os.remove(out_flp)
@@ -739,6 +742,16 @@ def run_many(args_):
                 SHUFFLE, args["standardize"]))
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
+        # dat_in = np.ascontiguousarray(dat_in)
+        # dat_out = np.ascontiguousarray(dat_out)
+        # dat_out_raw = np.ascontiguousarray(dat_out_raw)
+        # dat_out_oracle = np.ascontiguousarray(dat_out_oracle)
+        # num_flws = np.ascontiguousarray(num_flws)
+        dat_in = utils.clean(dat_in)
+        dat_out = utils.clean(dat_out)
+        dat_out_raw = utils.clean(dat_out_raw)
+        dat_out_oracle = utils.clean(dat_out_oracle)
+        num_flws = utils.clean(num_flws)
         np.savez_compressed(
             dat_flp,
             **{"in": dat_in, "out": dat_out, "out_raw": dat_out_raw,
@@ -748,9 +761,9 @@ def run_many(args_):
         with open(scl_prms_flp, "w") as fil:
             json.dump(scl_prms.tolist(), fil)
 
-    # Visualaize the ground truth data.
-    utils.visualize_classes(
-        net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
+    # # Visualaize the ground truth data.
+    # utils.visualize_classes(
+    #     net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
