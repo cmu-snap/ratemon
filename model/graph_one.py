@@ -47,17 +47,13 @@ def main():
             pyplot.ylabel(fet)
 
             # Adjust plot limits.
-            pyplot.ylim(bottom=-0.1)
+            pyplot.ylim(bottom=0)
             if "queue" in fet:
                 pyplot.ylim(top=1.1)
                 pyplot.hlines(
                     queue_fair_occupancy, 0, dat["arrival time us"][-1],
                     colors='k', linestyles='dashdot')
-            if "mathis model label" in fet:
-                pyplot.ylim((-1.1, 1.1))
-            else:
-                pyplot.ylim(bottom=0)
-            if "loss rate" in fet:
+            if ("mathis model label" in fet or "loss" in fet) and "sqrt" not in fet:
                 pyplot.ylim(top=1.1)
 
             pyplot.tight_layout()
