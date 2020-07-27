@@ -355,7 +355,9 @@ class BinaryModelWrapper(PytorchModelWrapper):
             if self.rtt_buckets else (
                 self.__create_windows(dat_in, dat_out, sequential)
                 if self.windows else (
-                    dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps)))
+                    dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    # Each feature is part of its own scaling group.
+                    list(range(len(dat_in.dtype.names))))))
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 

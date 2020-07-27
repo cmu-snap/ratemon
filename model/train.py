@@ -194,7 +194,8 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
             sim, dat_in, dat_out, dat_out_raw,
             # Must put the column name in a list for the result to be
             # a structured array.
-            dat_out_oracle=dat[["mathis model label"]], sequential=sequential),
+            dat_out_oracle=dat[["mathis model label-ewma-alpha0.5"]],
+            sequential=sequential),
         sim)
 
 
@@ -237,8 +238,8 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
     dtype_out = None
     scl_grps = None
     for dat_in, dat_out, _, _, scl_grps_cur in dat_all:
-        dim_in_cur = len(dat_in.dtype.descr)
-        dim_out_cur = len(dat_out.dtype.descr)
+        dim_in_cur = len(dat_in.dtype.names)
+        dim_out_cur = len(dat_out.dtype.names)
         dtype_in_cur = dat_in.dtype
         dtype_out_cur = dat_out.dtype
         if dim_in is None:
