@@ -2,7 +2,6 @@
 """ Evaluates feature correlation. """
 
 import argparse
-import itertools
 import multiprocessing
 from os import path
 
@@ -88,8 +87,10 @@ def main():
     # where each pair is sorted.
     accs_pairs = run_cnfs([
         {"features": fets, **vars(args)} for fets in
-        {tuple(sorted(fets))
-         for fets in itertools.product(all_fets, all_fets)}])
+        {(fet1, fet2)
+         for i, fet1 in enumerate(all_fets)
+         for j, fet2 in enumerate(all_fets)
+         if i > j}])
 
     # Calculate the accuracy ratios.
     lbls_x = list(reversed(all_fets))
@@ -98,8 +99,9 @@ def main():
     # will be present in accs_pairs. For the missing "backwards" pair, record a
     # 0. These 0s will be masked out, below.
     accs_ratios = np.array(
-        [[accs_pairs[(fet1, fet2)] / accs_single[fet1]
-          if (fet1, fet2) in accs_pairs else 0
+        [[(accs_pairs[(fet1, fet2)] if (fet1, fet2) in accs_pairs else (
+            accs_pairs[(fet2, fet1)] if (fet2, fet1) in accs_pairs else 0)) /
+          accs_single[fet1]
           for fet2 in lbls_x]
          for fet1 in lbls_y])
 
