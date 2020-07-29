@@ -31,9 +31,9 @@ REGULAR = [
 EWMAS = [
     ("interarrival time us", "float64"),
     ("throughput p/s", "float64"),
-    ("RTT estimate us", "int32"),
+    ("RTT estimate us", "float64"),
     ("RTT estimate ratio", "float64"),
-    ("RTT true us", "int32"),
+    ("RTT true us", "float64"),
     ("RTT true ratio", "float64"),
     ("loss rate estimate", "float64"),
     ("loss rate true", "float64"),
