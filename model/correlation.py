@@ -13,6 +13,7 @@ import seaborn as sns
 
 import models
 import train
+import utils
 
 # Whether to parse simulation files synchronously or in parallel.
 SYNC = False
@@ -365,6 +366,9 @@ def main():
         dat_dir = args.data_dir
         sims = [path.join(dat_dir, sim) for sim in os.listdir(dat_dir)]
         if train.SHUFFLE:
+            # Set the random seed so that multiple instances of this
+            # script see the same random order.
+            random.seed(utils.SEED)
             random.shuffle(sims)
         num_sims = args.num_sims
         if num_sims is not None:
