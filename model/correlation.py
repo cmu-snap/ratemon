@@ -2,7 +2,6 @@
 """ Evaluates feature correlation. """
 
 import argparse
-import copy
 import multiprocessing
 import os
 from os import path
@@ -15,7 +14,9 @@ import seaborn as sns
 import models
 import train
 
-
+# Whether to parse simulation files synchronously or in parallel.
+SYNC = False
+# Features to analyze.
 ALL_FETS = sorted([
     # "1/sqrt loss event rate-windowed-minRtt1",
     # "1/sqrt loss event rate-windowed-minRtt1024",
@@ -264,25 +265,24 @@ ALL_FETS = sorted([
 
 def run_cnfs(fets, args, sims):
     """ Trains a model for each provided configuration. """
-    # Record the base output directory, then remove the "out_dir" arg
-    # to that we can specify one manually, below.
-    out_dir = args.out_dir
-    args = vars(copy.copy(args))
-    del args["out_dir"]
+    # Assemble configurations.
     cnfs = [
-        {"features": fets_, "sims": sims, "skip_load": True, "sync": True,
+        {**vars(args), "features": fets_, "sims": sims, "sync": True,
          "out_dir": path.join(
-             out_dir,
+             args.out_dir,
              ",".join(
                  [str(fet).replace(" ", "_").replace("/", "p")
-                  for fet in fets_])),
-         **args}
+                  for fet in fets_]))}
         for fets_ in fets]
-    with multiprocessing.Pool(processes=10) as pol:
-        # Note that accuracy = 1 - loss.
-        return dict(zip(
-            [tuple(cnf["features"]) for cnf in cnfs],
-            1 - np.array(pol.map(train.run_many, cnfs))))
+    # Train configurations.
+    if SYNC:
+        res = [train.run_many(cnf) for cnf in cnfs]
+    else:
+        with multiprocessing.Pool(processes=2) as pol:
+            res = pol.map(train.run_many, cnfs)
+    # Note that accuracy = 1 - loss.
+    return dict(zip(
+        [tuple(cnf["features"]) for cnf in cnfs], 1 - np.array(res)))
 
 
 def main():
