@@ -28,6 +28,7 @@ DEFAULTS = {
     "data_dir": ".",
     "warmup": 0,
     "num_sims": sys.maxsize,
+    "sims": [],
     "model": models.MODEL_NAMES[0],
     "features": [],
     "epochs": 100,
@@ -49,7 +50,9 @@ DEFAULTS = {
     "max_attempts": 10,
     "no_rand": False,
     "timeout_s": 0,
-    "out_dir": "."
+    "out_dir": ".",
+    "regen_data": False,
+    "sync": False
 }
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
@@ -199,7 +202,7 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
         sim)
 
 
-def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
+def make_datasets(net, args):
     """
     Parses the simulation files in data_dir and transforms them (e.g., by
     scaling) into the correct format for the network.
@@ -208,17 +211,25 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
     simulations only. If shuffle is True, then the simulations will be parsed in
     sorted order. Use num_sims and shuffle=True together to simplify debugging.
     """
-    sims = sorted(os.listdir(dat_dir))
-    if shuffle:
+    sims = args["sims"]
+    if not sims:
+        dat_dir = args["data_dir"]
+        sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+    if SHUFFLE:
         random.shuffle(sims)
+    num_sims = args["num_sims"]
     if num_sims is not None:
+        num_sims_actual = len(sims)
+        assert num_sims_actual >= num_sims, \
+            (f"Insufficient simulations. Requested {num_sims}, but only "
+             f"{num_sims_actual} availabled.")
         sims = sims[:num_sims]
 
     tot_sims = len(sims)
     print(f"Found {tot_sims} simulations.")
-    sims_args = [(idx, tot_sims, net, path.join(dat_dir, sim), warmup)
+    sims_args = [(idx, tot_sims, net, sim, args["warmup"])
                  for idx, sim in enumerate(sims)]
-    if SYNC:
+    if SYNC or args["sync"]:
         dat_all = [process_sim(*sim_args) for sim_args in sims_args]
     else:
         with multiprocessing.Pool() as pol:
@@ -283,16 +294,21 @@ def make_datasets(net, dat_dir, warmup, num_sims, shuffle, standardize):
 
     # Convert all instances of -1 (feature value unknown) to the mean
     # for that feature.
+    bad_fets = []
     for fet in dat_in_all.dtype.names:
         fet_values = dat_in_all[fet]
+        if (fet_values == -1).all():
+            bad_fets.append(fet)
+            continue
         dat_in_all[fet] = np.where(
             fet_values == -1, np.mean(fet_values), fet_values)
         assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
+    assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
 
     # Scale input features. Do this here instead of in process_sim()
     # because all of the features must be scaled using the same
     # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, standardize)
+    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, args["standardize"])
 
     # # Check if any of the data is malformed and discard features if
     # # necessary.
@@ -531,7 +547,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
     if not ely_stp:
         # Save the final version of the model. Convert the model to Torch Script
         # first.
-        print(f"Saving: {out_flp}")
+        print(f"Saving final model: {out_flp}")
         torch.jit.save(torch.jit.script(net.net), out_flp)
     return net
 
@@ -580,16 +596,16 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     net = models.MODELS[args["model"]]()
     net.new(**{param: args[param] for param in net.params})
     # Split the data into training, validation, and test loaders.
-    ldr_trn, _, ldr_tst = split_data(args["features"],
-        net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-        args["train_batch"], args["test_batch"])
+    ldr_trn, _, ldr_tst = split_data(
+        args["features"], net, dat_in, dat_out, dat_out_raw, dat_out_oracle,
+        num_flws, args["train_batch"], args["test_batch"])
     # Training.
     print("Training...")
     tim_srt_s = time.time()
     net.train(*(ldr_trn.dataset.raw()[1:3]))
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
     # Save the model.
-    print(f"Saving: {out_flp}")
+    print(f"Saving final model: {out_flp}")
     with open(out_flp, "wb") as fil:
         pickle.dump(net.net, fil)
     # Testing.
@@ -720,7 +736,8 @@ def run_many(args_):
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the
     # proper scaling parameters.
-    if path.exists(dat_flp) and path.exists(scl_prms_flp):
+    if (not args["regen_data"] and path.exists(dat_flp) and
+            path.exists(scl_prms_flp)):
         print("Found existing data!")
         dat = np.load(dat_flp)
         assert "in" in dat.files and "out" in dat.files, \
@@ -737,21 +754,16 @@ def run_many(args_):
     else:
         print("Regenerating data...")
         dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, scl_prms = (
-            make_datasets(
-                net_tmp, args["data_dir"], args["warmup"], args["num_sims"],
-                SHUFFLE, args["standardize"]))
-        # Save the processed data so that we do not need to process it again.
-        print(f"Saving data: {dat_flp}")
-        # dat_in = np.ascontiguousarray(dat_in)
-        # dat_out = np.ascontiguousarray(dat_out)
-        # dat_out_raw = np.ascontiguousarray(dat_out_raw)
-        # dat_out_oracle = np.ascontiguousarray(dat_out_oracle)
-        # num_flws = np.ascontiguousarray(num_flws)
+            make_datasets(net_tmp, args))
+        # Clean the data before saving it to fix an error in
+        # savez_compressed().
         dat_in = utils.clean(dat_in)
         dat_out = utils.clean(dat_out)
         dat_out_raw = utils.clean(dat_out_raw)
         dat_out_oracle = utils.clean(dat_out_oracle)
         num_flws = utils.clean(num_flws)
+        # Save the processed data so that we do not need to process it again.
+        print(f"Saving data: {dat_flp}")
         np.savez_compressed(
             dat_flp,
             **{"in": dat_in, "out": dat_out, "out_raw": dat_out_raw,
@@ -761,9 +773,9 @@ def run_many(args_):
         with open(scl_prms_flp, "w") as fil:
             json.dump(scl_prms.tolist(), fil)
 
-    # # Visualaize the ground truth data.
-    # utils.visualize_classes(
-    #     net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
+    # Visualaize the ground truth data.
+    utils.visualize_classes(
+        net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]

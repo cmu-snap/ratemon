@@ -14,7 +14,7 @@ import torch
 
 # Arguments to ignore when converting an arguments dictionary to a
 # string.
-ARGS_TO_IGNORE = ["data_dir", "out_dir", "features"]
+ARGS_TO_IGNORE = ["data_dir", "out_dir", "sims", "features"]
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -343,7 +343,9 @@ def visualize_classes(net, dat, is_svm):
             else list(range(net.num_clss)))
     # Assumes that dat is a structured numpy array containing a
     # column named "class".
-    tots = [(dat["class"] == cls).sum() for cls in clss]
+    tots = [
+        ((dat if dat.dtype.names is None else dat["class"]) == cls).sum()
+        for cls in clss]
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("Classes:\n" + "\n".join(
