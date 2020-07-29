@@ -320,6 +320,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
             *[(scl_grp, (f"{name}_{idx}", typ))
               for idx in range(self.win)
               for scl_grp, (name, typ) in enumerate(fets)])
+        scl_grps = np.array(scl_grps)
         dat_in_new = np.zeros((num_wins,), dtype=list(dtype))
 
         for win_idx, end_idx in enumerate(pkt_idxs):

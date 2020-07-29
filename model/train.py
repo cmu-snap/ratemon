@@ -17,6 +17,7 @@ import sys
 import time
 
 import numpy as np
+from numpy.lib import recfunctions
 import torch
 
 import models
@@ -163,8 +164,8 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
     # columns correspond to the feature names in in_spc and out_spc.
     assert net.in_spc, "{sim_flp}: Empty in spec."
     assert net.out_spc, "{sim_flp}: Empty out spec."
-    dat_in = dat[net.in_spc]
-    dat_out = dat[net.out_spc]
+    dat_in = recfunctions.repack_fields(dat[net.in_spc])
+    dat_out = recfunctions.repack_fields(dat[net.out_spc])
     # Convert output features to class labels.
     dat_out_raw = dat_out
     dat_out = net.convert_to_class(sim, dat_out)
@@ -190,14 +191,21 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
         assert 0 <= cls < net.num_clss, f"Invalid class: {cls}"
 
     # Transform the data as required by this specific model.
-    return (
-        net.modify_data(
-            sim, dat_in, dat_out, dat_out_raw,
-            # Must put the column name in a list for the result to be
-            # a structured array.
-            dat_out_oracle=dat[["mathis model label-ewma-alpha0.5"]],
-            sequential=sequential),
-        sim)
+    dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = net.modify_data(
+        sim, dat_in, dat_out, dat_out_raw,
+        # Must put the column name in a list for the result to be
+        # a structured array.
+        dat_out_oracle=dat[["mathis model label-ewma-alpha0.5"]],
+        sequential=sequential)
+
+    # To avoid errors with sending large matrices between processes,
+    # store the results in a randomly-named file in /tmp.
+    dat_flp = path.join("/tmp", f"{random.randint(0, sys.maxsize)}.npz")
+    print(f"    Saving temporary data: {dat_flp}")
+    np.savez_compressed(
+        dat_flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
+        dat_out_oracle=dat_out_oracle, scl_grps=scl_grps)
+    return dat_flp, sim
 
 
 def make_datasets(net, args):
@@ -243,6 +251,15 @@ def make_datasets(net, args):
 
     dat_all, sims = zip(*dat_all)
 
+    # Each data item is actually a filepath to where the data can be found on disk.
+    def load_dat(flp):
+        dat = np.load(flp)
+        os.remove(flp)
+        return (
+            dat["dat_in"], dat["dat_out"], dat["dat_out_raw"],
+            dat["dat_out_oracle"], dat["scl_grps"])
+    dat_all = [load_dat(flp) for flp in dat_all]
+
     # Validate data.
     dim_in = None
     dtype_in = None
@@ -272,7 +289,7 @@ def make_datasets(net, args):
             f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
         assert dtype_out_cur == dtype_out, \
             f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
-        assert scl_grps_cur == scl_grps, \
+        assert (scl_grps_cur == scl_grps).all(), \
             f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
     assert dim_in is not None, "Unable to compute input feature dim!"
     assert dim_out is not None, "Unable to compute output feature dim!"
@@ -327,7 +344,7 @@ def make_datasets(net, args):
             prms_in)
 
 
-def split_data(fets, net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
                bch_trn, bch_tst, use_val=False):
     """
     Divides the input and output data into training, validation, and
@@ -339,14 +356,14 @@ def split_data(fets, net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws
     #assert len(dat_out_oracle.shape) == 1
     #assert len(num_flws.shape) == 1
 
-    #fets = dat_in.dtype.names
+    fets = dat_in.dtype.names
     # Destroy columns names to make merging the matrices easier. I.e.,
     # convert from structured to regular numpy arrays.
-    # dat_in = utils.clean(dat_in)
-    # dat_out = utils.clean(dat_out)
-    # dat_out_raw = utils.clean(dat_out_raw)
-    # dat_out_oracle = utils.clean(dat_out_oracle)
-    # num_flws = utils.clean(num_flws)
+    dat_in = utils.clean(dat_in)
+    dat_out = utils.clean(dat_out)
+    dat_out_raw = utils.clean(dat_out_raw)
+    dat_out_oracle = utils.clean(dat_out_oracle)
+    num_flws = utils.clean(num_flws)
     # Shuffle the data to ensure that the training, validation, and
     # test sets are uniformly sampled. To shuffle all of the arrays
     # together, we must first merge them into a combined matrix.
@@ -598,8 +615,8 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     net.new(**{param: args[param] for param in net.params})
     # Split the data into training, validation, and test loaders.
     ldr_trn, _, ldr_tst = split_data(
-        args["features"], net, dat_in, dat_out, dat_out_raw, dat_out_oracle,
-        num_flws, args["train_batch"], args["test_batch"])
+        net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+        args["train_batch"], args["test_batch"])
     # Training.
     print("Training...")
     tim_srt_s = time.time()
@@ -756,13 +773,6 @@ def run_many(args_):
         print("Regenerating data...")
         dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, scl_prms = (
             make_datasets(net_tmp, args))
-        # Clean the data before saving it to fix an error in
-        # savez_compressed().
-        dat_in = utils.clean(dat_in)
-        dat_out = utils.clean(dat_out)
-        dat_out_raw = utils.clean(dat_out_raw)
-        dat_out_oracle = utils.clean(dat_out_oracle)
-        num_flws = utils.clean(num_flws)
         # Save the processed data so that we do not need to process it again.
         print(f"Saving data: {dat_flp}")
         np.savez_compressed(
