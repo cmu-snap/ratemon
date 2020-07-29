@@ -2,8 +2,11 @@
 """ Evaluates feature correlation. """
 
 import argparse
+import copy
 import multiprocessing
+import os
 from os import path
+import random
 
 from matplotlib import pyplot as plt
 import numpy as np
@@ -13,13 +16,273 @@ import models
 import train
 
 
-def run_cnfs(cnfs):
+ALL_FETS = sorted([
+    # "1/sqrt loss event rate-windowed-minRtt1",
+    # "1/sqrt loss event rate-windowed-minRtt1024",
+    # "1/sqrt loss event rate-windowed-minRtt128",
+    # "1/sqrt loss event rate-windowed-minRtt16",
+    # "1/sqrt loss event rate-windowed-minRtt2",
+    # "1/sqrt loss event rate-windowed-minRtt256",
+    # "1/sqrt loss event rate-windowed-minRtt32",
+    # "1/sqrt loss event rate-windowed-minRtt4",
+    # "1/sqrt loss event rate-windowed-minRtt512",
+    # "1/sqrt loss event rate-windowed-minRtt64",
+    # "1/sqrt loss event rate-windowed-minRtt8",
+    # "RTT estimate ratio-ewma-alpha0.001",
+    # "RTT estimate ratio-ewma-alpha0.002",
+    # "RTT estimate ratio-ewma-alpha0.003",
+    # "RTT estimate ratio-ewma-alpha0.004",
+    # "RTT estimate ratio-ewma-alpha0.005",
+    # "RTT estimate ratio-ewma-alpha0.006",
+    # "RTT estimate ratio-ewma-alpha0.007",
+    # "RTT estimate ratio-ewma-alpha0.008",
+    # "RTT estimate ratio-ewma-alpha0.009",
+    # "RTT estimate ratio-ewma-alpha0.01",
+    # "RTT estimate ratio-ewma-alpha0.1",
+    # "RTT estimate ratio-ewma-alpha0.2",
+    # "RTT estimate ratio-ewma-alpha0.3",
+    # "RTT estimate ratio-ewma-alpha0.4",
+    "RTT estimate ratio-ewma-alpha0.5",
+    # "RTT estimate ratio-ewma-alpha0.6",
+    # "RTT estimate ratio-ewma-alpha0.7",
+    # "RTT estimate ratio-ewma-alpha0.8",
+    # "RTT estimate ratio-ewma-alpha0.9",
+    # "RTT estimate ratio-ewma-alpha1.0",
+    # "RTT estimate us-ewma-alpha0.001",
+    # "RTT estimate us-ewma-alpha0.002",
+    # "RTT estimate us-ewma-alpha0.003",
+    # "RTT estimate us-ewma-alpha0.004",
+    # "RTT estimate us-ewma-alpha0.005",
+    # "RTT estimate us-ewma-alpha0.006",
+    # "RTT estimate us-ewma-alpha0.007",
+    # "RTT estimate us-ewma-alpha0.008",
+    # "RTT estimate us-ewma-alpha0.009",
+    # "RTT estimate us-ewma-alpha0.01",
+    # "RTT estimate us-ewma-alpha0.1",
+    # "RTT estimate us-ewma-alpha0.2",
+    # "RTT estimate us-ewma-alpha0.3",
+    # "RTT estimate us-ewma-alpha0.4",
+    "RTT estimate us-ewma-alpha0.5",
+    # "RTT estimate us-ewma-alpha0.6",
+    # "RTT estimate us-ewma-alpha0.7",
+    # "RTT estimate us-ewma-alpha0.8",
+    # "RTT estimate us-ewma-alpha0.9",
+    # "RTT estimate us-ewma-alpha1.0",
+    # "arrival time us",
+    # "average RTT estimate ratio-windowed-minRtt1",
+    # "average RTT estimate ratio-windowed-minRtt1024",
+    # "average RTT estimate ratio-windowed-minRtt128",
+    # "average RTT estimate ratio-windowed-minRtt16",
+    # "average RTT estimate ratio-windowed-minRtt2",
+    # "average RTT estimate ratio-windowed-minRtt256",
+    # "average RTT estimate ratio-windowed-minRtt32",
+    # "average RTT estimate ratio-windowed-minRtt4",
+    # "average RTT estimate ratio-windowed-minRtt512",
+    # "average RTT estimate ratio-windowed-minRtt64",
+    # "average RTT estimate ratio-windowed-minRtt8",
+    # "average RTT estimate us-windowed-minRtt1",
+    # "average RTT estimate us-windowed-minRtt1024",
+    # "average RTT estimate us-windowed-minRtt128",
+    # "average RTT estimate us-windowed-minRtt16",
+    # "average RTT estimate us-windowed-minRtt2",
+    # "average RTT estimate us-windowed-minRtt256",
+    # "average RTT estimate us-windowed-minRtt32",
+    # "average RTT estimate us-windowed-minRtt4",
+    # "average RTT estimate us-windowed-minRtt512",
+    # "average RTT estimate us-windowed-minRtt64",
+    # "average RTT estimate us-windowed-minRtt8",
+    # "average interarrival time us-windowed-minRtt1",
+    # "average interarrival time us-windowed-minRtt1024",
+    # "average interarrival time us-windowed-minRtt128",
+    # "average interarrival time us-windowed-minRtt16",
+    # "average interarrival time us-windowed-minRtt2",
+    # "average interarrival time us-windowed-minRtt256",
+    # "average interarrival time us-windowed-minRtt32",
+    # "average interarrival time us-windowed-minRtt4",
+    # "average interarrival time us-windowed-minRtt512",
+    # "average interarrival time us-windowed-minRtt64",
+    # "average interarrival time us-windowed-minRtt8",
+    # "average throughput p/s-windowed-minRtt1",
+    # "average throughput p/s-windowed-minRtt1024",
+    # "average throughput p/s-windowed-minRtt128",
+    # "average throughput p/s-windowed-minRtt16",
+    # "average throughput p/s-windowed-minRtt2",
+    # "average throughput p/s-windowed-minRtt256",
+    # "average throughput p/s-windowed-minRtt32",
+    # "average throughput p/s-windowed-minRtt4",
+    # "average throughput p/s-windowed-minRtt512",
+    # "average throughput p/s-windowed-minRtt64",
+    # "average throughput p/s-windowed-minRtt8",
+    # "interarrival time us-ewma-alpha0.001",
+    # "interarrival time us-ewma-alpha0.002",
+    # "interarrival time us-ewma-alpha0.003",
+    # "interarrival time us-ewma-alpha0.004",
+    # "interarrival time us-ewma-alpha0.005",
+    # "interarrival time us-ewma-alpha0.006",
+    # "interarrival time us-ewma-alpha0.007",
+    # "interarrival time us-ewma-alpha0.008",
+    # "interarrival time us-ewma-alpha0.009",
+    # "interarrival time us-ewma-alpha0.01",
+    # "interarrival time us-ewma-alpha0.1",
+    # "interarrival time us-ewma-alpha0.2",
+    # "interarrival time us-ewma-alpha0.3",
+    # "interarrival time us-ewma-alpha0.4",
+    "interarrival time us-ewma-alpha0.5",
+    # "interarrival time us-ewma-alpha0.6",
+    # "interarrival time us-ewma-alpha0.7",
+    # "interarrival time us-ewma-alpha0.8",
+    # "interarrival time us-ewma-alpha0.9",
+    # "interarrival time us-ewma-alpha1.0",
+    # "loss event rate-windowed-minRtt1",
+    # "loss event rate-windowed-minRtt1024",
+    # "loss event rate-windowed-minRtt128",
+    # "loss event rate-windowed-minRtt16",
+    # "loss event rate-windowed-minRtt2",
+    # "loss event rate-windowed-minRtt256",
+    # "loss event rate-windowed-minRtt32",
+    # "loss event rate-windowed-minRtt4",
+    # "loss event rate-windowed-minRtt512",
+    # "loss event rate-windowed-minRtt64",
+    # "loss event rate-windowed-minRtt8",
+    # "loss rate estimate-ewma-alpha0.001",
+    # "loss rate estimate-ewma-alpha0.002",
+    # "loss rate estimate-ewma-alpha0.003",
+    # "loss rate estimate-ewma-alpha0.004",
+    # "loss rate estimate-ewma-alpha0.005",
+    # "loss rate estimate-ewma-alpha0.006",
+    # "loss rate estimate-ewma-alpha0.007",
+    # "loss rate estimate-ewma-alpha0.008",
+    # "loss rate estimate-ewma-alpha0.009",
+    # "loss rate estimate-ewma-alpha0.01",
+    # "loss rate estimate-ewma-alpha0.1",
+    # "loss rate estimate-ewma-alpha0.2",
+    # "loss rate estimate-ewma-alpha0.3",
+    # "loss rate estimate-ewma-alpha0.4",
+    "loss rate estimate-ewma-alpha0.5",
+    # "loss rate estimate-ewma-alpha0.6",
+    # "loss rate estimate-ewma-alpha0.7",
+    # "loss rate estimate-ewma-alpha0.8",
+    # "loss rate estimate-ewma-alpha0.9",
+    # "loss rate estimate-ewma-alpha1.0",
+    # "loss rate estimate-windowed-minRtt1",
+    # "loss rate estimate-windowed-minRtt1024",
+    # "loss rate estimate-windowed-minRtt128",
+    # "loss rate estimate-windowed-minRtt16",
+    # "loss rate estimate-windowed-minRtt2",
+    # "loss rate estimate-windowed-minRtt256",
+    # "loss rate estimate-windowed-minRtt32",
+    # "loss rate estimate-windowed-minRtt4",
+    # "loss rate estimate-windowed-minRtt512",
+    # "loss rate estimate-windowed-minRtt64",
+    # "loss rate estimate-windowed-minRtt8",
+    # "mathis model label-ewma-alpha0.001",
+    # "mathis model label-ewma-alpha0.002",
+    # "mathis model label-ewma-alpha0.003",
+    # "mathis model label-ewma-alpha0.004",
+    # "mathis model label-ewma-alpha0.005",
+    # "mathis model label-ewma-alpha0.006",
+    # "mathis model label-ewma-alpha0.007",
+    # "mathis model label-ewma-alpha0.008",
+    # "mathis model label-ewma-alpha0.009",
+    # "mathis model label-ewma-alpha0.01",
+    # "mathis model label-ewma-alpha0.1",
+    # "mathis model label-ewma-alpha0.2",
+    # "mathis model label-ewma-alpha0.3",
+    # "mathis model label-ewma-alpha0.4",
+    "mathis model label-ewma-alpha0.5",
+    # "mathis model label-ewma-alpha0.6",
+    # "mathis model label-ewma-alpha0.7",
+    # "mathis model label-ewma-alpha0.8",
+    # "mathis model label-ewma-alpha0.9",
+    # "mathis model label-ewma-alpha1.0",
+    # "mathis model label-windowed-minRtt1",
+    # "mathis model label-windowed-minRtt1024",
+    # "mathis model label-windowed-minRtt128",
+    # "mathis model label-windowed-minRtt16",
+    # "mathis model label-windowed-minRtt2",
+    # "mathis model label-windowed-minRtt256",
+    # "mathis model label-windowed-minRtt32",
+    # "mathis model label-windowed-minRtt4",
+    # "mathis model label-windowed-minRtt512",
+    # "mathis model label-windowed-minRtt64",
+    # "mathis model label-windowed-minRtt8",
+    # "mathis model throughput p/s-ewma-alpha0.001",
+    # "mathis model throughput p/s-ewma-alpha0.002",
+    # "mathis model throughput p/s-ewma-alpha0.003",
+    # "mathis model throughput p/s-ewma-alpha0.004",
+    # "mathis model throughput p/s-ewma-alpha0.005",
+    # "mathis model throughput p/s-ewma-alpha0.006",
+    # "mathis model throughput p/s-ewma-alpha0.007",
+    # "mathis model throughput p/s-ewma-alpha0.008",
+    # "mathis model throughput p/s-ewma-alpha0.009",
+    # "mathis model throughput p/s-ewma-alpha0.01",
+    # "mathis model throughput p/s-ewma-alpha0.1",
+    # "mathis model throughput p/s-ewma-alpha0.2",
+    # "mathis model throughput p/s-ewma-alpha0.3",
+    # "mathis model throughput p/s-ewma-alpha0.4",
+    "mathis model throughput p/s-ewma-alpha0.5",
+    # "mathis model throughput p/s-ewma-alpha0.6",
+    # "mathis model throughput p/s-ewma-alpha0.7",
+    # "mathis model throughput p/s-ewma-alpha0.8",
+    # "mathis model throughput p/s-ewma-alpha0.9",
+    # "mathis model throughput p/s-ewma-alpha1.0",
+    # "mathis model throughput p/s-windowed-minRtt1",
+    # "mathis model throughput p/s-windowed-minRtt1024",
+    # "mathis model throughput p/s-windowed-minRtt128",
+    # "mathis model throughput p/s-windowed-minRtt16",
+    # "mathis model throughput p/s-windowed-minRtt2",
+    # "mathis model throughput p/s-windowed-minRtt256",
+    # "mathis model throughput p/s-windowed-minRtt32",
+    # "mathis model throughput p/s-windowed-minRtt4",
+    # "mathis model throughput p/s-windowed-minRtt512",
+    # "mathis model throughput p/s-windowed-minRtt64",
+    # "mathis model throughput p/s-windowed-minRtt8",
+    "min RTT us",
+    # "seq",
+    # "throughput p/s-ewma-alpha0.001",
+    # "throughput p/s-ewma-alpha0.002",
+    # "throughput p/s-ewma-alpha0.003",
+    # "throughput p/s-ewma-alpha0.004",
+    # "throughput p/s-ewma-alpha0.005",
+    # "throughput p/s-ewma-alpha0.006",
+    # "throughput p/s-ewma-alpha0.007",
+    # "throughput p/s-ewma-alpha0.008",
+    # "throughput p/s-ewma-alpha0.009",
+    # "throughput p/s-ewma-alpha0.01",
+    # "throughput p/s-ewma-alpha0.1",
+    # "throughput p/s-ewma-alpha0.2",
+    # "throughput p/s-ewma-alpha0.3",
+    # "throughput p/s-ewma-alpha0.4",
+    "throughput p/s-ewma-alpha0.5",
+    # "throughput p/s-ewma-alpha0.6",
+    # "throughput p/s-ewma-alpha0.7",
+    # "throughput p/s-ewma-alpha0.8",
+    # "throughput p/s-ewma-alpha0.9",
+    # "throughput p/s-ewma-alpha1.0"
+])
+
+
+def run_cnfs(fets, args, sims):
     """ Trains a model for each provided configuration. """
-    with multiprocessing.Pool() as pol:
+    # Record the base output directory, then remove the "out_dir" arg
+    # to that we can specify one manually, below.
+    out_dir = args.out_dir
+    args = vars(copy.copy(args))
+    del args["out_dir"]
+    cnfs = [
+        {"features": fets_, "sims": sims, "skip_load": True, "sync": True,
+         "out_dir": path.join(
+             out_dir,
+             ",".join(
+                 [str(fet).replace(" ", "_").replace("/", "p")
+                  for fet in fets_])),
+         **args}
+        for fets_ in fets]
+    with multiprocessing.Pool(processes=10) as pol:
         # Note that accuracy = 1 - loss.
         return dict(zip(
-            (cnf["features"] for cnf in cnfs),
-            1 - np.array(pol.starmap(train.run_many, cnfs))))
+            [tuple(cnf["features"]) for cnf in cnfs],
+            1 - np.array(pol.map(train.run_many, cnfs))))
 
 
 def main():
@@ -80,45 +343,67 @@ def main():
     args = psr.parse_args()
 
     # Train models.
-    all_fets = sorted(models.MODELS[args.model].in_spc)
-    accs_single = run_cnfs(
-        [{"features": fet, **vars(args)} for fet in all_fets])
-    # To remove duplicates first create a set of all feature pairs,
-    # where each pair is sorted.
-    accs_pairs = run_cnfs([
-        {"features": fets, **vars(args)} for fets in
-        {(fet1, fet2)
-         for i, fet1 in enumerate(all_fets)
-         for j, fet2 in enumerate(all_fets)
-         if i > j}])
+    # all_fets = sorted(models.MODELS[args.model].in_spc)
+    all_fets = ALL_FETS
 
-    # Calculate the accuracy ratios.
-    lbls_x = list(reversed(all_fets))
-    lbls_y = all_fets
-    # For a pair of features (fet1, fet2), only the pair sorted((fet1, fet2))
-    # will be present in accs_pairs. For the missing "backwards" pair, record a
-    # 0. These 0s will be masked out, below.
-    accs_ratios = np.array(
-        [[(accs_pairs[(fet1, fet2)] if (fet1, fet2) in accs_pairs else (
-            accs_pairs[(fet2, fet1)] if (fet2, fet1) in accs_pairs else 0)) /
-          accs_single[fet1]
-          for fet2 in lbls_x]
-         for fet1 in lbls_y])
+    # x-axis features.
+    fets_x = list(reversed(all_fets))
+    # y-axis features.
+    fets_y = all_fets
+
+    out_dir = args.out_dir
+    dat_flp = path.join(out_dir, "correlation.npz")
+    if path.exists(dat_flp):
+        # Load existing results.
+        print(f"Found existing data: {dat_flp}")
+        accs_ratios = np.load(dat_flp)
+        accs_ratios = accs_ratios[accs_ratios.files[0]]
+    else:
+        # Create the list of simulations here instead of letting the
+        # training script do it so that all runs use the same
+        # simulations.
+        dat_dir = args.data_dir
+        sims = [path.join(dat_dir, sim) for sim in os.listdir(dat_dir)]
+        if train.SHUFFLE:
+            random.shuffle(sims)
+        num_sims = args.num_sims
+        if num_sims is not None:
+            num_sims_actual = len(sims)
+            assert num_sims_actual >= num_sims, \
+                (f"Insufficient simulations. Requested {num_sims}, but only "
+                 f"{num_sims_actual} availabled.")
+            sims = sims[:num_sims]
+
+        # Train models.
+        accs_single = run_cnfs([[fet] for fet in all_fets], args, sims)
+        accs_pairs = run_cnfs(
+            [[fet1, fet2]
+             for i, fet1 in enumerate(all_fets)
+             for j, fet2 in enumerate(all_fets)
+             # Do not consider pairs of the same feature.
+             if i != j],
+            args, sims)
+        # Calculate the accuracy ratios.
+        accs_ratios = np.array(
+            [[(accs_pairs[(fet1, fet2)] / accs_single[(fet1,)]
+               if (fet1, fet2) in accs_pairs else 0)
+              for fet2 in fets_x]
+             for fet1 in fets_y])
+        # Save results.
+        np.savez_compressed(dat_flp, accs_ratios=accs_ratios)
+        print(f"Saving results: {dat_flp}")
 
     # Graph results.
-    mask = np.zeros_like(accs_ratios)
-    # Mask out feature pairs that were duplicates.
-    mask[np.triu_indices_from(mask, k=1)] = True
-    f, ax = plt.subplots(figsize=(25, 20))
+    f, ax = plt.subplots(figsize=(8, 7))
     with sns.axes_style("white"):
         ax = sns.heatmap(
-            accs_ratios, mask=mask, linewidth=0.5, center=1, xticklabels=lbls_x,
-            yticklabels=lbls_y, square=True, annot=True, fmt=".2f",
-            annot_kws={"fontsize":5})
+            accs_ratios, linewidth=0.5, center=1, xticklabels=fets_x,
+            yticklabels=fets_y, square=True, annot=True, fmt=".2f",
+            annot_kws={"fontsize":8})
     plt.tight_layout()
-    out_flp = path.join(args.out_dir, "out.pdf")
+    out_flp = path.join(out_dir, "correlation.pdf")
+    print(f"Saving graph: {out_flp}")
     plt.savefig(out_flp)
-    print(f"Saved: {out_flp}")
 
 
 if __name__ == "__main__":
