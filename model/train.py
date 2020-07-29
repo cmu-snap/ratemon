@@ -223,7 +223,7 @@ def make_datasets(net, args):
         num_sims_actual = len(sims)
         assert num_sims_actual >= num_sims, \
             (f"Insufficient simulations. Requested {num_sims}, but only "
-             f"{num_sims_actual} availabled.")
+             f"{num_sims_actual} available.")
         sims = sims[:num_sims]
 
     tot_sims = len(sims)
