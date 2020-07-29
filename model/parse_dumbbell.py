@@ -847,9 +847,9 @@ def main():
     pcaps = [(path.join(exp_dir, sim), out_dir)
              for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
-        # Set the random seed so that multiple parallel instances of
-        # this script see the same random order.
-        random.seed(0)
+        # Set the random seed so that multiple instances of this
+        # script see the same random order.
+        random.seed(utils.SEED)
         random.shuffle(pcaps)
 
     print(f"Num files: {len(pcaps)}")

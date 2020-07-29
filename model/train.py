@@ -61,8 +61,6 @@ EPCS_MAX = 10_000
 # decreased to less than this fraction of the original throughput for a
 # training example to be considered.
 NEW_TPT_TSH = 0.925
-# The random seed.
-SEED = 1337
 # Set to false to parse the simulations in sorted order.
 SHUFFLE = True
 # The number of times to log progress during one epoch.
@@ -216,6 +214,9 @@ def make_datasets(net, args):
         dat_dir = args["data_dir"]
         sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
     if SHUFFLE:
+        # Set the random seed so that multiple parallel instances of
+        # this script see the same random order.
+        random.seed(utils.SEED)
         random.shuffle(sims)
     num_sims = args["num_sims"]
     if num_sims is not None:
@@ -697,9 +698,9 @@ def run_many(args_):
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
-        random.seed(SEED)
-        np.random.seed(SEED)
-        torch.manual_seed(SEED)
+        random.seed(utils.SEED)
+        np.random.seed(utils.SEED)
+        torch.manual_seed(utils.SEED)
 
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):

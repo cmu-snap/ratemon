@@ -15,6 +15,8 @@ import torch
 # Arguments to ignore when converting an arguments dictionary to a
 # string.
 ARGS_TO_IGNORE = ["data_dir", "out_dir", "sims", "features"]
+# The random seed.
+SEED = 1337
 
 
 class Dataset(torch.utils.data.Dataset):

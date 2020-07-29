@@ -12,8 +12,9 @@ import time
 import ax
 import numpy as np
 
-import train
 import models
+import train
+import utils
 
 
 DEFAULT_TLS_OPT = 40
@@ -222,7 +223,7 @@ def main():
             evaluation_function=train.run_many,
             minimize=True,
             total_trials=args.opt_trials,
-            random_seed=train.SEED if no_rand else None)
+            random_seed=utils.SEED if no_rand else None)
         best_err = best_vals[0]["objective"]
     print((f"Done with hyper-parameter optimization - "
            f"{time.time() - tim_srt_s:.2f} seconds"))
