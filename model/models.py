@@ -714,8 +714,8 @@ class SvmSklearnWrapper(SvmWrapper):
         "alpha0.8" not in fet and
         "alpha0.9" not in fet and
         "label" not in fet and
-        "512" not in fet and
-        "1024" not in fet and
+        "tt512" not in fet and
+        "tt1024" not in fet and
         "loss event rate" not in fet)]
     out_spc = ["queue occupancy-ewma-alpha0.5"]
     los_fnc = None
