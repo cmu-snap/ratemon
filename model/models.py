@@ -511,7 +511,6 @@ class SvmSklearnWrapper(SvmWrapper):
         "RTT estimate us-ewma-alpha0.8",
         "RTT estimate us-ewma-alpha0.9",
         "RTT estimate us-ewma-alpha1.0",
-        "arrival time us",
         "average RTT estimate ratio-windowed-minRtt1",
         "average RTT estimate ratio-windowed-minRtt1024",
         "average RTT estimate ratio-windowed-minRtt128",
