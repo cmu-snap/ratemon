@@ -790,6 +790,7 @@ def run_many(args_):
         print(f"Saving scaling parameters: {scl_prms_flp}")
         with open(scl_prms_flp, "w") as fil:
             json.dump(scl_prms.tolist(), fil)
+    print(f"Number of input features: {len(dat_in.dtype.names)}")
 
     # Visualaize the ground truth data.
     utils.visualize_classes(
