@@ -747,7 +747,7 @@ class SvmSklearnWrapper(SvmWrapper):
     def train(self, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
-        printf("Best fets: {self.in_spc[np.where(self.net.ranking_ == 1)]}")
+        print(f"Best fets: {self.in_spc[np.where(self.net.ranking_ == 1)]}")
 
     def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
                    sort_by_unfairness=True):
