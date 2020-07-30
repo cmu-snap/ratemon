@@ -12,6 +12,7 @@ from matplotlib import pyplot
 import numpy as np
 from sklearn import linear_model
 from sklearn import svm
+from sklearn import feature_selection
 import torch
 
 
@@ -731,6 +732,7 @@ class SvmSklearnWrapper(SvmWrapper):
     def train(self, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
+        printf("Best fets: {self.in_spc[np.where(self.net.ranking_ == 1)]}")
 
     def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None, sort_by_unfairness=True):
         # Compute the distance from fair, then divide by fair to
@@ -943,9 +945,11 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Change the maximum number of iterations.
-        self.net = linear_model.LogisticRegression(
+        lr = linear_model.LogisticRegression(
             penalty="l1", dual=False, class_weight="balanced",
             solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
+        self.net = feature_selection.RFE(
+            estimator=lr, n_features_to_select=10, step=3)
         return self.net
 
 
