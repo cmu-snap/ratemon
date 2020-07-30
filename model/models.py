@@ -749,7 +749,8 @@ class SvmSklearnWrapper(SvmWrapper):
         self.net.fit(dat_in, dat_out)
         printf("Best fets: {self.in_spc[np.where(self.net.ranking_ == 1)]}")
 
-    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None, sort_by_unfairness=True):
+    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
+                   sort_by_unfairness=True):
         # Compute the distance from fair, then divide by fair to
         # compute the relative unfairness.
         diffs = (raw - fair) / fair
