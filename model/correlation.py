@@ -287,7 +287,10 @@ def run_cnfs(fets, args, sims):
             res = pol.map(train.run_many, cnfs)
     # Remove temporary subdirs.
     for cnf in cnfs:
-        shutil.rmtree(cnf["tmp_dir"])
+        try:
+            shutil.rmtree(cnf["tmp_dir"])
+        except FileNotFoundError:
+            pass
     # Note that accuracy = 1 - loss.
     return dict(zip(
         [tuple(cnf["features"]) for cnf in cnfs], 1 - np.array(res)))
