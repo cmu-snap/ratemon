@@ -702,6 +702,21 @@ class SvmSklearnWrapper(SvmWrapper):
         "throughput p/s-ewma-alpha0.9",
         "throughput p/s-ewma-alpha1.0"
     ]
+    in_spc = [fet for fet in in_spc if (
+        "alpha0.002" not in fet and
+        "alpha0.004" not in fet and
+        "alpha0.006" not in fet and
+        "alpha0.008" not in fet and
+        "alpha0.01" not in fet and
+        "alpha0.2" not in fet and
+        "alpha0.4" not in fet and
+        "alpha0.6" not in fet and
+        "alpha0.8" not in fet and
+        "alpha0.9" not in fet and
+        "label" not in fet and
+        "512" not in fet and
+        "1024" not in fet and
+        "loss event rate" not in fet)]
     out_spc = ["queue occupancy-ewma-alpha0.5"]
     los_fnc = None
     opt = None
