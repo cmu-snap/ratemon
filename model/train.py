@@ -52,6 +52,7 @@ DEFAULTS = {
     "no_rand": False,
     "timeout_s": 0,
     "out_dir": ".",
+    "tmp_dir": None,
     "regen_data": False,
     "sync": False
 }
@@ -147,7 +148,7 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
+def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, sequential=False):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
@@ -199,8 +200,8 @@ def process_sim(idx, total, net, sim_flp, warmup, sequential=False):
         sequential=sequential)
 
     # To avoid errors with sending large matrices between processes,
-    # store the results in a randomly-named file in /tmp.
-    dat_flp = path.join("/tmp", f"{random.randint(0, sys.maxsize)}.npz")
+    # store the results in a temporary file.
+    dat_flp = path.join(tmp_dir, f"{path.basename(sim_flp)[:-4]}_tmp.npz")
     print(f"    Saving temporary data: {dat_flp}")
     np.savez_compressed(
         dat_flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
@@ -236,7 +237,13 @@ def make_datasets(net, args):
 
     tot_sims = len(sims)
     print(f"Found {tot_sims} simulations.")
-    sims_args = [(idx, tot_sims, net, sim, args["warmup"])
+    tmp_dir = args["tmp_dir"]
+    if tmp_dir is None:
+        tmp_dir = args["out_dir"]
+    if not path.isdir(tmp_dir):
+        print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
+        os.makedirs(tmp_dir)
+    sims_args = [(idx, tot_sims, net, sim, tmp_dir, args["warmup"])
                  for idx, sim in enumerate(sims)]
     if SYNC or args["sync"]:
         dat_all = [process_sim(*sim_args) for sim_args in sims_args]

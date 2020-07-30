@@ -6,6 +6,7 @@ import multiprocessing
 import os
 from os import path
 import random
+import shutil
 
 from matplotlib import pyplot as plt
 import numpy as np
@@ -269,18 +270,24 @@ def run_cnfs(fets, args, sims):
     # Assemble configurations.
     cnfs = [
         {**vars(args), "features": fets_, "sims": sims, "sync": True,
-         "out_dir": path.join(
-             args.out_dir,
-             ",".join(
-                 [str(fet).replace(" ", "_").replace("/", "p")
-                  for fet in fets_]))}
-        for fets_ in fets]
+         "out_dir": path.join(args.out_dir, subdir),
+         "tmp_dir": path.join("/tmp", subdir)}
+        for fets_, subdir in zip(
+            fets,
+            # Create a subdirectory name for each list of features.
+            [",".join([
+                str(fet).replace(" ", "_").replace("/", "p")
+                for fet in fets_])
+             for fets_ in fets])]
     # Train configurations.
     if SYNC:
         res = [train.run_many(cnf) for cnf in cnfs]
     else:
-        with multiprocessing.Pool(processes=2) as pol:
+        with multiprocessing.Pool(processes=1) as pol:
             res = pol.map(train.run_many, cnfs)
+    # Remove temporary subdirs.
+    for cnf in cnfs:
+        shutil.rmtree(cnf["tmp_dir"])
     # Note that accuracy = 1 - loss.
     return dict(zip(
         [tuple(cnf["features"]) for cnf in cnfs], 1 - np.array(res)))
