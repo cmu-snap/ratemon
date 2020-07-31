@@ -283,7 +283,7 @@ def run_cnfs(fets, args, sims):
     if SYNC:
         res = [train.run_many(cnf) for cnf in cnfs]
     else:
-        with multiprocessing.Pool(processes=1) as pol:
+        with multiprocessing.Pool(processes=4) as pol:
             res = pol.map(train.run_many, cnfs)
     # Remove temporary subdirs.
     for cnf in cnfs:
