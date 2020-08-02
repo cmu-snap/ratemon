@@ -42,6 +42,7 @@ DEFAULTS = {
     "degree": 3,
     "penalty": "l1",
     "max_iter": 10000,
+    "rfe": "None",
     "graph": False,
     "standardize": True,
     "early_stop": False,
@@ -627,7 +628,7 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(*(ldr_trn.dataset.raw()[1:3]))
+    net.train(*(ldr_trn.dataset.raw()[:3]))
     print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
     # Save the model.
     print(f"Saving final model: {out_flp}")
@@ -882,6 +883,12 @@ def main():
               "number of iterations to use during the fitting process. Ignored "
               "otherwise."),
         type=int)
+    psr.add_argument(
+        "--rfe", choices=["None", "rfe", "rfecv"], default="None",
+        help=(f"If the model is of type \"{models.LrSklearnWrapper().name}\", "
+              "then this is the type of recursive feature elimination to use. "
+              "Ignored otherwise."),
+        type=str)
     psr.add_argument(
         "--graph", action="store_true",
         help=("If the model is an sklearn model, then analyze and graph the "

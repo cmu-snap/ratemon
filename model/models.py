@@ -10,9 +10,10 @@ from statistics import mean
 
 from matplotlib import pyplot
 import numpy as np
+import sklearn
+from sklearn import feature_selection
 from sklearn import linear_model
 from sklearn import svm
-from sklearn import feature_selection
 import torch
 
 
@@ -744,13 +745,33 @@ class SvmSklearnWrapper(SvmWrapper):
                 verbose=1, max_iter=max_iter))
         return self.net
 
-    def train(self, dat_in, dat_out):
+    def train(self, fets, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
-        print(
-            "Best fets: "
-            f"{np.array(self.in_spc)[np.where(self.net.ranking_ == 1)]}")
-        print(f"Coeffs: {self.net.estimator_.coef_}")
+        print()
+        if isinstance(
+                self.net,
+                (sklearn.feature_selection.RFE,
+                 sklearn.feature_selection.RFECV)):
+            # Sort the features alphabetically.
+            best_fets = sorted(
+                zip(
+                    np.array(fets)[np.where(self.net.ranking_ == 1)],
+                    self.net.estimator_.coef_[0]),
+                key=lambda p: p[0])
+            print(f"Number of features selected: {len(best_fets)}")
+        else:
+            # First, sort the features by the absolute value of the
+            # importance and pick the top 20. Then, sort the features
+            # alphabetically.
+            best_fets = reversed(sorted(
+                sorted(
+                    zip(fets, self.net.coef_[0]),
+                    key=lambda p: abs(p[1]))[:20],
+                key=lambda p: p[0]))
+        best_fets = "\n".join([f"{fet}: {coef}" for fet, coef in best_fets])
+        print(f"----------\nBest features:\n{best_fets}\n----------")
+
 
     def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
                    sort_by_unfairness=True):
@@ -955,7 +976,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
     """ Wraps ab sklearn Logistic Regression model. """
 
     name = "LrSklearn"
-    params = ["max_iter", "graph"]
+    params = ["max_iter", "rfe", "graph"]
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -967,8 +988,19 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         lr = linear_model.LogisticRegression(
             penalty="l1", dual=False, class_weight="balanced",
             solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
-        self.net = feature_selection.RFE(
-            estimator=lr, n_features_to_select=10, step=3)
+        rfe = kwargs["rfe"]
+        if rfe == "None":
+            self.net = lr
+        elif rfe == "rfe":
+            self.net = sklearn.feature_selection.RFE(
+                estimator=lr, n_features_to_select=10, step=10)
+        elif rfe == "rfecv":
+            self.net = sklearn.feature_selection.RFECV(
+                estimator=lr, step=1,
+                cv=sklearn.model_selection.StratifiedKFold(2),
+                scoring="accuracy", n_jobs=40)
+        else:
+            raise Exception(f"Unknown RFE type: {rfe}")
         return self.net
 
 
