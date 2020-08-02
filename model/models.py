@@ -990,11 +990,14 @@ class LrSklearnWrapper(SvmSklearnWrapper):
             solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
         rfe = kwargs["rfe"]
         if rfe == "None":
+            print("Not using recursive feature elimination.")
             self.net = lr
         elif rfe == "rfe":
+            print("Using recursive feature elimination.")
             self.net = sklearn.feature_selection.RFE(
                 estimator=lr, n_features_to_select=10, step=10)
         elif rfe == "rfecv":
+            print("Using recursive feature elimination with cross-validation.")
             self.net = sklearn.feature_selection.RFECV(
                 estimator=lr, step=1,
                 cv=sklearn.model_selection.StratifiedKFold(2),
