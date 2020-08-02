@@ -1000,8 +1000,8 @@ class LrSklearnWrapper(SvmSklearnWrapper):
             print("Using recursive feature elimination with cross-validation.")
             self.net = sklearn.feature_selection.RFECV(
                 estimator=lr, step=1,
-                cv=sklearn.model_selection.StratifiedKFold(2),
-                scoring="accuracy", n_jobs=40)
+                cv=sklearn.model_selection.StratifiedKFold(10),
+                scoring="accuracy", n_jobs=-1)
         else:
             raise Exception(f"Unknown RFE type: {rfe}")
         return self.net
