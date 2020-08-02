@@ -805,7 +805,7 @@ class SvmSklearnWrapper(SvmWrapper):
         return acc
 
 
-    def __plotThroughput(self, preds, labels, raw, fair, flp, x_lim=None):
+    def __plot_throughput(self, preds, labels, raw, fair, flp, x_lim=None):
         raw = raw.tolist()
         fair = fair.tolist()
 
@@ -934,7 +934,7 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot throughput
-            self.__plotThroughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
+            self.__plot_throughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
                 out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
         else:
             out_dir = "."
