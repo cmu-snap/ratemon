@@ -764,11 +764,11 @@ class SvmSklearnWrapper(SvmWrapper):
             # First, sort the features by the absolute value of the
             # importance and pick the top 20. Then, sort the features
             # alphabetically.
-            best_fets = reversed(sorted(
+            best_fets = sorted(
                 sorted(
                     zip(fets, self.net.coef_[0]),
-                    key=lambda p: abs(p[1]))[:20],
-                key=lambda p: p[0]))
+                    key=lambda p: abs(p[1]))[-20:],
+                key=lambda p: p[0])
         best_fets = "\n".join([f"{fet}: {coef}" for fet, coef in best_fets])
         print(f"----------\nBest features:\n{best_fets}\n----------")
 
