@@ -28,6 +28,7 @@ import utils
 DEFAULTS = {
     "data_dir": ".",
     "warmup": 0,
+    "keep_percent": 100,
     "num_sims": sys.maxsize,
     "sims": [],
     "model": models.MODEL_NAMES[0],
@@ -149,7 +150,7 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, sequential=False):
+def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc, sequential=False):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
@@ -200,6 +201,15 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, sequential=False):
         dat_out_oracle=dat[["mathis model label-ewma-alpha0.5"]],
         sequential=sequential)
 
+    # Select a fraction of the data.
+    num_rows = dat_in.shape[0]
+    num_to_pick = math.ceil(num_rows * prc / 100)
+    idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
+    dat_in = dat_in[idxs]
+    dat_out = dat_out[idxs]
+    dat_out_raw = dat_out_raw[idxs]
+    dat_out_oracle = dat_out_oracle[idxs]
+
     # To avoid errors with sending large matrices between processes,
     # store the results in a temporary file.
     dat_flp = path.join(tmp_dir, f"{path.basename(sim_flp)[:-4]}_tmp.npz")
@@ -244,8 +254,11 @@ def make_datasets(net, args):
     if not path.isdir(tmp_dir):
         print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
         os.makedirs(tmp_dir)
-    sims_args = [(idx, tot_sims, net, sim, tmp_dir, args["warmup"])
-                 for idx, sim in enumerate(sims)]
+
+    # Parse simulations.
+    sims_args = [
+        (idx, tot_sims, net, sim, tmp_dir, args["warmup"], args["keep_percent"])
+        for idx, sim in enumerate(sims)]
     if SYNC or args["sync"]:
         dat_all = [process_sim(*sim_args) for sim_args in sims_args]
     else:
@@ -837,6 +850,9 @@ def main():
         help=("The number of packets to drop from the beginning of each "
               "simulation."),
         type=int)
+    psr.add_argument(
+        "--keep-percent", default=DEFAULTS["keep_percent"],
+        help="The percent of each simulation's datapoints to keep.", type=float)
     psr.add_argument(
         "--num-sims", default=DEFAULTS["num_sims"],
         help="The number of simulations to consider.", type=int)
