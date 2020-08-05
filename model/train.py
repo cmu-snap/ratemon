@@ -229,6 +229,7 @@ def make_datasets(net, args):
     simulations only. If shuffle is True, then the simulations will be parsed in
     sorted order. Use num_sims and shuffle=True together to simplify debugging.
     """
+    # Find simulations.
     sims = args["sims"]
     if not sims:
         dat_dir = args["data_dir"]
@@ -245,9 +246,13 @@ def make_datasets(net, args):
             (f"Insufficient simulations. Requested {num_sims}, but only "
              f"{num_sims_actual} available.")
         sims = sims[:num_sims]
-
     tot_sims = len(sims)
     print(f"Found {tot_sims} simulations.")
+
+    # Prepare temporary output directory. The output of parsing each
+    # simulation it written to disk instead of being transfered
+    # between processes because sometimes the data is too large for
+    # Python to send between processes.
     tmp_dir = args["tmp_dir"]
     if tmp_dir is None:
         tmp_dir = args["out_dir"]
