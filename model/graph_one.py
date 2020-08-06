@@ -1,11 +1,18 @@
 #! /usr/bin/env python3
+""" Graph all of the features from a single simulation. """
 
-from os import path
 import argparse
-import numpy as np
+import os
+from os import path
+
 from matplotlib import pyplot
+import numpy as np
+
+import utils
+
 
 def main():
+    """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Visualize a simulation's features.")
@@ -21,47 +28,42 @@ def main():
     assert path.exists(dat_flp), f"File does not exist: {dat_flp}"
     if not path.exists(out_dir):
         os.makedirs(out_dir)
-    dat = np.load(dat_flp)
-    num_unfair = len(dat.files)
-    assert num_unfair == 1, \
-        ("This script supports simulations with a single unfair flow only, but "
-         f"the provided simulation contains {num_unfair} unfair flows!")
-    dat = dat[dat.files[0]]
+    with np.load(dat_flp) as fil:
+        num_unfair = len(fil.files)
+        assert num_unfair == 1, \
+            ("This script supports simulations with a single unfair flow only, "
+             f"but the provided simulation contains {num_unfair} unfair flows!")
+        dat = fil[fil.files[0]]
 
-    # determine fair queue occupancy
-    toks = dat_flp.split("-")
-    if dat_flp.endswith(".npz"):
-        toks[-1] = toks[-1][:-4]
-    (bw_Mbps, btl_delay_us, queue_p, unfair_flws, other_flws, edge_delays,
-     payload_B, dur_s) = toks
-
-    queue_fair_occupancy = 1 / (1.0 * (int(unfair_flws[:-6]) + int(other_flws[:-5])))
+    sim = utils.Sim(dat_flp)
+    queue_fair_occupancy = 1 / (sim.unfair_flws + sim.other_flws)
 
     for fet in dat.dtype.names:
-        if fet != "arrival time us":
-            print(f"Plotting feature: {fet}")
-            pyplot.plot(
-                dat["arrival time us"],
-                np.where(dat[fet] == -1, np.nan, dat[fet]))
-            pyplot.xlabel("arrival time (us)")
-            pyplot.ylabel(fet)
+        if fet == "arrival time us":
+            continue
+        print(f"Plotting feature: {fet}")
+        pyplot.plot(
+            dat["arrival time us"],
+            np.where(dat[fet] == -1, np.nan, dat[fet]))
+        pyplot.xlabel("arrival time (us)")
+        pyplot.ylabel(fet)
 
-            # Adjust plot limits.
-            pyplot.ylim(bottom=0)
-            if "queue" in fet:
-                pyplot.ylim(top=1.1)
-                pyplot.hlines(
-                    queue_fair_occupancy, 0, dat["arrival time us"][-1],
-                    colors='k', linestyles='dashdot')
-            if ("mathis model label" in fet or "loss" in fet) and "sqrt" not in fet:
-                pyplot.ylim(top=1.1)
+        # Adjust plot limits.
+        pyplot.ylim(bottom=0)
+        if "queue" in fet:
+            pyplot.ylim(top=1.1)
+            pyplot.hlines(
+                queue_fair_occupancy, 0, dat["arrival time us"][-1],
+                colors='k', linestyles='dashdot')
+        if ("mathis model label" in fet or "loss" in fet) and "sqrt" not in fet:
+            pyplot.ylim(top=1.1)
 
-            pyplot.tight_layout()
-            # Replace name
-            fet = fet.replace(" ", "_")
-            fet = fet.replace("/", "-")
-            pyplot.savefig(path.join(out_dir, f"Arrival_time_vs_{fet}.pdf"))
-            pyplot.close()
+        pyplot.tight_layout()
+        pyplot.savefig(path.join(
+            out_dir,
+            ("arrival_time_us_vs_"
+             f"{fet.replace(' ', '_').replace('/', '-')}.pdf")))
+        pyplot.close()
 
 
 if __name__ == "__main__":
