@@ -31,7 +31,7 @@ def check_output(cnf, logger):
             [f"--{arg}={val}" for arg, val in cnf.items()])
     cmd = f"LD_LIBRARY_PATH={os.environ['LD_LIBRARY_PATH']} {' '.join(args)}"
     log = logging.getLogger(logger)
-    log.info(f"Running: {cmd}")
+    log.info("Running: %s", cmd)
     try:
         res = subprocess.check_output(
             args, stderr=subprocess.STDOUT, env=os.environ).decode().split("\n")
@@ -95,7 +95,7 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
         log.addHandler(hdl)
 
     # Compile ns-3.
-    log.info(f"ns-3 dir: {NS3_DIR}")
+    log.info("ns-3 dir: %s", NS3_DIR)
     subprocess.check_call(["./waf"], cwd=NS3_DIR)
     # Since we are running the application binary directly, we need to make sure
     # the ns-3 library can be found.
@@ -108,7 +108,7 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
         json.dump(cnfs, fil, indent=4)
 
     # Simulate the configurations.
-    log.info(f"Num simulations: {len(cnfs)}")
+    log.info("Num simulations: %s", len(cnfs))
     if dry_run:
         return []
     tim_srt_s = time.time()
@@ -117,5 +117,6 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
     else:
         with multiprocessing.Pool() as pool:
             data = pool.starmap(run, ((cnf, res_fnc, logger) for cnf in cnfs))
-    log.critical(f"Done with simulations - time: {time.time() - tim_srt_s:.2f} seconds")
+    log.critical(
+        "Done with simulations - time: %.2f seconds", time.time() - tim_srt_s)
     return list(zip(cnfs, data))
