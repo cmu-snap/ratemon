@@ -96,7 +96,7 @@ DTYPE = (REGULAR +
 
 def make_interval_weight(num_intervals):
     return [
-        1 if i < num_intervals / 2 else 2 * (i - 1) / (i + 2)
+        1 if i < num_intervals / 2 else 2 * (num_intervals - i) / (num_intervals + 2)
         for i in range(num_intervals)]
 
 
@@ -184,7 +184,7 @@ def parse_pcap(sim_dir, out_dir):
             # The index at which this window starts.
             "window_start_idx": 0,
             # The "loss event rate".
-            "loss_interval_weights": make_interval_weight(win),
+            "loss_interval_weights": make_interval_weight(8),
             "loss_event_intervals": collections.deque(),
             "current_loss_event_start_idx": 0,
             "current_loss_event_start_time": 0,
@@ -343,8 +343,8 @@ def parse_pcap(sim_dir, out_dir):
                     # this is desirable because we want to see how the
                     # metric as a whole reacts to a certain degree of
                     # memory.
-                    loss_rate_estimate = output[
-                        j][make_ewma_metric("loss rate estimate", alpha)]
+                    loss_rate_estimate = (pkt_loss_total_estimate / 
+                                          (1.0 * j) if j > 0 else 0)
                     # Use "safe" operations in case any of the
                     # supporting values are -1 (unknown).
                     new = (
@@ -485,7 +485,7 @@ def parse_pcap(sim_dir, out_dir):
                                             new_start_idx - cur_start_idx)
                                     # Potentially discard an old event.
                                     if len(win_state[
-                                            win]["loss_event_intervals"]) > win:
+                                            win]["loss_event_intervals"]) > 8:
                                         win_state[
                                             win]["loss_event_intervals"].pop()
 
@@ -547,14 +547,15 @@ def parse_pcap(sim_dir, out_dir):
                 elif "mathis model throughput p/s" in metric:
                     # Use the loss event rate to compute the Mathis
                     # model fair throughput.
+                    loss_rate_estimate = (pkt_loss_total_estimate / 
+                                          (1.0 * j) if j > 0 else 0)
                     new = utils.safe_div(
                         MATHIS_C,
                         utils.safe_div(
                             utils.safe_mul(
                                 min_rtt_us,
                                 utils.safe_sqrt(
-                                    output[j][make_win_metric(
-                                        "loss event rate", win)])),
+                                    loss_rate_estimate)),
                             1e6))
                 elif "mathis model label" in metric:
                     # Use the current throughput and Mathis model
