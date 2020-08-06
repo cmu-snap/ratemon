@@ -96,7 +96,8 @@ DTYPE = (REGULAR +
 
 def make_interval_weight(num_intervals):
     return [
-        1 if i < num_intervals / 2 else 2 * (num_intervals - i) / (num_intervals + 2)
+        (1 if i < num_intervals / 2 else
+         2 * (num_intervals - i) / (num_intervals + 2))
         for i in range(num_intervals)]
 
 
@@ -343,8 +344,8 @@ def parse_pcap(sim_dir, out_dir):
                     # this is desirable because we want to see how the
                     # metric as a whole reacts to a certain degree of
                     # memory.
-                    loss_rate_estimate = (pkt_loss_total_estimate / 
-                                          (1.0 * j) if j > 0 else 0)
+                    loss_rate_estimate = (
+                        pkt_loss_total_estimate / j if j > 0 else -1)
                     # Use "safe" operations in case any of the
                     # supporting values are -1 (unknown).
                     new = (
@@ -485,7 +486,7 @@ def parse_pcap(sim_dir, out_dir):
                                             new_start_idx - cur_start_idx)
                                     # Potentially discard an old event.
                                     if len(win_state[
-                                            win]["loss_event_intervals"]) > 8:
+                                            win]["loss_event_intervals"]) > win:
                                         win_state[
                                             win]["loss_event_intervals"].pop()
 
@@ -547,8 +548,8 @@ def parse_pcap(sim_dir, out_dir):
                 elif "mathis model throughput p/s" in metric:
                     # Use the loss event rate to compute the Mathis
                     # model fair throughput.
-                    loss_rate_estimate = (pkt_loss_total_estimate / 
-                                          (1.0 * j) if j > 0 else 0)
+                    loss_rate_estimate = (
+                        pkt_loss_total_estimate / j if j > 0 else -1)
                     new = utils.safe_div(
                         MATHIS_C,
                         utils.safe_div(
