@@ -95,6 +95,7 @@ DTYPE = (REGULAR +
 
 
 def make_interval_weight(num_intervals):
+    """ Used to calculate loss event rate. """
     return [
         (1 if i < num_intervals / 2 else
          2 * (num_intervals - i) / (num_intervals + 2))
@@ -103,6 +104,7 @@ def make_interval_weight(num_intervals):
 
 def compute_weighted_average(curr_event_size, loss_event_intervals,
                              loss_interval_weights):
+    """ Used to calculate loss event rate. """
     weight_total = 1 + sum(loss_interval_weights[1:])
     interval_total_0 = (curr_event_size + sum(
         interval * weight
