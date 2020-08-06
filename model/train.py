@@ -151,13 +151,16 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc, sequential=False):
+def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc,
+                sequential=False):
     """
     Loads and processes data from a single simulation. Drops the first
     "warmup" packets. Uses "net" to determine the relevant input and
     output features. Returns a tuple of numpy arrays of the form:
     (input data, output data).
     """
+    assert 0 < prc <= 100, \
+        f"\"prc\" must be in the range (0, 100], but is: {prc}"
     sim, dat = utils.load_sim(
         sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if dat is None:
@@ -747,6 +750,10 @@ def run_many(args_):
         f"\"max_iter\" must be greater than 0, but is: {max_iter}"
     folds = args["folds"]
     assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
+    keep_percent = args["keep_percent"]
+    assert 0 < keep_percent <= 100, \
+        ("\"keep_percent\" must be in the range (0, 100], but is: "
+         f"{keep_percent}")
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
