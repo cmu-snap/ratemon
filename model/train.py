@@ -44,7 +44,7 @@ DEFAULTS = {
     "penalty": "l1",
     "max_iter": 10000,
     "rfe": "None",
-    "folds": 1,
+    "folds": 2,
     "graph": False,
     "standardize": True,
     "early_stop": False,
@@ -740,7 +740,7 @@ def run_many(args_):
     assert max_iter > 0, \
         f"\"max_iter\" must be greater than 0, but is: {max_iter}"
     folds = args["folds"]
-    assert folds >= 0, f"\"folds\" must be greater than 0, but is: {folds}"
+    assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
