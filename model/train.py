@@ -160,6 +160,9 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc, sequential=False
     """
     sim, dat = utils.load_sim(
         sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
+    if dat is None:
+        return None, sim
+
     # Drop the first few packets so that we consider steady-state behavior only.
     assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
     dat = dat[warmup:]
@@ -280,12 +283,16 @@ def make_datasets(net, args):
 
     # Each data item is actually a filepath to where the data can be found on disk.
     def load_dat(flp):
-        dat = np.load(flp)
+        with np.load(flp) as fil:
+            dat_in = fil["dat_in"]
+            dat_out = fil["dat_out"]
+            dat_out_raw = fil["dat_out_raw"]
+            dat_out_oracle = fil["dat_out_oracle"]
+            scl_grps = fil["scl_grps"]
         os.remove(flp)
-        return (
-            dat["dat_in"], dat["dat_out"], dat["dat_out_raw"],
-            dat["dat_out_oracle"], dat["scl_grps"])
-    dat_all = [load_dat(flp) for flp in dat_all]
+        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
+
+    dat_all = [load_dat(flp) for flp in dat_all if flp is not None]
 
     # Validate data.
     dim_in = None
@@ -786,14 +793,14 @@ def run_many(args_):
     if (not args["regen_data"] and path.exists(dat_flp) and
             path.exists(scl_prms_flp)):
         print("Found existing data!")
-        dat = np.load(dat_flp)
-        assert "in" in dat.files and "out" in dat.files, \
-            f"Improperly formed data file: {dat_flp}"
-        dat_in = dat["in"]
-        dat_out = dat["out"]
-        dat_out_raw = dat["out_raw"]
-        dat_out_oracle = dat["out_oracle"]
-        num_flws = dat["num_flws"]
+        with np.load(dat_flp) as fil:
+            assert "in" in fil.files and "out" in fil.files, \
+                f"Improperly formed data file: {dat_flp}"
+            dat_in = fil["in"]
+            dat_out = fil["out"]
+            dat_out_raw = fil["out_raw"]
+            dat_out_oracle = fil["out_oracle"]
+            num_flws = fil["num_flws"]
         dat_in_shape = dat_in.shape
         dat_out_shape = dat_out.shape
         assert dat_in_shape[0] == dat_out_shape[0], \
