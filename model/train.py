@@ -132,7 +132,7 @@ def scale_fets(dat, scl_grps, standardize=False):
             scaled = (
                 # Handle the rare case where the standard deviation is
                 # 0 (meaning that all of the feature values are the
-                # same).
+                # same), in which case return an array of zeros.
                 np.zeros(
                     fet_values.shape, dtype=fet_values.dtype) if prm_2 == 0
                 else (fet_values - prm_1) / prm_2)
