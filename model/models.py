@@ -973,10 +973,27 @@ class SvmSklearnWrapper(SvmWrapper):
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
-    """ Wraps ab sklearn Logistic Regression model. """
+    """ Wraps an sklearn Logistic Regression model. """
 
     name = "LrSklearn"
     params = ["max_iter", "rfe", "graph"]
+
+    def rfe(net, rfe_type):
+        if rfe_type == "None":
+            print("Not using recursive feature elimination.")
+        elif rfe_type == "rfe":
+            print("Using recursive feature elimination.")
+            net = sklearn.feature_selection.RFE(
+                estimator=net, n_features_to_select=10, step=10)
+        elif rfe_type == "rfecv":
+            print("Using recursive feature elimination with cross-validation.")
+            net = sklearn.feature_selection.RFECV(
+                estimator=net, step=1,
+                cv=sklearn.model_selection.StratifiedKFold(10),
+                scoring="accuracy", n_jobs=-1)
+        else:
+            raise Exception(f"Unknown RFE type: {rfe_type}")
+        return net
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -985,25 +1002,36 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Change the maximum number of iterations.
-        lr = linear_model.LogisticRegression(
-            penalty="l1", dual=False, class_weight="balanced",
-            solver="liblinear", max_iter=kwargs["max_iter"], verbose=1)
-        rfe = kwargs["rfe"]
-        if rfe == "None":
-            print("Not using recursive feature elimination.")
-            self.net = lr
-        elif rfe == "rfe":
-            print("Using recursive feature elimination.")
-            self.net = sklearn.feature_selection.RFE(
-                estimator=lr, n_features_to_select=10, step=10)
-        elif rfe == "rfecv":
-            print("Using recursive feature elimination with cross-validation.")
-            self.net = sklearn.feature_selection.RFECV(
-                estimator=lr, step=1,
-                cv=sklearn.model_selection.StratifiedKFold(10),
-                scoring="accuracy", n_jobs=-1)
-        else:
-            raise Exception(f"Unknown RFE type: {rfe}")
+        self.net = LrSklearnWrapper.rfe(
+            linear_model.LogisticRegression(
+                penalty="l1", dual=False, class_weight="balanced",
+                solver="liblinear", max_iter=kwargs["max_iter"], verbose=1),
+            kwargs["rfe"])
+        return self.net
+
+
+class LrCvSklearnWrapper(LrSklearnWrapper):
+    """
+    Wraps an sklearn Logistic Regression model, but uses cross-validation.
+    """
+
+    name = "LrCvSklearn"
+    params = ["max_iter", "rfe", "graph", "folds"]
+
+    def new(self, **kwargs):
+        # Use L1 regularization. Since the number of samples is
+        # greater than the number of features, solve the primal
+        # optimization problem instead of its dual. Automatically set
+        # the class weights based on the class popularity in the
+        # training data. Change the maximum number of iterations.
+        # Use the specified number of cross-validation folds. Use
+        # all cores.
+        self.net = LrSklearnWrapper.rfe(
+            linear_model.LogisticRegressionCV(
+                cv=kwargs["folds"], penalty="l1", dual=False,
+                class_weight="balanced", solver="saga",
+                max_iter=kwargs["max_iter"], verbose=1, n_jobs=-1),
+            kwargs["rfe"])
         return self.net
 
 
@@ -1217,6 +1245,7 @@ MODELS = {mdl.name: mdl for mdl in [
     SvmWrapper,
     SvmSklearnWrapper,
     LrSklearnWrapper,
+    LrCvSklearnWrapper,
     LstmWrapper
 ]}
 MODEL_NAMES = sorted(MODELS.keys())

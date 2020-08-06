@@ -44,6 +44,7 @@ DEFAULTS = {
     "penalty": "l1",
     "max_iter": 10000,
     "rfe": "None",
+    "folds": 1,
     "graph": False,
     "standardize": True,
     "early_stop": False,
@@ -738,6 +739,8 @@ def run_many(args_):
     max_iter = args["max_iter"]
     assert max_iter > 0, \
         f"\"max_iter\" must be greater than 0, but is: {max_iter}"
+    folds = args["folds"]
+    assert folds >= 0, f"\"folds\" must be greater than 0, but is: {folds}"
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
@@ -906,10 +909,16 @@ def main():
         type=int)
     psr.add_argument(
         "--rfe", choices=["None", "rfe", "rfecv"], default="None",
-        help=(f"If the model is of type \"{models.LrSklearnWrapper().name}\", "
-              "then this is the type of recursive feature elimination to use. "
-              "Ignored otherwise."),
+        help=(f"If the model is of type \"{models.LrSklearnWrapper().name}\" "
+              f"or \"{models.LrCvSklearnWrapper().name}\", then this is the "
+              "type of recursive feature elimination to use. Ignored "
+              "otherwise."),
         type=str)
+    psr.add_argument(
+        "--folds", default=DEFAULTS["folds"],
+        help=(f"If the model is of type \"{models.LrCvSklearnWrapper().name}\","
+              " then use this number of cross-validation folds."),
+        type=int)
     psr.add_argument(
         "--graph", action="store_true",
         help=("If the model is an sklearn model, then analyze and graph the "
