@@ -79,8 +79,8 @@ def main():
     # Load and parse the simulation.
     (dat_in, dat_out, dat_out_raw, dat_out_oracle, _), sim = (
         train.process_sim(
-            idx=0, total=1, net=net, sim_flp=sim_flp, warmup=warmup,
-            sequential=True))
+            idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
+            warmup=warmup, prc=100, sequential=True))
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
