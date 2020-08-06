@@ -3,6 +3,7 @@
 
 import math
 from os import path
+import zipfile
 
 import numpy as np
 import scapy.utils
@@ -312,10 +313,15 @@ def load_sim(flp, msg=None):
     a tuple of the form: (total number of flows, results matrix).
     """
     print(f"{'' if msg is None else f'{msg} - '}Parsing: {flp}")
-    with np.load(flp) as fil:
-        assert len(fil.files) == 1 and "1" in fil.files, \
-            "More than one unfair flow detected!"
-        return Sim(flp), fil["1"]
+    try:
+        with np.load(flp) as fil:
+            assert len(fil.files) == 1 and "1" in fil.files, \
+                "More than one unfair flow detected!"
+            dat = fil["1"]
+    except zipfile.BadZipFile:
+        print(f"Bad simulation file: {flp}")
+        dat = None
+    return Sim(flp), dat
 
 
 def clean(arr):
