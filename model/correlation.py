@@ -408,9 +408,9 @@ def main():
         print(f"Saving results: {dat_flp}")
 
     # Graph results.
-    f, ax = plt.subplots(figsize=(8, 7))
+    plt.subplots(figsize=(8, 7))
     with sns.axes_style("white"):
-        ax = sns.heatmap(
+        sns.heatmap(
             accs_ratios, linewidth=0.5, center=1, xticklabels=fets_x,
             yticklabels=fets_y, square=True, annot=True, fmt=".2f",
             annot_kws={"fontsize":8})
