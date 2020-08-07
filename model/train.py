@@ -161,7 +161,7 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc, sequential=False
     sim, dat = utils.load_sim(
         sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if dat is None:
-        return None, sim
+        return None
 
     # Drop the first few packets so that we consider steady-state behavior only.
     assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
@@ -278,7 +278,6 @@ def make_datasets(net, args):
     dat_all = [dat for dat in dat_all if dat is not None]
     print(f"Discarded {tot_sims - len(dat_all)} simulations!")
     assert dat_all, "No valid simulations found!"
-
     dat_all, sims = zip(*dat_all)
 
     # Each data item is actually a filepath to where the data can be found on disk.
@@ -292,7 +291,7 @@ def make_datasets(net, args):
         os.remove(flp)
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
-    dat_all = [load_dat(flp) for flp in dat_all if flp is not None]
+    dat_all = [load_dat(flp) for flp in dat_all]
 
     # Validate data.
     dim_in = None
