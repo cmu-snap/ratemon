@@ -1,13 +1,175 @@
 #! /usr/bin/env python3
 """ Utility functions. """
 
+import math
 from os import path
+import zipfile
 
 import numpy as np
 import scapy.utils
 import scapy.layers.l2
 import scapy.layers.inet
 import scapy.layers.ppp
+import torch
+
+
+# Arguments to ignore when converting an arguments dictionary to a
+# string.
+ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features"]
+# The random seed.
+SEED = 1337
+
+
+class Dataset(torch.utils.data.Dataset):
+    """ A simple Dataset that wraps arrays of input and output features. """
+
+    def __init__(self, fets, dat_in, dat_out, dat_out_raw=None,
+                 dat_out_oracle=None, num_flws=None):
+        """
+        fets: List of input feature names, corresponding to the columns of
+            dat_in.
+        dat_in: Numpy array of input data, with two dimensions.
+        dat_out: Numpy array of output data. Assumed to have a single practical
+            dimension only (e.g., dat_out should be of shape (X,), or (X, 1)).
+        dat_out_raw: Numpy array of raw features values used to create dat_out.
+            Same shape as dat_out.
+        dat_out_oracle: Numpy array of oracle predictions for this data. Same
+            shape as dat_out.
+        num_flws: Numpy array of the total number of flows in each datapoint's
+            experiment. Same shape as dat_out.
+        """
+        super(Dataset).__init__()
+        shp_in = dat_in.shape
+        shp_out = dat_out.shape
+        assert shp_in[0] == shp_out[0], \
+            f"Mismatched dat_in ({shp_in}) and dat_out ({shp_out})!"
+        num_fets = len(fets)
+        assert shp_in[1] == num_fets, \
+            f"Mismatched dat_in ({shp_in}) and fets (len: {num_fets})"
+
+        # Convert the numpy arrays to Torch tensors.
+        self.dat_in = torch.tensor(dat_in, dtype=torch.float)
+        # Reshape the output into a 1D array first, because
+        # CrossEntropyLoss expects a single value. The dtype must be
+        # long because the loss functions expect longs.
+        self.dat_out = torch.tensor(
+            dat_out.reshape(shp_out[0]), dtype=torch.long)
+
+        self.fets = fets
+        self.dat_out_raw = (
+            None if dat_out_raw is None
+            else torch.tensor(
+                dat_out_raw.reshape(shp_out[0]), dtype=torch.float))
+        self.dat_out_oracle = (
+            None if dat_out_oracle is None
+            else torch.tensor(
+                dat_out_oracle.reshape(shp_out[0]), dtype=torch.int))
+        self.num_flws = (
+            None if num_flws is None
+            else torch.tensor(num_flws.reshape(shp_out[0]), dtype=torch.int))
+
+    def to(self, dev):
+        """ Move the entire dataset to the target device. """
+        try:
+            # This will fail if there is insufficient memory.
+            self.dat_in = self.dat_in.to(dev)
+            self.dat_out = self.dat_out.to(dev)
+        except RuntimeError:
+            print(f"Warning:: Unable to move dataset to device: {dev}")
+            # In case the input data was moved successfully but there
+            # was insufficient device memory for the output data, move
+            # the input data back to main memory.
+            self.dat_in = self.dat_in.to(torch.device("cpu"))
+
+    def __len__(self):
+        """ Returns the number of items in this Dataset. """
+        return len(self.dat_in)
+
+    def __getitem__(self, idx):
+        """ Returns a specific (input, output) pair from this Dataset. """
+        assert torch.utils.data.get_worker_info() is None, \
+            "This Dataset does not support being loaded by multiple workers!"
+        return self.dat_in[idx], self.dat_out[idx]
+
+    def raw(self):
+        """ Returns the raw data underlying this dataset. """
+        return (self.fets, self.dat_in, self.dat_out, self.dat_out_raw,
+                self.dat_out_oracle, self.num_flws)
+
+
+class BalancedSampler:
+    """
+    A batching sampler that creates balanced batches. The batch size
+    must be evenly divided by the number of classes. This does not
+    inherit from any of the existing Torch Samplers because it does
+    not require any of their functionalty. Instead, this is a wrapper
+    for many other Samplers, one for each class.
+    """
+
+    def __init__(self, dataset, batch_size, drop_last):
+        assert isinstance(dataset, Dataset), \
+            "Dataset must be an instance of utils.Dataset."
+        # Determine the unique classes.
+        _, dat_out = dataset.raw()
+        clss = set(dat_out.tolist())
+        num_clss = len(clss)
+        assert batch_size >= num_clss, \
+            (f"The batch size ({batch_size}) must be at least as large as the "
+             f"number of classes ({num_clss})!")
+        assert batch_size % num_clss == 0, \
+            (f"The number of classes ({num_clss}) must evenly divide the batch "
+             f"size ({batch_size})!")
+
+        print("Balancing classes...")
+        # Find the indices for each class.
+        clss_idxs = {cls: torch.where(dat_out == cls)[0] for cls in clss}
+        # Determine the number of examples in the most populous class.
+        max_examples = max(len(cls_idxs) for cls_idxs in clss_idxs.values())
+        # Generate new samples to fill in under-represented classes.
+        for cls, cls_idxs in clss_idxs.items():
+            num_examples = len(cls_idxs)
+            # If this class has insufficient examples...
+            if num_examples < max_examples:
+                new_examples = max_examples - num_examples
+                # Duplicate existing examples to make this class balanced.
+                # Append the duplicated examples to the true examples.
+                clss_idxs[cls] = torch.cat(
+                    (cls_idxs,
+                     torch.multinomial(
+                         # Sample from the existing examples using a uniform
+                         # distribution.
+                         torch.ones((num_examples,)),
+                         num_samples=new_examples,
+                         # Sample with replacement in case the number of new
+                         # examples is greater than the number of existing
+                         # examples.
+                         replacement=True)),
+                    dim=0)
+                print(f"    Added {new_examples} examples to class {cls}.")
+        # Create a BatchSampler iterator for each class.
+        examples_per_cls = batch_size // num_clss
+        self.samplers = {
+            cls: torch.utils.data.BatchSampler(
+                torch.utils.data.RandomSampler(cls_idxs, replacement=False),
+                examples_per_cls, drop_last)
+            for cls, cls_idxs in clss_idxs.items()}
+        # After __iter__() is called, this will contain an iterator for each
+        # class.
+        self.iters = {}
+        self.num_batches = max_examples // examples_per_cls
+
+    def __iter__(self):
+        # Create an iterator for each class.
+        self.iters = {
+            cls: iter(sampler) for cls, sampler in self.samplers.items()}
+        return self
+
+    def __len__(self):
+        return self.num_batches
+
+    def __next__(self):
+        # Pull examples from each class and merge them into a single list.
+        return [idx for it in self.iters.values() for idx in next(it)]
 
 
 class Sim():
@@ -19,8 +181,9 @@ class Sim():
         self.name = sim
         toks = sim.split("-")
         if sim.endswith(".npz"):
-            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s-2rttW.npz
-            toks = toks[:-1]
+            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s.npz
+            # Remove ".npz" from the last token.
+            toks[-1] = toks[-1][:-4]
         # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
         (bw_Mbps, btl_delay_us, queue_p, unfair_flws, other_flws, edge_delays,
          payload_B, dur_s) = toks
@@ -43,43 +206,105 @@ class Sim():
         self.dur_s = float(dur_s[:-1])
 
 
-def parse_packets_endpoint(flp, packet_size_B):
+def args_to_str(args, order):
     """
-    Takes in a file path and returns (seq, timestamp).
+    Converts the provided arguments dictionary to a string, using the
+    keys in order to determine the order of arguments in the
+    string.
     """
-    # Not using parse_time_us for efficiency purpose
-    return [
-        (scapy.layers.ppp.PPP(pkt_dat)[scapy.layers.inet.TCP].seq,
-         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
-        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Ignore non-data packets.
-        if pkt_mdat.wirelen >= packet_size_B
-    ]
+    for key in order:
+        assert key in args, f"Key {key} not in args: {args}"
+    return "-".join(
+        [str(args[key]) for key in order if key not in ARGS_TO_IGNORE])
 
 
-def parse_packets_router(flp, packet_size_B):
+def str_to_args(args_str, order):
     """
-    Takes in a file path and returns (sender, timestamp).
+    Converts the provided string of arguments to a dictionary, using
+    the keys in order to determine the identity of each argument in the
+    string.
     """
-    # Not using parse_time_us for efficiency purpose
-    return [
-        # Parse each packet as a PPP packet.
-        (int(scapy.layers.ppp.PPP(pkt_dat)[
-            scapy.layers.inet.IP].src.split(".")[2]),
-         pkt_mdat.sec * 1e6 + pkt_mdat.usec)
-        for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp)
-        # Ignore non-data packets.
-        if pkt_mdat.wirelen >= packet_size_B
-    ]
+    # Remove extension and split on "-".
+    toks = ".".join(args_str.split(".")[:-1]).split("-")
+    # Remove elements of order that args_to_str() does not use when
+    # encoding strings.
+    order = [key for key in order if key not in ARGS_TO_IGNORE]
+    num_toks = len(toks)
+    num_order = len(order)
+    assert num_toks == num_order, \
+        (f"Mismatched tokens ({num_toks}) and order ({num_order})! "
+         "tokens: {toks}, order: {order}")
+    parsed = {}
+    for arg, tok in zip(order, toks):
+        try:
+            parsed_val = float(tok)
+        except ValueError:
+            parsed_val = tok
+        parsed[arg] = parsed_val
+    return parsed
 
 
-def scale(x, min_in, max_in, min_out, max_out):
+def parse_packets(flp, packet_size_B, direction="data"):
     """
-    Scales x, which is from the range [min_in, max_in], to the range
+    Parses a PCAP file. Returns a list of tuples of the form:
+        (seq, sender, timestamp us, timestamp option)
+    with one entry for every packet. Considers only packets in either the "ack"
+    or "data" direction.
+    """
+    dir_opts = ["ack", "data"]
+    assert direction in dir_opts, \
+        f"\"direction\" must be one of {dir_opts}, but is: {direction}"
+
+    pkts = []
+    for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp):
+        ppp = scapy.layers.ppp.PPP(pkt_dat)
+        src = [int(part) for part in ppp[scapy.layers.inet.IP].src.split(".")]
+        if ((direction == "data" and src[0] == 10 and
+             pkt_mdat.wirelen >= packet_size_B) or
+                (direction == "ack" and src[0] == 20)):
+            tcp = ppp[scapy.layers.inet.TCP]
+            pkts.append((
+                # Sequence number.
+                tcp.seq,
+                # Sender.
+                src[2],
+                # Timestamp. Not using parse_time_us for efficiency purpose.
+                pkt_mdat.sec * 1e6 + pkt_mdat.usec,
+                # Timestamp option.
+                tcp.options[0][1]))
+    return pkts
+
+
+def scale(val, min_in, max_in, min_out, max_out):
+    """
+    Scales val, which is from the range [min_in, max_in], to the range
     [min_out, max_out].
     """
     assert min_in != max_in, "Divide by zero!"
-    return min_out + (x - min_in) * (max_out - min_out) / (max_in - min_in)
+    return min_out + (val - min_in) * (max_out - min_out) / (max_in - min_in)
+
+
+def scale_all(dat, scl_prms, min_out, max_out, standardize):
+    """
+    Uses the provided scaling parameters to scale the columns of
+    dat. If standardize is False, then the values are rescaled to the
+    range [min_out, max_out].
+    """
+    dat_dtype = dat.dtype
+    fets = dat_dtype.names
+    num_scl_prms = len(scl_prms)
+    assert len(fets) == num_scl_prms, \
+        (f"Mismatching dtype ({fets}) and number of scale parameters "
+         f"({num_scl_prms})!")
+    new = np.empty(dat.shape, dtype=dat_dtype)
+    for idx, fet in enumerate(fets):
+        prm_1, prm_2 = scl_prms[idx]
+        new[fet] = (
+            (dat[fet] - prm_1) / prm_2 if standardize else
+            scale(
+                dat[fet], min_in=prm_1, max_in=prm_2, min_out=min_out,
+                max_out=max_out))
+    return new
 
 
 def load_sim(flp, msg=None):
@@ -88,10 +313,15 @@ def load_sim(flp, msg=None):
     a tuple of the form: (total number of flows, results matrix).
     """
     print(f"{'' if msg is None else f'{msg} - '}Parsing: {flp}")
-    with np.load(flp) as fil:
-        assert len(fil.files) == 1 and "1" in fil.files, \
-            "More than one unfair flow detected!"
-        return Sim(flp), fil["1"]
+    try:
+        with np.load(flp) as fil:
+            assert len(fil.files) == 1 and "1" in fil.files, \
+                "More than one unfair flow detected!"
+            dat = fil["1"]
+    except zipfile.BadZipFile:
+        print(f"Bad simulation file: {flp}")
+        dat = None
+    return Sim(flp), dat
 
 
 def clean(arr):
@@ -107,8 +337,103 @@ def clean(arr):
         (f"Only 1D structured arrays are supported, but this one has {num_dims} "
          "dims!")
 
-    num_cols = len(arr.dtype.descr)
+    num_cols = len(arr.dtype.names)
     new = np.empty((arr.shape[0], num_cols), dtype=float)
     for col in range(num_cols):
         new[:, col] = arr[arr.dtype.names[col]]
     return new
+
+
+def visualize_classes(net, dat, is_svm):
+    """ Prints statistics about the classes in dat. """
+    # Visualaize the ground truth data.
+    clss = ([-1, 1] if is_svm
+            else list(range(net.num_clss)))
+    # Assumes that dat is a structured numpy array containing a
+    # column named "class".
+    tots = [
+        ((dat if dat.dtype.names is None else dat["class"]) == cls).sum()
+        for cls in clss]
+    # The total number of class labels extracted in the previous line.
+    tot = sum(tots)
+    print("Classes:\n" + "\n".join(
+        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
+         for cls, tot_cls in zip(clss, tots)]))
+    tot_actual = np.prod(np.array(dat.shape))
+    assert tot == tot_actual, \
+        f"Error visualizing ground truth! {tot} != {tot_actual}"
+
+
+def safe_mathis_label(tput_true, tput_mathis):
+    """
+    Returns the Mathis model label based on the true throughput and
+    Mathis model fair throughput. If either component value is -1
+    (unknown), then the resulting label is -1 (unknown).
+    """
+    return (
+        -1 if tput_true == -1 or tput_mathis == -1 else
+        int(tput_true > tput_mathis))
+
+
+def safe_min(val1, val2):
+    """
+    Safely computes the min of two values. If either value is -1 or 0,
+    then that value is discarded and the other value becomes the
+    min. If both values are discarded, then the min is -1 (unknown).
+    """
+    unsafe = (-1, 0)
+    return (
+        -1 if val1 in unsafe and val2 in unsafe else (
+            val2 if val1 in unsafe else (
+                val1 if val2 in unsafe else (
+                    min(val1, val2)))))
+
+
+def safe_mul(val1, val2):
+    """
+    Safely multiplies two values. If either value is -1, then the
+    result is -1 (unknown).
+    """
+    return -1 if val1 == -1 or val2 == -1 else val1 * val2
+
+
+def safe_div(num, den):
+    """
+    Safely divides two values. If either value is -1 or the
+    denominator is 0, then the result is -1 (unknown).
+    """
+    return -1 if num == -1 or den in (-1, 0) else num / den
+
+
+def safe_sqrt(val):
+    """
+    Safely calculates the square root of a value. If the value is less
+    than or equal to 0, then the result is -1 (unknown).
+    """
+    return -1 if val < 0 else math.sqrt(val)
+
+
+def safe_mean(dat, start_idx, end_idx):
+
+    """
+    Safely calculates a mean over a window. Any values that are -1
+    (unknown) are discarded. The mean of an empty window if -1
+    (unknown).
+    """
+    # Extract the window.
+    dat_win = dat[start_idx:end_idx + 1]
+    # Eliminate values that are -1 (unknown).
+    dat_win = dat_win[dat_win != -1]
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_win.shape[0] == 0 else np.mean(dat_win)
+
+
+def safe_update_ewma(prev_ewma, new_val, alpha):
+    """
+    Safely updates an exponentially weighted moving average. If the
+    previous EWMA is -1 (unknown), then the new EWMA is assumed to be
+    the unweighted new value.
+    """
+    return (
+        new_val if prev_ewma == -1 else
+        alpha * new_val + (1 - alpha) * prev_ewma)

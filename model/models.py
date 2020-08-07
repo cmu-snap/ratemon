@@ -1,52 +1,63 @@
 #!/usr/bin/env python3
-"""
-Models of the form:
-  (current throughput, current RTT, target throughput) -> (ACK pacing interval)
-"""
+""" Models. """
 
 import functools
 import math
+import os
+from os import path
 import random
+from statistics import mean
 
+from matplotlib import pyplot
 import numpy as np
+import sklearn
+from sklearn import feature_selection
+from sklearn import linear_model
+from sklearn import svm
 import torch
 
 
-class Model(torch.nn.Module):
+class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
 
+    # The name of this model.
+    name = None
     # The specification of the input tensor format.
     in_spc = []
     # The specification of the output tensor format.
     out_spc = []
     # The number of output classes.
     num_clss = 0
-    # Whether this model is an LSTM. LSTMs require slightly different
-    # data handling.
-    is_lstm = False
     # The loss function to use during training.
     los_fnc = None
     # The optimizer to use during training.
     opt = None
+    # Model-specific parameters. Each model may use these differently.
+    params = []
 
     def __init__(self):
-        super(Model, self).__init__()
+        self.net = None
+        self.graph = False
+        self.__check()
 
-    def check(self):
-        """ Verifies that this Model instance has been initialized properly. """
+    def __check(self):
+        """
+        Verifies that this PytorchModel instance has been initialized properly.
+        """
+        assert self.name is not None, "Empty name!"
         assert self.in_spc, "Empty in_spc!"
         assert self.out_spc, "Empty out_spc!"
-        assert self.num_clss is None or self.num_clss > 0, \
-    "Invalid number of output classes!"
-        assert self.los_fnc is not None, "No loss function!"
-        assert self.opt is not None, "No optimizer!"
+        assert self.num_clss > 0, "Invalid number of output classes!"
+        if not isinstance(self, SvmSklearnWrapper):
+            assert self.los_fnc is not None, "No loss function!"
+            assert self.opt is not None, "No optimizer!"
 
     def init_hidden(self, batch_size):
         """
         If this model is an LSTM, then this method returns the initialized
         hidden state. Otherwise, returns None.
         """
-        return None
+        return torch.zeros(()), torch.zeros(())
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -55,68 +66,74 @@ class Model(torch.nn.Module):
 
     def modify_data(self, sim, dat_in, dat_out):
         """ Performs an arbitrary transformation on the data. """
-        return dat_in, dat_out
+        return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
 
-    def forward(self, x, hidden):
-        raise Exception(("Attempting to call \"forward()\" on the Model base "
-                         "class itself."))
+    def check_output(self, out, target):
+        """
+        Returns the number of examples from out that were classified correctly,
+        according to target.
+        """
+        size_out = out.size()
+        size_target = target.size()
+        assert size_target
+        assert size_out[0] == size_target[0], \
+            ("Output and target have different batch sizes (first dimension): "
+             f"{size_out} != {size_target}")
+        # Transform the output into classes.
+        out = self._check_output_helper(out)
+        size_out = out.size()
+        assert size_out == size_target, \
+            f"Output and target sizes do not match: {size_out} != {size_target}"
+        # eq(): Compare the outputs to the labels.
+        # type(): Cast the resulting bools to ints.
+        # sum(): Sum them up to get the total number of correct predictions.
+        return out.eq(target).type(torch.int).sum().item()
+
+    def _check_output_helper(self, out):
+        """ Convert the raw network output into classes. """
+        # Assume a one-hot encoding of class probabilities. The class
+        # is the index of the output entry with greatest value (i.e.,
+        # highest probability). Set dim=1 because the first dimension
+        # is the batch.
+        size_out = out.size()
+        assert size_out[1] == self.num_clss, \
+            (f"Expecting one-hot encoding for {self.num_clss} classes, but "
+             f"found size: {size_out}")
+        return torch.argmax(out, dim=1)
+
+    def new(self):
+        """ Returns a new instance of the underlying torch.nn.Module. """
+        raise Exception(
+            ("Attempting to call \"new()\" on the PytorchModelWrapper base class "
+             "itself."))
 
 
-class BinaryDnn(Model):
-    """ A simple binary classifier neural network. """
+class BinaryModelWrapper(PytorchModelWrapper):
+    """ A base class for binary classification models. """
 
-    # in_spc = ["arrival time", "loss rate"]
-    in_spc = ["arrival time"]
-    # in_spc = ["inter-arrival time", "loss rate"]
-    # in_spc = ["inter-arrival time"]
-    out_spc = ["queue occupancy"]
     num_clss = 2
-    los_fnc = torch.nn.CrossEntropyLoss
-    opt = torch.optim.SGD
 
-    def __init__(self, win=100, rtt_buckets=True, sqrt_loss=False, disp=False):
-        super(BinaryDnn, self).__init__()
-        self.check()
+    def __init__(self, win=100, rtt_buckets=False, windows=False):
+        super(BinaryModelWrapper, self).__init__()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
-        if self.rtt_buckets:
-            assert "arrival time" in self.in_spc, \
-                "When bucketizing packets, \"arrival time\" must be a feature."
-        self.sqrt_loss = sqrt_loss
-
+        self.windows = windows
+        if self.rtt_buckets or self.windows:
+            assert "arrival time us" in self.in_spc, \
+                ("When bucketizing packets, \"arrival time us\" must be a "
+                 "feature.")
         # Determine layer dimensions. If we are bucketizing packets
         # based on arrival time, then there will be one input feature
         # for every bucket (self.win) plus one input feature for every
-        # entry in self.in_spc *except* for "arrival time". If we are
+        # entry in self.in_spc *except* for "arrival time us". If we are
         # not bucketizing packets, then there will be one input
         # feature for each entry in self.in_spc for each packet
         # (self.win).
-        num_ins = (self.win + len(self.in_spc) - 1 if self.rtt_buckets
-                   else len(self.in_spc) * self.win)
-        dim_1 = min(num_ins, 64)
-        dim_2 = min(dim_1, 32)
-        dim_3 = min(dim_2, 16)
-        # We must store these as indivual class variables (instead of
-        # just storing them in self.fcs) because PyTorch looks at the
-        # class variables to determine the model's trainable weights.
-        self.fc0 = torch.nn.Linear(num_ins, dim_1)
-        self.fc1 = torch.nn.Linear(dim_1, dim_2)
-        self.fc2 = torch.nn.Linear(dim_2, dim_3)
-        self.fc3 = torch.nn.Linear(dim_3, self.num_clss)
-        self.fcs = [self.fc0, self.fc1, self.fc2, self.fc3]
-        self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"BinaryDnn - win: {self.win}, fc layers: {len(self.fcs)}"
-                  "\n    " + "\n    ".join(
-                      [f"Linear: {lay.in_features}x{lay.out_features}"
-                       for lay in self.fcs]) +
-                  "\n    Sigmoid")
-
-    def forward(self, x, hidden=None):
-        for fc in self.fcs:
-            x = torch.nn.functional.relu(fc(x))
-        return self.sg(x), hidden
+        self.num_ins = (
+            self.win + len(self.in_spc) - 1 if self.rtt_buckets else (
+                len(self.in_spc) * self.win if self.windows else
+                len(self.in_spc)))
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -138,10 +155,10 @@ class BinaryDnn(Model):
         return clss_str
 
     @staticmethod
-    def bucketize(dat_in, dat_in_start_idx, dat_in_end_idx, dat_in_new,
-                  dat_in_new_idx, dur_us, num_buckets):
+    def __bucketize(dat_in, dat_in_start_idx, dat_in_end_idx, dat_in_new,
+                    dat_in_new_idx, dur_us, num_buckets):
         """
-        Uses dat_in["arrival time"] to divide the arriving packets from
+        Uses dat_in["arrival time us"] to divide the arriving packets from
         the range [dat_in_start_idx, dat_in_end_idx] into num_buckets
         intervals. Each interval has duration dur_us / num_buckets.
         Stores the resulting histogram in dat_in_new, at the row
@@ -150,35 +167,31 @@ class BinaryDnn(Model):
         nothing.
         """
         fets = dat_in.dtype.names
-        assert "arrival time" in fets, f"Missing \"arrival time\": {fets}"
-        arr_times = dat_in["arrival time"][dat_in_start_idx:dat_in_end_idx + 1]
+        assert "arrival time us" in fets, f"Missing \"arrival time us\": {fets}"
+        arr_times = dat_in[
+            "arrival time us"][dat_in_start_idx:dat_in_end_idx + 1]
         num_pkts = arr_times.shape[0]
         assert num_pkts > 0, "Need more than 0 packets!"
 
         # We are turning the arrival times into buckets, but there are
         # other features that must be preserved.
         other_fets = [col for col in dat_in.dtype.descr
-                      if col[0] != "arrival time" and col[0] != ""]
+                      if col[0] != "arrival time us" and col[0] != ""]
         # The duration of each interval.
         interval_us = dur_us / num_buckets
         # The arrival time of the first packet, and therefore the
         # start of the first interval.
         start_time_us = arr_times[0]
-
-        for arr_time in arr_times:
-            diff = arr_time - start_time_us
-            raw_interval = diff / interval_us
-            interval_idx = np.floor(raw_interval).astype(int)
-            # # Convert the arrival times to interval indices and loop over them.
-            # for interval_idx in np.floor(
-            #         (arr_times - start_time_us) / interval_us).astype(int):
+        # Convert the arrival times to interval indices and loop over them.
+        for interval_idx in np.floor(
+                (arr_times - start_time_us) / interval_us).astype(int):
+            if interval_idx == num_buckets:
+                print(f"Warning: Interval is {interval_idx} when it should be "
+                      f"in the range [0, {num_buckets}]. Fixing interval...")
+                interval_idx -= 1
             assert 0 <= interval_idx < num_buckets, \
-                (f"Invalid idx ({interval_idx}) for the number of buckets ({num_buckets})!\n"
-                 f"arr_times: {arr_times}\n"
-                 f"arr_time: {arr_time}\n"
-                 f"start_time_us: {start_time_us}\n"
-                 f"diff: {diff}\n"
-                 f"raw_interval: {raw_interval}\n")
+                (f"Invalid idx ({interval_idx}) for the number of buckets "
+                 f"({num_buckets})!")
             dat_in_new[dat_in_new_idx][interval_idx] += 1
         # Set the values of the other features based on the last packet in this
         # window.
@@ -191,7 +204,8 @@ class BinaryDnn(Model):
             (f"Error building counts! Bucketed {bucketed_pkts} of {num_pkts} "
              "packets!")
 
-    def create_buckets(self, sim, dat_in, dat_out):
+    def __create_buckets(self, sim, dat_in, dat_out, dat_out_raw,
+                         dat_out_oracle, sequential):
         """
         Divides dat_in into windows and divides each window into self.win
         buckets, which each defines a temporal interval. The value of
@@ -199,9 +213,10 @@ class BinaryDnn(Model):
         interval. The output value for each window is the output of
         the last packet in the window.
         """
+        print("Creating arrival time buckets...")
         fets = dat_in.dtype.names
-        assert "arrival time" in fets, f"Missing \"arrival time\": {fets}"
-        arr_times = dat_in["arrival time"]
+        assert "arrival time us" in fets, f"Missing \"arrival time us\": {fets}"
+        arr_times = dat_in["arrival time us"]
 
         # 100x the min RTT (as determined by the simulation parameters).
         dur_us = 100 * 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
@@ -221,14 +236,19 @@ class BinaryDnn(Model):
         assert start_idx is not None and 0 <= start_idx < num_pkts, \
             f"Invalid start index: {start_idx}"
 
-        # The number of windows is the number of times the window
-        # durations fits within the simulation.
-        num_wins = 10 * math.floor(sim.dur_s * 1e6 / dur_us)
-        # Select random intervals from this simulation to create the
-        # new input data. win_idx is the index into
-        # dat_in_new. pkt_idx is the index of the last packet in this
-        # window.
-        pkt_idxs = random.choices(range(start_idx, num_pkts), k=num_wins)
+        if sequential:
+            # Select all valid windows, in order.
+            num_wins = num_pkts - start_idx
+            pkt_idxs = list(range(start_idx, num_pkts))
+        else:
+            # The number of windows is the number of times the window
+            # durations fits within the simulation.
+            num_wins = 10 * math.floor(sim.dur_s * 1e6 / dur_us)
+            # Select random intervals from this simulation to create the
+            # new input data. win_idx is the index into
+            # dat_in_new. pkt_idx is the index of the last packet in this
+            # window.
+            pkt_idxs = random.choices(range(start_idx, num_pkts), k=num_wins)
         # Records the number of packets that arrived during each
         # interval. This is a structured numpy array where each column
         # is named based on its bucket index. We add extra columns for
@@ -237,7 +257,7 @@ class BinaryDnn(Model):
             (num_wins,),
             dtype=([(f"bucket_{bkt}", "float") for bkt in range(self.win)] +
                    [col for col in dat_in.dtype.descr
-                    if col[0] != "arrival time" and col[0] != ""]))
+                    if col[0] != "arrival time us" and col[0] != ""]))
 
         for win_idx, pkt_idx in enumerate(pkt_idxs):
             # Find the first packet in this window (whose index will
@@ -258,7 +278,7 @@ class BinaryDnn(Model):
                 win_start_idx is not None and 0 <= win_start_idx <= pkt_idx), \
                 ("Problem finding beginning of window! Are there insufficient "
                  "packets?")
-            self.bucketize(
+            self.__bucketize(
                 dat_in, win_start_idx, pkt_idx, dat_in_new, win_idx, dur_us,
                 self.win)
 
@@ -273,17 +293,20 @@ class BinaryDnn(Model):
             # value. I.e., the final ground truth value for this window
             # becomes the ground truth for the entire window.
             np.take(dat_out, pkt_idxs),
+            np.take(dat_out_raw, pkt_idxs),
+            np.take(dat_out_oracle, pkt_idxs),
             # The buckets all share a scaling group. Each other
             # feature is part of its own group.
             [0] * self.win +
             list(range(1, len(dat_in_new.dtype.names) - self.win + 1)))
 
-    def create_windows(self, dat_in, dat_out):
+    def __create_windows(self, dat_in, dat_out, sequential):
         """
         Divides dat_in into windows of self.win packets. Flattens the
         features of the packets in a window. The output value for each
         window is the output of the last packet in the window.
         """
+        print("Creating windows...")
         num_pkts = dat_in.shape[0]
         num_wins = math.ceil(num_pkts / self.win)
         fets = [(name, typ) for name, typ in dat_in.dtype.descr if name != ""]
@@ -299,6 +322,7 @@ class BinaryDnn(Model):
             *[(scl_grp, (f"{name}_{idx}", typ))
               for idx in range(self.win)
               for scl_grp, (name, typ) in enumerate(fets)])
+        scl_grps = np.array(scl_grps)
         dat_in_new = np.zeros((num_wins,), dtype=list(dtype))
 
         for win_idx, end_idx in enumerate(pkt_idxs):
@@ -322,102 +346,723 @@ class BinaryDnn(Model):
         # becomes the ground truth for the entire window.
         return dat_in_new, np.take(dat_out, pkt_idxs), scl_grps
 
-    def modify_data(self, sim, dat_in, dat_out):
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    sequential):
         """
         Extracts from the set of simulations many separate intervals. Each
         interval becomes a training example.
         """
-        dat_in_new, dat_out_new, scl_grps = (
-            self.create_buckets(sim, dat_in, dat_out) if self.rtt_buckets
-            else self.create_windows(dat_in, dat_out))
-
-        # If configured to do so, compute 1 / sqrt(x) for any features
-        # that contain "loss rate". We cannot simply look for a single
-        # feature named exactly "loss rate" because if
-        # self.rtt_buckets == False, then there may exist many features of the
-        # form "loss rate_X".
-        if self.sqrt_loss:
-            for fet in dat_in_new.dtype.names:
-                if "loss rate" in fet:
-                    dat_in_new[fet] = np.reciprocal(np.sqrt(dat_in_new[fet]))
-
-        return dat_in_new, dat_out_new, scl_grps
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
+            self.__create_buckets(
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential)
+            if self.rtt_buckets else (
+                self.__create_windows(dat_in, dat_out, sequential)
+                if self.windows else (
+                    dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    # Each feature is part of its own scaling group.
+                    list(range(len(dat_in.dtype.names))))))
+        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
 
+class BinaryDnnWrapper(BinaryModelWrapper):
+    """ Wraps BinaryDnn. """
 
-class SVM(BinaryDnn):
-    """ A simple SVM binary classifier. """
-
-    in_spc = ["inter-arrival time", "loss rate"]
+    name = "BinaryDnn"
+    # in_spc = ["arrival time", "loss rate"]
+    in_spc = ["arrival time"]
+    # in_spc = ["inter-arrival time", "loss rate"]
+    # in_spc = ["inter-arrival time"]
     out_spc = ["queue occupancy"]
-    num_clss = None
+    los_fnc = torch.nn.CrossEntropyLoss
+    opt = torch.optim.SGD
+    params = ["lr", "momentum"]
+
+    def new(self):
+        self.net = BinaryDnn(self.num_ins, self.num_clss)
+        return self.net
+
+
+class BinaryDnn(torch.nn.Module):
+    """ A simple binary classifier neural network. """
+
+    def __init__(self, num_ins, num_outs):
+        super(BinaryDnn, self).__init__()
+        dim_1 = min(num_ins, 64)
+        dim_2 = min(dim_1, 32)
+        dim_3 = min(dim_2, 16)
+        # We must store these as indivual class variables (instead of
+        # just storing them in a list) because PyTorch looks at the
+        # class variables to determine the model's trainable weights.
+        self.fc0 = torch.nn.Linear(num_ins, dim_1)
+        self.fc1 = torch.nn.Linear(dim_1, dim_2)
+        self.fc2 = torch.nn.Linear(dim_2, dim_3)
+        self.fc3 = torch.nn.Linear(dim_3, num_outs)
+        self.sg = torch.nn.Sigmoid()
+        print("BinaryDnn:\n    " +
+              "\n    ".join(
+                  [f"Linear: {lay.in_features}x{lay.out_features}"
+                   for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
+              "\n    Sigmoid")
+
+    def forward(self, x):
+        x = torch.nn.functional.relu(self.fc0(x))
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.relu(self.fc2(x))
+        x = torch.nn.functional.relu(self.fc3(x))
+        return self.sg(x)
+
+
+class SvmWrapper(BinaryModelWrapper):
+    """ Wraps Svm. """
+
+    name = "Svm"
+    in_spc = ["arrival time", "loss rate"]
+    out_spc = ["queue occupancy"]
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
+    params = ["lr", "momentum"]
 
-    def __init__(self, win=20, rtt_buckets=True, disp=False):
-        super(BinaryDnn, self).__init__()
-        self.check()
+    def new(self):
+        self.net = Svm(self.num_ins)
+        return self.net
 
-        self.win = win
-        self.rtt_buckets = rtt_buckets
-        self.fc0 = torch.nn.Linear(self.win if self.rtt_buckets else len(BinaryDnn.in_spc) * self.win, 1)
-        self.sg = torch.nn.Sigmoid()
-        if (disp):
-            print(f"SVM - win: {self.win}, fc layers: 1\n    " +
-                  f"Linear: {self.fc0.in_features}x{self.fc0.out_features}" +
-                  "\n    Sigmoid")
+    def modify_data(self, sim, dat_in, dat_out, dat_out_raw, dat_out_oracle,
+                    sequential):
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = (
+            super(SvmWrapper, self).modify_data(
+                sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential))
+        # Map [0,1] to [-1, 1]
+        fet = dat_out.dtype.names[0]
+        dat_out[fet] = dat_out[fet] * 2 - 1
+        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
-    def forward(self, x, hidden=None):
-        return self.fc0(x), hidden
+    def _check_output_helper(self, out):
+        # Remove a trailing dimension of size 1.
+        out = torch.reshape(out, (out.size()[0],))
+        # Transform the output to report classes -1 and 1.
+        out[torch.where(out < 0)] = -1
+        out[torch.where(out >= 0)] = 1
+        return out
 
-    def modify_data(self, sim, dat_in, dat_out, **kwargs):
-        new_dat_in, new_dat_out = super(SVM, self).modify_data(sim, dat_in, dat_out, **kwargs)
-        for i in range(len(new_dat_out)):
-            new_dat_out[i][0] = new_dat_out[i][0] * 2 - 1 # Map [0,1] to [-1, 1]
-        return new_dat_in, new_dat_out
+
+class Svm(torch.nn.Module):
+    """ A simple SVM binary classifier. """
+
+    def __init__(self, num_ins):
+        super(Svm, self).__init__()
+        self.fc = torch.nn.Linear(num_ins, 1)
+        print(f"SVM:\n    Linear: {self.fc.in_features}x{self.fc.out_features}")
+
+    def forward(self, x):
+        return self.fc(x)
 
 
-class Lstm(Model):
-    """ An LSTM that classifies a flow into one of five fairness categories. """
+class SvmSklearnWrapper(SvmWrapper):
+    """ Wraps an sklearn SVM. """
 
+    name = "SvmSklearn"
+    in_spc = [
+        "1/sqrt loss event rate-windowed-minRtt1",
+        "1/sqrt loss event rate-windowed-minRtt1024",
+        "1/sqrt loss event rate-windowed-minRtt128",
+        "1/sqrt loss event rate-windowed-minRtt16",
+        "1/sqrt loss event rate-windowed-minRtt2",
+        "1/sqrt loss event rate-windowed-minRtt256",
+        "1/sqrt loss event rate-windowed-minRtt32",
+        "1/sqrt loss event rate-windowed-minRtt4",
+        "1/sqrt loss event rate-windowed-minRtt512",
+        "1/sqrt loss event rate-windowed-minRtt64",
+        "1/sqrt loss event rate-windowed-minRtt8",
+        "RTT estimate ratio-ewma-alpha0.001",
+        "RTT estimate ratio-ewma-alpha0.002",
+        "RTT estimate ratio-ewma-alpha0.003",
+        "RTT estimate ratio-ewma-alpha0.004",
+        "RTT estimate ratio-ewma-alpha0.005",
+        "RTT estimate ratio-ewma-alpha0.006",
+        "RTT estimate ratio-ewma-alpha0.007",
+        "RTT estimate ratio-ewma-alpha0.008",
+        "RTT estimate ratio-ewma-alpha0.009",
+        "RTT estimate ratio-ewma-alpha0.01",
+        "RTT estimate ratio-ewma-alpha0.1",
+        "RTT estimate ratio-ewma-alpha0.2",
+        "RTT estimate ratio-ewma-alpha0.3",
+        "RTT estimate ratio-ewma-alpha0.4",
+        "RTT estimate ratio-ewma-alpha0.5",
+        "RTT estimate ratio-ewma-alpha0.6",
+        "RTT estimate ratio-ewma-alpha0.7",
+        "RTT estimate ratio-ewma-alpha0.8",
+        "RTT estimate ratio-ewma-alpha0.9",
+        "RTT estimate ratio-ewma-alpha1.0",
+        "RTT estimate us-ewma-alpha0.001",
+        "RTT estimate us-ewma-alpha0.002",
+        "RTT estimate us-ewma-alpha0.003",
+        "RTT estimate us-ewma-alpha0.004",
+        "RTT estimate us-ewma-alpha0.005",
+        "RTT estimate us-ewma-alpha0.006",
+        "RTT estimate us-ewma-alpha0.007",
+        "RTT estimate us-ewma-alpha0.008",
+        "RTT estimate us-ewma-alpha0.009",
+        "RTT estimate us-ewma-alpha0.01",
+        "RTT estimate us-ewma-alpha0.1",
+        "RTT estimate us-ewma-alpha0.2",
+        "RTT estimate us-ewma-alpha0.3",
+        "RTT estimate us-ewma-alpha0.4",
+        "RTT estimate us-ewma-alpha0.5",
+        "RTT estimate us-ewma-alpha0.6",
+        "RTT estimate us-ewma-alpha0.7",
+        "RTT estimate us-ewma-alpha0.8",
+        "RTT estimate us-ewma-alpha0.9",
+        "RTT estimate us-ewma-alpha1.0",
+        "average RTT estimate ratio-windowed-minRtt1",
+        "average RTT estimate ratio-windowed-minRtt1024",
+        "average RTT estimate ratio-windowed-minRtt128",
+        "average RTT estimate ratio-windowed-minRtt16",
+        "average RTT estimate ratio-windowed-minRtt2",
+        "average RTT estimate ratio-windowed-minRtt256",
+        "average RTT estimate ratio-windowed-minRtt32",
+        "average RTT estimate ratio-windowed-minRtt4",
+        "average RTT estimate ratio-windowed-minRtt512",
+        "average RTT estimate ratio-windowed-minRtt64",
+        "average RTT estimate ratio-windowed-minRtt8",
+        "average RTT estimate us-windowed-minRtt1",
+        "average RTT estimate us-windowed-minRtt1024",
+        "average RTT estimate us-windowed-minRtt128",
+        "average RTT estimate us-windowed-minRtt16",
+        "average RTT estimate us-windowed-minRtt2",
+        "average RTT estimate us-windowed-minRtt256",
+        "average RTT estimate us-windowed-minRtt32",
+        "average RTT estimate us-windowed-minRtt4",
+        "average RTT estimate us-windowed-minRtt512",
+        "average RTT estimate us-windowed-minRtt64",
+        "average RTT estimate us-windowed-minRtt8",
+        "average interarrival time us-windowed-minRtt1",
+        "average interarrival time us-windowed-minRtt1024",
+        "average interarrival time us-windowed-minRtt128",
+        "average interarrival time us-windowed-minRtt16",
+        "average interarrival time us-windowed-minRtt2",
+        "average interarrival time us-windowed-minRtt256",
+        "average interarrival time us-windowed-minRtt32",
+        "average interarrival time us-windowed-minRtt4",
+        "average interarrival time us-windowed-minRtt512",
+        "average interarrival time us-windowed-minRtt64",
+        "average interarrival time us-windowed-minRtt8",
+        "average throughput p/s-windowed-minRtt1",
+        "average throughput p/s-windowed-minRtt1024",
+        "average throughput p/s-windowed-minRtt128",
+        "average throughput p/s-windowed-minRtt16",
+        "average throughput p/s-windowed-minRtt2",
+        "average throughput p/s-windowed-minRtt256",
+        "average throughput p/s-windowed-minRtt32",
+        "average throughput p/s-windowed-minRtt4",
+        "average throughput p/s-windowed-minRtt512",
+        "average throughput p/s-windowed-minRtt64",
+        "average throughput p/s-windowed-minRtt8",
+        "interarrival time us-ewma-alpha0.001",
+        "interarrival time us-ewma-alpha0.002",
+        "interarrival time us-ewma-alpha0.003",
+        "interarrival time us-ewma-alpha0.004",
+        "interarrival time us-ewma-alpha0.005",
+        "interarrival time us-ewma-alpha0.006",
+        "interarrival time us-ewma-alpha0.007",
+        "interarrival time us-ewma-alpha0.008",
+        "interarrival time us-ewma-alpha0.009",
+        "interarrival time us-ewma-alpha0.01",
+        "interarrival time us-ewma-alpha0.1",
+        "interarrival time us-ewma-alpha0.2",
+        "interarrival time us-ewma-alpha0.3",
+        "interarrival time us-ewma-alpha0.4",
+        "interarrival time us-ewma-alpha0.5",
+        "interarrival time us-ewma-alpha0.6",
+        "interarrival time us-ewma-alpha0.7",
+        "interarrival time us-ewma-alpha0.8",
+        "interarrival time us-ewma-alpha0.9",
+        "interarrival time us-ewma-alpha1.0",
+        "loss event rate-windowed-minRtt1",
+        "loss event rate-windowed-minRtt1024",
+        "loss event rate-windowed-minRtt128",
+        "loss event rate-windowed-minRtt16",
+        "loss event rate-windowed-minRtt2",
+        "loss event rate-windowed-minRtt256",
+        "loss event rate-windowed-minRtt32",
+        "loss event rate-windowed-minRtt4",
+        "loss event rate-windowed-minRtt512",
+        "loss event rate-windowed-minRtt64",
+        "loss event rate-windowed-minRtt8",
+        "loss rate estimate-ewma-alpha0.001",
+        "loss rate estimate-ewma-alpha0.002",
+        "loss rate estimate-ewma-alpha0.003",
+        "loss rate estimate-ewma-alpha0.004",
+        "loss rate estimate-ewma-alpha0.005",
+        "loss rate estimate-ewma-alpha0.006",
+        "loss rate estimate-ewma-alpha0.007",
+        "loss rate estimate-ewma-alpha0.008",
+        "loss rate estimate-ewma-alpha0.009",
+        "loss rate estimate-ewma-alpha0.01",
+        "loss rate estimate-ewma-alpha0.1",
+        "loss rate estimate-ewma-alpha0.2",
+        "loss rate estimate-ewma-alpha0.3",
+        "loss rate estimate-ewma-alpha0.4",
+        "loss rate estimate-ewma-alpha0.5",
+        "loss rate estimate-ewma-alpha0.6",
+        "loss rate estimate-ewma-alpha0.7",
+        "loss rate estimate-ewma-alpha0.8",
+        "loss rate estimate-ewma-alpha0.9",
+        "loss rate estimate-ewma-alpha1.0",
+        "loss rate estimate-windowed-minRtt1",
+        "loss rate estimate-windowed-minRtt1024",
+        "loss rate estimate-windowed-minRtt128",
+        "loss rate estimate-windowed-minRtt16",
+        "loss rate estimate-windowed-minRtt2",
+        "loss rate estimate-windowed-minRtt256",
+        "loss rate estimate-windowed-minRtt32",
+        "loss rate estimate-windowed-minRtt4",
+        "loss rate estimate-windowed-minRtt512",
+        "loss rate estimate-windowed-minRtt64",
+        "loss rate estimate-windowed-minRtt8",
+        "mathis model label-ewma-alpha0.001",
+        "mathis model label-ewma-alpha0.002",
+        "mathis model label-ewma-alpha0.003",
+        "mathis model label-ewma-alpha0.004",
+        "mathis model label-ewma-alpha0.005",
+        "mathis model label-ewma-alpha0.006",
+        "mathis model label-ewma-alpha0.007",
+        "mathis model label-ewma-alpha0.008",
+        "mathis model label-ewma-alpha0.009",
+        "mathis model label-ewma-alpha0.01",
+        "mathis model label-ewma-alpha0.1",
+        "mathis model label-ewma-alpha0.2",
+        "mathis model label-ewma-alpha0.3",
+        "mathis model label-ewma-alpha0.4",
+        "mathis model label-ewma-alpha0.5",
+        "mathis model label-ewma-alpha0.6",
+        "mathis model label-ewma-alpha0.7",
+        "mathis model label-ewma-alpha0.8",
+        "mathis model label-ewma-alpha0.9",
+        "mathis model label-ewma-alpha1.0",
+        "mathis model label-windowed-minRtt1",
+        "mathis model label-windowed-minRtt1024",
+        "mathis model label-windowed-minRtt128",
+        "mathis model label-windowed-minRtt16",
+        "mathis model label-windowed-minRtt2",
+        "mathis model label-windowed-minRtt256",
+        "mathis model label-windowed-minRtt32",
+        "mathis model label-windowed-minRtt4",
+        "mathis model label-windowed-minRtt512",
+        "mathis model label-windowed-minRtt64",
+        "mathis model label-windowed-minRtt8",
+        "mathis model throughput p/s-ewma-alpha0.001",
+        "mathis model throughput p/s-ewma-alpha0.002",
+        "mathis model throughput p/s-ewma-alpha0.003",
+        "mathis model throughput p/s-ewma-alpha0.004",
+        "mathis model throughput p/s-ewma-alpha0.005",
+        "mathis model throughput p/s-ewma-alpha0.006",
+        "mathis model throughput p/s-ewma-alpha0.007",
+        "mathis model throughput p/s-ewma-alpha0.008",
+        "mathis model throughput p/s-ewma-alpha0.009",
+        "mathis model throughput p/s-ewma-alpha0.01",
+        "mathis model throughput p/s-ewma-alpha0.1",
+        "mathis model throughput p/s-ewma-alpha0.2",
+        "mathis model throughput p/s-ewma-alpha0.3",
+        "mathis model throughput p/s-ewma-alpha0.4",
+        "mathis model throughput p/s-ewma-alpha0.5",
+        "mathis model throughput p/s-ewma-alpha0.6",
+        "mathis model throughput p/s-ewma-alpha0.7",
+        "mathis model throughput p/s-ewma-alpha0.8",
+        "mathis model throughput p/s-ewma-alpha0.9",
+        "mathis model throughput p/s-ewma-alpha1.0",
+        "mathis model throughput p/s-windowed-minRtt1",
+        "mathis model throughput p/s-windowed-minRtt1024",
+        "mathis model throughput p/s-windowed-minRtt128",
+        "mathis model throughput p/s-windowed-minRtt16",
+        "mathis model throughput p/s-windowed-minRtt2",
+        "mathis model throughput p/s-windowed-minRtt256",
+        "mathis model throughput p/s-windowed-minRtt32",
+        "mathis model throughput p/s-windowed-minRtt4",
+        "mathis model throughput p/s-windowed-minRtt512",
+        "mathis model throughput p/s-windowed-minRtt64",
+        "mathis model throughput p/s-windowed-minRtt8",
+        "min RTT us",
+        "throughput p/s-ewma-alpha0.001",
+        "throughput p/s-ewma-alpha0.002",
+        "throughput p/s-ewma-alpha0.003",
+        "throughput p/s-ewma-alpha0.004",
+        "throughput p/s-ewma-alpha0.005",
+        "throughput p/s-ewma-alpha0.006",
+        "throughput p/s-ewma-alpha0.007",
+        "throughput p/s-ewma-alpha0.008",
+        "throughput p/s-ewma-alpha0.009",
+        "throughput p/s-ewma-alpha0.01",
+        "throughput p/s-ewma-alpha0.1",
+        "throughput p/s-ewma-alpha0.2",
+        "throughput p/s-ewma-alpha0.3",
+        "throughput p/s-ewma-alpha0.4",
+        "throughput p/s-ewma-alpha0.5",
+        "throughput p/s-ewma-alpha0.6",
+        "throughput p/s-ewma-alpha0.7",
+        "throughput p/s-ewma-alpha0.8",
+        "throughput p/s-ewma-alpha0.9",
+        "throughput p/s-ewma-alpha1.0"
+    ]
+    in_spc = [fet for fet in in_spc if (
+        "alpha0.002" not in fet and
+        "alpha0.004" not in fet and
+        "alpha0.006" not in fet and
+        "alpha0.008" not in fet and
+        "alpha0.01" not in fet and
+        "alpha0.2" not in fet and
+        "alpha0.4" not in fet and
+        "alpha0.6" not in fet and
+        "alpha0.8" not in fet and
+        "alpha0.9" not in fet and
+        "label" not in fet and
+        "tt512" not in fet and
+        "tt1024" not in fet and
+        "loss event rate" not in fet)]
+    out_spc = ["queue occupancy-ewma-alpha0.5"]
+    los_fnc = None
+    opt = None
+    params = ["kernel", "degree", "penalty", "max_iter", "graph"]
+
+    def new(self, **kwargs):
+        self.graph = kwargs["graph"]
+        kernel = kwargs["kernel"]
+        max_iter = kwargs["max_iter"]
+        # Automatically set the class weights based on the class
+        # popularity in the training data. Change the maximum number
+        # of iterations.
+        self.net = (
+            # Use manually-configured regularization. Since the number
+            # of samples is greater than the number of features, solve
+            # the primal optimization problem instead of its dual.
+            svm.LinearSVC(
+                penalty=kwargs["penalty"], dual=False, class_weight="balanced",
+                verbose=1, max_iter=max_iter)
+            if kernel == "linear" else
+            # Supports L2 regularization only. The degree parameter is
+            # used only if kernel == "poly".
+            svm.SVC(
+                kernel=kernel, degree=kwargs["degree"], class_weight="balanced",
+                verbose=1, max_iter=max_iter))
+        return self.net
+
+    def train(self, fets, dat_in, dat_out):
+        """ Fits this model to the provided dataset. """
+        self.net.fit(dat_in, dat_out)
+        print()
+        if isinstance(
+                self.net,
+                (sklearn.feature_selection.RFE,
+                 sklearn.feature_selection.RFECV)):
+            # Sort the features alphabetically.
+            best_fets = sorted(
+                zip(
+                    np.array(fets)[np.where(self.net.ranking_ == 1)],
+                    self.net.estimator_.coef_[0]),
+                key=lambda p: p[0])
+            print(f"Number of features selected: {len(best_fets)}")
+        else:
+            # First, sort the features by the absolute value of the
+            # importance and pick the top 20. Then, sort the features
+            # alphabetically.
+            best_fets = sorted(
+                sorted(
+                    zip(fets, self.net.coef_[0]),
+                    key=lambda p: abs(p[1]))[-20:],
+                key=lambda p: p[0])
+        best_fets = "\n".join([f"{fet}: {coef}" for fet, coef in best_fets])
+        print(f"----------\nBest features:\n{best_fets}\n----------")
+
+
+    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
+                   sort_by_unfairness=True):
+        # Compute the distance from fair, then divide by fair to
+        # compute the relative unfairness.
+        diffs = (raw - fair) / fair
+        if sort_by_unfairness:
+            # Sort based on unfairness.
+            diffs, indices = torch.sort(diffs)
+            preds = preds[indices]
+            labels = labels[indices]
+        # Bucketize and compute bucket accuracies.
+        num_samples = preds.size()[0]
+        num_buckets = min(20 * (1 if sort_by_unfairness else 4), num_samples)
+        num_per_bucket = math.floor(num_samples / num_buckets)
+        assert num_per_bucket > 0, \
+            ("There must be at least one sample per bucket, but there are "
+             f"{num_samples} samples and only {num_buckets} buckets!")
+        # The resulting buckets are tuples of three values:
+        #   (x-axis value for bucket, number predicted correctly, total)
+        buckets = [
+            (x,
+             self.check_output(preds_, labels_),
+             preds_.size()[0])
+            for x, preds_, labels_ in [
+                # Each bucket is defined by a tuple of three values:
+                #   (x-axis value for bucket, predictions, ground truth labels).
+                # The x-axis is the mean relative difference for this
+                # bucket. A few values at the end may be discarded.
+                (torch.mean(diffs[i:i + num_per_bucket]),
+                 preds[i:i + num_per_bucket],
+                 labels[i:i + num_per_bucket])
+                for i in range(0, num_samples, num_per_bucket)]]
+        if self.graph:
+            # Plot each bucket's accuracy.
+            pyplot.plot(
+                ([x for x, _, _ in buckets]
+                 if sort_by_unfairness else list(range(len(buckets)))),
+                [c / t for _, c, t in buckets], "bo-")
+            pyplot.ylim((-0.1, 1.1))
+            if x_lim is not None:
+                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+            pyplot.xlabel("Unfairness (fraction of fair)" if sort_by_unfairness else "Time")
+            pyplot.ylabel("Classification accuracy")
+            pyplot.tight_layout()
+            pyplot.savefig(flp)
+            pyplot.close()
+        # Compute the overall accuracy.
+        _, corrects, totals = zip(*buckets)
+        acc = sum(corrects) / sum(totals)
+        print(f"    Test accuracy: {acc * 100:.2f}%")
+        return acc
+
+
+    def __plot_throughput(self, preds, labels, raw, fair, flp, x_lim=None):
+        raw = raw.tolist()
+        fair = fair.tolist()
+
+        # Convert labels from -1 and 1 to 0 and 1
+        labels = (labels + 1) / 2
+        labels = labels.tolist()
+
+        # Bucketize and compute bucket accuracies.
+        num_samples = preds.size()[0]
+        num_buckets = min(20 * 4, num_samples)
+        num_per_bucket = math.floor(num_samples / num_buckets)
+        assert num_per_bucket > 0, \
+            ("There must be at least one sample per bucket, but there are "
+             f"{num_samples} samples and only {num_buckets} buckets!")
+        buckets = [
+            (mean(throughput_),
+             mean(labels_))
+            for throughput_, labels_ in [
+                (raw[i:i + num_per_bucket],
+                 labels[i:i + num_per_bucket])
+                for i in range(0, num_samples, num_per_bucket)]]
+        if self.graph:
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [throughput for throughput, _ in buckets], "b-")
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [fair] * len(buckets), "g--")
+            pyplot.plot(
+                (list(range(len(buckets)))),
+                [label for _, label in buckets], "r^")
+            if x_lim is not None:
+                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+            pyplot.xlabel("Time")
+            pyplot.ylabel("Queue occupancy vs Fair queue occupancy")
+            pyplot.tight_layout()
+            pyplot.savefig(flp)
+            pyplot.close()
+
+
+    def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
+             num_flws, arr_times=None, graph_prms=None):
+        """
+        Tests this model on the provided dataset and returns the test accuracy
+        (higher is better).
+        """
+        # Compute the fair share. Convert from int to float to avoid
+        # all values being rounded to 0.
+        fair = torch.reciprocal(num_flws.type(torch.float))
+
+        if self.graph:
+            assert graph_prms is not None, "graph_prms is None!"
+            out_dir = path.join(graph_prms["out_dir"], self.name)
+            sort_by_unfairness = graph_prms["sort_by_unfairness"]
+            # Set the x limits.Determine the maximum unfairness.
+            x_lim = (
+                # Compute the maximum unfairness.
+                (-1, ((dat_out_raw - fair) / fair).max())
+                if sort_by_unfairness else (0, graph_prms["dur_s"]))
+            # Create the output directory.
+            if not path.exists(out_dir):
+                os.makedirs(out_dir)
+
+            # Analyze feature importance.
+            coefs = None
+            try:
+                coefs = self.net.coef_
+            except AttributeError:
+                # Coefficients are only; available with a linear kernel.
+                print("Warning: Unable to extract coefficients!")
+            if coefs is not None:
+                imps, names = zip(*reversed(sorted(
+                    [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
+                    key=lambda t: t[0])))
+                # Pick the 20 features whose coefficients have the largest magnitude.
+                imps, names = zip(*reversed(sorted(
+                    [(imp, name) for _, imp, name in sorted(
+                        [(abs(imp), imp, name) for imp, name in zip(imps, names)],
+                        key=lambda t: t[0])[len(names) - 20:]],
+                    key=lambda t: t[0])))
+                num_fets = len(names)
+                y_vals = list(range(num_fets))
+                pyplot.figure(figsize=(7, 0.2 * num_fets))
+                pyplot.barh(y_vals, imps, align="center")
+                pyplot.yticks(y_vals, names)
+                pyplot.ylim((-1, num_fets))
+                pyplot.xlabel("Feature coefficient")
+                pyplot.ylabel("Feature name")
+                pyplot.tight_layout()
+                pyplot.savefig(path.join(out_dir, f"features_{self.name}.pdf"))
+                pyplot.close()
+
+            # Analyze accuracy vs. unfairness for all flows and all
+            # degrees of unfairness, for the Mathis Model oracle.
+            print("Evaluting Mathis Model oracle:")
+            self.__evaluate(
+                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+                path.join(
+                    out_dir, f"accuracy_vs_unfairness_mathis_{self.name}.pdf"),
+                x_lim, sort_by_unfairness)
+
+            # Analyze, for each number of flows, accuracy vs. unfairness.
+            flws_accs = []
+            nums_flws = list(set(num_flws.tolist()))
+            for num_flws_selected in nums_flws:
+                print(f"Evaluating model for {num_flws_selected} flows:")
+                valid = torch.where(num_flws == num_flws_selected)
+                flws_accs.append(self.__evaluate(
+                    torch.tensor(self.net.predict(dat_in[valid])),
+                    dat_out_classes[valid], dat_out_raw[valid], fair[valid],
+                    path.join(
+                        out_dir,
+                        (f"accuracy_vs_unfairness_{num_flws_selected}flows_"
+                         f"{self.name}.pdf")),
+                    x_lim, sort_by_unfairness))
+
+            # Analyze accuracy vs. number of flows.
+            x_vals = list(range(len(flws_accs)))
+            pyplot.bar(x_vals, flws_accs, align="center")
+            pyplot.xticks(x_vals, nums_flws)
+            pyplot.ylim((0, 1.1))
+            pyplot.xlabel("Total flows (1 unfair)")
+            pyplot.ylabel("Classification accuracy")
+            pyplot.tight_layout()
+            pyplot.savefig(path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
+            pyplot.close()
+
+            # Plot throughput
+            self.__plot_throughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
+                out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
+        else:
+            out_dir = "."
+            sort_by_unfairness = False
+            x_lim = None
+
+        # Analyze accuracy vs unfairness for all flows and all degrees
+        # of unfairness, for the model itself.
+        print("Evaluating model:")
+        return self.__evaluate(
+            torch.tensor(self.net.predict(dat_in)), dat_out_classes,
+            dat_out_raw, fair,
+            path.join(out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
+            x_lim, sort_by_unfairness)
+
+
+class LrSklearnWrapper(SvmSklearnWrapper):
+    """ Wraps an sklearn Logistic Regression model. """
+
+    name = "LrSklearn"
+    params = ["max_iter", "rfe", "graph"]
+
+    def rfe(net, rfe_type):
+        if rfe_type == "None":
+            print("Not using recursive feature elimination.")
+        elif rfe_type == "rfe":
+            print("Using recursive feature elimination.")
+            net = sklearn.feature_selection.RFE(
+                estimator=net, n_features_to_select=10, step=10)
+        elif rfe_type == "rfecv":
+            print("Using recursive feature elimination with cross-validation.")
+            net = sklearn.feature_selection.RFECV(
+                estimator=net, step=1,
+                cv=sklearn.model_selection.StratifiedKFold(10),
+                scoring="accuracy", n_jobs=-1)
+        else:
+            raise Exception(f"Unknown RFE type: {rfe_type}")
+        return net
+
+    def new(self, **kwargs):
+        self.graph = kwargs["graph"]
+        # Use L1 regularization. Since the number of samples is
+        # greater than the number of features, solve the primal
+        # optimization problem instead of its dual. Automatically set
+        # the class weights based on the class popularity in the
+        # training data. Change the maximum number of iterations.
+        self.net = LrSklearnWrapper.rfe(
+            linear_model.LogisticRegression(
+                penalty="l1", dual=False, class_weight="balanced",
+                solver="liblinear", max_iter=kwargs["max_iter"], verbose=1),
+            kwargs["rfe"])
+        return self.net
+
+
+class LrCvSklearnWrapper(LrSklearnWrapper):
+    """
+    Wraps an sklearn Logistic Regression model, but uses cross-validation.
+    """
+
+    name = "LrCvSklearn"
+    params = ["max_iter", "rfe", "graph", "folds"]
+
+    def new(self, **kwargs):
+        # Use L1 regularization. Since the number of samples is
+        # greater than the number of features, solve the primal
+        # optimization problem instead of its dual. Automatically set
+        # the class weights based on the class popularity in the
+        # training data. Change the maximum number of iterations.
+        # Use the specified number of cross-validation folds. Use
+        # all cores.
+        self.net = LrSklearnWrapper.rfe(
+            linear_model.LogisticRegressionCV(
+                cv=kwargs["folds"], penalty="l1", dual=False,
+                class_weight="balanced", solver="saga",
+                max_iter=kwargs["max_iter"], verbose=1, n_jobs=-1),
+            kwargs["rfe"])
+        return self.net
+
+
+class LstmWrapper(PytorchModelWrapper):
+    """ Wraps Lstm. """
+
+    name = "Lstm"
     # For now, we do not use RTT ratio because our method of estimating
     # it cannot be performed by a general receiver.
     # in_spc = ["inter-arrival time", "RTT ratio", "loss rate"]
     in_spc = ["inter-arrival time", "loss rate"]
     out_spc = ["queue occupancy"]
     num_clss = 5
-    is_lstm = True
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.Adam
+    params = ["lr"]
 
-    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5, disp=False):
-        super(Lstm, self).__init__()
-        self.check()
-
+    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
+        super(LstmWrapper, self).__init__()
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
         self.num_lyrs = num_lyrs
         self.out_dim = out_dim
-        self.lstm = torch.nn.LSTM(self.in_dim, self.hid_dim)
-        self.fc = torch.nn.Linear(self.hid_dim, self.out_dim)
-        self.sg = torch.nn.Sigmoid()
-        if disp:
-            print(f"Lstm - in_dim: {self.in_dim}, hid_dim: {self.hid_dim}, "
-                  f"num_lyrs: {self.num_lyrs}, out_dim: {self.out_dim}")
 
-    def forward(self, x, hidden):
-        # The LSTM itself, which also takes as input the previous hidden state.
-        out, hidden = self.lstm(x, hidden)
-        # Select the last piece as the LSTM output.
-        out = out.contiguous().view(-1, self.hid_dim)
-        # Classify the LSTM output.
-        out = self.fc(out)
-        out = self.sg(out)
-        return out, hidden
+    def new(self):
+        self.net = Lstm(self.in_dim, self.hid_dim, self.num_lyrs, self.out_dim)
+        return self.net
 
     def init_hidden(self, batch_size):
-        weight = next(self.parameters()).data
+        weight = next(self.net.parameters()).data
         return (weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_(),
                 weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
 
@@ -458,14 +1103,40 @@ class Lstm(Model):
         # Map a conversion function across all entries. Note that here
         # an entry is an entire row, since each row is a single tuple
         # value.
-        return np.vectorize(
+        clss = np.vectorize(
             functools.partial(
                 percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
+        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
+        clss_str["class"] = clss
+        return clss_str
+
+
+class Lstm(torch.nn.Module):
+    """ An LSTM that classifies a flow into one of five fairness categories. """
+
+    def __init__(self, in_dim, hid_dim, num_lyrs, out_dim):
+        super(Lstm, self).__init__()
+        self.hid_dim = hid_dim
+        self.lstm = torch.nn.LSTM(in_dim, self.hid_dim)
+        self.fc = torch.nn.Linear(self.hid_dim, out_dim)
+        self.sg = torch.nn.Sigmoid()
+        print(f"Lstm - in_dim: {in_dim}, hid_dim: {self.hid_dim}, "
+              f"num_lyrs: {num_lyrs}, out_dim: {out_dim}")
+
+    def forward(self, x, hidden):
+        # The LSTM itself, which also takes as input the previous hidden state.
+        out, hidden = self.lstm(x, hidden)
+        # Select the last piece as the LSTM output.
+        out = out.contiguous().view(-1, self.hid_dim)
+        # Classify the LSTM output.
+        out = self.fc(out)
+        out = self.sg(out)
+        return out, hidden
 
 
 #######################################################################
-#### Old Models. Present for archival purposes only. These are not ####
+#### Old models. Present for archival purposes only. These are not ####
 #### guaranteed to function.                                       ####
 #######################################################################
 
@@ -569,13 +1240,12 @@ class FcFour(torch.nn.Module):
 #######################################################################
 
 
-MODELS = {
-    "BinaryDnn": BinaryDnn,
-    "Lstm": Lstm,
-    "SVM": SVM,
-    "SimpleOne": SimpleOne,
-    "FcOne": FcOne,
-    "FcTwo": FcTwo,
-    "FcThree": FcThree,
-    "FcFour": FcFour
-}
+MODELS = {mdl.name: mdl for mdl in [
+    BinaryDnnWrapper,
+    SvmWrapper,
+    SvmSklearnWrapper,
+    LrSklearnWrapper,
+    LrCvSklearnWrapper,
+    LstmWrapper
+]}
+MODEL_NAMES = sorted(MODELS.keys())

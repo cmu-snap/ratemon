@@ -4,15 +4,23 @@ Hyper-parameter optimization for train.py.
 """
 
 import argparse
+import itertools
+import multiprocessing
+import sys
 import time
 
 import ax
+import numpy as np
 
-import train
 import models
+import train
+import utils
 
 
 DEFAULT_TLS_OPT = 40
+# When using exhaustive mode, whether to run configurations
+# synchronously or in parallel. Ignored otherwise.
+SYNC = False
 
 
 def main():
@@ -25,9 +33,12 @@ def main():
         "--model", default=model_opts[0], help="The model to use.",
         choices=model_opts, type=str)
     psr.add_argument(
-        "--data",
+        "--data-dir",
         help="The path to the training/validation/testing data (required).",
         required=True, type=str)
+    psr.add_argument(
+        "--num-sims", default=sys.maxsize,
+        help="The number of simulations to consider.", type=int)
     psr.add_argument(
         "--opt-trials", default=DEFAULT_TLS_OPT,
         help="The number of optimization trials to run.", type=int)
@@ -41,6 +52,10 @@ def main():
         "--max-attempts", default=train.DEFAULTS["max_attempts"],
         help=("The maximum number of failed training attempts to survive, per "
               "configuration."), type=int)
+    psr.add_argument(
+        "--exhaustive", action="store_true",
+        help=("Try all combinations of parameters. Incompatible with parameters "
+              "of type \"range\"."))
     psr.add_argument(
         "--no-rand", action="store_true", help="Use a fixed random seed.")
     psr.add_argument(
@@ -58,14 +73,14 @@ def main():
     # Define the optimization parameters.
     params = [
         {
-            "name": "data",
+            "name": "data_dir",
             "type": "fixed",
-            "value": args.data
+            "value": args.data_dir
         },
         {
             "name": "model",
-            "type": "fixed",
-            "value": args.model
+            "type": "choice",
+            "values": ["SvmSklearn", "LrSklearn"]
         },
         {
             "name": "conf_trials",
@@ -80,32 +95,54 @@ def main():
         {
             "name": "num_gpus",
             "type": "fixed",
-            "value": 1
+            "value": 0
         },
         {
             "name": "warmup",
             "type": "fixed",
-            "value": 1000
+            "value": 500
         },
         {
             "name": "num_sims",
             "type": "fixed",
-            "value": None
+            "value": args.num_sims
+        },
+        # {
+        #     "name": "train_batch",
+        #     "type": "fixed",
+        #     "value": 10
+        # },
+        # {
+        #     "name": "learning_rate",
+        #     "type": "range",
+        #     "bounds": [0.0001, 0.01]
+        # },
+        # {
+        #     "name": "momentum",
+        #     "type": "range",
+        #     "bounds": [0.09, 0.99]
+        # },
+        {
+            "name": "kernel",
+            "type": "choice",
+            "values": ["linear", "poly", "rbf", "sigmoid"]
+        },
+        # {
+        #     "name": "degree",
+        #     "type": "range",
+        #     "bounds": [0, 20]
+        # },
+        # Represent degree as a choice parameter so that it is
+        # compatible with exhaustive mode.
+        {
+            "name": "degree",
+            "type": "choice",
+            "values": list(range(0, 21))
         },
         {
-            "name": "train_batch",
-            "type": "fixed",
-            "value": 10
-        },
-        {
-            "name": "learning_rate",
-            "type": "range",
-            "bounds": [0.0001, 0.01]
-        },
-        {
-            "name": "momentum",
-            "type": "range",
-            "bounds": [0.09, 0.99]
+            "name": "penalty",
+            "type": "choice",
+            "values": ["l1", "l2"]
         },
         {
             "name": "no_rand",
@@ -146,26 +183,52 @@ def main():
         ])
     else:
         params.extend([
-            {
-                "name": "epochs",
-                "type": "range",
-                "bounds": [1, 100]
-            },
+            # {
+            #     "name": "epochs",
+            #     "type": "range",
+            #     "bounds": [1, 100]
+            # },
         ])
 
-    print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
-           "sub-trial(s) for each configuration."))
     tim_srt_s = time.time()
-    best_params, best_vals, _, _ = ax.optimize(
-        parameters=params,
-        evaluation_function=train.run_many,
-        minimize=True,
-        total_trials=args.opt_trials,
-        random_seed=train.SEED if no_rand else None)
+    if args.exhaustive:
+        for param in params:
+            assert param["type"] != "range", \
+                f"Exhaustive mode does not support range parameters: {param}"
+        fixed = {
+            param["name"]: param["value"]
+            for param in params if param["type"] == "fixed"}
+        to_vary = [
+            [(param["name"], value) for value in param["values"]]
+            for param in params if param["type"] == "choice"]
+        print(
+            f"Varying these parameters, with {tls_cnf} sub-trials(s) for each "
+            f"configuration: {[pairs[0][0] for pairs in to_vary]}")
+        cnfs = [
+            {**fixed, **dict(params)} for params in itertools.product(*to_vary)]
+        print(f"Total trials: {len(cnfs) * tls_cnf}")
+        if SYNC:
+            res = [train.run_many(cnf) for cnf in cnfs]
+        else:
+            with multiprocessing.Pool() as pol:
+                res = pol.map(train.run_many, cnfs)
+        best_idx = np.argmin(np.array(res))
+        best_params = cnfs[best_idx]
+        best_err = res[best_idx]
+    else:
+        print((f"Running {tls_opt} optimization trial(s), with {tls_cnf} "
+               "sub-trial(s) for each configuration."))
+        best_params, best_vals, _, _ = ax.optimize(
+            parameters=params,
+            evaluation_function=train.run_many,
+            minimize=True,
+            total_trials=args.opt_trials,
+            random_seed=utils.SEED if no_rand else None)
+        best_err = best_vals[0]["objective"]
     print((f"Done with hyper-parameter optimization - "
            f"{time.time() - tim_srt_s:.2f} seconds"))
     print(f"\nBest params: {best_params}")
-    print(f"Best error: {best_vals[0]['objective']:.2f}%")
+    print(f"Best error: {best_err:.4f}%")
 
 
 if __name__ == "__main__":
