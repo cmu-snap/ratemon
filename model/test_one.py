@@ -27,10 +27,10 @@ def main():
         "--simulation", help="The path to a simulation to analyze.", required=True,
         type=str)
     psr.add_argument(
-        "--warmup", default=0,
-        help=("The number of packets to drop from the beginning of each "
-              "simulation."),
-        type=int)
+        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
+        help=("The percent of each simulation's datapoint to drop from the "
+              "beginning."),
+        type=float)
     psr.add_argument(
         "--scale-params", help="The path to the input scaling parameters.",
         required=True, type=str)
@@ -44,12 +44,14 @@ def main():
     args = psr.parse_args()
     mdl_flp = args.model
     sim_flp = args.simulation
-    warmup = args.warmup
+    warmup_prc = args.warmup_percent
     scl_prms_flp = args.scale_params
     out_dir = args.out_dir
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
     assert path.exists(sim_flp), f"Simulation file does not exist: {sim_flp}"
-    assert warmup >= 0, f"Warmup cannot be negative, but is: {warmup}"
+    assert 0 <= warmup_prc < 100, \
+        ("\"warmup_percent\" must be in the range [0, 100), but is: "
+         f"{warmup_prc}")
     assert path.exists(scl_prms_flp), \
         f"Scaling parameters file does not exist: {scl_prms_flp}"
     if not path.exists(out_dir):
@@ -80,7 +82,7 @@ def main():
     (dat_in, dat_out, dat_out_raw, dat_out_oracle, _), sim = (
         train.process_sim(
             idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
-            warmup=warmup, prc=100, sequential=True))
+            warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:

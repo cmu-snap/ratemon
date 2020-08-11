@@ -306,10 +306,10 @@ def main():
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(
-        "--warmup", default=train.DEFAULTS["warmup"],
-        help=("The number of packets to drop from the beginning of each "
-              "simulation."),
-        type=int)
+        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
+        help=("The percent of each simulation's datapoint to drop from the "
+              "beginning."),
+        type=float)
     psr.add_argument(
         "--num-sims", default=train.DEFAULTS["num_sims"],
         help="The number of simulations to consider.", type=int)

@@ -98,9 +98,9 @@ def main():
             "value": 0
         },
         {
-            "name": "warmup",
+            "name": "warmup_percent",
             "type": "fixed",
-            "value": 500
+            "value": 10
         },
         {
             "name": "num_sims",

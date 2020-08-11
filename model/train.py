@@ -28,7 +28,7 @@ import utils
 # Parameter defaults.
 DEFAULTS = {
     "data_dir": ".",
-    "warmup": 0,
+    "warmup_percent": 0,
     "keep_percent": 100,
     "num_sims": sys.maxsize,
     "sims": [],
@@ -152,24 +152,27 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc,
+def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
                 sequential=False):
     """
-    Loads and processes data from a single simulation. Drops the first
-    "warmup" packets. Uses "net" to determine the relevant input and
-    output features. Returns a tuple of numpy arrays of the form:
-    (input data, output data).
+    Loads and processes data from a single simulation.
+
+    For logging purposes, "idx" is the index of this simulation amongst "total"
+    simulations total. Uses "net" to determine the relevant input and output
+    features. "sim_flp" is the path to the simulation file. The parsed results
+    are stored in "tmp_dir". Drops the first "warmup_prc" percent of packets.
+    Of the remaining packets, only "keep_prc" percent are kept. See
+    utils.save_tmp_file() for the format of the results file.
+
+    Returns the path to the results file and a descriptive utils.Sim object.
     """
-    assert 0 < prc <= 100, \
-        f"\"prc\" must be in the range (0, 100], but is: {prc}"
     sim, dat = utils.load_sim(
         sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if dat is None:
         return None
 
     # Drop the first few packets so that we consider steady-state behavior only.
-    assert dat.shape[0] > warmup, f"{sim_flp}: Unable to drop first {warmup} packets!"
-    dat = dat[warmup:]
+    dat = dat[math.floor(dat.shape[0] * warmup_prc / 100):]
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.
@@ -211,7 +214,7 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc,
 
     # Select a fraction of the data.
     num_rows = dat_in.shape[0]
-    num_to_pick = math.ceil(num_rows * prc / 100)
+    num_to_pick = math.ceil(num_rows * keep_prc / 100)
     idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
     dat_in = dat_in[idxs]
     dat_out = dat_out[idxs]
@@ -893,10 +896,10 @@ def main():
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(
-        "--warmup", default=DEFAULTS["warmup"],
-        help=("The number of packets to drop from the beginning of each "
-              "simulation."),
-        type=int)
+        "--warmup-percent", default=DEFAULTS["warmup_percent"],
+        help=("The percent of each simulation's datapoint to drop from the "
+              "beginning."),
+        type=float)
     psr.add_argument(
         "--keep-percent", default=DEFAULTS["keep_percent"],
         help="The percent of each simulation's datapoints to keep.", type=float)
