@@ -367,8 +367,8 @@ def main():
     if path.exists(dat_flp):
         # Load existing results.
         print(f"Found existing data: {dat_flp}")
-        accs_ratios = np.load(dat_flp)
-        accs_ratios = accs_ratios[accs_ratios.files[0]]
+        with np.load(dat_flp) as fil:
+            accs_ratios = fil[fil.files[0]]
     else:
         # Create the list of simulations here instead of letting the
         # training script do it so that all runs use the same
