@@ -6,6 +6,7 @@ Based on:
 """
 
 import argparse
+import copy
 import json
 import math
 import multiprocessing
@@ -220,14 +221,12 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup, prc,
     # To avoid errors with sending large matrices between processes,
     # store the results in a temporary file.
     dat_flp = path.join(tmp_dir, f"{path.basename(sim_flp)[:-4]}_tmp.npz")
-    print(f"    Saving temporary data: {dat_flp}")
-    np.savez_compressed(
-        dat_flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
-        dat_out_oracle=dat_out_oracle, scl_grps=scl_grps)
+    utils.save_tmp_file(
+        dat_flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps)
     return dat_flp, sim
 
 
-def make_datasets(net, args):
+def make_datasets(net, args, dat=None):
     """
     Parses the simulation files in data_dir and transforms them (e.g., by
     scaling) into the correct format for the network.
@@ -236,65 +235,58 @@ def make_datasets(net, args):
     simulations only. If shuffle is True, then the simulations will be parsed in
     sorted order. Use num_sims and shuffle=True together to simplify debugging.
     """
-    # Find simulations.
-    sims = args["sims"]
-    if not sims:
-        dat_dir = args["data_dir"]
-        sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
-    if SHUFFLE:
-        # Set the random seed so that multiple parallel instances of
-        # this script see the same random order.
-        random.seed(utils.SEED)
-        random.shuffle(sims)
-    num_sims = args["num_sims"]
-    if num_sims is not None:
-        num_sims_actual = len(sims)
-        assert num_sims_actual >= num_sims, \
-            (f"Insufficient simulations. Requested {num_sims}, but only "
-             f"{num_sims_actual} available.")
-        sims = sims[:num_sims]
-    tot_sims = len(sims)
-    print(f"Found {tot_sims} simulations.")
+    if dat is None:
+        # Find simulations.
+        sims = args["sims"]
+        if not sims:
+            dat_dir = args["data_dir"]
+            sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+        if SHUFFLE:
+            # Set the random seed so that multiple parallel instances of
+            # this script see the same random order.
+            random.seed(utils.SEED)
+            random.shuffle(sims)
+        num_sims = args["num_sims"]
+        if num_sims is not None:
+            num_sims_actual = len(sims)
+            assert num_sims_actual >= num_sims, \
+                (f"Insufficient simulations. Requested {num_sims}, but only "
+                 f"{num_sims_actual} available.")
+            sims = sims[:num_sims]
+        tot_sims = len(sims)
+        print(f"Found {tot_sims} simulations.")
 
-    # Prepare temporary output directory. The output of parsing each
-    # simulation it written to disk instead of being transfered
-    # between processes because sometimes the data is too large for
-    # Python to send between processes.
-    tmp_dir = args["tmp_dir"]
-    if tmp_dir is None:
-        tmp_dir = args["out_dir"]
-    if not path.isdir(tmp_dir):
-        print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
-        os.makedirs(tmp_dir)
+        # Prepare temporary output directory. The output of parsing each
+        # simulation it written to disk instead of being transfered
+        # between processes because sometimes the data is too large for
+        # Python to send between processes.
+        tmp_dir = args["tmp_dir"]
+        if tmp_dir is None:
+            tmp_dir = args["out_dir"]
+        if not path.isdir(tmp_dir):
+            print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
+            os.makedirs(tmp_dir)
 
-    # Parse simulations.
-    sims_args = [
-        (idx, tot_sims, net, sim, tmp_dir, args["warmup"], args["keep_percent"])
-        for idx, sim in enumerate(sims)]
-    if SYNC or args["sync"]:
-        dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+        # Parse simulations.
+        sims_args = [
+            (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
+             args["keep_percent"])
+            for idx, sim in enumerate(sims)]
+        if SYNC or args["sync"]:
+            dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+        else:
+            with multiprocessing.Pool() as pol:
+                # Each element of dat_all corresponds to a single simulation.
+                dat_all = pol.starmap(process_sim, sims_args)
+        # Throw away results from simulations that could not be parsed.
+        dat_all = [dat for dat in dat_all if dat is not None]
+        print(f"Discarded {tot_sims - len(dat_all)} simulations!")
+        assert dat_all, "No valid simulations found!"
+        dat_all, sims = zip(*dat_all)
+
+        dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
     else:
-        with multiprocessing.Pool() as pol:
-            # Each element of dat_all corresponds to a single simulation.
-            dat_all = pol.starmap(process_sim, sims_args)
-    # Throw away results from simulations that could not be parsed.
-    dat_all = [dat for dat in dat_all if dat is not None]
-    print(f"Discarded {tot_sims - len(dat_all)} simulations!")
-    assert dat_all, "No valid simulations found!"
-    dat_all, sims = zip(*dat_all)
-
-    # Each data item is actually a filepath to where the data can be found on disk.
-    def load_dat(flp):
-        with np.load(flp) as fil:
-            dat_in = fil["dat_in"]
-            dat_out = fil["dat_out"]
-            dat_out_raw = fil["dat_out_raw"]
-            dat_out_oracle = fil["dat_out_oracle"]
-            scl_grps = fil["scl_grps"]
-        os.remove(flp)
-        return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
-
-    dat_all = [load_dat(flp) for flp in dat_all]
+        dat_all, sims = dat
 
     # Validate data.
     dim_in = None
@@ -378,6 +370,21 @@ def make_datasets(net, args):
 
     return (dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
             prms_in)
+
+
+def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
+    """ Generates training data and optionally saves it. """
+    dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, scl_prms = (
+        make_datasets(net, args, dat))
+    # Save the processed data so that we do not need to process it again.
+    if save_data:
+        utils.save(
+            dat_flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws)
+    # Save scaling parameters.
+    print(f"Saving scaling parameters: {scl_prms_flp}")
+    with open(scl_prms_flp, "w") as fil:
+        json.dump(scl_prms.tolist(), fil)
+    return dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws
 
 
 def split_data(net, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
@@ -657,7 +664,9 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     print("Training...")
     tim_srt_s = time.time()
     net.train(*(ldr_trn.dataset.raw()[:3]))
-    print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
+    tim_trn_s = time.time() - tim_srt_s
+    print(f"Finished training - time: {tim_trn_s:.2f} seconds")
+    del ldr_trn
     # Save the model.
     print(f"Saving final model: {out_flp}")
     with open(out_flp, "wb") as fil:
@@ -665,9 +674,10 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
-    los_tst = net.test(*ldr_tst.dataset.raw())
+    acc_tst = net.test(*ldr_tst.dataset.raw())
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
-    return los_tst
+    del ldr_tst
+    return acc_tst, tim_trn_s
 
 
 def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
@@ -705,7 +715,8 @@ def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
         args["val_patience"], out_flp, args["val_improvement_thresh"],
         args["timeout_s"],
         opt_params={param: args[param] for param in net.params})
-    print(f"Finished training - time: {time.time() - tim_srt_s:.2f} seconds")
+    tim_trn_s = time.time() - tim_srt_s
+    print(f"Finished training - time: {tim_trn_s:.2f} seconds")
 
     # Explicitly delete the training and validation data so that they are
     # removed from the target device.
@@ -721,23 +732,22 @@ def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Testing.
     ldr_tst.dataset.to(dev)
     tim_srt_s = time.time()
-    los_tst = test(net, ldr_tst, dev)
+    acc_tst = test(net, ldr_tst, dev)
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     torch.cuda.empty_cache()
-    return los_tst
+    return acc_tst, tim_trn_s
 
 
-def run_many(args_):
+def prepare_args(args_):
     """
-    Run args["conf_trials"] trials and survive args["max_attempts"] failed
-    attempts.
+    Updates the default arguments with the specified values and validates them.
     """
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
     # parameters have values.
-    args = DEFAULTS
+    args = copy.copy(DEFAULTS)
     args.update(args_)
     if args["early_stop"]:
         args["epochs"] = EPCS_MAX
@@ -750,10 +760,21 @@ def run_many(args_):
         f"\"max_iter\" must be greater than 0, but is: {max_iter}"
     folds = args["folds"]
     assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
-    keep_percent = args["keep_percent"]
-    assert 0 < keep_percent <= 100, \
-        ("\"keep_percent\" must be in the range (0, 100], but is: "
-         f"{keep_percent}")
+    keep_prc = args["keep_percent"]
+    assert 0 < keep_prc <= 100, \
+        f"\"keep_percent\" must be in the range (0, 100], but is: {keep_prc}"
+    warmup_prc = args["warmup_percent"]
+    assert 0 <= warmup_prc < 100, \
+        ("\"warmup_percent\" must be in the range [0, 100), but is: "
+         f"{warmup_prc}")
+    return args
+
+
+def run_trials(args):
+    """
+    Run args["conf_trials"] trials and survive args["max_attempts"] failed
+    attempts.
+    """
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
@@ -799,32 +820,16 @@ def run_many(args_):
     if (not args["regen_data"] and path.exists(dat_flp) and
             path.exists(scl_prms_flp)):
         print("Found existing data!")
-        with np.load(dat_flp) as fil:
-            assert "in" in fil.files and "out" in fil.files, \
-                f"Improperly formed data file: {dat_flp}"
-            dat_in = fil["in"]
-            dat_out = fil["out"]
-            dat_out_raw = fil["out_raw"]
-            dat_out_oracle = fil["out_oracle"]
-            num_flws = fil["num_flws"]
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws = utils.load(
+            dat_flp)
         dat_in_shape = dat_in.shape
         dat_out_shape = dat_out.shape
         assert dat_in_shape[0] == dat_out_shape[0], \
             f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
     else:
         print("Regenerating data...")
-        dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, scl_prms = (
-            make_datasets(net_tmp, args))
-        # Save the processed data so that we do not need to process it again.
-        print(f"Saving data: {dat_flp}")
-        np.savez_compressed(
-            dat_flp,
-            **{"in": dat_in, "out": dat_out, "out_raw": dat_out_raw,
-               "out_oracle": dat_out_oracle, "num_flws": num_flws})
-        # Save scaling parameters.
-        print(f"Saving scaling parameters: {scl_prms_flp}")
-        with open(scl_prms_flp, "w") as fil:
-            json.dump(scl_prms.tolist(), fil)
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws = (
+            gen_data(net_tmp, args, dat_flp, scl_prms_flp))
     print(f"Number of input features: {len(dat_in.dtype.names)}")
 
     # Visualaize the ground truth data.
@@ -840,7 +845,7 @@ def run_many(args_):
         apts += 1
         res = (run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch)(
             args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, out_flp)
-        if res == 100:
+        if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
         else:
@@ -848,13 +853,34 @@ def run_many(args_):
             trls -= 1
     if ress:
         print(("Resulting accuracies: "
-               f"{', '.join([f'{res:.2f}' for res in ress])}"))
-        max_acc = max(ress)
+               f"{', '.join([f'{acc:.2f}' for acc, _ in ress])}"))
+        max_acc, tim_s = max(ress, key=lambda p: p[0])
         print(f"Maximum accuracy: {max_acc:.2f}")
         # Return the minimum error instead of the maximum accuracy.
-        return 1 - max_acc
+        return 1 - max_acc, tim_s
     print(f"Model cannot be trained with args: {args}")
-    return float("inf")
+    return float("inf"), float("inf")
+
+
+def run_cnfs(cnfs, sync=False):
+    """
+    Evaluates many configurations. Assumes that the arguments have already been
+    processed with prepare_args().
+    """
+    print(f"Training {len(cnfs)} configurations.")
+    return []
+    # The configurations themselves should execute synchronously if
+    # and only if sync is False or the configuration is explicity
+    # configured to run synchronously.
+    cnfs = [
+        {**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
+        for cnf in cnfs]
+    if sync:
+        res = [run_trials(cnf) for cnf in cnfs]
+    else:
+        with multiprocessing.Pool() as pol:
+            res = pol.map(run_trials, cnfs)
+    return res
 
 
 def main():
@@ -971,7 +997,7 @@ def main():
     # Verify that all arguments are reflected in DEFAULTS.
     for arg in args.keys():
         assert arg in DEFAULTS, f"Argument {arg} missing from DEFAULTS!"
-    run_many(args)
+    run_trials(prepare_args(args))
 
 
 if __name__ == "__main__":

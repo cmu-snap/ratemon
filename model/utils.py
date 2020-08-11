@@ -2,6 +2,7 @@
 """ Utility functions. """
 
 import math
+import os
 from os import path
 import zipfile
 
@@ -437,3 +438,75 @@ def safe_update_ewma(prev_ewma, new_val, alpha):
     return (
         new_val if prev_ewma == -1 else
         alpha * new_val + (1 - alpha) * prev_ewma)
+
+
+def filt(dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps, num_sims, prc):
+    """
+    Filters parsed data based on a desired number of simulations and percent of
+    results from each simulation. Each dat_* is a list where each entry is the
+    results of one simulation.
+    """
+    assert (
+        len(dat_in) >= num_sims and
+        len(dat_out) == len(dat_in) and
+        len(dat_out_raw) == len(dat_in) and
+        len(dat_out_oracle) == len(dat_in)), "Malformed arguments!"
+
+    dat_in = dat_in[:num_sims]
+    dat_out = dat_out[:num_sims]
+    dat_out_raw = dat_out_raw[:num_sims]
+    dat_out_oracle = dat_out_oracle[:num_sims]
+    scl_grps = scl_grps[:num_sims]
+    for idx in range(num_sims):
+        num_rows = dat_in[idx].shape[0]
+        num_to_pick = math.ceil(num_rows * prc / 100)
+        idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
+        dat_in[idx] = dat_in[idx][idxs]
+        dat_out[idx] = dat_out[idx][idxs]
+        dat_out_raw[idx] = dat_out_raw[idx][idxs]
+        dat_out_oracle[idx] = dat_out_oracle[idx][idxs]
+    return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
+
+
+def save(flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws):
+    """
+    Saves parsed data. Each dat_* is a list where each entry is the results of
+    one simulation.
+    """
+    print(f"Saving data: {flp}")
+    np.savez_compressed(
+        flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
+        dat_out_oracle=dat_out_oracle, num_flws=num_flws)
+
+
+def load(flp):
+    """
+    Loads parsed data. Each returned item is a list where each entry is the
+    results of one simulation.
+    """
+    print(f"Loading data: {flp}")
+    with np.load(flp) as fil:
+        return (
+            fil["dat_in"], fil["dat_out"], fil["dat_out_raw"],
+            fil["dat_out_oracle"], fil["num_flws"])
+
+
+def save_tmp_file(flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps):
+    """ Saves a single-simulation temporary results file. """
+    print(f"Saving temporary data: {flp}")
+    np.savez_compressed(
+        flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
+        dat_out_oracle=dat_out_oracle, scl_grps=scl_grps)
+
+
+def load_tmp_file(flp):
+    """ Loads and deletes a single-simulation temporary results file. """
+    print(f"Loading temporary data: {flp}")
+    with np.load(flp) as fil:
+        dat_in = fil["dat_in"]
+        dat_out = fil["dat_out"]
+        dat_out_raw = fil["dat_out_raw"]
+        dat_out_oracle = fil["dat_out_oracle"]
+        scl_grps = fil["scl_grps"]
+    os.remove(flp)
+    return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps

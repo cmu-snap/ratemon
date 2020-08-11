@@ -208,10 +208,10 @@ def main():
             {**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
         if SYNC:
-            res = [train.run_many(cnf) for cnf in cnfs]
+            res = [train.run_trials(cnf)[0] for cnf in cnfs]
         else:
             with multiprocessing.Pool() as pol:
-                res = pol.map(train.run_many, cnfs)
+                res = pol.map(lambda cnf: train.run_trials(cnf)[0], cnfs)
         best_idx = np.argmin(np.array(res))
         best_params = cnfs[best_idx]
         best_err = res[best_idx]
@@ -220,7 +220,7 @@ def main():
                "sub-trial(s) for each configuration."))
         best_params, best_vals, _, _ = ax.optimize(
             parameters=params,
-            evaluation_function=train.run_many,
+            evaluation_function=lambda cnf: train.run_trials(cnf)[0],
             minimize=True,
             total_trials=args.opt_trials,
             random_seed=utils.SEED if no_rand else None)
