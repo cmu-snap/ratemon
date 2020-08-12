@@ -140,7 +140,7 @@ def main():
         if SYNC:
             dat_all = [train.process_sim(*sim_args_) for sim_args_ in sim_args]
         else:
-            with multiprocessing.Pool() as pol:
+            with multiprocessing.Pool(processes=10) as pol:
                 dat_all = pol.starmap(train.process_sim, sim_args)
         # Verify that we were able to parse all simulations. Normally,
         # we would allow the training process to proceed even if some
