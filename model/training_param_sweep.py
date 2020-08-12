@@ -23,25 +23,25 @@ SYNC = False
 # Experiment parameters.
 #
 # Number of simulations.
-NUMS_SIMS = [1]
+NUMS_SIMS = [1, 10, 100, 1000]
 # NUMS_SIMS = [1, 10, 100, 1000, 10000]
 # Percent of each simulation.
-PRC_MIN = 100
-PRC_MAX = 100
-PRC_DELTA = 10
+PRC_MIN = 5
+PRC_MAX = 50
+PRC_DELTA = 5
 # PRC_MIN = 10
 # PRC_MAX = 100
 # PRC_DELTA = 10
-PRCS = [100]
-# PRCS = [10, 30, 60, 100]
+# PRCS = [100]
+PRCS = [5, 10, 25, 50]
 # Number of iterations.
 NUM_ITERS_MIN = 5
-NUM_ITERS_MAX = 5
+NUM_ITERS_MAX = 155
 NUM_ITERS_DELTA = 15
 # NUM_ITERS_MIN = 5
 # NUM_ITERS_MAX = 150
 # NUM_ITERS_DELTA = 15
-NUMS_ITERS = [5]
+NUMS_ITERS = [5, 20, 80, 155]
 # NUMS_ITERS = [5, 20, 65, 155]
 
 
