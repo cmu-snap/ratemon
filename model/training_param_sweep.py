@@ -234,8 +234,6 @@ def main():
             print(f"Removing: {tmp_dir}")
             shutil.rmtree(tmp_dir)
 
-        cnfs = cnfs[:10]
-
         # Train models. The result is a list of tuples of the form:
         #     (test loss (in range [0, 1]), training time (seconds))
         # Zip the results list with the list of configurations, then extract the
