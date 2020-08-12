@@ -871,7 +871,6 @@ def run_cnfs(cnfs, sync=False):
     processed with prepare_args().
     """
     print(f"Training {len(cnfs)} configurations.")
-    return []
     # The configurations themselves should execute synchronously if
     # and only if sync is False or the configuration is explicity
     # configured to run synchronously.
