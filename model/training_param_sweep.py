@@ -101,91 +101,6 @@ def main():
         with np.load(dat_flp) as fil:
             ress = fil["results"]
     else:
-        # The data processing here is tricky. Our goal is to have the
-        # configurations all process the same data to make the
-        # comparison as "apples-to-apples" as possible. To that end,
-        # all of the configurations will process subsets of the same
-        # set of simulations. The high-level strategy is to manually load and
-        # process the data and then place it strategically so that the training
-        # process reads it in automatically. The process is as follows:
-        #    1) Determine the greatest number of simulations that any
-        #       configuration will require and parse them.
-        #    2) For each configuration, pick a subset of these simulations. When
-        #       picking which simulations to use, always pick from the front.
-        #       This means that configurations with more simulations will
-        #       process the same simulations as those with fewer simulations,
-        #       plus some extra. When picking which datapoints to use from
-        #       within a simulation, choose them randomly.
-        #    3) For each configuration, copy its data into its output directory
-        #       so that it will be automatically detected and read in.
-
-        # Load the required number of simulations.
-        dat_dir = args["data_dir"]
-        sims = [path.join(dat_dir, sim) for sim in os.listdir(dat_dir)]
-        if train.SHUFFLE:
-            # Set the random seed so that multiple instances of this
-            # script see the same random order.
-            random.seed(utils.SEED)
-            random.shuffle(sims)
-        num_sims_actual = len(sims)
-        max_sims = max(NUMS_SIMS)
-        assert num_sims_actual >= max_sims, \
-            (f"Insufficient simulations. Requested {max_sims}, but only "
-             f"{num_sims_actual} available.")
-        sims = sims[:max_sims]
-        net = models.MODELS[args["model"]]()
-        sim_args = [
-            (idx, max_sims, net, sim_flp, out_dir, args["warmup_percent"], 100)
-            for idx, sim_flp in enumerate(sims)]
-        if SYNC:
-            dat_all = [train.process_sim(*sim_args_) for sim_args_ in sim_args]
-        else:
-            with multiprocessing.Pool(processes=10) as pol:
-                dat_all = pol.starmap(train.process_sim, sim_args)
-        # Verify that we were able to parse all simulations. Normally,
-        # we would allow the training process to proceed even if some
-        # simulations failed to parse, but since in this case we are
-        # looking at specific trends, we need to make sure that we are
-        # training on the number of simulations that we intend.
-        for dat in dat_all:
-            assert dat is not None, \
-                "Error processing at least one simulation. Check logs (above)."
-        # Unpack the data.
-        dat_all, sims = zip(*dat_all)
-        dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
-        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = zip(*dat_all)
-        dat_in = list(dat_in)
-        dat_out = list(dat_out)
-        dat_out_raw = list(dat_out_raw)
-        dat_out_oracle = list(dat_out_oracle)
-        scl_grps = list(scl_grps)
-
-        # For each possible configuration of number of simulations and
-        # percentage of each simulation, create a temporary file
-        # containing the parsed data for that configuration.
-        dat = {}
-        all_prcs = list(set(
-            PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
-        for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
-            # Select the data corresponding to this number of
-            # simulations and percent of each simulation.
-            dat_all = list(zip(*utils.filt(
-                dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps,
-                num_sims, prc)))
-            base_dir = path.join(out_dir, f"{num_sims}_{prc}")
-            if not path.exists(base_dir):
-                os.makedirs(base_dir)
-            tmp_dat_flp = path.join(base_dir, "data.npz")
-            tmp_scl_prms_flp = path.join(base_dir, "scale_params.json")
-            # Finish processesing the data and save it in a form that
-            # can be read by the training process.
-            ignore = train.gen_data(
-                net, args, dat_flp=tmp_dat_flp, scl_prms_flp=tmp_scl_prms_flp,
-                dat=(dat_all, sims), save_data=True)
-            del ignore
-            # Record the paths to the data and scale parameters files.
-            dat[(num_sims, prc)] = (tmp_dat_flp, tmp_scl_prms_flp)
-
         # Assembles the configurations to test.
         cnfs = [
             train.prepare_args({
@@ -212,27 +127,137 @@ def main():
                     NUMS_SIMS, PRCS,
                     range(NUM_ITERS_MIN, NUM_ITERS_MAX + 1, NUM_ITERS_DELTA))))
         ]
+        print(f"Will test {len(cnfs)} configurations.")
+
+        # For each possible configuration of number of simulations and
+        # percentage of each simulation, create a temporary file
+        # containing the parsed data for that configuration.
+        all_prcs = list(set(
+            PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
+        tmp_dat = {}
+        for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
+            base_dir = path.join(out_dir, f"{num_sims}_{prc}")
+            if not path.exists(base_dir):
+                os.makedirs(base_dir)
+            tmp_dat_flp = path.join(base_dir, "data.npz")
+            tmp_scl_prms_flp = path.join(base_dir, "scale_params.json")
+            # Record the paths to the data and scale parameters files.
+            tmp_dat[(num_sims, prc)] = (tmp_dat_flp, tmp_scl_prms_flp)
 
         # Look up to the location of the data corresponding to each
-        # configuration and copy it to the configuration's output
-        # directory, where it will be read automatically.
+        # configuration and make a mapping from this temporary data to
+        # where it should be copied in the configuration's output
+        # directory (where it will be read automatically).
+        src_dst = []
         for cnf in cnfs:
             cnf_out_dir = cnf["out_dir"]
             if not path.exists(cnf_out_dir):
                 os.makedirs(cnf_out_dir)
-            tmp_dat_flp, tmp_scl_prms_flp = dat[
+            tmp_dat_flp, tmp_scl_prms_flp = tmp_dat[
                 (cnf["num_sims"], cnf["keep_percent"])]
-            shutil.copyfile(
-                src=tmp_dat_flp,
-                dst=path.join(cnf_out_dir, path.basename(tmp_dat_flp)))
-            shutil.copyfile(
-                src=tmp_scl_prms_flp,
-                dst=path.join(cnf_out_dir, path.basename(tmp_scl_prms_flp)))
-        # Remove temporary data files.
-        for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
-            tmp_dir = path.join(out_dir, f"{num_sims}_{prc}")
-            print(f"Removing: {tmp_dir}")
-            shutil.rmtree(tmp_dir)
+            src_dst.append((
+                (tmp_dat_flp,
+                 path.join(cnf_out_dir, path.basename(tmp_dat_flp))),
+                (tmp_scl_prms_flp,
+                 path.join(cnf_out_dir, path.basename(tmp_scl_prms_flp)))))
+
+        # Check if any of the data has not been generated yet.
+        dat_found = [
+            path.exists(dat_dst) and path.exists(scl_prms_dst)
+            for (_, dat_dst), (_, scl_prms_dst) in src_dst]
+        # If any of the data has not been generated yet, then we must
+        # regenerate all of the data.
+        if dat_found.all():
+            print("All data already generated.")
+        else:
+            print("Generating all new data.")
+            raise Exception()
+            # The data processing here is tricky. Our goal is to have
+            # the configurations all process the same data to make the
+            # comparison as "apples-to-apples" as possible. To that
+            # end, all of the configurations will process subsets of
+            # the same set of simulations. The high-level strategy is
+            # to manually load and process the data and then place it
+            # strategically so that the training process reads it in
+            # automatically. The process is as follows:
+            #    1) Determine the greatest number of simulations that any
+            #       configuration will require and parse them.
+            #    2) For each configuration, pick a subset of these simulations.
+            #       When picking which simulations to use, always pick from the
+            #       front. This means that configurations with more simulations
+            #       will process the same simulations as those with fewer
+            #       simulations, plus some extra. When picking which datapoints
+            #       to use from within a simulation, choose them randomly.
+            #    3) For each configuration, copy its data into its output
+            #       directory so that it will be automatically detected and read
+            #       in.
+
+            # Load the required number of simulations.
+            dat_dir = args["data_dir"]
+            sims = [path.join(dat_dir, sim) for sim in os.listdir(dat_dir)]
+            if train.SHUFFLE:
+                # Set the random seed so that multiple instances of this
+                # script see the same random order.
+                random.seed(utils.SEED)
+                random.shuffle(sims)
+            num_sims_actual = len(sims)
+            max_sims = max(NUMS_SIMS)
+            assert num_sims_actual >= max_sims, \
+                (f"Insufficient simulations. Requested {max_sims}, but only "
+                 f"{num_sims_actual} available.")
+            sims = sims[:max_sims]
+            net = models.MODELS[args["model"]]()
+            sim_args = [
+                (idx, max_sims, net, sim_flp, out_dir, args["warmup_percent"], 100)
+                for idx, sim_flp in enumerate(sims)]
+            if SYNC:
+                dat_all = [train.process_sim(*sim_args_) for sim_args_ in sim_args]
+            else:
+                with multiprocessing.Pool() as pol:
+                    dat_all = pol.starmap(train.process_sim, sim_args)
+            # Verify that we were able to parse all
+            # simulations. Normally, we would allow the training
+            # process to proceed even if some simulations failed to
+            # parse, but since in this case we are looking at specific
+            # trends, we need to make sure that we are training on the
+            # number of simulations that we intend.
+            for dat in dat_all:
+                assert dat is not None, \
+                    "Error processing at least one simulation. Check logs (above)."
+            # Unpack the data.
+            dat_all, sims = zip(*dat_all)
+            dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
+            dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = zip(*dat_all)
+            dat_in = list(dat_in)
+            dat_out = list(dat_out)
+            dat_out_raw = list(dat_out_raw)
+            dat_out_oracle = list(dat_out_oracle)
+            scl_grps = list(scl_grps)
+
+            # Generate temporary data.
+            for (num_sims, prc), (tmp_dat_flp, tmp_scl_prms_flp) in tmp_dat.items():
+                # Select the data corresponding to this number of
+                # simulations and percent of each simulation.
+                dat_all = list(zip(*utils.filt(
+                    dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps,
+                    num_sims, prc)))
+                # Finish processesing the data and save it in a form that
+                # can be read by the training process.
+                ignore = train.gen_data(
+                    net, args, dat_flp=tmp_dat_flp, scl_prms_flp=tmp_scl_prms_flp,
+                    dat=(dat_all, sims), save_data=True)
+                del ignore
+
+            # Copy temporary data to configuration output directories.
+            for (dat_src, dat_dst), (scl_prms_src, scl_prms_dst)  in src_dst:
+                shutil.copyfile(dat_src, dat_dst)
+                shutil.copyfile(scl_prms_src, scl_prms_dst)
+
+            # Remove temporary data files.
+            for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
+                tmp_dir = path.join(out_dir, f"{num_sims}_{prc}")
+                print(f"Removing: {tmp_dir}")
+                shutil.rmtree(tmp_dir)
 
         # Train models. The result is a list of tuples of the form:
         #     (test loss (in range [0, 1]), training time (seconds))
