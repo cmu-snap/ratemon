@@ -270,10 +270,10 @@ def main():
             for cnf, (los_tst, tim_trn_s) in zip(
                 cnfs, train.run_cnfs(cnfs, SYNC))])
 
-        # Remove real data files.
-        for cnf in cnfs:
-            print(f"Removing: {cnf['out_dir']}")
-            shutil.rmtree(cnf["out_dir"])
+        # # Remove real data files.
+        # for cnf in cnfs:
+        #     print(f"Removing: {cnf['out_dir']}")
+        #     shutil.rmtree(cnf["out_dir"])
 
         # Save results.
         np.savez_compressed(dat_flp, results=ress)
