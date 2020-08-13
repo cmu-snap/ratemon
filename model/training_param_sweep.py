@@ -161,13 +161,12 @@ def main():
                 (tmp_scl_prms_flp,
                  path.join(cnf_out_dir, path.basename(tmp_scl_prms_flp)))))
 
-        # Check if any of the data has not been generated yet.
-        dat_found = [
-            path.exists(dat_dst) and path.exists(scl_prms_dst)
-            for (_, dat_dst), (_, scl_prms_dst) in src_dst]
-        # If any of the data has not been generated yet, then we must
+        # Check if any of the data has not been generated yet. If any
+        # of the data has not been generated yet, then we must
         # regenerate all of the data.
-        if dat_found.all():
+        if np.array([
+                path.exists(dat_dst) and path.exists(scl_prms_dst)
+                for (_, dat_dst), (_, scl_prms_dst) in src_dst]).all():
             print("All data already generated.")
         else:
             print("Generating all new data.")
