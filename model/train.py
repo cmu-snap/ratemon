@@ -880,7 +880,7 @@ def run_cnfs(cnfs, sync=False):
     if sync:
         res = [run_trials(cnf) for cnf in cnfs]
     else:
-        with multiprocessing.Pool(processes=5) as pol:
+        with multiprocessing.Pool(processes=3) as pol:
             res = pol.map(run_trials, cnfs)
     return res
 
