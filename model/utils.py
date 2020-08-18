@@ -19,6 +19,8 @@ import torch
 ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features"]
 # The random seed.
 SEED = 1337
+# Name used for lock files.
+LOCK_FLN = "lock"
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -510,3 +512,29 @@ def load_tmp_file(flp):
         scl_grps = fil["scl_grps"]
     os.remove(flp)
     return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
+
+
+def get_lock_flp(out_dir):
+    """ Returns the path to a lock file in out_dir. """
+    return path.join(out_dir, LOCK_FLN)
+
+
+def create_lock_file(out_dir):
+    """ Creates a lock file in out_dir. """
+    lock_flp = get_lock_flp(out_dir)
+    if not path.exists(lock_flp):
+        with open(lock_flp, "w") as fil:
+            pass
+
+
+def check_lock_file(out_dir):
+    """ Checks whether a lock file exists in out_dir. """
+    return path.exists(get_lock_flp(out_dir))
+
+
+def remove_lock_file(out_dir):
+    """ Remove a lock file from out_dir. """
+    try:
+        os.remove(get_lock_flp(out_dir))
+    except FileNotFoundError:
+        pass

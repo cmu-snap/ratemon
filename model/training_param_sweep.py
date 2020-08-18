@@ -43,6 +43,57 @@ NUM_ITERS_DELTA = 15
 # NUM_ITERS_DELTA = 15
 NUMS_ITERS = [5, 20, 80]
 # NUMS_ITERS = [5, 20, 65, 155]
+RESULTS_KEY = "results"
+
+def get_results_flp(cnf):
+    """ Assembles the results filepath for a configuration. """
+    return path.join(
+        cnf["out_dir"],
+        (f"{cnf['num_sims']}_{cnf['keep_percent']}_"
+         f"{cnf['max_iter']}_results.npz"))
+
+
+def maybe_run_cnf(cnf, func):
+    """
+    Runs a function on a configuration, unless results already exist
+    or a lock file indicates that training is already running in
+    another process. Creates a lock file if the function is executed.
+    """
+    # If results already exist for this configuration, then return them.
+    res_flp = get_results_flp(cnf)
+    if path.exists(res_flp):
+        with np.load(res_flp) as fil:
+            return fil[RESULTS_KEY]
+    # If a lock file exists for this configuration, then skip it.
+    out_dir = cnf["out_dir"]
+    if utils.check_lock_file(out_dir):
+        return None
+    # Otherwise, create a lock file and process the configuration.
+    utils.create_lock_file(out_dir)
+    return func(cnf)
+
+
+def cleanup_combine_and_save_results(cnf, res):
+    """
+    Extracts the exercised hyper-parameters from cnf, packages them
+    with the results, and saves them to disk in cnf's output
+    directory. Removes a lock file if one was created.
+    """
+    # If the result is None, then the training never ran. This occurs when
+    # another process is already running training, as evidenced by a lock file.
+    if res is None:
+        # Training produced no results. The lock file belongs to
+        # another process, so do not remove it.
+        res = float("NaN"), float("NaN")
+    else:
+        # Training did, in fact, produce results, so remove the lock file.
+        utils.remove_lock_file(cnf["out_dir"])
+    los_tst, tim_trn_s = res
+    res = np.array(
+        [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"], los_tst,
+         tim_trn_s])
+    np.savez_compressed(get_results_flp(cnf), **{RESULTS_KEY: res})
+    return res
 
 
 def main():
@@ -101,8 +152,10 @@ def main():
         with np.load(dat_flp) as fil:
             ress = fil["results"]
     else:
-        # Assembles the configurations to test.
-        cnfs = [
+        # Assemble the configurations to test. Sort them based on the
+        # product of their hyper-parameters, which is a heuristic of
+        # how long they will take to run.
+        cnfs = sorted([
             train.prepare_args({
                 "warmup_percent": args["warmup_percent"],
                 "model": args["model"],
@@ -126,7 +179,9 @@ def main():
                 list(itertools.product(
                     NUMS_SIMS, PRCS,
                     range(NUM_ITERS_MIN, NUM_ITERS_MAX + 1, NUM_ITERS_DELTA))))
-        ]
+            ],
+            key=lambda cnf: np.prod(
+                [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"]]))
         print(f"Will test {len(cnfs)} configurations.")
 
         # For each possible configuration of number of simulations and
@@ -258,16 +313,9 @@ def main():
                 print(f"Removing: {tmp_dir}")
                 shutil.rmtree(tmp_dir)
 
-        # Train models. The result is a list of tuples of the form:
-        #     (test loss (in range [0, 1]), training time (seconds))
-        # Zip the results list with the list of configurations, then extract the
-        # experiment parameters from each configuration and package them and the
-        # results into a numpy array.
-        ress = np.array([
-            (cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"],
-             los_tst, tim_trn_s)
-            for cnf, (los_tst, tim_trn_s) in zip(
-                cnfs, train.run_cnfs(cnfs, SYNC))])
+        # Train models.
+        ress = np.array(train.run_cnfs(
+            cnfs, SYNC, maybe_run_cnf, cleanup_combine_and_save_results))
 
         # # Remove real data files.
         # for cnf in cnfs:

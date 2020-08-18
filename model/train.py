@@ -862,26 +862,36 @@ def run_trials(args):
         # Return the minimum error instead of the maximum accuracy.
         return 1 - max_acc, tim_s
     print(f"Model cannot be trained with args: {args}")
-    return float("inf"), float("inf")
+    return float("NaN"), float("NaN")
 
 
-def run_cnfs(cnfs, sync=False):
+def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     """
     Evaluates many configurations. Assumes that the arguments have already been
     processed with prepare_args().
     """
     print(f"Training {len(cnfs)} configurations.")
-    # The configurations themselves should execute synchronously if
-    # and only if sync is False or the configuration is explicity
-    # configured to run synchronously.
     cnfs = [
         {**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
         for cnf in cnfs]
+    # Optionally decide whether to run a configuration.
+    func = (
+        run_trials if gate_func is None else
+        lambda cnf: gate_func(cnf, run_trials))
+    # Optionally process the output of each configuration.
+    func = (
+        func if post_func is None else
+        lambda cnf: post_func(cnf, func(cnf)))
+    # The configurations themselves should execute synchronously if
+    # and only if sync is False or the configuration is explicity
+    # configured to run synchronously. The result is a list of tuples
+    # of the form:
+    #     (test loss (in range [0, 1]), training time (seconds))
     if sync:
-        res = [run_trials(cnf) for cnf in cnfs]
+        res = [func(cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=3) as pol:
-            res = pol.map(run_trials, cnfs)
+            res = pol.map(func, cnfs)
     return res
 
 
