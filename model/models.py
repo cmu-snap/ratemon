@@ -712,12 +712,12 @@ class SvmSklearnWrapper(SvmWrapper):
         "alpha0.2" not in fet and
         "alpha0.4" not in fet and
         "alpha0.6" not in fet and
+        "alpha0.7" not in fet and
         "alpha0.8" not in fet and
         "alpha0.9" not in fet and
-        "label" not in fet and
         "tt512" not in fet and
         "tt1024" not in fet and
-        "loss event rate" not in fet)]
+        "mathis model" not in fet)]
     out_spc = ["queue occupancy-ewma-alpha0.5"]
     los_fnc = None
     opt = None
