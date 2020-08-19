@@ -43,6 +43,7 @@ NUM_ITERS_DELTA = 15
 # NUM_ITERS_DELTA = 15
 NUMS_ITERS = [5, 20, 80]
 # NUMS_ITERS = [5, 20, 65, 155]
+# Key to use in the results file.
 RESULTS_KEY = "results"
 
 def get_results_flp(cnf):
@@ -62,11 +63,13 @@ def maybe_run_cnf(cnf, func):
     # If results already exist for this configuration, then return them.
     res_flp = get_results_flp(cnf)
     if path.exists(res_flp):
+        print(f"Results already exist: {res_flp}")
         with np.load(res_flp) as fil:
             return fil[RESULTS_KEY]
     # If a lock file exists for this configuration, then skip it.
     out_dir = cnf["out_dir"]
     if utils.check_lock_file(out_dir):
+        print(f"Configuration running somewhere else: {out_dir}")
         return None
     # Otherwise, create a lock file and process the configuration.
     utils.create_lock_file(out_dir)

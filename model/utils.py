@@ -19,7 +19,7 @@ import torch
 ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features"]
 # The random seed.
 SEED = 1337
-# Name used for lock files.
+# Name to use for lock files.
 LOCK_FLN = "lock"
 
 
