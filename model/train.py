@@ -865,33 +865,39 @@ def run_trials(args):
     return float("NaN"), float("NaN")
 
 
+def run_cnf(cnf, gate_func=None, post_func=None):
+    """ Evaluate a single configuration. """
+    func = run_trials
+    # Optionally decide whether to run a configuration.
+    if gate_func is not None:
+        func = gate_func(cnf, func)
+    res = func(cnf)
+    # Optionally process the output of each configuration.
+    if post_func is not None:
+        res = post_func(cnf, res)
+    return res
+
+
 def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     """
     Evaluates many configurations. Assumes that the arguments have already been
     processed with prepare_args().
     """
-    print(f"Training {len(cnfs)} configurations.")
-    cnfs = [
-        {**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
-        for cnf in cnfs]
-    # Optionally decide whether to run a configuration.
-    func = (
-        run_trials if gate_func is None else
-        lambda cnf: gate_func(cnf, run_trials))
-    # Optionally process the output of each configuration.
-    func = (
-        func if post_func is None else
-        lambda cnf: post_func(cnf, func(cnf)))
+    num_cnfs = len(cnfs)
+    print(f"Training {num_cnfs} configurations.")
     # The configurations themselves should execute synchronously if
     # and only if sync is False or the configuration is explicity
-    # configured to run synchronously. The result is a list of tuples
-    # of the form:
-    #     (test loss (in range [0, 1]), training time (seconds))
+    # configured to run synchronously.
+    cnfs = zip(
+        [{**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
+         for cnf in cnfs],
+        [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
+
     if sync:
         res = [func(cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=3) as pol:
-            res = pol.map(func, cnfs)
+            res = pol.starmap(run_cnf, cnfs)
     return res
 
 
