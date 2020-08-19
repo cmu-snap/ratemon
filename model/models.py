@@ -718,7 +718,7 @@ class SvmSklearnWrapper(SvmWrapper):
         "tt512" not in fet and
         "tt1024" not in fet and
         "mathis model" not in fet)]
-    out_spc = ["queue occupancy-ewma-alpha0.5"]
+    out_spc = ["queue occupancy-ewma-alpha0.01"]
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
