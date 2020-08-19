@@ -19,6 +19,7 @@ import utils
 
 manager = multiprocessing.Manager()
 all_accuracy = manager.list()
+all_bucketized_accuracy = manager.list()
 
 bw_dict = manager.dict({
     1: manager.list(),
@@ -48,8 +49,9 @@ queue_dict = manager.dict({
     5000: manager.list()
 })
 
+
 def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy, 
-                bw_dict, rtt_dict, queue_dict):
+                all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict):
 
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
@@ -72,7 +74,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
     utils.visualize_classes(net, dat_out)
 
     # Test the simulation.
-    accuracy = net.test(
+    accuracy, bucketized_accuracy = net.test(
         *utils.Dataset(
             fets=dat_in.dtype.names,
             dat_in=utils.clean(dat_in),
@@ -90,6 +92,9 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
 
     all_accuracy.append(accuracy)
     mean_accuracy = mean(all_accuracy)
+
+    all_bucketized_accuracy.append(bucketized_accuracy)
+    mean_bucketized_accuracy = mean(all_bucketized_accuracy)
 
     for bw_Mbps in bw_dict.keys():
         if sim.bw_Mbps <= bw_Mbps:
@@ -109,7 +114,8 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
 
     print(
         f"Finish processing {sim.name}\n"
-        f"----Average accuracy for all the processed simulations: {mean_accuracy}")
+        f"----Average accuracy for all the processed simulations: {mean_accuracy}\n",
+        f"----Average bucketized accuracy for all the processed simulations: {mean_bucketized_accuracy}\n",)
 
     for bw_Mbps in bw_dict.keys():
         if bw_dict[bw_Mbps]:
@@ -193,8 +199,8 @@ def main():
 
     func_input = [
         (path.join(sim_dir, sim), path.join(out_dir, sim.split(".")[0]), net,
-         warmup_prc, scl_prms_flp, standardize, all_accuracy, bw_dict,
-         rtt_dict, queue_dict)
+         warmup_prc, scl_prms_flp, standardize, all_accuracy, all_bucketized_accuracy,
+         bw_dict, rtt_dict, queue_dict)
         for sim in sorted(os.listdir(sim_dir))]
 
     print(f"Num files: {len(func_input)}")
@@ -203,6 +209,30 @@ def main():
         pol.starmap(process_one, func_input)
 
     print(f"Done Processing - time: {time.time() - tim_srt_s:.2f} seconds")
+
+    f = open("results.txt", "w")
+
+    mean_accuracy = mean(all_accuracy)
+
+    f.write(
+        f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
+
+    for bw_Mbps in bw_dict.keys():
+        if bw_dict[bw_Mbps]:
+            bw_accuracy = mean(bw_dict[bw_Mbps])
+            f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
+
+    for rtt_us_ in rtt_dict.keys():
+        if rtt_dict[rtt_us_]:
+            rtt_accuracy = mean(rtt_dict[rtt_us_])
+            f.write(f"Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n")
+
+    for queue_p in queue_dict.keys():
+        if queue_dict[queue_p]:
+            queue_accuracy = mean(queue_dict[queue_p])
+            f.write(f"Queue size less than {queue_p} packets accuracy {queue_accuracy}\n")
+
+    f.close()
 
 
 if __name__ == "__main__":
