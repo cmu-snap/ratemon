@@ -891,15 +891,27 @@ class SvmSklearnWrapper(SvmWrapper):
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
+            throughput_list = [throughput for throughput, _ in buckets]
+            fair_list = [fair] * len(buckets)
             pyplot.plot(
                 (list(range(len(buckets)))),
-                [throughput for throughput, _ in buckets], "b-")
+                throughput_list, "b-")
             pyplot.plot(
                 (list(range(len(buckets)))),
-                [fair] * len(buckets), "g--")
+                fair_list, "g--")
+            labels = [label for _, label in buckets]
+            label_list = [0] * len(buckets)
+            bucketized_label = [0] * len(buckets)
+            for i in range(len(buckets)):
+                if (throughput_list[i] > fair[0]):
+                    label_list[i] = labels[i]
+                    bucketized_label[i] = int(labels[i] >= 0.5)
+                else:
+                    label_list[i] = 1.0 - labels[i]
+                    bucketized_label[i] = int(labels[i] < 0.5)
             pyplot.plot(
                 (list(range(len(buckets)))),
-                [label for _, label in buckets], "r^")
+                label_list, "r^")
             if x_lim is not None:
                 pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
@@ -907,6 +919,9 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.tight_layout()
             pyplot.savefig(flp)
             pyplot.close()
+
+            return sum(bucketized_label) / (1.0 * len(bucketized_label))
+        return 0
 
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
@@ -1024,8 +1039,9 @@ class SvmSklearnWrapper(SvmWrapper):
                 path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
 
+
             # Plot throughput.
-            self.__plot_throughput(
+            bucketized_accuracy = self.__plot_throughput(
                 dat_out_oracle, dat_out_classes, dat_out_raw, fair,
                 path.join(
                     out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"),
@@ -1050,7 +1066,7 @@ class SvmSklearnWrapper(SvmWrapper):
             graph_prms={
                 "flp": path.join(
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
-                "x_lim": x_lim})
+                "x_lim": x_lim}), bucketized_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
