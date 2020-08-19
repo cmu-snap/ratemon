@@ -46,6 +46,7 @@ NUMS_ITERS = [5, 20, 80]
 # Key to use in the results file.
 RESULTS_KEY = "results"
 
+
 def get_results_flp(cnf):
     """ Assembles the results filepath for a configuration. """
     return path.join(
