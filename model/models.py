@@ -803,7 +803,6 @@ class SvmSklearnWrapper(SvmWrapper):
         clss_str["class"] = clss
         return clss_str
 
-
     def __evaluate(self, preds, labels, raw, fair, sort_by_unfairness=False,
                    graph_prms=None):
         """
@@ -868,7 +867,6 @@ class SvmSklearnWrapper(SvmWrapper):
         print(f"    Test accuracy: {acc * 100:.2f}%")
         return acc
 
-
     def __plot_queue_occ(self, preds, labels, raw, fair, flp, x_lim=None):
         """ Plots the queue occupancy and accuracy over time. """
         print("Plotting queue occupancy...")
@@ -916,9 +914,8 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.savefig(flp)
             pyplot.close()
 
-            return sum(bucketized_label) / len(bucketized_label)
+            return sum(bucketized_label) / (1.0 * len(bucketized_label))
         return 0
-
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
              num_flws, arr_times=None,
