@@ -91,11 +91,14 @@ def cleanup_combine_and_save_results(cnf, res):
     else:
         # Training did, in fact, produce results, so remove the lock file.
         utils.remove_lock_file(cnf["out_dir"])
-    los_tst, tim_trn_s = res
-    res = np.array(
-        [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"], los_tst,
-         tim_trn_s])
-    np.savez_compressed(get_results_flp(cnf), **{RESULTS_KEY: res})
+    # If the result is not already bundled with its parameters, then
+    # do so and save it to disk.
+    if len(res) != 5:
+        los_tst, tim_trn_s = res
+        res = np.array(
+            [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"], los_tst,
+             tim_trn_s])
+        np.savez_compressed(get_results_flp(cnf), **{RESULTS_KEY: res})
     return res
 
 
