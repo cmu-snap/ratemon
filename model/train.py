@@ -7,6 +7,7 @@ Based on:
 
 import argparse
 import copy
+import functools
 import json
 import math
 import multiprocessing
@@ -870,7 +871,7 @@ def run_cnf(cnf, gate_func=None, post_func=None):
     func = run_trials
     # Optionally decide whether to run a configuration.
     if gate_func is not None:
-        func = gate_func(cnf, func)
+        func = functools.partial(gate_func, func=func)
     res = func(cnf)
     # Optionally process the output of each configuration.
     if post_func is not None:
@@ -893,8 +894,8 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
          for cnf in cnfs],
         [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
 
-    if sync:
-        res = [func(cnf) for cnf in cnfs]
+    if SYNC:
+        res = [run_cnf(*cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=3) as pol:
             res = pol.starmap(run_cnf, cnfs)
