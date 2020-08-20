@@ -347,11 +347,10 @@ def clean(arr):
     return new
 
 
-def visualize_classes(net, dat, is_svm):
+def visualize_classes(net, dat):
     """ Prints statistics about the classes in dat. """
     # Visualaize the ground truth data.
-    clss = ([-1, 1] if is_svm
-            else list(range(net.num_clss)))
+    clss = net.get_classes()
     # Assumes that dat is a structured numpy array containing a
     # column named "class".
     tots = [

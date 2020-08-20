@@ -63,7 +63,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize):
     dat_in = utils.scale_all(dat_in, scl_prms, 0, 1, standardize)
 
     # Visualize the ground truth data.
-    utils.visualize_classes(net, dat_out, isinstance(net, models.SvmWrapper))
+    utils.visualize_classes(net, dat_out)
 
     if not path.exists(out_dir):
         os.makedirs(out_dir)

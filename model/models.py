@@ -64,6 +64,10 @@ class PytorchModelWrapper:
         """ Converts real-valued feature values into classes. """
         return dat_out
 
+    def get_classes(self):
+        """ Returns a list of all possible class labels. """
+        return list(range(self.num_clss))
+
     def modify_data(self, sim, dat_in, dat_out):
         """ Performs an arbitrary transformation on the data. """
         return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
@@ -432,16 +436,16 @@ class SvmWrapper(BinaryModelWrapper):
             super(SvmWrapper, self).modify_data(
                 sim, dat_in, dat_out, dat_out_raw, dat_out_oracle, sequential))
         # Map [0,1] to [-1, 1]
-        fet = dat_out.dtype.names[0]
-        dat_out[fet] = dat_out[fet] * 2 - 1
+        # fet = dat_out.dtype.names[0]
+        # dat_out[fet] = dat_out[fet] * 2 - 1
         return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
 
     def _check_output_helper(self, out):
         # Remove a trailing dimension of size 1.
         out = torch.reshape(out, (out.size()[0],))
         # Transform the output to report classes -1 and 1.
-        out[torch.where(out < 0)] = -1
-        out[torch.where(out >= 0)] = 1
+        # out[torch.where(out < 0)] = -1
+        # out[torch.where(out >= 0)] = 1
         return out
 
 
@@ -722,11 +726,16 @@ class SvmSklearnWrapper(SvmWrapper):
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
+    num_clss = 3
+    multiclass = num_clss > 2
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
         kernel = kwargs["kernel"]
         max_iter = kwargs["max_iter"]
+
+        assert not multiclass or kernel == "linear", \
+            "Kernel must be linear for multiclass mode."
         # Automatically set the class weights based on the class
         # popularity in the training data. Change the maximum number
         # of iterations.
@@ -736,7 +745,7 @@ class SvmSklearnWrapper(SvmWrapper):
             # the primal optimization problem instead of its dual.
             svm.LinearSVC(
                 penalty=kwargs["penalty"], dual=False, class_weight="balanced",
-                verbose=1, max_iter=max_iter)
+                verbose=1, max_iter=max_iter, multi_class="ovr")
             if kernel == "linear" else
             # Supports L2 regularization only. The degree parameter is
             # used only if kernel == "poly".
@@ -771,6 +780,48 @@ class SvmSklearnWrapper(SvmWrapper):
                 key=lambda p: p[0])
         best_fets = "\n".join([f"{fet}: {coef}" for fet, coef in best_fets])
         print(f"----------\nBest features:\n{best_fets}\n----------")
+
+    @staticmethod
+    def convert_to_class(sim, dat_out):
+        if SvmSklearnWrapper.num_clss == 2:
+            return BinaryModelWrapper.convert_to_class(sim, dat_out)
+        assert SvmSklearnWrapper.num_clss == 3, \
+            ("Only 2 or 3 classes are supported, not: "
+             f"{SvmSklearnWrapper.num_clss}")
+        assert len(dat_out.dtype.names) == 1, "Should be only one column."
+
+        def percent_to_class(prc, fair):
+            """ Convert a queue occupancy percent to a fairness class. """
+            assert len(prc) == 1, "Should be only one column."
+            prc = prc[0]
+
+            # Threshold between fair and unfair.
+            tsh_fair = 0.1
+
+            dif = (fair - prc) / fair
+            if dif < -1 * tsh_fair:
+                # We are much higher than fair.
+                cls = 2
+            elif -1 * tsh_fair <= dif <= tsh_fair:
+                # We are fair.
+                cls = 1
+            elif tsh_fair < dif:
+                # We are much lower than fair.
+                cls = 0
+            else:
+                assert False, "This should never happen."
+            return cls
+
+        # Map a conversion function across all entries. Note that here
+        # an entry is an entire row, since each row is a single tuple
+        # value.
+        clss = np.vectorize(
+            functools.partial(
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
+            otypes=[int])(dat_out)
+        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
+        clss_str["class"] = clss
+        return clss_str
 
 
     def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
@@ -831,7 +882,7 @@ class SvmSklearnWrapper(SvmWrapper):
         fair = fair.tolist()
 
         # Convert labels from -1 and 1 to 0 and 1
-        labels = (labels + 1) / 2
+        # labels = (labels + 1) / 2
         labels = labels.tolist()
 
         # Bucketize and compute bucket accuracies.
@@ -1005,7 +1056,8 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         self.net = LrSklearnWrapper.rfe(
             linear_model.LogisticRegression(
                 penalty="l1", dual=False, class_weight="balanced",
-                solver="liblinear", max_iter=kwargs["max_iter"], verbose=1),
+                solver="saga", max_iter=kwargs["max_iter"], verbose=1,
+                multi_class="ovr", n_jobs=-1),
             kwargs["rfe"])
         return self.net
 
@@ -1030,7 +1082,8 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
             linear_model.LogisticRegressionCV(
                 cv=kwargs["folds"], penalty="l1", dual=False,
                 class_weight="balanced", solver="saga",
-                max_iter=kwargs["max_iter"], verbose=1, n_jobs=-1),
+                max_iter=kwargs["max_iter"], verbose=1, n_jobs=-1,
+                multi_class="ovr"),
             kwargs["rfe"])
         return self.net
 

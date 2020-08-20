@@ -837,8 +837,7 @@ def run_trials(args):
     print(f"Number of input features: {len(dat_in.dtype.names)}")
 
     # Visualaize the ground truth data.
-    utils.visualize_classes(
-        net_tmp, dat_out, isinstance(net_tmp, models.SvmWrapper))
+    utils.visualize_classes(net_tmp, dat_out)
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
