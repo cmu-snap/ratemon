@@ -733,8 +733,7 @@ class SvmSklearnWrapper(SvmWrapper):
         self.graph = kwargs["graph"]
         kernel = kwargs["kernel"]
         max_iter = kwargs["max_iter"]
-
-        assert not multiclass or kernel == "linear", \
+        assert not self.multiclass or kernel == "linear", \
             "Kernel must be linear for multiclass mode."
         # Automatically set the class weights based on the class
         # popularity in the training data. Change the maximum number
@@ -1029,22 +1028,25 @@ class LrSklearnWrapper(SvmSklearnWrapper):
     name = "LrSklearn"
     params = ["max_iter", "rfe", "graph"]
 
+    @staticmethod
     def rfe(net, rfe_type):
+        """ Apply recursive feature elimination to the provided net. """
+        final_net = net
         if rfe_type == "None":
             print("Not using recursive feature elimination.")
         elif rfe_type == "rfe":
             print("Using recursive feature elimination.")
-            net = sklearn.feature_selection.RFE(
+            final_net = sklearn.feature_selection.RFE(
                 estimator=net, n_features_to_select=10, step=10)
         elif rfe_type == "rfecv":
             print("Using recursive feature elimination with cross-validation.")
-            net = sklearn.feature_selection.RFECV(
+            final_net = sklearn.feature_selection.RFECV(
                 estimator=net, step=1,
                 cv=sklearn.model_selection.StratifiedKFold(10),
                 scoring="accuracy", n_jobs=-1)
         else:
             raise Exception(f"Unknown RFE type: {rfe_type}")
-        return net
+        return final_net
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -1053,7 +1055,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         # optimization problem instead of its dual. Automatically set
         # the class weights based on the class popularity in the
         # training data. Change the maximum number of iterations.
-        self.net = LrSklearnWrapper.rfe(
+        self.net = self.rfe(
             linear_model.LogisticRegression(
                 penalty="l1", dual=False, class_weight="balanced",
                 solver="saga", max_iter=kwargs["max_iter"], verbose=1,
@@ -1078,7 +1080,7 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
         # training data. Change the maximum number of iterations.
         # Use the specified number of cross-validation folds. Use
         # all cores.
-        self.net = LrSklearnWrapper.rfe(
+        self.net = self.rfe(
             linear_model.LogisticRegressionCV(
                 cv=kwargs["folds"], penalty="l1", dual=False,
                 class_weight="balanced", solver="saga",
