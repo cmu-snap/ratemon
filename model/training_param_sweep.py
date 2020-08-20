@@ -11,7 +11,7 @@ import shutil
 import time
 
 import numpy as np
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 
 import models
 import train
@@ -103,6 +103,108 @@ def cleanup_combine_and_save_results(cnf, res):
     return res
 
 
+def graph_partial_results(cnfs, out_dir):
+    results = []
+    for cnf in cnfs:
+        cnf_out_dir = cnf["out_dir"]
+        results_flps = [
+            path.join(cnf_out_dir, fln) for fln in os.listdir(cnf_out_dir)
+            if fln.endswith("results.npz")]
+        assert len(results_flps) <= 1
+        if results_flps:
+            results_flp = results_flps[0]
+            print(f"Loading results: {results_flp}")
+            with np.load(results_flp) as fil:
+                results.append(fil[RESULTS_KEY])
+    results = [res for res in results if not np.isnan(res).any()]
+    print(f"Found {len(results)} valid results!")
+
+    # Vary keep_percent. One graph for each number of iterations. A line for
+    # each number of simulations.
+    #
+    # Create one graph for each number of iterations.
+    for max_iters_graph in NUMS_ITERS:
+        # Create a line for each number of simulations.
+        num_sims_lines = {}
+        for num_sims_target in NUMS_SIMS:
+            num_sims_lines[num_sims_target] = []
+            for result in results:
+                num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
+                if num_sims == num_sims_target and max_iter == max_iters_graph:
+                    num_sims_lines[num_sims_target].append(
+                        (keep_prc, los_tst, tim_trn_s))
+
+        for num_sims, line in sorted(num_sims_lines.items()):
+            xs, ys_los, _ = zip(*line)
+            plt.plot(xs, 1 - np.array(ys_los), label=f"{num_sims} simulations")
+        plt.legend()
+        plt.xlabel("Percent kept from each sim")
+        plt.ylabel("Accuracy")
+        plt.ylim((0, 1))
+        plt.tight_layout()
+        out_flp = path.join(
+            out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-accuracy.pdf")
+        print(f"Saving graph: {out_flp}")
+        plt.savefig(out_flp)
+        plt.close()
+
+        for num_sims, line in sorted(num_sims_lines.items()):
+            xs, _, ys_tim = zip(*line)
+            plt.plot(xs, ys_tim, label=f"{num_sims} simulations")
+        plt.legend()
+        plt.xlabel("Percent kept from each sim")
+        plt.ylabel("Training time (seconds)")
+        plt.tight_layout()
+        out_flp = path.join(
+            out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-time.pdf")
+        print(f"Saving graph: {out_flp}")
+        plt.savefig(out_flp)
+        plt.close()
+
+
+    # # Vary max_iter. One graph for each number of iterations. A line for
+    # # each number of simulations.
+    # #
+    # # Create one graph for each number of iterations.
+    # for max_iters_graph in NUMS_ITERS:
+    #     # Create a line for each number of simulations.
+    #     num_sims_lines = {}
+    #     for num_sims_target in NUMS_SIMS:
+    #         num_sims_lines[num_sims_target] = []
+    #         for result in results:
+    #             num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
+    #             if num_sims == num_sims_target and max_iter == max_iters_graph:
+    #                 num_sims_lines[num_sims_target].append(
+    #                     (keep_prc, los_tst, tim_trn_s))
+
+    #     for num_sims, line in sorted(num_sims_lines.items()):
+    #         xs, ys_los, _ = zip(*line)
+    #         plt.plot(xs, 1 - np.array(ys_los), label=f"{num_sims} simulations")
+    #     plt.legend()
+    #     plt.xlabel("Percent kept from each sim")
+    #     plt.ylabel("Accuracy")
+    #     plt.ylim((0, 1))
+    #     plt.tight_layout()
+    #     out_flp = path.join(
+    #         out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-accuracy.pdf")
+    #     print(f"Saving graph: {out_flp}")
+    #     plt.savefig(out_flp)
+    #     plt.close()
+
+    #     for num_sims, line in sorted(num_sims_lines.items()):
+    #         xs, _, ys_tim = zip(*line)
+    #         plt.plot(xs, ys_tim, label=f"{num_sims} simulations")
+    #     plt.legend()
+    #     plt.xlabel("Percent kept from each sim")
+    #     plt.ylabel("Training time (seconds)")
+    #     plt.tight_layout()
+    #     out_flp = path.join(
+    #         out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-time.pdf")
+    #     print(f"Saving graph: {out_flp}")
+    #     plt.savefig(out_flp)
+    #     plt.close()
+
+
 def main():
     """ This program's entrypoint. """
     psr = argparse.ArgumentParser(
@@ -145,6 +247,10 @@ def main():
     psr.add_argument(
         "--out-dir", default=train.DEFAULTS["out_dir"],
         help="The directory in which to store output files.", type=str)
+    psr.add_argument(
+        "--graph-partial-results", action="store_true",
+        help=("Look through the output directory for partial results, and "
+              "graph them."))
     args = psr.parse_args()
     args = train.prepare_args(vars(args))
 
@@ -190,6 +296,9 @@ def main():
             key=lambda cnf: np.prod(
                 [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"]]))
         print(f"Will test {len(cnfs)} configurations.")
+
+        if args["graph_partial_results"]:
+            return graph_partial_results(cnfs, out_dir)
 
         # For each possible configuration of number of simulations and
         # percentage of each simulation, create a temporary file

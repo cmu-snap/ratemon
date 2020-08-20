@@ -726,7 +726,7 @@ class SvmSklearnWrapper(SvmWrapper):
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
-    num_clss = 3
+    num_clss = 2
     multiclass = num_clss > 2
 
     def new(self, **kwargs):
