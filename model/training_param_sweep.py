@@ -32,8 +32,8 @@ PRC_DELTA = 5
 # PRC_MIN = 10
 # PRC_MAX = 100
 # PRC_DELTA = 10
-# PRCS = [100]
-PRCS = [5, 10, 25]
+# KEEP_PRCS = [100]
+KEEP_PRCS = [5, 10, 25]
 # Number of iterations.
 NUM_ITERS_MIN = 5
 NUM_ITERS_MAX = 80
@@ -162,47 +162,47 @@ def graph_partial_results(cnfs, out_dir):
         plt.close()
 
 
-    # # Vary max_iter. One graph for each number of iterations. A line for
-    # # each number of simulations.
-    # #
-    # # Create one graph for each number of iterations.
-    # for max_iters_graph in NUMS_ITERS:
-    #     # Create a line for each number of simulations.
-    #     num_sims_lines = {}
-    #     for num_sims_target in NUMS_SIMS:
-    #         num_sims_lines[num_sims_target] = []
-    #         for result in results:
-    #             num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
-    #             if num_sims == num_sims_target and max_iter == max_iters_graph:
-    #                 num_sims_lines[num_sims_target].append(
-    #                     (keep_prc, los_tst, tim_trn_s))
+    # Vary max_iter. One graph for each number of iterations. A line for
+    # each number of simulations.
+    #
+    # Create one graph for each number of iterations.
+    for num_sims_graph in NUMS_SIMS:
+        # Create a line for each number of simulations.
+        keep_prc_lines = {}
+        for keep_prc_target in KEEP_PRCS:
+            keep_prc_lines[keep_prc_target] = []
+            for result in results:
+                num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
+                if num_sims == num_sims_graph and keep_prc == keep_prc_target:
+                    keep_prc_lines[keep_prc_target].append(
+                        (max_iter, los_tst, tim_trn_s))
 
-    #     for num_sims, line in sorted(num_sims_lines.items()):
-    #         xs, ys_los, _ = zip(*line)
-    #         plt.plot(xs, 1 - np.array(ys_los), label=f"{num_sims} simulations")
-    #     plt.legend()
-    #     plt.xlabel("Percent kept from each sim")
-    #     plt.ylabel("Accuracy")
-    #     plt.ylim((0, 1))
-    #     plt.tight_layout()
-    #     out_flp = path.join(
-    #         out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-accuracy.pdf")
-    #     print(f"Saving graph: {out_flp}")
-    #     plt.savefig(out_flp)
-    #     plt.close()
+        for keep_prc, line in sorted(keep_prc_lines.items()):
+            xs, ys_los, _ = zip(*line)
+            plt.plot(xs, 1 - np.array(ys_los), label=f"{keep_prc}% kept")
+        plt.legend()
+        plt.xlabel("Number of training iterations")
+        plt.ylabel("Accuracy")
+        plt.ylim((0, 1))
+        plt.tight_layout()
+        out_flp = path.join(
+            out_dir, f"num_sims_{num_sims_graph}-vary_max_iter-accuracy.pdf")
+        print(f"Saving graph: {out_flp}")
+        plt.savefig(out_flp)
+        plt.close()
 
-    #     for num_sims, line in sorted(num_sims_lines.items()):
-    #         xs, _, ys_tim = zip(*line)
-    #         plt.plot(xs, ys_tim, label=f"{num_sims} simulations")
-    #     plt.legend()
-    #     plt.xlabel("Percent kept from each sim")
-    #     plt.ylabel("Training time (seconds)")
-    #     plt.tight_layout()
-    #     out_flp = path.join(
-    #         out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-time.pdf")
-    #     print(f"Saving graph: {out_flp}")
-    #     plt.savefig(out_flp)
-    #     plt.close()
+        for keep_prc, line in sorted(keep_prc_lines.items()):
+            xs, _, ys_tim = zip(*line)
+            plt.plot(xs, ys_tim, label=f"{keep_prc}% kept")
+        plt.legend()
+        plt.xlabel("Number of training iterations")
+        plt.ylabel("Training time (seconds)")
+        plt.tight_layout()
+        out_flp = path.join(
+            out_dir, f"num_sims_{num_sims_graph}-vary_max_iter-time.pdf")
+        print(f"Saving graph: {out_flp}")
+        plt.savefig(out_flp)
+        plt.close()
 
 
 def main():
@@ -290,7 +290,7 @@ def main():
                 # Fix percent of each simulation and number of
                 # simulations. Vary number of iterations.
                 list(itertools.product(
-                    NUMS_SIMS, PRCS,
+                    NUMS_SIMS, KEEP_PRCS,
                     range(NUM_ITERS_MIN, NUM_ITERS_MAX + 1, NUM_ITERS_DELTA))))
             ],
             key=lambda cnf: np.prod(
@@ -304,7 +304,7 @@ def main():
         # percentage of each simulation, create a temporary file
         # containing the parsed data for that configuration.
         all_prcs = list(set(
-            PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
+            KEEP_PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
         tmp_dat = {}
         for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
             base_dir = path.join(out_dir, f"{num_sims}_{prc}")
