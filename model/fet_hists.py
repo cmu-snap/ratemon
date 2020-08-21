@@ -31,7 +31,7 @@ def main():
     dat = np.load(dat_flp)
     num_arrays = len(dat.files)
     assert num_arrays == 5, f"Expected 5 arrays, but found: {dat.files}"
-    dat_in = dat["in"]
+    dat_in = dat["dat_in"]
 
     # Generate graphs.
     for fet in dat_in.dtype.names:
