@@ -210,7 +210,7 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
         sim, dat_in, dat_out, dat_out_raw,
         # Must put the column name in a list for the result to be
         # a structured array.
-        dat_out_oracle=dat[["mathis model label-ewma-alpha0.5"]],
+        dat_out_oracle=dat[["mathis model label-ewma-alpha0.01"]],
         sequential=sequential)
 
     # Select a fraction of the data.
