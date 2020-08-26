@@ -914,7 +914,7 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.savefig(flp)
             pyplot.close()
 
-            return sum(bucketized_label) / (1.0 * len(bucketized_label))
+            return sum(bucketized_label) / len(bucketized_label)
         return 0
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
