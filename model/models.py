@@ -884,34 +884,28 @@ class SvmSklearnWrapper(SvmWrapper):
             ("There must be at least one sample per bucket, but there are "
              f"{num_samples} samples and only {num_buckets} buckets!")
         buckets = [
-            (mean(throughput_),
+            (mean(queue_occupancy_),
              mean(labels_))
-            for throughput_, labels_ in [
+            for queue_occupancy_, labels_ in [
                 (raw[i:i + num_per_bucket],
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
-            throughput_list = [throughput for throughput, _ in buckets]
+            queue_occupancy_list = [queue_occupancy for queue_occupancy, _ in buckets]
             fair_list = [fair] * len(buckets)
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                throughput_list, "b-")
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                fair_list, "g--")
-            labels = [label for _, label in buckets]
-            label_list = [0] * len(buckets)
+            xs = list(range(len(buckets)))
+            pyplot.plot(xs, queue_occupancy_list, "b-")
+            pyplot.plot(xs, fair_list, "g--")
+            label_accuracy = [0] * len(buckets)
             bucketized_label = [0] * len(buckets)
-            for i in range(len(buckets)):
-                if (throughput_list[i] > fair[0]):
-                    label_list[i] = labels[i]
-                    bucketized_label[i] = int(labels[i] >= 0.5)
+            for i, (queue_occupancy, label) in enumerate(buckets):
+                if (queue_occupancy > fair[0]):
+                    label_accuracy[i] = label
+                    bucketized_label[i] = int(label >= 0.5)
                 else:
-                    label_list[i] = 1.0 - labels[i]
-                    bucketized_label[i] = int(labels[i] < 0.5)
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                label_list, "r^")
+                    label_accuracy[i] = 1.0 - label
+                    bucketized_label[i] = int(label < 0.5)
+            pyplot.plot(xs, label_accuracy, "r^")
             if x_lim is not None:
                 pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
@@ -920,7 +914,7 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.savefig(flp)
             pyplot.close()
 
-            return sum(bucketized_label) / (1.0 * len(bucketized_label))
+            return sum(bucketized_label) / len(bucketized_label)
         return 0
 
 

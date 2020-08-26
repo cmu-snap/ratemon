@@ -210,29 +210,26 @@ def main():
 
     print(f"Done Processing - time: {time.time() - tim_srt_s:.2f} seconds")
 
-    f = open("results.txt", "w")
-
     mean_accuracy = mean(all_accuracy)
 
-    f.write(
-        f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
+    with open("results.txt", "w") as f:
+        f.write(
+            f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
 
-    for bw_Mbps in bw_dict.keys():
-        if bw_dict[bw_Mbps]:
-            bw_accuracy = mean(bw_dict[bw_Mbps])
-            f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
+        for bw_Mbps, values in bw_dict.items():
+            if values:
+                bw_accuracy = mean(values)
+                f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
 
-    for rtt_us_ in rtt_dict.keys():
-        if rtt_dict[rtt_us_]:
-            rtt_accuracy = mean(rtt_dict[rtt_us_])
-            f.write(f"Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n")
+        for rtt_us, values in rtt_dict.items():
+            if values:
+                rtt_accuracy = mean(values)
+                f.write(f"Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n")
 
-    for queue_p in queue_dict.keys():
-        if queue_dict[queue_p]:
-            queue_accuracy = mean(queue_dict[queue_p])
-            f.write(f"Queue size less than {queue_p} packets accuracy {queue_accuracy}\n")
-
-    f.close()
+        for queue_p, values in queue_dict.items():
+            if values:
+                queue_accuracy = mean(values)
+                f.write(f"Queue size less than {queue_p} packets accuracy {queue_accuracy}\n")
 
 
 if __name__ == "__main__":
