@@ -9,6 +9,7 @@ from os import path
 import pickle
 from statistics import mean
 import time
+from matplotlib import pyplot
 
 import numpy as np
 import torch
@@ -216,20 +217,60 @@ def main():
         f.write(
             f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
 
+        x_axis = []
+        y_axis = []
+
         for bw_Mbps, values in bw_dict.items():
             if values:
                 bw_accuracy = mean(values)
                 f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
 
+                x_axis.append(f"{bw_Mbps}Mbps")
+                y_axis.append(bw_accuracy)
+
+        y_pos = np.arange(len(y_axis))
+        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+        pyplot.xticks(y_pos, x_axis)
+        pyplot.ylabel("Accuracy")
+        pyplot.savefig("bandwidth_vs_accuracy.pdf")
+        pyplot.close()
+
+        x_axis.clear()
+        y_axis.clear()
+
+
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                f.write(f"Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n")
+                f.write(f"Rtt less than {rtt_us_}us accuracy {rtt_accuracy}\n")
+
+                x_axis.append(f"{rtt_us_}us")
+                y_axis.append(rtt_accuracy)
+
+        y_pos = np.arange(len(y_axis))
+        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+        pyplot.xticks(y_pos, x_axis)
+        pyplot.ylabel("Accuracy")
+        pyplot.savefig("rtt_vs_accuracy.pdf")
+        pyplot.close()
+
+        x_axis.clear()
+        y_axis.clear()
 
         for queue_p, values in queue_dict.items():
             if values:
                 queue_accuracy = mean(values)
                 f.write(f"Queue size less than {queue_p} packets accuracy {queue_accuracy}\n")
+
+                x_axis.append(f"{queue_p}p")
+                y_axis.append(queue_accuracy)
+
+        y_pos = np.arange(len(y_axis))
+        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+        pyplot.xticks(y_pos, x_axis)
+        pyplot.ylabel("Accuracy")
+        pyplot.savefig("queue_vs_accuracy.pdf")
+        pyplot.close()
 
 
 if __name__ == "__main__":
