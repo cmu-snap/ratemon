@@ -50,6 +50,15 @@ queue_dict = manager.dict({
     5000: manager.list()
 })
 
+def plot_bar(x_axis, y_axis, file_name):
+    y_pos = np.arange(len(y_axis))
+    pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+    pyplot.xticks(y_pos, x_axis)
+    pyplot.ylabel("Accuracy")
+    pyplot.savefig(file_name)
+    pyplot.close()
+
+
 
 def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy, 
                 all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict):
@@ -228,12 +237,7 @@ def main():
                 x_axis.append(f"{bw_Mbps}Mbps")
                 y_axis.append(bw_accuracy)
 
-        y_pos = np.arange(len(y_axis))
-        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
-        pyplot.xticks(y_pos, x_axis)
-        pyplot.ylabel("Accuracy")
-        pyplot.savefig("bandwidth_vs_accuracy.pdf")
-        pyplot.close()
+        plot_bar(x_axis, y_axis, "bandwidth_vs_accuracy.pdf")
 
         x_axis.clear()
         y_axis.clear()
@@ -247,12 +251,7 @@ def main():
                 x_axis.append(f"{rtt_us_}us")
                 y_axis.append(rtt_accuracy)
 
-        y_pos = np.arange(len(y_axis))
-        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
-        pyplot.xticks(y_pos, x_axis)
-        pyplot.ylabel("Accuracy")
-        pyplot.savefig("rtt_vs_accuracy.pdf")
-        pyplot.close()
+        plot_bar(x_axis, y_axis, "rtt_vs_accuracy.pdf")
 
         x_axis.clear()
         y_axis.clear()
@@ -265,12 +264,7 @@ def main():
                 x_axis.append(f"{queue_p}p")
                 y_axis.append(queue_accuracy)
 
-        y_pos = np.arange(len(y_axis))
-        pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
-        pyplot.xticks(y_pos, x_axis)
-        pyplot.ylabel("Accuracy")
-        pyplot.savefig("queue_vs_accuracy.pdf")
-        pyplot.close()
+        plot_bar(x_axis, y_axis, "queue_vs_accuracy.pdf")
 
 
 if __name__ == "__main__":
