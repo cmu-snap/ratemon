@@ -16,7 +16,11 @@ from sklearn import linear_model
 from sklearn import svm
 import torch
 
+<<<<<<< HEAD
 SMOOTHING_THRESHOLD = 0.4
+=======
+SMOOTHING_THRESHOLD = 0.3
+>>>>>>> d0ac525 (smoothing threshold)
 
 
 class PytorchModelWrapper:
@@ -900,12 +904,23 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.plot(x_axis, fair_list, "g--")
             label_accuracy = [0] * len(buckets)
             bucketized_label = [0] * len(buckets)
+<<<<<<< HEAD
             label_accuracy, bucketized_label = zip(
                 *(((label, int(label >= SMOOTHING_THRESHOLD))
                    if queue_occupancy > fair[0] else
                    (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
                   for queue_occupancy, label in buckets))
             pyplot.plot(x_axis, label_accuracy, "r^")
+=======
+            for i, (queue_occupancy, label) in enumerate(buckets):
+                if (queue_occupancy > fair[0]):
+                    label_accuracy[i] = label
+                    bucketized_label[i] = int(label >= SMOOTHING_THRESHOLD)
+                else:
+                    label_accuracy[i] = 1.0 - label
+                    bucketized_label[i] = int(label < SMOOTHING_THRESHOLD)
+            pyplot.plot(xs, label_accuracy, "r^")
+>>>>>>> d0ac525 (smoothing threshold)
             if x_lim is not None:
                 pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
