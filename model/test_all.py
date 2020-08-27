@@ -248,7 +248,7 @@ def main():
                 rtt_accuracy = mean(values)
                 f.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
 
-                x_axis.append(f"{rtt_us_}us")
+                x_axis.append(f"{rtt_us}us")
                 y_axis.append(rtt_accuracy)
 
         plot_bar(x_axis, y_axis, "rtt_vs_accuracy.pdf")
