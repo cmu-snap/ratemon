@@ -17,6 +17,8 @@ from sklearn import linear_model
 from sklearn import svm
 import torch
 
+SMOOTHING_THRESHOLD = 0.3
+
 
 class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
@@ -901,10 +903,10 @@ class SvmSklearnWrapper(SvmWrapper):
             for i, (queue_occupancy, label) in enumerate(buckets):
                 if (queue_occupancy > fair[0]):
                     label_accuracy[i] = label
-                    bucketized_label[i] = int(label >= 0.5)
+                    bucketized_label[i] = int(label >= SMOOTHING_THRESHOLD)
                 else:
                     label_accuracy[i] = 1.0 - label
-                    bucketized_label[i] = int(label < 0.5)
+                    bucketized_label[i] = int(label < SMOOTHING_THRESHOLD)
             pyplot.plot(xs, label_accuracy, "r^")
             if x_lim is not None:
                 pyplot.xlim(x_lim)
