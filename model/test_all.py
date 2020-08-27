@@ -242,7 +242,7 @@ def main():
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                f.write(f"Rtt less than {rtt_us_}us accuracy {rtt_accuracy}\n")
+                f.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
 
                 x_axis.append(f"{rtt_us_}us")
                 y_axis.append(rtt_accuracy)
