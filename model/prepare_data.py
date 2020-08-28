@@ -156,6 +156,8 @@ def __main():
         print(f"Output directory does not exist. Creating it: {out_dir}")
         os.makedirs(out_dir)
 
+    tim_srt_s = time.time()
+
     # Determine the simulation filepaths.
     sims_dir = args.data_dir
     sim_flns = os.listdir(sims_dir)
@@ -168,7 +170,6 @@ def __main():
     print(f"Total packets: {num_pkts}\nFeatures:\n    " + '\n    '.join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
-    tim_srt_s = time.time()
     __merge(sim_flps, out_dir, num_pkts, dtype, splits)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
