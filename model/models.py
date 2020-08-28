@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ Models. """
 
+import copy
 import functools
 import math
 import os
@@ -753,32 +754,11 @@ class SvmSklearnWrapper(SvmWrapper):
                 verbose=1, max_iter=max_iter))
         return self.net
 
-    def train(self, fets, dat_in, dat_out):
+    def train(self, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
         self.net.fit(dat_in, dat_out)
+        # Oftentimes, the training log statements do not end with a newline.
         print()
-        if isinstance(
-                self.net,
-                (sklearn.feature_selection.RFE,
-                 sklearn.feature_selection.RFECV)):
-            # Sort the features alphabetically.
-            best_fets = sorted(
-                zip(
-                    np.array(fets)[np.where(self.net.ranking_ == 1)],
-                    self.net.estimator_.coef_[0]),
-                key=lambda p: p[0])
-            print(f"Number of features selected: {len(best_fets)}")
-        else:
-            # First, sort the features by the absolute value of the
-            # importance and pick the top 20. Then, sort the features
-            # alphabetically.
-            best_fets = sorted(
-                sorted(
-                    zip(fets, self.net.coef_[0]),
-                    key=lambda p: abs(p[1]))[-20:],
-                key=lambda p: p[0])
-        best_fets = "\n".join([f"{fet}: {coef}" for fet, coef in best_fets])
-        print(f"----------\nBest features:\n{best_fets}\n----------")
 
     @staticmethod
     def convert_to_class(sim, dat_out):
@@ -823,8 +803,13 @@ class SvmSklearnWrapper(SvmWrapper):
         return clss_str
 
 
-    def __evaluate(self, preds, labels, raw, fair, flp, x_lim=None,
-                   sort_by_unfairness=True):
+    def __evaluate(self, preds, labels, raw, fair, sort_by_unfairness=False,
+                   graph_prms=None):
+        """
+        Returns the accuracy of predictions compared to ground truth
+        labels. If self.graph == True, then this function also graphs
+        the accuracy.
+        """
         # Compute the distance from fair, then divide by fair to
         # compute the relative unfairness.
         diffs = (raw - fair) / fair
@@ -856,18 +841,23 @@ class SvmSklearnWrapper(SvmWrapper):
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
+            assert graph_prms is not None, \
+                "\"graph_prms\" must be a dict(), not None."
+            assert "flp" in graph_prms, "\"flp\" not in \"graph_prms\"!"
+            assert "x_lim" in graph_prms, "\"x_lim\" not in \"graph_prms\"!"
             # Plot each bucket's accuracy.
             pyplot.plot(
                 ([x for x, _, _ in buckets]
                  if sort_by_unfairness else list(range(len(buckets)))),
                 [c / t for _, c, t in buckets], "bo-")
             pyplot.ylim((-0.1, 1.1))
+            x_lim = graph_prms["x_lim"]
             if x_lim is not None:
-                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+                pyplot.xlim(x_lim)
             pyplot.xlabel("Unfairness (fraction of fair)" if sort_by_unfairness else "Time")
             pyplot.ylabel("Classification accuracy")
             pyplot.tight_layout()
-            pyplot.savefig(flp)
+            pyplot.savefig(graph_prms["flp"])
             pyplot.close()
         # Compute the overall accuracy.
         _, corrects, totals = zip(*buckets)
@@ -877,6 +867,8 @@ class SvmSklearnWrapper(SvmWrapper):
 
 
     def __plot_throughput(self, preds, labels, raw, fair, flp, x_lim=None):
+        """ Plots the queue occupancy and accuracy over time. """
+        print("Plotting queue occupancy...")
         raw = raw.tolist()
         fair = fair.tolist()
 
@@ -909,7 +901,7 @@ class SvmSklearnWrapper(SvmWrapper):
                 (list(range(len(buckets)))),
                 [label for _, label in buckets], "r^")
             if x_lim is not None:
-                pyplot.xlim((x_lim[0] * 1.1, x_lim[1] * 1.1))
+                pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
             pyplot.ylabel("Queue occupancy vs Fair queue occupancy")
             pyplot.tight_layout()
@@ -918,49 +910,79 @@ class SvmSklearnWrapper(SvmWrapper):
 
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
-             num_flws, arr_times=None, graph_prms=None):
+             num_flws, arr_times=None,
+             graph_prms=copy.copy({
+                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
         """
         Tests this model on the provided dataset and returns the test accuracy
-        (higher is better).
+        (higher is better). Also, analyzes the model's feature coefficients and
+        (if self.graph == True) visualizes various metrics.
+
+        fets: List of feature names.
+        dat_in: Test data.
+        dat_out_classes: Ground truth labels.
+        dat_out_raw: Raw values used to compute dat_out_classes.
+        dat_out_oracle: Labels predicted by the Mathis model.
+        num_flws: The number of flows in the simulation that generated each
+            sample.
+        arr_times: The arrival times of each sample.
+        graph_prms: Graphing parameters. Used only if self.graph == True.
         """
+        sort_by_unfairness = graph_prms["sort_by_unfairness"]
+        dur_s = graph_prms["dur_s"]
+        assert sort_by_unfairness or dur_s is not None, \
+            ("If \"sort_by_unfairness\" is False, then \"dur_s\" must not be "
+             "None.")
+
         # Compute the fair share. Convert from int to float to avoid
         # all values being rounded to 0.
         fair = torch.reciprocal(num_flws.type(torch.float))
-
+        # Calculate the x limits. Determine the maximum unfairness.
+        x_lim = (
+            # Compute the maximum unfairness.
+            (-1, ((dat_out_raw - fair) / fair).max().item())
+            if sort_by_unfairness else (0, graph_prms["dur_s"]))
+        # Optionally create the output directory.
+        out_dir = path.join(graph_prms["out_dir"], self.name)
         if self.graph:
-            assert graph_prms is not None, "graph_prms is None!"
-            out_dir = path.join(graph_prms["out_dir"], self.name)
-            sort_by_unfairness = graph_prms["sort_by_unfairness"]
-            # Set the x limits.Determine the maximum unfairness.
-            x_lim = (
-                # Compute the maximum unfairness.
-                (-1, ((dat_out_raw - fair) / fair).max())
-                if sort_by_unfairness else (0, graph_prms["dur_s"]))
             # Create the output directory.
             if not path.exists(out_dir):
                 os.makedirs(out_dir)
 
-            # Analyze feature importance.
-            coefs = None
-            try:
-                coefs = self.net.coef_
-            except AttributeError:
-                # Coefficients are only; available with a linear kernel.
-                print("Warning: Unable to extract coefficients!")
-            if coefs is not None:
-                imps, names = zip(*reversed(sorted(
-                    [(imp, fets[idx]) for idx, imp in enumerate(coefs[0])],
-                    key=lambda t: t[0])))
-                # Pick the 20 features whose coefficients have the largest magnitude.
-                imps, names = zip(*reversed(sorted(
-                    [(imp, name) for _, imp, name in sorted(
-                        [(abs(imp), imp, name) for imp, name in zip(imps, names)],
-                        key=lambda t: t[0])[len(names) - 20:]],
-                    key=lambda t: t[0])))
+        # Analyze feature coefficients. The underlying model's .coef_
+        # attribute may not exist.
+        try:
+            if isinstance(
+                    self.net,
+                    (sklearn.feature_selection.RFE,
+                     sklearn.feature_selection.RFECV)):
+                # Since the model was trained using RFE, display all
+                # features. Sort the features alphabetically.
+                best_fets = sorted(
+                    zip(
+                        np.array(fets)[np.where(self.net.ranking_ == 1)],
+                        self.net.estimator_.coef_[0]),
+                    key=lambda p: p[0])
+                print(f"Number of features selected: {len(best_fets)}")
+            else:
+                # First, sort the features by the absolute value of the
+                # importance and pick the top 20. Then, sort the features
+                # alphabetically.
+                best_fets = sorted(
+                    sorted(
+                        zip(fets, self.net.coef_[0]),
+                        key=lambda p: abs(p[1]))[-20:],
+                    key=lambda p: p[0])
+            print(
+                f"----------\nBest features ({len(best_fets)}):\n" +
+                "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
+                "\n----------")
+            if self.graph:
+                names, coefs = zip(*best_fets)
                 num_fets = len(names)
                 y_vals = list(range(num_fets))
                 pyplot.figure(figsize=(7, 0.2 * num_fets))
-                pyplot.barh(y_vals, imps, align="center")
+                pyplot.barh(y_vals, coefs, align="center")
                 pyplot.yticks(y_vals, names)
                 pyplot.ylim((-1, num_fets))
                 pyplot.xlabel("Feature coefficient")
@@ -968,16 +990,11 @@ class SvmSklearnWrapper(SvmWrapper):
                 pyplot.tight_layout()
                 pyplot.savefig(path.join(out_dir, f"features_{self.name}.pdf"))
                 pyplot.close()
+        except AttributeError:
+            # Coefficients are only available with a linear kernel.
+            print("Warning: Unable to extract coefficients!")
 
-            # Analyze accuracy vs. unfairness for all flows and all
-            # degrees of unfairness, for the Mathis Model oracle.
-            print("Evaluting Mathis Model oracle:")
-            self.__evaluate(
-                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
-                path.join(
-                    out_dir, f"accuracy_vs_unfairness_mathis_{self.name}.pdf"),
-                x_lim, sort_by_unfairness)
-
+        if self.graph:
             # Analyze, for each number of flows, accuracy vs. unfairness.
             flws_accs = []
             nums_flws = list(set(num_flws.tolist()))
@@ -987,11 +1004,13 @@ class SvmSklearnWrapper(SvmWrapper):
                 flws_accs.append(self.__evaluate(
                     torch.tensor(self.net.predict(dat_in[valid])),
                     dat_out_classes[valid], dat_out_raw[valid], fair[valid],
-                    path.join(
-                        out_dir,
-                        (f"accuracy_vs_unfairness_{num_flws_selected}flows_"
-                         f"{self.name}.pdf")),
-                    x_lim, sort_by_unfairness))
+                    sort_by_unfairness,
+                    graph_prms={
+                        "flp": path.join(
+                            out_dir,
+                            (f"accuracy_vs_unfairness_{num_flws_selected}flows_"
+                             f"{self.name}.pdf")),
+                        "x_lim": x_lim}))
 
             # Analyze accuracy vs. number of flows.
             x_vals = list(range(len(flws_accs)))
@@ -1001,25 +1020,37 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.xlabel("Total flows (1 unfair)")
             pyplot.ylabel("Classification accuracy")
             pyplot.tight_layout()
-            pyplot.savefig(path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
+            pyplot.savefig(
+                path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
 
-            # Plot throughput
-            self.__plot_throughput(dat_out_oracle, dat_out_classes, dat_out_raw, fair, path.join(
-                out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), x_lim)
-        else:
-            out_dir = "."
-            sort_by_unfairness = False
-            x_lim = None
+            # Plot throughput.
+            self.__plot_throughput(
+                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+                path.join(
+                    out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"),
+                x_lim)
 
+        # Analyze accuracy vs. unfairness for all flows and all
+        # degrees of unfairness, for the Mathis Model oracle.
+        print("Evaluting Mathis Model:")
+        self.__evaluate(
+            dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+            sort_by_unfairness,
+            graph_prms={
+                "flp": path.join(
+                    out_dir, "accuracy_vs_unfairness_mathis.pdf"),
+                "x_lim": x_lim})
         # Analyze accuracy vs unfairness for all flows and all degrees
         # of unfairness, for the model itself.
-        print("Evaluating model:")
+        print(f"Evaluating {self.name} model:")
         return self.__evaluate(
             torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-            dat_out_raw, fair,
-            path.join(out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
-            x_lim, sort_by_unfairness)
+            dat_out_raw, fair, sort_by_unfairness,
+            graph_prms={
+                "flp": path.join(
+                    out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
+                "x_lim": x_lim})
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):

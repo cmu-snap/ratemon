@@ -667,7 +667,7 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(*(ldr_trn.dataset.raw()[:3]))
+    net.train(*(ldr_trn.dataset.raw()[1:3]))
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
     del ldr_trn
