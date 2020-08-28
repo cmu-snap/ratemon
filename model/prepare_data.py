@@ -54,8 +54,10 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, splits):
 
     forgotten = 0
     idxs = {"trn": 0, "val": 0, "tst": 0}
-    for sim_flp in sim_flps:
-        dat = utils.load_sim(sim_flp)[1]
+    num_sims = len(sim_flps)
+    for idx, sim_flp in enumerate(sim_flps):
+        dat = utils.load_sim(
+            sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")[1]
 
         # Start with the list of all indices, then remove the new
         # indices that will be used for the validation and test
