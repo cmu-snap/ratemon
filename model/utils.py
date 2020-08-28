@@ -537,3 +537,24 @@ def remove_lock_file(out_dir):
         os.remove(get_lock_flp(out_dir))
     except FileNotFoundError:
         pass
+
+
+def get_npz_headers(flp):
+    """
+    Takes a path to an .npz file, which is a Zip archive of .npy files, and
+    returns a list of tuples of the form:
+        (name, shape, np.dtype)
+
+    Adapted from: https://stackoverflow.com/a/43223420
+    """
+    def decode_header(archive, name):
+        """ Decodes the header information of a single NPY file. """
+        npy = archive.open(name)
+        version = np.lib.format.read_magic(npy)
+        shape, fortran, dtype = np.lib.format._read_array_header(npy, version)
+        return name[:-4], shape, dtype
+
+    with zipfile.ZipFile(flp) as archive:
+        return [
+            decode_header(archive, name) for name in archive.namelist()
+            if name.endswith(".npy")]
