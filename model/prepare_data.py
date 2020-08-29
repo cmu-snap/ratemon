@@ -20,9 +20,9 @@ import utils
 class Split:
     """ Represents either the training, validation, or test split. """
 
-    def __init__(self, name, frac, flp, dtype, num_pkts_tot):
+    def __init__(self, name, prc, flp, dtype, num_pkts_tot):
         self.name = name
-        self.frac = frac / 100
+        self.frac = prc / 100
         # Create an empty file for each split, and set all entries
         # to -1. This matches the behavior of parse_dumbbell.py:
         # Features values that cannot be computed are replaced
@@ -30,7 +30,7 @@ class Split:
         # incomplete feature values by looking for -1s.
         print(f"Creating file for split \"{self.name}\"...")
         self.dat = np.memmap(
-            flp, dtype, mode="w+", shape=(math.ceil(num_pkts_tot * frac),))
+            flp, dtype, mode="w+", shape=(math.ceil(num_pkts_tot * self.frac),))
         self.dat.fill(-1)
         # The next available index in self.dat.
         self.idx = 0
@@ -98,8 +98,8 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
     print("Preparing split files...")
     splits = {
         name: Split(
-            name, frac, path.join(out_dir, f"{name}.npy"), dtype, num_pkts)
-        for name, frac in split_prcs.items()}
+            name, prc, path.join(out_dir, f"{name}.npy"), dtype, num_pkts)
+        for name, prc in split_prcs.items()}
     # Keep track of the number of packets that do not get selected for
     # any of the splits.
     pkts_forgotten = 0
