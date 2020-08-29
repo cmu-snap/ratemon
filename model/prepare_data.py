@@ -17,13 +17,65 @@ import train
 import utils
 
 
-def __get_num_packets_and_dtype(sim_flps):
-    print("Surveying simulations...")
+class Split:
+    """ Represents either the training, validation, or test split. """
+
+    def __init__(self, name, frac, flp, dtype, num_pkts_tot):
+        self.name = name
+        self.frac = frac / 100
+        # Create an empty file for each split, and set all entries
+        # to -1. This matches the behavior of parse_dumbbell.py:
+        # Features values that cannot be computed are replaced
+        # with -1. When reading the splits later, we can detect
+        # incomplete feature values by looking for -1s.
+        print(f"Creating file for split \"{self.name}\"...")
+        self.dat = np.memmap(
+            flp, dtype, mode="w+", shape=(math.ceil(num_pkts_tot * frac),))
+        self.dat.fill(-1)
+        # The next available index in self.dat.
+        self.idx = 0
+
+    def take(self, sim_dat, available_idxs):
+        """
+        Takes this Split's specified fraction of data from sim_dat,
+        choosing from available_idxs. Removes the chosen indices from
+        available_idxs and returns it.
+        """
+        num_sim_pkts = sim_dat.shape[0]
+        num_new = math.floor(num_sim_pkts * self.frac)
+        # Verify that if a split fraction was nonzero, then at
+        # least one packet was selected. This is a common-case
+        # heuristic rather than an invariant, since it is
+        # reasonable for zero packets to be selected if the
+        # simulation has either very few packets or the split
+        # fraction is very low.
+        assert num_new > 0 or self.frac == 0, \
+            (f"Selecting 0 of {num_sim_pkts} packets, but fraction is: "
+             f"{self.frac}")
+        end_idx = self.idx + num_new
+        assert end_idx <= self.dat.shape[0], \
+            (f"Index {end_idx} into \"{self.name}\" split does not fit within "
+             f"shape {self.dat.shape}")
+        new_idxs = random.sample(available_idxs, num_new)
+        self.dat[self.idx:end_idx] = sim_dat[new_idxs]
+        self.idx = end_idx
+        available_idxs -= set(new_idxs)
+        return available_idxs
+
+
+def __survey(sim_flps):
+    """
+    Surveys the provided simulations to determine their total packets and dtype,
+    which are returned.
+    """
+    num_sims = len(sim_flps)
+    print(f"Surveying {num_sims} simulations...")
     assert sim_flps, "Must provide at least one simulation."
 
-    # Extract the header from each simulation.
+    # Extract the header from each simulation. Reshape to remove a
+    # middle dimension of size 1.
     headers = np.array(
-        [utils.get_npz_headers(flp) for flp in sim_flps]).reshape((len(sim_flps), 3))
+        [utils.get_npz_headers(flp) for flp in sim_flps]).reshape((num_sims, 3))
     # Count the total number of packets by looking at the header shapes.
     num_pkts = sum(shape[0] for shape in headers[:, 1])
     # Extract the dtype and verify that all dtypes are the same.
@@ -32,95 +84,58 @@ def __get_num_packets_and_dtype(sim_flps):
     return num_pkts, dtype
 
 
-def __merge(sim_flps, out_dir, num_pkts, dtype, splits):
+def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
+    """
+    Merges the provided simulations into training, validation, and
+    test splits as defined by the percents in split_prcs. Stores the
+    resulting files in out_dir. The simulations contain a total of
+    num_pkts packets and have the provided dtype.
+    """
     # Create the final output files (version 1).
         # For each simulation file, load it.
         # Select each split randomly and append those entries to each split.
         # Shuffle the training split.
-    print("Preparing target files...")
-
-    trn = np.memmap(
-        path.join(out_dir, "train.npy"), dtype, mode="w+",
-        shape=(math.ceil(num_pkts * splits["trn"] / 100),))
-    val = np.memmap(
-        path.join(out_dir, "val.npy"), dtype, mode="w+",
-        shape=(math.ceil(num_pkts * splits["val"] / 100),))
-    tst = np.memmap(
-        path.join(out_dir, "test.npy"), dtype, mode="w+",
-        shape=(math.ceil(num_pkts * splits["tst"] / 100),))
-    trn.fill(-1)
-    val.fill(-1)
-    tst.fill(-1)
-
-    forgotten = 0
-    idxs = {"trn": 0, "val": 0, "tst": 0}
+    print("Preparing split files...")
+    splits = {
+        name: Split(
+            name, frac, path.join(out_dir, f"{name}.npy"), dtype, num_pkts)
+        for name, frac in split_prcs.items()}
+    # Keep track of the number of packets that do not get selected for
+    # any of the splits.
+    pkts_forgotten = 0
     num_sims = len(sim_flps)
     for idx, sim_flp in enumerate(sim_flps):
+        # Load the simulation.
         dat = utils.load_sim(
             sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")[1]
-
-        # Start with the list of all indices, then remove the new
-        # indices that will be used for the validation and test
-        # data. The remaining indices will be used for the training
-        # data. This guarantees that the amount of training data is at
-        # least as large as specified.
-        num_sim_pkts = dat.shape[0]
-        all_idxs = set(range(num_sim_pkts))
-
-        num_new_trn = math.floor(num_sim_pkts * splits["trn"] / 100)
-        new_trn_idxs = random.sample(all_idxs, num_new_trn)
-        all_idxs -= set(new_trn_idxs)
-
-        num_new_val = math.floor(num_sim_pkts * splits["val"] / 100)
-        new_val_idxs = random.sample(all_idxs, num_new_val)
-        all_idxs -= set(new_val_idxs)
-
-        num_new_tst = math.floor(num_sim_pkts * splits["tst"] / 100)
-        new_tst_idxs = random.sample(all_idxs, num_new_tst)
-        all_idxs -= set(new_tst_idxs)
-
+        if dat is None:
+            continue
+        # Start with the list of all indices. Each split select some
+        # indices for itself, then removes them from this set.
+        all_idxs = set(range(dat.shape[0]))
+        # For each split, take a fraction of the simulation packets.
+        for split in splits.values():
+            all_idxs = split.take(dat, all_idxs)
         # Record how many packets are not being moved to one of the
         # merged files.
-        forgotten += len(all_idxs)
-
-        assert num_new_trn > 0 or splits["trn"] == 0
-        assert num_new_val > 0 or splits["val"] == 0
-        assert num_new_tst > 0 or splits["tst"] == 0
-
-        trn_end_idx = idxs["trn"] + num_new_trn
-        val_end_idx = idxs["val"] + num_new_val
-        tst_end_idx = idxs["tst"] + num_new_tst
-
-        assert trn_end_idx <= trn.shape[0], \
-            f"Index {trn_end_idx} into training set does not fit within shape {trn.shape}"
-        assert val_end_idx <= val.shape[0]
-        assert tst_end_idx <= tst.shape[0]
-
-        trn[idxs["trn"]:trn_end_idx] = dat[new_trn_idxs]
-        trn[idxs["val"]:val_end_idx] = dat[new_val_idxs]
-        trn[idxs["tst"]:tst_end_idx] = dat[new_tst_idxs]
-
-        idxs["trn"] = trn_end_idx
-        idxs["val"] = val_end_idx
-        idxs["tst"] = tst_end_idx
-
-    print(f"Forgot {forgotten}/{num_pkts} packets ({forgotten / num_pkts:.2f}%)")
+        pkts_forgotten += len(all_idxs)
+    print(f"Forgot {pkts_forgotten}/{num_pkts} packets ({pkts_forgotten / num_pkts:.2f}%)")
 
     # Shuffle the training data. The validation and test data do not
     # need to be shuffled.
-    np.random.shuffle(trn)
-
-    del trn
-    del val
-    del tst
-
-    # Create the final output files (version 2).
-        # For each simulation file, load it and append it to the final output file.
-        # Shuffle the final output file.
-        # Divide the final output file into training, validation, and test sets.
+    print("Shuffling training data...")
+    np.random.shuffle(splits["train"].dat)
+    # Delete the splits to force their data to be written to disk.
+    print("Flushing splits to disk...")
+    del splits
 
 
 def __main():
+    """ This program's entrypoint. """
+    # Set the relevant random seeds.
+    random.seed(utils.SEED)
+    np.random.seed(utils.SEED)
+
     psr = argparse.ArgumentParser(
         description=(
             "Merges parsed simulation files into unified training, validation, "
@@ -146,9 +161,10 @@ def __main():
         required=False, type=int)
     args = psr.parse_args()
 
-    splits = {
-        "trn": args.train_split, "val": args.val_split, "tst": args.test_split}
-    tot_split = sum(splits.values())
+    split_prcs = {
+        "train": args.train_split, "val": args.val_split,
+        "test": args.test_split}
+    tot_split = sum(split_prcs.values())
     assert tot_split == 100, \
         ("The sum of the training, validation, and test splits must equal 100, "
          f"not {tot_split}")
@@ -159,20 +175,21 @@ def __main():
         os.makedirs(out_dir)
 
     tim_srt_s = time.time()
-
     # Determine the simulation filepaths.
     sims_dir = args.data_dir
     sim_flns = os.listdir(sims_dir)
+    random.shuffle(sim_flns)
     num_sims = args.num_sims
     num_sims = len(sim_flns) if num_sims is None else num_sims
+    print(f"Selected {num_sims} simulations")
     sim_flps = [
         path.join(sims_dir, sim_fln) for sim_fln in sim_flns[:num_sims]]
-    num_pkts, dtype = __get_num_packets_and_dtype(sim_flps)
+    num_pkts, dtype = __survey(sim_flps)
     fets = dtype.names
     print(f"Total packets: {num_pkts}\nFeatures:\n    " + '\n    '.join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
-    __merge(sim_flps, out_dir, num_pkts, dtype, splits)
+    __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 
