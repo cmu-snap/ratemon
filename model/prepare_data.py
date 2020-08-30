@@ -20,47 +20,75 @@ import utils
 class Split:
     """ Represents either the training, validation, or test split. """
 
-    def __init__(self, name, prc, flp, dtype, num_pkts_tot):
+    def __init__(self, name, prc, flp, dtype, num_pkts_tot, shuffle):
         self.name = name
+        print(f"Initializing split \"{self.name}\"...")
         self.frac = prc / 100
+        self.shuffle = shuffle
+        if self.shuffle:
+            print(f"Split \"{self.name}\" will be shuffled")
+        # Track where this Split has been finalized, in which case it
+        # cannot have methods called on it.
+        self.finished = False
+
+        num_pkts = math.ceil(num_pkts_tot * self.frac)
         # Create an empty file for each split, and set all entries
         # to -1. This matches the behavior of parse_dumbbell.py:
         # Features values that cannot be computed are replaced
         # with -1. When reading the splits later, we can detect
         # incomplete feature values by looking for -1s.
-        print(f"Creating file for split \"{self.name}\"...")
-        self.dat = np.memmap(
-            flp, dtype, mode="w+", shape=(math.ceil(num_pkts_tot * self.frac),))
-        self.dat.fill(-1)
-        # The next available index in self.dat.
-        self.idx = 0
+        self.dat = np.memmap(flp, dtype, mode="w+", shape=(num_pkts,))
 
-    def take(self, sim_dat, available_idxs):
+        # The next available index in self.dat. Used if self.shuffle == False.
+        self.idx = 0
+        # List of all available indices in this split. This set is
+        # reduced as the split is populated.
+        self.dat_available_idxs = set(range(num_pkts))
+
+
+    def take(self, sim_dat, sim_available_idxs):
         """
         Takes this Split's specified fraction of data from sim_dat,
-        choosing from available_idxs. Removes the chosen indices from
-        available_idxs and returns it.
+        choosing from sim_available_idxs. Removes the chosen indices from
+        sim_available_idxs and returns the modified version.
         """
+        assert not self.finished, "Trying to call a method on a finished Split."
         num_sim_pkts = sim_dat.shape[0]
         num_new = math.floor(num_sim_pkts * self.frac)
-        # Verify that if a split fraction was nonzero, then at
-        # least one packet was selected. This is a common-case
-        # heuristic rather than an invariant, since it is
-        # reasonable for zero packets to be selected if the
-        # simulation has either very few packets or the split
-        # fraction is very low.
+        # Verify that if a split fraction was nonzero, then at least
+        # one packet was selected. This is a common-case heuristic
+        # rather than an invariant, since it is reasonable for zero
+        # packets to be selected if the simulation has either very few
+        # packets or the split fraction is very low.
         assert num_new > 0 or self.frac == 0, \
             (f"Selecting 0 of {num_sim_pkts} packets, but fraction is: "
              f"{self.frac}")
-        end_idx = self.idx + num_new
-        assert end_idx <= self.dat.shape[0], \
-            (f"Index {end_idx} into \"{self.name}\" split does not fit within "
-             f"shape {self.dat.shape}")
-        new_idxs = random.sample(available_idxs, num_new)
-        self.dat[self.idx:end_idx] = sim_dat[new_idxs]
-        self.idx = end_idx
-        available_idxs -= set(new_idxs)
-        return available_idxs
+        # Randomly select the packets to pull into this split.
+        sim_new_idxs = random.sample(sim_available_idxs, num_new)
+        sim_available_idxs -= set(sim_new_idxs)
+
+        if self.shuffle:
+            dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
+            self.dat[dat_new_idxs] = sim_dat[sim_new_idxs]
+        else:
+            start_idx = self.idx
+            self.idx = self.idx + num_new
+            assert self.idx <= self.dat.shape[0], \
+                (f"Index {self.idx} into \"{self.name}\" split does not fit within "
+                 f"shape {self.dat.shape}")
+            dat_new_idxs = range(start_idx, self.idx)
+            self.dat[start_idx:self.idx] = sim_dat[sim_new_idxs]
+        self.dat_available_idxs -= set(dat_new_idxs)
+        return sim_available_idxs
+
+    def finish(self):
+        """
+        Finalize this split. A finalized Split cannot have methods called on it.
+        """
+        self.finished = True
+        # Mark any unused indices as invalid by filling their values
+        # with -1.
+        self.dat[list(self.dat_available_idxs)].fill(-1)
 
 
 def __survey(sim_flps):
@@ -91,14 +119,11 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
     resulting files in out_dir. The simulations contain a total of
     num_pkts packets and have the provided dtype.
     """
-    # Create the final output files (version 1).
-        # For each simulation file, load it.
-        # Select each split randomly and append those entries to each split.
-        # Shuffle the training split.
     print("Preparing split files...")
     splits = {
         name: Split(
-            name, prc, path.join(out_dir, f"{name}.npy"), dtype, num_pkts)
+            name, prc, path.join(out_dir, f"{name}.npy"), dtype, num_pkts,
+            shuffle=name == "train")
         for name, prc in split_prcs.items()}
     # Keep track of the number of packets that do not get selected for
     # any of the splits.
@@ -121,10 +146,9 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
         pkts_forgotten += len(all_idxs)
     print(f"Forgot {pkts_forgotten}/{num_pkts} packets ({pkts_forgotten / num_pkts:.2f}%)")
 
-    # Shuffle the training data. The validation and test data do not
-    # need to be shuffled.
-    print("Shuffling training data...")
-    np.random.shuffle(splits["train"].dat)
+    for split in splits.values():
+        split.finish()
+
     # Delete the splits to force their data to be written to disk.
     print("Flushing splits to disk...")
     del splits
