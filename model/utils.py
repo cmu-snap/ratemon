@@ -4,6 +4,7 @@
 import math
 import os
 from os import path
+import random
 import zipfile
 
 import numpy as np
@@ -558,3 +559,10 @@ def get_npz_headers(flp):
         return [
             decode_header(archive, name) for name in archive.namelist()
             if name.endswith(".npy")]
+
+
+def set_rand_seed(seed=SEED):
+    """ Sets the Python, numpy, and Torch random seeds to seed. """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)

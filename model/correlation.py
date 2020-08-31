@@ -378,7 +378,7 @@ def main():
         if train.SHUFFLE:
             # Set the random seed so that multiple instances of this
             # script see the same random order.
-            random.seed(utils.SEED)
+            utils.set_rand_seed()
             random.shuffle(sims)
         num_sims = args.num_sims
         if num_sims is not None:

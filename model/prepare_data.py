@@ -156,9 +156,7 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
 
 def __main():
     """ This program's entrypoint. """
-    # Set the relevant random seeds.
-    random.seed(utils.SEED)
-    np.random.seed(utils.SEED)
+    utils.set_rand_seed()
 
     psr = argparse.ArgumentParser(
         description=(

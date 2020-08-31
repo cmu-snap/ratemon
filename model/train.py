@@ -248,7 +248,7 @@ def make_datasets(net, args, dat=None):
         if SHUFFLE:
             # Set the random seed so that multiple parallel instances of
             # this script see the same random order.
-            random.seed(utils.SEED)
+            utils.set_rand_seed()
             random.shuffle(sims)
         num_sims = args["num_sims"]
         if num_sims is not None:
@@ -782,9 +782,7 @@ def run_trials(args):
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
-        random.seed(utils.SEED)
-        np.random.seed(utils.SEED)
-        torch.manual_seed(utils.SEED)
+        utils.set_rand_seed()
 
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):
