@@ -118,7 +118,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
             rtt_dict[rtt_us_].append(accuracy)
             break
 
-    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / self.queue_p
+    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / sim.queue_p
 
     for queue_bdp in queue_dict.keys():
         if bdp <= queue_bdp:
