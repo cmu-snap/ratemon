@@ -14,6 +14,7 @@ from matplotlib import pyplot
 import numpy as np
 import torch
 
+import cl_args
 import models
 import train
 import utils
@@ -151,27 +152,13 @@ def main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Hyper-parameter optimizer for train.py.")
+    psr = cl_args.add_running(psr)
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
     psr.add_argument(
         "--simulations", help="The path to a simulations to analyze.", required=True,
         type=str)
-    psr.add_argument(
-        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--scale-params", help="The path to the input scaling parameters.",
-        required=True, type=str)
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
     args = psr.parse_args()
     mdl_flp = args.model
     sim_dir = args.simulations

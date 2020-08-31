@@ -13,6 +13,7 @@ import time
 
 import numpy as np
 
+import cl_args
 import utils
 
 
@@ -837,12 +838,9 @@ def main():
         help=("The directory in which the experiment results are stored "
               "(required)."), required=True, type=str)
     psr.add_argument(
-        "--out-dir",
-        help="The directory in which to store output files (required).",
-        required=True, type=str)
-    psr.add_argument(
         "--random-order", action="store_true",
         help="Parse the simulations in a random order.")
+    psr = cl_args.add_out(psr)
     args = psr.parse_args()
     exp_dir = args.exp_dir
     out_dir = args.out_dir

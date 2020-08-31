@@ -13,7 +13,7 @@ import random
 
 import numpy as np
 
-import train
+import cl_args
 import utils
 
 
@@ -167,9 +167,6 @@ def __main():
         help="The path to a directory containing the simulation files.",
         required=True, type=str)
     psr.add_argument(
-        "--out-dir", default=train.DEFAULTS["out_dir"],
-        help="The directory in which to store the merged files.", type=str)
-    psr.add_argument(
         "--train-split", default=50, help="Training data fraction",
         required=False, type=float)
     psr.add_argument(
@@ -181,6 +178,7 @@ def __main():
     psr.add_argument(
         "--num-sims", help="The number of simulations to consider.",
         required=False, type=int)
+    psr = cl_args.add_out(psr)
     args = psr.parse_args()
 
     split_prcs = {

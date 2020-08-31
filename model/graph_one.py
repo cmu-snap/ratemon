@@ -8,6 +8,7 @@ from os import path
 from matplotlib import pyplot
 import numpy as np
 
+import cl_args
 import utils
 
 
@@ -19,9 +20,7 @@ def main():
     psr.add_argument(
         "--parsed-data", help="The path to the parsed simulation data.",
         required=True, type=str)
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
+    psr = cl_args.add_out(psr)
     args = psr.parse_args()
     dat_flp = args.parsed_data
     out_dir = args.out_dir

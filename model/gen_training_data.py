@@ -8,6 +8,7 @@ import os
 from os import path
 import time
 
+import cl_args
 import sim
 
 
@@ -63,12 +64,9 @@ def main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Generates training data.")
     psr.add_argument(
-        "--out-dir",
-        help="The directory in which to store output files (required).",
-        required=True, type=str)
-    psr.add_argument(
         "--log-dst", default=EMAIL_DST,
         help="The email address to which updates will be sent.", type=str)
+    psr = cl_args.add_out(psr)
     args = psr.parse_args()
     # The ID of the experiment.
     eid = str(round(time.time()))
