@@ -11,6 +11,7 @@ import json
 import numpy as np
 import torch
 
+import cl_args
 import models
 import train
 import utils
@@ -26,21 +27,7 @@ def main():
     psr.add_argument(
         "--simulation", help="The path to a simulation to analyze.", required=True,
         type=str)
-    psr.add_argument(
-        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--scale-params", help="The path to the input scaling parameters.",
-        required=True, type=str)
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
+    psr = cl_args.add_running(psr)
     args = psr.parse_args()
     mdl_flp = args.model
     sim_flp = args.simulation
