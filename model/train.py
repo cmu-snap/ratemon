@@ -23,45 +23,11 @@ from numpy.lib import recfunctions
 import torch
 
 import cl_args
+import defaults
 import models
 import utils
 
 
-# Parameter defaults.
-DEFAULTS = {
-    "data_dir": ".",
-    "warmup_percent": 0,
-    "keep_percent": 100,
-    "num_sims": sys.maxsize,
-    "sims": [],
-    "model": models.MODEL_NAMES[0],
-    "features": [],
-    "epochs": 100,
-    "num_gpus": 0,
-    "train_batch": sys.maxsize,
-    "test_batch": sys.maxsize,
-    "learning_rate": 0.001,
-    "momentum": 0.09,
-    "kernel": "linear",
-    "degree": 3,
-    "penalty": "l1",
-    "max_iter": 10000,
-    "rfe": "None",
-    "folds": 2,
-    "graph": False,
-    "standardize": True,
-    "early_stop": False,
-    "val_patience": 10,
-    "val_improvement_thresh": 0.1,
-    "conf_trials": 1,
-    "max_attempts": 10,
-    "no_rand": False,
-    "timeout_s": 0,
-    "out_dir": ".",
-    "tmp_dir": None,
-    "regen_data": False,
-    "sync": False
-}
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
 # The threshold of the new throughout to the old throughput above which a
@@ -752,7 +718,7 @@ def prepare_args(args_):
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
     # parameters have values.
-    args = copy.copy(DEFAULTS)
+    args = copy.copy(defaults.DEFAULTS)
     args.update(args_)
     if args["early_stop"]:
         args["epochs"] = EPCS_MAX
@@ -796,7 +762,7 @@ def run_trials(args):
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        (utils.args_to_str(args, order=sorted(DEFAULTS.keys()))
+        (utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()))
         ) + (
             # Determine the proper extension based on the type of
             # model.
@@ -888,7 +854,8 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     # and only if sync is False or the configuration is explicity
     # configured to run synchronously.
     cnfs = zip(
-        [{**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
+        [{**cnf,
+          "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
          for cnf in cnfs],
         [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
 
@@ -910,9 +877,10 @@ def main():
               "testing results."))
     psr = cl_args.add_training(psr)
     args = vars(psr.parse_args())
-    # Verify that all arguments are reflected in DEFAULTS.
+    # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
-        assert arg in DEFAULTS, f"Argument {arg} missing from DEFAULTS!"
+        assert arg in defaults.DEFAULTS, \
+            f"Argument {arg} missing from defaults.DEFAULTS!"
     run_trials(prepare_args(args))
 
 

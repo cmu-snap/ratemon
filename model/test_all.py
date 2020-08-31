@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 import cl_args
+import defaults
 import models
 import train
 import utils
@@ -182,7 +183,7 @@ def main():
         # extract the "model" key.
         utils.str_to_args(
             path.basename(mdl_flp),
-            order=sorted(train.DEFAULTS.keys())
+            order=sorted(defaults.DEFAULTS.keys())
         )["model"]]()
     # # Manually remove the loss event rate sqrt feature.
     # net.in_spc.remove("loss event rate sqrt")
