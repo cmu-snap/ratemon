@@ -6,7 +6,6 @@ Hyper-parameter optimization for train.py.
 import argparse
 import itertools
 import multiprocessing
-import sys
 import time
 
 import ax
