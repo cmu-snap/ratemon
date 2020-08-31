@@ -39,15 +39,15 @@ rtt_dict = manager.dict({
     1000000: manager.list()
 })
 
-
+# Queue size in BDP
 queue_dict = manager.dict({
-    10: manager.list(),
-    50: manager.list(),
-    100: manager.list(),
-    200: manager.list(),
-    500: manager.list(),
-    1000: manager.list(),
-    5000: manager.list()
+    1: manager.list(),
+    2: manager.list(),
+    4: manager.list(),
+    8: manager.list(),
+    16: manager.list(),
+    32: manager.list(),
+    64: manager.list()
 })
 
 def plot_bar(x_axis, y_axis, file_name):
@@ -55,6 +55,7 @@ def plot_bar(x_axis, y_axis, file_name):
     pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
     pyplot.xticks(y_pos, x_axis)
     pyplot.ylabel("Accuracy")
+    pyplot.tight_layout()
     pyplot.savefig(file_name)
     pyplot.close()
 
@@ -117,9 +118,11 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
             rtt_dict[rtt_us_].append(accuracy)
             break
 
-    for queue_p in queue_dict.keys():
-        if sim.queue_p <= queue_p:
-            queue_dict[queue_p].append(accuracy)
+    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / self.queue_p
+
+    for queue_bdp in queue_dict.keys():
+        if bdp <= queue_bdp:
+            queue_dict[queue_bdp].append(accuracy)
             break
 
     print(
@@ -137,10 +140,10 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
             rtt_accuracy = mean(rtt_dict[rtt_us_])
             print(f"----Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}")
 
-    for queue_p in queue_dict.keys():
-        if queue_dict[queue_p]:
-            queue_accuracy = mean(queue_dict[queue_p])
-            print(f"----Queue size less than {queue_p} packets accuracy {queue_accuracy}")
+    for queue_bdp in queue_dict.keys():
+        if queue_dict[queue_bdp]:
+            queue_accuracy = mean(queue_dict[queue_bdp])
+            print(f"----Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}")
 
 
 def main():
@@ -256,12 +259,12 @@ def main():
         x_axis.clear()
         y_axis.clear()
 
-        for queue_p, values in queue_dict.items():
+        for queue_bdp, values in queue_dict.items():
             if values:
                 queue_accuracy = mean(values)
-                f.write(f"Queue size less than {queue_p} packets accuracy {queue_accuracy}\n")
+                f.write(f"Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}\n")
 
-                x_axis.append(f"{queue_p}p")
+                x_axis.append(f"{queue_bdp}bdp")
                 y_axis.append(queue_accuracy)
 
         plot_bar(x_axis, y_axis, "queue_vs_accuracy.pdf")
