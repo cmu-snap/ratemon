@@ -1,6 +1,5 @@
 """ Common command line arguments. """
 
-
 import defaults
 import models
 
