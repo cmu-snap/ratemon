@@ -16,7 +16,7 @@ from sklearn import linear_model
 from sklearn import svm
 import torch
 
-SMOOTHING_THRESHOLD = 0.3
+SMOOTHING_THRESHOLD = 0.4
 
 
 class PytorchModelWrapper:
