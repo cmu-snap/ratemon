@@ -13,12 +13,11 @@ import numpy as np
 import seaborn as sns
 
 import cl_args
+import defaults
 import models
 import train
 import utils
 
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 # Features to analyze.
 ALL_FETS = sorted([
     # "1/sqrt loss event rate-windowed-minRtt1",
@@ -281,7 +280,7 @@ def run_cnfs(fets, args, sims):
                 for fet in fets_])
              for fets_ in fets])]
     # Train configurations.
-    if SYNC:
+    if defaults.SYNC:
         res = [train.run_trials(cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=4) as pol:

@@ -39,3 +39,5 @@ DEFAULTS = {
     "regen_data": False,
     "sync": False
 }
+# Whether to execute synchronously or in parallel.
+SYNC = False
