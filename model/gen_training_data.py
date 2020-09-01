@@ -9,6 +9,7 @@ from os import path
 import time
 
 import cl_args
+import defaults
 import sim
 
 
@@ -44,8 +45,6 @@ UNFAIR_FLOWS = 1
 OTHER_PROTO = "ns3::TcpNewReno"
 # Whether to return before running experiments.
 DRY_RUN = False
-# Whether to run the simulations synchronously or in parallel.
-SYNC = False
 # Default destination for email updates.
 EMAIL_DST = "c.canel@icloud.com"
 # Log level.
@@ -105,7 +104,7 @@ def main():
             for bw_Mbps, dly_us, que_p, flws in itertools.product(
                 BWS_Mbps, DELAYS_us, QUEUE_p, OTHER_FLOWS)]
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
-            dry_run=DRY_RUN, sync=SYNC)
+            dry_run=DRY_RUN, sync=defaults.SYNC)
 
     log.info("Results in: %s", out_dir)
     log.critical("Finished.")

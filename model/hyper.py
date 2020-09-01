@@ -12,14 +12,12 @@ import ax
 import numpy as np
 
 import cl_args
+import defaults
 import train
 import utils
 
 
 DEFAULT_TLS_OPT = 40
-# When using exhaustive mode, whether to run configurations
-# synchronously or in parallel. Ignored otherwise.
-SYNC = False
 
 
 def main():
@@ -177,7 +175,7 @@ def main():
         cnfs = [
             {**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
-        if SYNC:
+        if defaults.SYNC:
             res = [train.run_trials(cnf)[0] for cnf in cnfs]
         else:
             with multiprocessing.Pool() as pol:

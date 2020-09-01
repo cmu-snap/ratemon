@@ -41,8 +41,6 @@ SHUFFLE = True
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 
 
 def scale_fets(dat, scl_grps, standardize=False):
@@ -249,7 +247,7 @@ def make_datasets(net, args, dat=None):
             (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
              args["keep_percent"])
             for idx, sim in enumerate(sims)]
-        if SYNC or args["sync"]:
+        if defaults.SYNC or args["sync"]:
             dat_all = [process_sim(*sim_args) for sim_args in sims_args]
         else:
             with multiprocessing.Pool() as pol:
@@ -875,7 +873,7 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
          for cnf in cnfs],
         [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
 
-    if SYNC:
+    if defaults.SYNC:
         res = [run_cnf(*cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=3) as pol:

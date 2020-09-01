@@ -14,11 +14,10 @@ import time
 import numpy as np
 
 import cl_args
+import defaults
 import utils
 
 
-# Whether to parse PCAP files synchronously or in parallel.
-SYNC = False
 # Assemble the output dtype.
 #
 # These metrics do not change.
@@ -856,7 +855,7 @@ def main():
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
-    if SYNC:
+    if defaults.SYNC:
         for pcap in pcaps:
             parse_pcap(*pcap)
     else:

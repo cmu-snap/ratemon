@@ -14,13 +14,12 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 import cl_args
+import defaults
 import models
 import train
 import utils
 
 
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 # Key to use in the results file.
 RESULTS_KEY = "results"
 # Experiment parameters.
@@ -352,7 +351,7 @@ def main():
         sim_args = [
             (idx, max_sims, net, sim_flp, out_dir, args["warmup_percent"], 100)
             for idx, sim_flp in enumerate(sims)]
-        if SYNC:
+        if defaults.SYNC:
             dat_all = [train.process_sim(*sim_args_) for sim_args_ in sim_args]
         else:
             with multiprocessing.Pool() as pol:
@@ -403,7 +402,7 @@ def main():
 
     # Train models.
     train.run_cnfs(
-        cnfs, SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
+        cnfs, defaults.SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
 
     # # Remove real data files.
     # for cnf in cnfs:
