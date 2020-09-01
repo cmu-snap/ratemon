@@ -31,8 +31,8 @@ def main():
         help="The number of optimization trials to run.", type=int)
     psr.add_argument(
         "--exhaustive", action="store_true",
-        help=("Try all combinations of parameters. Incompatible with parameters "
-              "of type \"range\"."))
+        help=("Try all combinations of parameters. Incompatible with "
+              "parameters of type \"range\"."))
     args = psr.parse_args()
     tls_opt = args.opt_trials
     tls_cnf = args.conf_trials
