@@ -1041,6 +1041,8 @@ class SvmSklearnWrapper(SvmWrapper):
                 path.join(
                     out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
                 x_lim)
+        else:
+            bucketized_accuracy = float("NaN")
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model oracle.
