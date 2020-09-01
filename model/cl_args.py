@@ -16,6 +16,10 @@ def add_out(psr):
 
 
 def add_warmup(psr):
+    """
+    Adds a "warmup-percent" argument to the provided ArgumentParser, and returns
+    it.
+    """
     psr.add_argument(
         "--warmup-percent", default=defaults.DEFAULTS["warmup_percent"],
         help=("The percent of each simulation's datapoint to drop from the "
@@ -84,8 +88,8 @@ def add_training(psr):
     psr.add_argument(
         "--degree", default=defaults.DEFAULTS["degree"],
         help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
-              "and \"--kernel=poly\", then this is the degree of the polynomial "
-              "that will be fit. Ignored otherwise."),
+              "and \"--kernel=poly\", then this is the degree of the "
+              "polynomial that will be fit. Ignored otherwise."),
         type=int)
     psr.add_argument(
         "--penalty", default=defaults.DEFAULTS["penalty"], choices=["l1", "l2"],

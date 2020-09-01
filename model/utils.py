@@ -202,7 +202,8 @@ class Sim():
         # Number of other flows
         self.other_flws = int(other_flws[:-5])
         # Edge delays
-        self.edge_delays = [int(del_us) for del_us in edge_delays[:-2].split(",")]
+        self.edge_delays = [
+            int(del_us) for del_us in edge_delays[:-2].split(",")]
         # Packet size (bytes)
         self.payload_B = float(payload_B[:-1])
         # Experiment duration (s).
@@ -337,8 +338,8 @@ def clean(arr):
         f"The provided array is not structured. dtype: {arr.dtype.descr}"
     num_dims = len(arr.shape)
     assert num_dims == 1, \
-        (f"Only 1D structured arrays are supported, but this one has {num_dims} "
-         "dims!")
+        ("Only 1D structured arrays are supported, but this one has "
+         f"{num_dims} dims!")
 
     num_cols = len(arr.dtype.names)
     new = np.empty((arr.shape[0], num_cols), dtype=float)

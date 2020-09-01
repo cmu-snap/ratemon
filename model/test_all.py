@@ -24,7 +24,7 @@ import utils
 def plot_bar(x_axis, y_axis, file_name):
     """ Create a bar graph. """
     y_pos = np.arange(len(y_axis))
-    pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+    pyplot.bar(y_pos, y_axis, align="center", alpha=0.5)
     pyplot.xticks(y_pos, x_axis)
     pyplot.ylabel("Accuracy")
     pyplot.tight_layout()
@@ -109,7 +109,8 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize,
     for bw_Mbps in bw_dict.keys():
         if bw_dict[bw_Mbps]:
             bw_accuracy = mean(bw_dict[bw_Mbps])
-            print(f"----Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}")
+            print(
+                f"----Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}")
 
     for rtt_us_ in rtt_dict.keys():
         if rtt_dict[rtt_us_]:
