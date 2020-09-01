@@ -867,7 +867,7 @@ class SvmSklearnWrapper(SvmWrapper):
         return acc
 
 
-    def __plot_throughput(self, preds, labels, raw, fair, flp, x_lim=None):
+    def __plot_queue_occ(self, preds, labels, raw, fair, flp, x_lim=None):
         """ Plots the queue occupancy and accuracy over time. """
         print("Plotting queue occupancy...")
         raw = raw.tolist()
@@ -892,17 +892,19 @@ class SvmSklearnWrapper(SvmWrapper):
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
-            queue_occupancy_list = [queue_occupancy for queue_occupancy, _ in buckets]
+            queue_occupancy_list = [
+                queue_occupancy for queue_occupancy, _ in buckets]
             fair_list = [fair] * len(buckets)
             x_axis = list(range(len(buckets)))
             pyplot.plot(x_axis, queue_occupancy_list, "b-")
             pyplot.plot(x_axis, fair_list, "g--")
             label_accuracy = [0] * len(buckets)
             bucketized_label = [0] * len(buckets)
-            label_accuracy, bucketized_label = zip(*[
-                ((label, int(label >= SMOOTHING_THRESHOLD)) if queue_occupancy > fair[0] else
-                 (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
-                for queue_occupancy, label in buckets])
+            label_accuracy, bucketized_label = zip(
+                *(((label, int(label >= SMOOTHING_THRESHOLD))
+                   if queue_occupancy > fair[0] else
+                   (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
+                  for queue_occupancy, label in buckets))
             pyplot.plot(x_axis, label_accuracy, "r^")
             if x_lim is not None:
                 pyplot.xlim(x_lim)
@@ -1031,11 +1033,12 @@ class SvmSklearnWrapper(SvmWrapper):
                 path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
 
-            # Plot throughput
-            bucketized_accuracy = self.__plot_throughput(dat_out_oracle, dat_out_classes,
-                                                         dat_out_raw, fair, 
-                                                         path.join(out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), 
-                                                         x_lim)
+            # Plot queue occupancy.
+            bucketized_accuracy = self.__plot_queue_occ(
+                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+                path.join(
+                    out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"),
+                x_lim)
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model oracle.
