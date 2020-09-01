@@ -110,8 +110,8 @@ class PytorchModelWrapper:
     def new(self):
         """ Returns a new instance of the underlying torch.nn.Module. """
         raise Exception(
-            ("Attempting to call \"new()\" on the PytorchModelWrapper base class "
-             "itself."))
+            ("Attempting to call \"new()\" on the PytorchModelWrapper base "
+             "class itself."))
 
 
 class BinaryModelWrapper(PytorchModelWrapper):
@@ -855,7 +855,9 @@ class SvmSklearnWrapper(SvmWrapper):
             x_lim = graph_prms["x_lim"]
             if x_lim is not None:
                 pyplot.xlim(x_lim)
-            pyplot.xlabel("Unfairness (fraction of fair)" if sort_by_unfairness else "Time")
+            pyplot.xlabel(
+                "Unfairness (fraction of fair)"
+                if sort_by_unfairness else "Time")
             pyplot.ylabel("Classification accuracy")
             pyplot.tight_layout()
             pyplot.savefig(graph_prms["flp"])

@@ -74,8 +74,8 @@ class Split:
             start_idx = self.idx
             self.idx = self.idx + num_new
             assert self.idx <= self.dat.shape[0], \
-                (f"Index {self.idx} into \"{self.name}\" split does not fit within "
-                 f"shape {self.dat.shape}")
+                (f"Index {self.idx} into \"{self.name}\" split does not fit "
+                 f"within shape {self.dat.shape}")
             dat_new_idxs = range(start_idx, self.idx)
             self.dat[start_idx:self.idx] = sim_dat[sim_new_idxs]
         self.dat_available_idxs -= set(dat_new_idxs)
@@ -108,7 +108,8 @@ def __survey(sim_flps):
     num_pkts = sum(shape[0] for shape in headers[:, 1])
     # Extract the dtype and verify that all dtypes are the same.
     dtype = headers[0][2]
-    assert (headers[1:][:, 2] == dtype).all(), "Not all simulations agree on dtype!"
+    assert (headers[1:][:, 2] == dtype).all(), \
+        "Not all simulations agree on dtype!"
     return num_pkts, dtype
 
 
@@ -144,7 +145,9 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
         # Record how many packets are not being moved to one of the
         # merged files.
         pkts_forgotten += len(all_idxs)
-    print(f"Forgot {pkts_forgotten}/{num_pkts} packets ({pkts_forgotten / num_pkts:.2f}%)")
+    print(
+        f"Forgot {pkts_forgotten}/{num_pkts} packets "
+        f"({pkts_forgotten / num_pkts:.2f}%)")
 
     for split in splits.values():
         split.finish()
@@ -206,7 +209,9 @@ def __main():
         path.join(sims_dir, sim_fln) for sim_fln in sim_flns[:num_sims]]
     num_pkts, dtype = __survey(sim_flps)
     fets = dtype.names
-    print(f"Total packets: {num_pkts}\nFeatures:\n    " + '\n    '.join(sorted(fets)))
+    print(
+        f"Total packets: {num_pkts}\nFeatures:\n    " +
+        "\n    ".join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
     __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs)

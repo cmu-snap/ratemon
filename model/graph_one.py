@@ -53,7 +53,7 @@ def main():
             pyplot.ylim(top=1.1)
             pyplot.hlines(
                 queue_fair_occupancy, 0, dat["arrival time us"][-1],
-                colors='k', linestyles='dashdot')
+                colors="k", linestyles="dashdot")
         if ("mathis model label" in fet or "loss" in fet) and "sqrt" not in fet:
             pyplot.ylim(top=1.1)
 

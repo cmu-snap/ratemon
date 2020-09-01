@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Based on:
-- https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
-- https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
+https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 """
 
 import argparse
@@ -70,7 +70,8 @@ def scale_fets(dat, scl_grps, standardize=False):
     scl_grps_prms = np.empty((len(scl_grps_unique), 2), dtype="float64")
     # Function to reduce a structured array.
     rdc = (lambda fnc, arr:
-           fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+           fnc(np.array(
+               [fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
     # Determine the min and the max of each scaling group.
     for scl_grp in scl_grps_unique:
         # Determine the features in this scaling group.
@@ -80,8 +81,10 @@ def scale_fets(dat, scl_grps, standardize=False):
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [
-            np.mean(utils.clean(fet_values)) if standardize else rdc(np.min, fet_values),
-            np.std(utils.clean(fet_values)) if standardize else rdc(np.max, fet_values)
+            np.mean(utils.clean(fet_values))
+            if standardize else rdc(np.min, fet_values),
+            np.std(utils.clean(fet_values))
+            if standardize else rdc(np.max, fet_values)
         ]
 
     # Create an empty array to hold the min and max values (i.e.,
@@ -157,7 +160,9 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     def has_non_finite(arr):
         for fet in arr.dtype.names:
             if not np.isfinite(arr[fet]).all():
-                print(f"    Simulation {sim_flp} has NaNs of Infs in feature {fet}")
+                print(
+                    f"    Simulation {sim_flp} has NaNs of Infs in feature "
+                    f"{fet}")
                 return True
         return False
     if has_non_finite(dat_in) or has_non_finite(dat_out):
@@ -211,7 +216,8 @@ def make_datasets(net, args, dat=None):
         sims = args["sims"]
         if not sims:
             dat_dir = args["data_dir"]
-            sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+            sims = [
+                path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
         if SHUFFLE:
             # Set the random seed so that multiple parallel instances of
             # this script see the same random order.
@@ -297,11 +303,13 @@ def make_datasets(net, args, dat=None):
     assert scl_grps is not None, "Unable to compte scaling groups!"
 
     # Build combined feature lists.
-    dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(*dat_all)
+    dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(
+        *dat_all)
     # Determine the number of flows in each example.
     num_flws = [sim.unfair_flws + sim.other_flws for sim in sims]
-    num_flws = [np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
-                for num_flws_, dat_in in zip(num_flws, dat_in_all)]
+    num_flws = [
+        np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
+        for num_flws_, dat_in in zip(num_flws, dat_in_all)]
     num_flws = np.concatenate(num_flws, axis=0)
     # Stack the arrays.
     dat_in_all = np.concatenate(dat_in_all, axis=0)
@@ -339,8 +347,9 @@ def make_datasets(net, args, dat=None):
     #         print(f"Discarding: {fet}")
     # dat_in_all = dat_in_all[fets]
 
-    return (dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
-            prms_in)
+    return (
+        dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
+        prms_in)
 
 
 def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
@@ -519,8 +528,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
             if bch_idx_trn % bchs_per_log == 0:
                 print(f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
-                      f"{'?' if ely_stp else num_epochs}, "
-                      f"batch: {bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
+                      f"{'?' if ely_stp else num_epochs}, batch: "
+                      f"{bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
                       f"{num_bchs_trn}", end=" ")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
@@ -542,11 +551,14 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
                 with torch.no_grad():
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
-                        print(f"    Validation batch: {bch_idx_val + 1}/{len(ldr_val)}")
+                        print(
+                            "    Validation batch: "
+                            f"{bch_idx_val + 1}/{len(ldr_val)}")
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net.net, dev, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net.net, dev, hidden,
+                            los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.net.train()
 
@@ -811,8 +823,12 @@ def run_trials(args):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = (run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch)(
-            args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, out_flp)
+        res = (
+            run_sklearn
+            if isinstance(net_tmp, models.SvmSklearnWrapper)
+            else run_torch)(
+                args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+                out_flp)
         if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
