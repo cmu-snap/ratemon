@@ -241,7 +241,7 @@ def main():
             if values:
                 bw_accuracy = mean(values)
                 fil.write(
-                    f"Bandwidth <= {bw_Mbps}Mbps accuracy "
+                    f"Bandwidth <= {bw_Mbps} Mbps, accuracy "
                     f"{bw_accuracy}\n")
 
                 x_axis.append(f"{bw_Mbps}Mbps")
@@ -256,7 +256,7 @@ def main():
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                fil.write(f"Rtt <= {rtt_us}us accuracy {rtt_accuracy}\n")
+                fil.write(f"Rtt <= {rtt_us} us, accuracy {rtt_accuracy}\n")
 
                 x_axis.append(f"{rtt_us}us")
                 y_axis.append(rtt_accuracy)
@@ -270,7 +270,7 @@ def main():
             if values:
                 queue_accuracy = mean(values)
                 fil.write(
-                    f"Queue size <= {queue_bdp} BDP accuracy "
+                    f"Queue size <= {queue_bdp}x BDP, accuracy "
                     f"{queue_accuracy}\n")
 
                 x_axis.append(f"{queue_bdp}bdp")
