@@ -28,7 +28,7 @@ def add_warmup(psr):
     return psr
 
 
-def __add_common(psr):
+def add_common(psr):
     """
     Adds common arguments to the provided ArgumentParser, and returns it.
     """
@@ -44,7 +44,7 @@ def add_training(psr):
     Adds training-related arguments to the provided ArgumentParser, and returns
     it.
     """
-    psr = __add_common(psr)
+    psr = add_common(psr)
     psr.add_argument(
         "--data-dir",
         help=("The path to a directory containing the"
@@ -144,7 +144,7 @@ def add_running(psr):
     Adds model execution--related arguments to the provided ArgumentParser, and
     returns it.
     """
-    psr = __add_common(psr)
+    psr = add_common(psr)
     psr.add_argument(
         "--scale-params", help="The path to the input scaling parameters.",
         required=True, type=str)
