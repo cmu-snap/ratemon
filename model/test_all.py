@@ -229,7 +229,7 @@ def main():
 
     mean_accuracy = mean(all_accuracy)
 
-    with open("results.txt", "w") as fil:
+    with open(path.join(out_dir, "results.txt"), "w") as fil:
         fil.write(
             "Average accuracy for all the processed simulations: "
             f"{mean_accuracy}\n")
@@ -241,27 +241,27 @@ def main():
             if values:
                 bw_accuracy = mean(values)
                 fil.write(
-                    f"Bandwidth less than {bw_Mbps}Mbps accuracy "
+                    f"Bandwidth <= {bw_Mbps}Mbps accuracy "
                     f"{bw_accuracy}\n")
 
                 x_axis.append(f"{bw_Mbps}Mbps")
                 y_axis.append(bw_accuracy)
 
-        plot_bar(x_axis, y_axis, "bandwidth_vs_accuracy.pdf")
+        plot_bar(
+            x_axis, y_axis, path.join(out_dir, "bandwidth_vs_accuracy.pdf"))
 
         x_axis.clear()
         y_axis.clear()
 
-
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                fil.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
+                fil.write(f"Rtt <= {rtt_us}us accuracy {rtt_accuracy}\n")
 
                 x_axis.append(f"{rtt_us}us")
                 y_axis.append(rtt_accuracy)
 
-        plot_bar(x_axis, y_axis, "rtt_vs_accuracy.pdf")
+        plot_bar(x_axis, y_axis, path.join(out_dir, "rtt_vs_accuracy.pdf"))
 
         x_axis.clear()
         y_axis.clear()
@@ -270,13 +270,13 @@ def main():
             if values:
                 queue_accuracy = mean(values)
                 fil.write(
-                    f"Queue size less than {queue_bdp} BDP accuracy "
+                    f"Queue size <= {queue_bdp} BDP accuracy "
                     f"{queue_accuracy}\n")
 
                 x_axis.append(f"{queue_bdp}bdp")
                 y_axis.append(queue_accuracy)
 
-        plot_bar(x_axis, y_axis, "queue_vs_accuracy.pdf")
+        plot_bar(x_axis, y_axis, path.join(out_dir, "queue_vs_accuracy.pdf"))
 
 
 if __name__ == "__main__":
