@@ -28,8 +28,6 @@ import models
 import utils
 
 
-# The maximum number of epochs when using early stopping.
-EPCS_MAX = 10_000
 # The threshold of the new throughout to the old throughput above which a
 # a training example will not be considered. I.e., the throughput must have
 # decreased to less than this fraction of the original throughput for a
@@ -721,33 +719,13 @@ def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
 
 
 def prepare_args(args_):
-    """
-    Updates the default arguments with the specified values and validates them.
-    """
+    """ Updates the default arguments with the specified values. """
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
     # parameters have values.
     args = copy.copy(defaults.DEFAULTS)
     args.update(args_)
-    if args["early_stop"]:
-        args["epochs"] = EPCS_MAX
-    degree = args["degree"]
-    assert degree >= 0, \
-        ("\"degree\" must be an integer greater than or equal to 0, but is: "
-         f"{degree}")
-    max_iter = args["max_iter"]
-    assert max_iter > 0, \
-        f"\"max_iter\" must be greater than 0, but is: {max_iter}"
-    folds = args["folds"]
-    assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
-    keep_prc = args["keep_percent"]
-    assert 0 < keep_prc <= 100, \
-        f"\"keep_percent\" must be in the range (0, 100], but is: {keep_prc}"
-    warmup_prc = args["warmup_percent"]
-    assert 0 <= warmup_prc < 100, \
-        ("\"warmup_percent\" must be in the range [0, 100), but is: "
-         f"{warmup_prc}")
     return args
 
 
@@ -889,8 +867,8 @@ def main():
         "--graph", action="store_true",
         help=("If the model is an sklearn model, then analyze and graph the "
               "testing results."))
-    psr = cl_args.add_training(psr)
-    args = vars(psr.parse_args())
+    psr, psr_verify = cl_args.add_training(psr)
+    args = vars(psr_verify(psr.parse_args()))
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
         assert arg in defaults.DEFAULTS, \

@@ -839,14 +839,15 @@ def main():
     psr.add_argument(
         "--random-order", action="store_true",
         help="Parse the simulations in a random order.")
-    psr = cl_args.add_out(psr)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
     out_dir = args.out_dir
 
     # Find all simulations.
-    pcaps = [(path.join(exp_dir, sim), out_dir)
-             for sim in sorted(os.listdir(exp_dir))]
+    pcaps = [
+        (path.join(exp_dir, sim), out_dir)
+        for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         # Set the random seed so that multiple instances of this
         # script see the same random order.

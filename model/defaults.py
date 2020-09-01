@@ -39,5 +39,7 @@ DEFAULTS = {
     "regen_data": False,
     "sync": False
 }
+# The maximum number of epochs when using early stopping.
+EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
 SYNC = False

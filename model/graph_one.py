@@ -20,8 +20,8 @@ def main():
     psr.add_argument(
         "--parsed-data", help="The path to the parsed simulation data.",
         required=True, type=str)
-    psr = cl_args.add_out(psr)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
     dat_flp = args.parsed_data
     out_dir = args.out_dir
     assert path.exists(dat_flp), f"File does not exist: {dat_flp}"

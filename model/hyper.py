@@ -25,7 +25,7 @@ def main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Hyper-parameter optimizer for train.py.")
-    psr = cl_args.add_training(psr)
+    psr, psr_verify = cl_args.add_training(psr)
     psr.add_argument(
         "--opt-trials", default=DEFAULT_TLS_OPT,
         help="The number of optimization trials to run.", type=int)
@@ -33,7 +33,7 @@ def main():
         "--exhaustive", action="store_true",
         help=("Try all combinations of parameters. Incompatible with "
               "parameters of type \"range\"."))
-    args = psr.parse_args()
+    args = psr_verify(psr.parse_args())
     tls_opt = args.opt_trials
     tls_cnf = args.conf_trials
     no_rand = args.no_rand

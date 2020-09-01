@@ -129,7 +129,7 @@ def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Analyzes full simulations.")
-    psr = cl_args.add_running(psr)
+    psr, psr_verify = cl_args.add_running(psr)
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
@@ -138,27 +138,17 @@ def main():
         help=("The path to a directory of simulations to analyze, or the path "
               "to a single simulation file."),
         required=True, type=str)
-    args = psr.parse_args()
+    args = psr_verify(psr.parse_args())
     mdl_flp = args.model
-    warmup_prc = args.warmup_percent
-    scl_prms_flp = args.scale_params
     out_dir = args.out_dir
     standardize = args.standardize
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
-    assert 0 <= warmup_prc < 100, \
-        ("\"warmup_percent\" must be in the range [0, 100), but is: "
-         f"{warmup_prc}")
-    assert path.exists(scl_prms_flp), \
-        f"Scaling parameters file does not exist: {scl_prms_flp}"
     sim_dir = args.simulations
     assert path.exists(sim_dir), \
         f"Simulation dir/file does not exist: {sim_dir}"
     sim_flps = (
         [path.join(sim_dir, sim_fln) for sim_fln in os.listdir(sim_dir)]
         if path.isdir(sim_dir) else [sim_dir])
-
-    if not path.exists(out_dir):
-        os.makedirs(out_dir)
 
     # Parse the model filepath to determine the model type, and instantiate it.
     net = models.MODELS[
@@ -216,7 +206,7 @@ def main():
 
     func_input = [
         (sim_flp, path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
-         warmup_prc, scl_prms_flp, standardize, all_accuracy,
+         args.warmup_percent, args.scale_params, standardize, all_accuracy,
          all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict)
         for sim_flp in sim_flps]
 
