@@ -22,12 +22,12 @@ ignore-patterns=
 
 # Use multiple processes to speed up Pylint. Specifying 0 will auto-detect the
 # number of processors available to use.
-jobs=1
+jobs=0
 
 # Control the amount of potential inferred values when inferring a single
 # object. This can help the performance when dealing with large functions or
 # complex, nested conditions.
-limit-inference-results=100
+limit-inference-results=1000
 
 # List of plugins (as comma separated values of python module names) to load,
 # usually to register additional checkers.
@@ -213,7 +213,7 @@ bad-names=foo,
 bad-names-rgxs=
 
 # Naming style matching correct class attribute names.
-class-attribute-naming-style=any
+class-attribute-naming-style=snake_case
 
 # Regular expression matching correct class attribute names. Overrides class-
 # attribute-naming-style.
@@ -257,10 +257,10 @@ good-names=i,
 good-names-rgxs=
 
 # Include a hint for the correct naming format with invalid-name.
-include-naming-hint=no
+include-naming-hint=yes
 
 # Naming style matching correct inline iteration names.
-inlinevar-naming-style=any
+inlinevar-naming-style=snake_case
 
 # Regular expression matching correct inline iteration names. Overrides
 # inlinevar-naming-style.
@@ -324,10 +324,10 @@ spelling-store-unknown-words=no
 [SIMILARITIES]
 
 # Ignore comments when computing similarities.
-ignore-comments=yes
+ignore-comments=no
 
 # Ignore docstrings when computing similarities.
-ignore-docstrings=yes
+ignore-docstrings=no
 
 # Ignore imports when computing similarities.
 ignore-imports=no
@@ -340,7 +340,7 @@ min-similarity-lines=4
 
 # This flag controls whether inconsistent-quotes generates a warning when the
 # character used as a quote delimiter is used inconsistently within a module.
-check-quote-consistency=no
+check-quote-consistency=yes
 
 # This flag controls whether the implicit-str-concat should generate a warning
 # on implicit string concatenation in sequences defined over several lines.
@@ -470,7 +470,7 @@ indent-after-paren=4
 indent-string='    '
 
 # Maximum number of characters on a single line.
-max-line-length=100
+max-line-length=80
 
 # Maximum number of lines in a module.
 max-module-lines=1000
