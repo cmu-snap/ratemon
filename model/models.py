@@ -1039,7 +1039,7 @@ class SvmSklearnWrapper(SvmWrapper):
             bucketized_accuracy = self.__plot_queue_occ(
                 dat_out_oracle, dat_out_classes, dat_out_raw, fair,
                 path.join(
-                    out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"),
+                    out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
                 x_lim)
 
         # Analyze accuracy vs. unfairness for all flows and all
