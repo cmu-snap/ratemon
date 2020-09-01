@@ -20,39 +20,9 @@ import models
 import train
 import utils
 
-manager = multiprocessing.Manager()
-all_accuracy = manager.list()
-all_bucketized_accuracy = manager.list()
-
-bw_dict = manager.dict({
-    1: manager.list(),
-    10: manager.list(),
-    30: manager.list(),
-    50: manager.list(),
-    1000: manager.list()
-})
-
-# RTT in us
-rtt_dict = manager.dict({
-    1000: manager.list(),
-    10000: manager.list(),
-    50000: manager.list(),
-    100000: manager.list(),
-    1000000: manager.list()
-})
-
-# Queue size in BDP
-queue_dict = manager.dict({
-    1: manager.list(),
-    2: manager.list(),
-    4: manager.list(),
-    8: manager.list(),
-    16: manager.list(),
-    32: manager.list(),
-    64: manager.list()
-})
 
 def plot_bar(x_axis, y_axis, file_name):
+    """ Create a bar graph. """
     y_pos = np.arange(len(y_axis))
     pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
     pyplot.xticks(y_pos, x_axis)
@@ -63,8 +33,9 @@ def plot_bar(x_axis, y_axis, file_name):
 
 
 
-def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy, 
-                all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict):
+def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize,
+                all_accuracy, all_bucketized_accuracy, bw_dict, rtt_dict,
+                queue_dict):
 
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
@@ -76,7 +47,8 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
             idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = utils.load_tmp_file(temp_path)    
+    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = (
+        utils.load_tmp_file(temp_path))
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
@@ -129,8 +101,10 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
 
     print(
         f"Finish processing {sim.name}\n"
-        f"----Average accuracy for all the processed simulations: {mean_accuracy}\n",
-        f"----Average bucketized accuracy for all the processed simulations: {mean_bucketized_accuracy}\n",)
+        "----Average accuracy for all the processed simulations: "
+        f"{mean_accuracy}\n",
+        "----Average bucketized accuracy for all the processed simulations: "
+        f"{mean_bucketized_accuracy}\n")
 
     for bw_Mbps in bw_dict.keys():
         if bw_dict[bw_Mbps]:
@@ -145,21 +119,23 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
     for queue_bdp in queue_dict.keys():
         if queue_dict[queue_bdp]:
             queue_accuracy = mean(queue_dict[queue_bdp])
-            print(f"----Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}")
+            print(
+                f"----Queue size less than {queue_bdp} BDP accuracy "
+                f"{queue_accuracy}")
 
 
 def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(
-        description="Hyper-parameter optimizer for train.py.")
+    psr = argparse.ArgumentParser(description="Analyzes full simulations.")
     psr = cl_args.add_running(psr)
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
     psr.add_argument(
-        "--simulations", help="The path to a simulations to analyze.", required=True,
-        type=str)
+        "--simulations",
+        help="The path to a directory of simulations to analyze.",
+        required=True, type=str)
     args = psr.parse_args()
     mdl_flp = args.model
     sim_dir = args.simulations
@@ -198,10 +174,43 @@ def main():
     net.net = mdl
     net.graph = True
 
+    manager = multiprocessing.Manager()
+    all_accuracy = manager.list()
+    all_bucketized_accuracy = manager.list()
+
+    # BW in Mbps.
+    bw_dict = manager.dict({
+        1: manager.list(),
+        10: manager.list(),
+        30: manager.list(),
+        50: manager.list(),
+        1000: manager.list()
+    })
+
+    # RTT in us
+    rtt_dict = manager.dict({
+        1000: manager.list(),
+        10000: manager.list(),
+        50000: manager.list(),
+        100000: manager.list(),
+        1000000: manager.list()
+    })
+
+    # Queue size in BDP
+    queue_dict = manager.dict({
+        1: manager.list(),
+        2: manager.list(),
+        4: manager.list(),
+        8: manager.list(),
+        16: manager.list(),
+        32: manager.list(),
+        64: manager.list()
+    })
+
     func_input = [
         (path.join(sim_dir, sim), path.join(out_dir, sim.split(".")[0]), net,
-         warmup_prc, scl_prms_flp, standardize, all_accuracy, all_bucketized_accuracy,
-         bw_dict, rtt_dict, queue_dict)
+         warmup_prc, scl_prms_flp, standardize, all_accuracy,
+         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict)
         for sim in sorted(os.listdir(sim_dir))]
 
     print(f"Num files: {len(func_input)}")
@@ -213,9 +222,10 @@ def main():
 
     mean_accuracy = mean(all_accuracy)
 
-    with open("results.txt", "w") as f:
-        f.write(
-            f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
+    with open("results.txt", "w") as fil:
+        fil.write(
+            "Average accuracy for all the processed simulations: "
+            f"{mean_accuracy}\n")
 
         x_axis = []
         y_axis = []
@@ -223,7 +233,9 @@ def main():
         for bw_Mbps, values in bw_dict.items():
             if values:
                 bw_accuracy = mean(values)
-                f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
+                fil.write(
+                    f"Bandwidth less than {bw_Mbps}Mbps accuracy "
+                    f"{bw_accuracy}\n")
 
                 x_axis.append(f"{bw_Mbps}Mbps")
                 y_axis.append(bw_accuracy)
@@ -237,7 +249,7 @@ def main():
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                f.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
+                fil.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
 
                 x_axis.append(f"{rtt_us}us")
                 y_axis.append(rtt_accuracy)
@@ -250,7 +262,9 @@ def main():
         for queue_bdp, values in queue_dict.items():
             if values:
                 queue_accuracy = mean(values)
-                f.write(f"Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}\n")
+                fil.write(
+                    f"Queue size less than {queue_bdp} BDP accuracy "
+                    f"{queue_accuracy}\n")
 
                 x_axis.append(f"{queue_bdp}bdp")
                 y_axis.append(queue_accuracy)
