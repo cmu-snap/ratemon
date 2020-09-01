@@ -181,8 +181,8 @@ def __main():
     psr.add_argument(
         "--num-sims", help="The number of simulations to consider.",
         required=False, type=int)
-    psr = cl_args.add_out(psr)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
 
     split_prcs = {
         "train": args.train_split, "val": args.val_split,
@@ -191,11 +191,6 @@ def __main():
     assert tot_split == 100, \
         ("The sum of the training, validation, and test splits must equal 100, "
          f"not {tot_split}")
-
-    out_dir = args.out_dir
-    if not path.isdir(out_dir):
-        print(f"Output directory does not exist. Creating it: {out_dir}")
-        os.makedirs(out_dir)
 
     tim_srt_s = time.time()
     # Determine the simulation filepaths.
@@ -214,7 +209,7 @@ def __main():
         "\n    ".join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
-    __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs)
+    __merge(sim_flps, args.out_dir, num_pkts, dtype, split_prcs)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 

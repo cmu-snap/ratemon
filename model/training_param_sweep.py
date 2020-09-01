@@ -225,18 +225,16 @@ def main():
     """ This program's entrypoint. """
     psr = argparse.ArgumentParser(
         description="Visualize sklearn training parameters.")
-    psr = cl_args.add_training(psr)
+    psr, psr_verify = cl_args.add_training(psr)
     psr.add_argument(
         "--graph-results", action="store_true",
         help=("Look through the output directory for completed experiments, "
               "and graph them."))
-    args = psr.parse_args()
+    args = psr_verify(psr.parse_args())
     args = train.prepare_args(vars(args))
-
     tim_srt_s = time.time()
     out_dir = args["out_dir"]
-    if not path.exists(out_dir):
-        os.makedirs(out_dir)
+
     # Assemble the configurations to test. Sort them based on the
     # product of their hyper-parameters, which is a heuristic of how
     # long they will take to run.

@@ -300,8 +300,8 @@ def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Evaluates feature correlation.")
-    psr = cl_args.add_training(psr)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_training(psr)
+    args = psr_verify(psr.parse_args())
 
     # Train models.
     # all_fets = sorted(models.MODELS[args.model].in_spc)

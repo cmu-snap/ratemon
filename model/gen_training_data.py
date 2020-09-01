@@ -65,8 +65,8 @@ def main():
     psr.add_argument(
         "--log-dst", default=EMAIL_DST,
         help="The email address to which updates will be sent.", type=str)
-    psr = cl_args.add_out(psr)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
     # The ID of the experiment.
     eid = str(round(time.time()))
     # Create a new output directory based on the current time.
