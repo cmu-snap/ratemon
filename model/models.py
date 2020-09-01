@@ -16,6 +16,8 @@ from sklearn import linear_model
 from sklearn import svm
 import torch
 
+SMOOTHING_THRESHOLD = 0.4
+
 
 class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
@@ -883,22 +885,25 @@ class SvmSklearnWrapper(SvmWrapper):
             ("There must be at least one sample per bucket, but there are "
              f"{num_samples} samples and only {num_buckets} buckets!")
         buckets = [
-            (mean(throughput_),
+            (mean(queue_occupancy_),
              mean(labels_))
-            for throughput_, labels_ in [
+            for queue_occupancy_, labels_ in [
                 (raw[i:i + num_per_bucket],
                  labels[i:i + num_per_bucket])
                 for i in range(0, num_samples, num_per_bucket)]]
         if self.graph:
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                [throughput for throughput, _ in buckets], "b-")
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                [fair] * len(buckets), "g--")
-            pyplot.plot(
-                (list(range(len(buckets)))),
-                [label for _, label in buckets], "r^")
+            queue_occupancy_list = [queue_occupancy for queue_occupancy, _ in buckets]
+            fair_list = [fair] * len(buckets)
+            x_axis = list(range(len(buckets)))
+            pyplot.plot(x_axis, queue_occupancy_list, "b-")
+            pyplot.plot(x_axis, fair_list, "g--")
+            label_accuracy = [0] * len(buckets)
+            bucketized_label = [0] * len(buckets)
+            label_accuracy, bucketized_label = zip(*[
+                ((label, int(label >= SMOOTHING_THRESHOLD)) if queue_occupancy > fair[0] else
+                 (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
+                for queue_occupancy, label in buckets])
+            pyplot.plot(x_axis, label_accuracy, "r^")
             if x_lim is not None:
                 pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
@@ -906,6 +911,9 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.tight_layout()
             pyplot.savefig(flp)
             pyplot.close()
+
+            return sum(bucketized_label) / len(bucketized_label)
+        return 0
 
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
@@ -1023,12 +1031,11 @@ class SvmSklearnWrapper(SvmWrapper):
                 path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             pyplot.close()
 
-            # Plot throughput.
-            self.__plot_throughput(
-                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
-                path.join(
-                    out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"),
-                x_lim)
+            # Plot throughput
+            bucketized_accuracy = self.__plot_throughput(dat_out_oracle, dat_out_classes,
+                                                         dat_out_raw, fair, 
+                                                         path.join(out_dir, f"throughtput_vs_fair_throughput_{self.name}.pdf"), 
+                                                         x_lim)
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model oracle.
@@ -1049,7 +1056,7 @@ class SvmSklearnWrapper(SvmWrapper):
             graph_prms={
                 "flp": path.join(
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
-                "x_lim": x_lim})
+                "x_lim": x_lim}), bucketized_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
