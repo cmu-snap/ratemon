@@ -33,10 +33,9 @@ def plot_bar(x_axis, y_axis, file_name):
 
 
 
-def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize,
-                all_accuracy, all_bucketized_accuracy, bw_dict, rtt_dict,
-                queue_dict):
-
+def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
+                standardize, all_accuracy, all_bucketized_accuracy, bw_dict,
+                rtt_dict, queue_dict):
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
         os.makedirs(out_dir)
@@ -44,7 +43,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize,
     # Load and parse the simulation.
     temp_path, sim = (
         train.process_sim(
-            idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
+            idx, total, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
     (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = (
@@ -204,11 +203,13 @@ def main():
         64: manager.list()
     })
 
+    total = len(sim_flps)
     func_input = [
-        (sim_flp, path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+        (idx, total, sim_flp,
+         path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
          args.warmup_percent, args.scale_params, standardize, all_accuracy,
          all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict)
-        for sim_flp in sim_flps]
+        for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()
