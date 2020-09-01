@@ -626,7 +626,7 @@ def test(net, ldr_tst, dev):
 
 
 def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-                out_flp):
+                out_dir, out_flp):
     """
     Trains an sklearn model according to the supplied parameters. Returns the
     test error (lower is better).
@@ -653,14 +653,18 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
-    acc_tst = net.test(*ldr_tst.dataset.raw())
+    # Select the first return value, which is the overall accuracy.
+    acc_tst = net.test(
+        *ldr_tst.dataset.raw(),
+        graph_prms={
+            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})[0]
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     return acc_tst, tim_trn_s
 
 
 def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-              out_flp):
+              out_dir, out_flp):
     """
     Trains a PyTorch model according to the supplied parameters. Returns the
     test error (lower is better).
@@ -804,7 +808,7 @@ def run_trials(args):
             if isinstance(net_tmp, models.SvmSklearnWrapper)
             else run_torch)(
                 args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-                out_flp)
+                out_dir, out_flp)
         if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
