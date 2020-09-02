@@ -156,7 +156,11 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     for split in splits.values():
         split.finish()
 
-    # Delete the splits to force their data to be written to disk.
+    # Delete the splits to force their data to be written to
+    # disk. Note that this is not needed for correctness. Since the
+    # process of flushing the tables to disk (which occurs when the
+    # memory-mapped ndarray object inside each Split object is
+    # deleted) may take a long time, we explicitly do so here.
     print("Flushing splits to disk...")
     del splits
 
