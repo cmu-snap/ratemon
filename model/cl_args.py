@@ -31,7 +31,7 @@ def add_warmup(psr, psr_verify=lambda args: args):
     def verify(args):
         warmup_prc = args.warmup_percent
         assert 0 <= warmup_prc < 100, \
-            ("\"warmup_percent\" must be in the range [0, 100), but is: "
+            ("\"warmup-percent\" must be in the range [0, 100), but is: "
              f"{warmup_prc}")
         return args
 
@@ -70,12 +70,12 @@ def add_training(psr, psr_verify=lambda args: args):
              f"is: {degree}")
         max_iter = args.max_iter
         assert max_iter > 0, \
-            f"\"max_iter\" must be greater than 0, but is: {max_iter}"
+            f"\"max-iter\" must be greater than 0, but is: {max_iter}"
         folds = args.folds
         assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
         keep_prc = args.keep_percent
         assert 0 < keep_prc <= 100, \
-            ("\"keep_percent\" must be in the range (0, 100], but is: "
+            ("\"keep-percent\" must be in the range (0, 100], but is: "
              f"{keep_prc}")
         return args
 
