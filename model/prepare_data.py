@@ -178,10 +178,8 @@ def __main():
     psr.add_argument(
         "--test-split", default=30, help="Test data fraction",
         required=False, type=float)
-    psr.add_argument(
-        "--num-sims", help="The number of simulations to consider.",
-        required=False, type=int)
-    psr, psr_verify = cl_args.add_out(psr)
+    psr, psr_verify = cl_args.add_out(
+        *cl_args.add_warmup(*cl_args.add_num_sims(psr)))
     args = psr_verify(psr.parse_args())
 
     split_prcs = {

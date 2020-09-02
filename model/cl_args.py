@@ -43,6 +43,22 @@ def add_warmup(psr, psr_verify=lambda args: args):
     return psr, lambda args: verify(psr_verify(args))
 
 
+def add_num_sims(psr, psr_verify=lambda args: args):
+    """
+    Adds a "num-sims" argument to the provided ArgumentParser, and returns it.
+    """
+    def verify(args):
+        num_sims = args.num_sims
+        assert num_sims >= 0, \
+            f"\"num-sims\" cannot be negative, but is: {num_sims}"
+        return args
+
+    psr.add_argument(
+        "--num-sims", default=defaults.DEFAULTS["num_sims"],
+        help="The number of simulations to consider.", required=False, type=int)
+    return psr, lambda args: verify(psr_verify(args))
+
+
 def add_common(psr, psr_verify=lambda args: args):
     """
     Adds common arguments to the provided ArgumentParser, and returns it.
@@ -79,15 +95,12 @@ def add_training(psr, psr_verify=lambda args: args):
              f"{keep_prc}")
         return args
 
-    psr, psr_verify = add_common(psr, psr_verify)
+    psr, psr_verify = add_num_sims(*add_common(psr, psr_verify))
     psr.add_argument(
         "--data-dir",
         help=("The path to a directory containing the"
               "training/validation/testing data (required)."),
         required=True, type=str)
-    psr.add_argument(
-        "--num-sims", default=defaults.DEFAULTS["num_sims"],
-        help="The number of simulations to consider.", type=int)
     psr.add_argument(
         "--keep-percent", default=defaults.DEFAULTS["keep_percent"],
         help="The percent of each simulation's datapoints to keep.", type=float)
