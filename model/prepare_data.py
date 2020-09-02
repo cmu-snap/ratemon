@@ -91,7 +91,7 @@ class Split:
         self.dat[list(self.dat_available_idxs)].fill(-1)
 
 
-def survey(sim_flps):
+def survey(sim_flps, warmup_frac):
     """
     Surveys the provided simulations to determine their total packets and dtype,
     which are returned.
@@ -105,7 +105,8 @@ def survey(sim_flps):
     headers = np.array(
         [utils.get_npz_headers(flp) for flp in sim_flps]).reshape((num_sims, 3))
     # Count the total number of packets by looking at the header shapes.
-    num_pkts = sum(shape[0] for shape in headers[:, 1])
+    save_frac = 1 - warmup_frac
+    num_pkts = sum(math.ceil(shape[0] * save_frac) for shape in headers[:, 1])
     # Extract the dtype and verify that all dtypes are the same.
     dtype = headers[0][2]
     assert (headers[1:][:, 2] == dtype).all(), \
@@ -113,7 +114,7 @@ def survey(sim_flps):
     return num_pkts, dtype
 
 
-def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_prc):
+def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     """
     Merges the provided simulations into training, validation, and
     test splits as defined by the percents in split_prcs. Stores the
@@ -136,6 +137,9 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_prc):
             sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")[1]
         if dat is None:
             continue
+        # Remove a percentage of packets from the beginning of the
+        # simulation.
+        dat = dat[math.floor(dat.shape[0] * warmup_frac):]
         # Start with the list of all indices. Each split select some
         # indices for itself, then removes them from this set.
         all_idxs = set(range(dat.shape[0]))
@@ -200,14 +204,15 @@ def main():
     print(f"Selected {num_sims} simulations")
     sim_flps = [
         path.join(sims_dir, sim_fln) for sim_fln in sim_flns[:num_sims]]
-    num_pkts, dtype = survey(sim_flps)
+    warmup_frac = args.warmup_percent / 100
+    num_pkts, dtype = survey(sim_flps, warmup_frac)
     fets = dtype.names
     print(
         f"Total packets: {num_pkts}\nFeatures:\n    " +
         "\n    ".join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
-    merge(sim_flps, args.out_dir, num_pkts, dtype, split_prcs, args.warmup_prc)
+    merge(sim_flps, args.out_dir, num_pkts, dtype, split_prcs, warmup_frac)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 
