@@ -91,7 +91,7 @@ class Split:
         self.dat[list(self.dat_available_idxs)].fill(-1)
 
 
-def __survey(sim_flps):
+def survey(sim_flps):
     """
     Surveys the provided simulations to determine their total packets and dtype,
     which are returned.
@@ -113,7 +113,7 @@ def __survey(sim_flps):
     return num_pkts, dtype
 
 
-def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
+def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_prc):
     """
     Merges the provided simulations into training, validation, and
     test splits as defined by the percents in split_prcs. Stores the
@@ -157,7 +157,7 @@ def __merge(sim_flps, out_dir, num_pkts, dtype, split_prcs):
     del splits
 
 
-def __main():
+def main():
     """ This program's entrypoint. """
     utils.set_rand_seed()
 
@@ -200,17 +200,17 @@ def __main():
     print(f"Selected {num_sims} simulations")
     sim_flps = [
         path.join(sims_dir, sim_fln) for sim_fln in sim_flns[:num_sims]]
-    num_pkts, dtype = __survey(sim_flps)
+    num_pkts, dtype = survey(sim_flps)
     fets = dtype.names
     print(
         f"Total packets: {num_pkts}\nFeatures:\n    " +
         "\n    ".join(sorted(fets)))
 
     # Create the merged training, validation, and test files.
-    __merge(sim_flps, args.out_dir, num_pkts, dtype, split_prcs)
+    merge(sim_flps, args.out_dir, num_pkts, dtype, split_prcs, args.warmup_prc)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 
 
 if __name__ == "__main__":
-    __main()
+    main()
