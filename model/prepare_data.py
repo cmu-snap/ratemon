@@ -68,6 +68,11 @@ class Split:
         sim_available_idxs -= set(sim_new_idxs)
 
         if self.shuffle:
+            num_slots_remaining = len(self.dat_available_idxs)
+            assert num_slots_remaining >= num_new, \
+                (f"Trying to find locations for {num_new} new packets when "
+                 f"there are only {num_slots_remaining} packet slots "
+                 "available!")
             dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
             self.dat[dat_new_idxs] = sim_dat[sim_new_idxs]
         else:
