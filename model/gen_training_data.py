@@ -53,9 +53,9 @@ LOG_LVL = "INFO"
 LOGGER = path.basename(__file__).split(".")[0]
 
 
-def bdp_bps(bw_Mbps, one_way_dly_us):
+def bdp_bps(bw_Mbps, rtt_us):
     """ Calculates the BDP in bits per second. """
-    return (bw_Mbps / 8. * 1e6) * (one_way_dly_us / 1e6)
+    return (bw_Mbps / 8. * 1e6) * (rtt_us / 1e6)
 
 
 def main():
@@ -90,7 +90,7 @@ def main():
              # less than a single packet, then use 1 packet as the BDP anyway.
              "bottleneck_queue_p": int(round(
                  que_p *
-                 max(1, bdp_bps(bw_Mbps, dly_us * 3) / float(PACKET_SIZE_B)))),
+                 max(1, bdp_bps(bw_Mbps, dly_us * 6) / float(PACKET_SIZE_B)))),
              "unfair_flows": UNFAIR_FLOWS,
              "other_flows": flws,
              "other_proto": OTHER_PROTO,
