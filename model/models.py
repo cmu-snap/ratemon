@@ -17,6 +17,7 @@ from sklearn import svm
 import torch
 
 SMOOTHING_THRESHOLD = 0.4
+SLIDING_WINDOW_SIZE = 30
 
 
 class PytorchModelWrapper:
@@ -879,21 +880,32 @@ class SvmSklearnWrapper(SvmWrapper):
         # labels = (labels + 1) / 2
         labels = labels.tolist()
 
-        # Bucketize and compute bucket accuracies.
-        num_samples = preds.size()[0]
-        num_buckets = min(20 * 4, num_samples)
-        num_per_bucket = math.floor(num_samples / num_buckets)
-        assert num_per_bucket > 0, \
+        bucketized_label = [0] * len(raw)
+        for i in range(0, len(raw)):
+            queue_occupancy = mean(raw[max(0, i - SLIDING_WINDOW_SIZE):i + 1])
+            label = mean(labels[max(0, i - SLIDING_WINDOW_SIZE):i + 1])
+            bucketized_label[i] = (int(label >= SMOOTHING_THRESHOLD) 
+                                   if queue_occupancy > fair[0]
+                                   else int(label < SMOOTHING_THRESHOLD))
+
+        if self.graph:
+            # Bucketize and compute bucket accuracies.
+            num_samples = preds.size()[0]
+            num_buckets = min(20 * 4, num_samples)
+            num_per_bucket = math.floor(num_samples / num_buckets)
+
+            assert num_per_bucket > 0, \
             ("There must be at least one sample per bucket, but there are "
              f"{num_samples} samples and only {num_buckets} buckets!")
-        buckets = [
-            (mean(queue_occupancy_),
-             mean(labels_))
-            for queue_occupancy_, labels_ in [
-                (raw[i:i + num_per_bucket],
-                 labels[i:i + num_per_bucket])
-                for i in range(0, num_samples, num_per_bucket)]]
-        if self.graph:
+
+            buckets = [
+                (mean(queue_occupancy_),
+                 mean(labels_))
+                for queue_occupancy_, labels_ in [
+                    (raw[i:i + num_per_bucket],
+                     labels[i:i + num_per_bucket])
+                    for i in range(0, num_samples, num_per_bucket)]]
+
             queue_occupancy_list = [
                 queue_occupancy for queue_occupancy, _ in buckets]
             fair_list = [fair] * len(buckets)

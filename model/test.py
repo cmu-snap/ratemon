@@ -32,10 +32,74 @@ def plot_bar(x_axis, y_axis, file_name):
     pyplot.close()
 
 
+def init_global(manager):
+    """ Initialize global variables that are shared by all processes. """
+    # BW in Mbps.
+    bw_dict = manager.dict({
+        1: manager.list(),
+        10: manager.list(),
+        30: manager.list(),
+        50: manager.list(),
+        1000: manager.list()
+    })
+
+    # RTT in us
+    rtt_dict = manager.dict({
+        1000: manager.list(),
+        10000: manager.list(),
+        50000: manager.list(),
+        100000: manager.list(),
+        1000000: manager.list()
+    })
+
+    # Queue size in BDP
+    queue_dict = manager.dict({
+        1: manager.list(),
+        2: manager.list(),
+        4: manager.list(),
+        8: manager.list(),
+        16: manager.list(),
+        32: manager.list(),
+        64: manager.list()
+    })
+
+    # BW in Mbps.
+    bucketized_bw_dict = manager.dict({
+        1: manager.list(),
+        10: manager.list(),
+        30: manager.list(),
+        50: manager.list(),
+        1000: manager.list()
+    })
+
+    # RTT in us
+    bucketized_rtt_dict = manager.dict({
+        1000: manager.list(),
+        10000: manager.list(),
+        50000: manager.list(),
+        100000: manager.list(),
+        1000000: manager.list()
+    })
+
+    # Queue size in BDP
+    bucketized_queue_dict = manager.dict({
+        1: manager.list(),
+        2: manager.list(),
+        4: manager.list(),
+        8: manager.list(),
+        16: manager.list(),
+        32: manager.list(),
+        64: manager.list()
+    })
+
+    return (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
+            bucketized_rtt_dict, bucketized_queue_dict)
+
 
 def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
                 standardize, all_accuracy, all_bucketized_accuracy, bw_dict,
-                rtt_dict, queue_dict):
+                rtt_dict, queue_dict, bucketized_bw_dict, bucketized_rtt_dict,
+                bucketized_queue_dict):
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
         os.makedirs(out_dir)
@@ -80,48 +144,58 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
     all_bucketized_accuracy.append(bucketized_accuracy)
     mean_bucketized_accuracy = mean(all_bucketized_accuracy)
 
-    for bw_Mbps in bw_dict.keys():
-        if sim.bw_Mbps <= bw_Mbps:
-            bw_dict[bw_Mbps].append(accuracy)
+    for bw_mbps in bw_dict.keys():
+        if sim.bw_mbps <= bw_mbps:
+            bw_dict[bw_mbps].append(accuracy)
+            bucketized_bw_dict[bw_mbps].append(bucketized_accuracy)
             break
 
     rtt_us = (sim.btl_delay_us + 2 * sim.edge_delays[0]) * 2
     for rtt_us_ in rtt_dict.keys():
         if rtt_us <= rtt_us_:
             rtt_dict[rtt_us_].append(accuracy)
+            bucketized_rtt_dict[rtt_us_].append(bucketized_accuracy)
             break
 
-    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / sim.queue_p
+    bdp = sim.bw_mbps * rtt_us / sim.payload_B / sim.queue_p
 
     for queue_bdp in queue_dict.keys():
         if bdp <= queue_bdp:
             queue_dict[queue_bdp].append(accuracy)
+            bucketized_queue_dict[queue_bdp].append(bucketized_accuracy)
             break
 
     print(
         f"Finish processing {sim.name}\n"
         "----Average accuracy for all the processed simulations: "
-        f"{mean_accuracy}\n",
+        f"{mean_accuracy}\n"
         "----Average bucketized accuracy for all the processed simulations: "
         f"{mean_bucketized_accuracy}\n")
 
-    for bw_Mbps in bw_dict.keys():
-        if bw_dict[bw_Mbps]:
-            bw_accuracy = mean(bw_dict[bw_Mbps])
+    for bw_mbps in bw_dict.keys():
+        if bw_dict[bw_mbps]:
+            bw_accuracy = mean(bw_dict[bw_mbps])
+            bucketized_bw_accuracy = mean(bucketized_bw_dict[bw_mbps])
             print(
-                f"----Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}")
+                f"----Bandwidth less than {bw_mbps}Mbps accuracy {bw_accuracy}"
+                "\n"
+                f"    bucketized accuracy {bucketized_bw_accuracy}")
 
     for rtt_us_ in rtt_dict.keys():
         if rtt_dict[rtt_us_]:
             rtt_accuracy = mean(rtt_dict[rtt_us_])
-            print(f"----Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}")
+            bucketized_rtt_accuracy = mean(bucketized_rtt_dict[rtt_us_])
+            print(f"----Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n"
+                  f"    bucketized accuracy {bucketized_rtt_accuracy}")
 
     for queue_bdp in queue_dict.keys():
         if queue_dict[queue_bdp]:
             queue_accuracy = mean(queue_dict[queue_bdp])
+            bucketized_queue_accuracy = mean(bucketized_queue_dict[queue_bdp])
             print(
                 f"----Queue size less than {queue_bdp} BDP accuracy "
-                f"{queue_accuracy}")
+                f"{queue_accuracy}\n"
+                f"    bucketized accuracy {bucketized_queue_accuracy}")
 
 
 def main():
@@ -174,41 +248,17 @@ def main():
     all_accuracy = manager.list()
     all_bucketized_accuracy = manager.list()
 
-    # BW in Mbps.
-    bw_dict = manager.dict({
-        1: manager.list(),
-        10: manager.list(),
-        30: manager.list(),
-        50: manager.list(),
-        1000: manager.list()
-    })
-
-    # RTT in us
-    rtt_dict = manager.dict({
-        1000: manager.list(),
-        10000: manager.list(),
-        50000: manager.list(),
-        100000: manager.list(),
-        1000000: manager.list()
-    })
-
-    # Queue size in BDP
-    queue_dict = manager.dict({
-        1: manager.list(),
-        2: manager.list(),
-        4: manager.list(),
-        8: manager.list(),
-        16: manager.list(),
-        32: manager.list(),
-        64: manager.list()
-    })
+    (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
+     bucketized_rtt_dict, bucketized_queue_dict) = init_global(manager)
 
     total = len(sim_flps)
     func_input = [
         (idx, total, sim_flp,
          path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
          args.warmup_percent, args.scale_params, standardize, all_accuracy,
-         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict)
+         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
+         bucketized_bw_dict, bucketized_rtt_dict,
+         bucketized_queue_dict)
         for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
@@ -228,14 +278,14 @@ def main():
         x_axis = []
         y_axis = []
 
-        for bw_Mbps, values in bw_dict.items():
+        for bw_mbps, values in bw_dict.items():
             if values:
                 bw_accuracy = mean(values)
                 fil.write(
-                    f"Bandwidth <= {bw_Mbps} Mbps, accuracy "
+                    f"Bandwidth <= {bw_mbps} Mbps, accuracy "
                     f"{bw_accuracy}\n")
 
-                x_axis.append(f"{bw_Mbps}Mbps")
+                x_axis.append(f"{bw_mbps}Mbps")
                 y_axis.append(bw_accuracy)
 
         plot_bar(
