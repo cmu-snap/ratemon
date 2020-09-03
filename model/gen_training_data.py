@@ -15,16 +15,16 @@ import sim
 
 # Bandwidth (Mbps).
 BW_MIN_Mbps = 4
-BW_MAX_Mbps = 50
-BW_DELTA_Mbps = 2
-BWS_Mbps = range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps)
+BW_MAX_Mbps = 48
+BW_DELTA_Mbps = 4
+BWS_Mbps = [1] + list(range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps))
 # Link delay (us).
-DELAY_MIN_us = 1000
+DELAY_MIN_us = 2000
 DELAY_MAX_us = 20000
-DELAY_DELTA_us = 1000
-DELAYS_us = range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us)
-# Router queue size (BDP).
-QUEUE_p = range(1, 32, 4)  # 1 to 32 BDP
+DELAY_DELTA_us = 2000
+DELAYS_us = [1000] + list(range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us))
+# Router queue size (multiples of the BDP).
+QUEUE_MULTS = [1, 2, 3] + list(range(4, 33, 4))  # 1 to 32 BDP
 # Number of "fair" flows
 FAIR_FLOWS = range(1, 11)  # 1 to 10 "fair" flows
 # Packet size (bytes)
@@ -44,7 +44,7 @@ UNFAIR_FLOWS = 1
 # The protool to use for the "unfair" flows.
 UNFAIR_PROTO = "ns3::TcpCubic"
 # The protocol to use for the "fair" flows.
-FAIR_PROTO = "ns3::TcpNewReno"
+FAIR_PROTO = "ns3::TcpBbr"
 # Whether to return before running experiments.
 DRY_RUN = False
 # Default destination for email updates.
@@ -91,11 +91,11 @@ def main():
              # Calculate queue capacity as a multiple of the BDP. If the BDP is
              # less than a single packet, then use 1 packet as the BDP anyway.
              "bottleneck_queue_p": int(round(
-                 que_p *
+                 que_mult *
                  max(1, bdp_bps(bw_Mbps, dly_us * 6) / float(PACKET_SIZE_B)))),
              "unfair_flows": UNFAIR_FLOWS,
              "unfair_proto": UNFAIR_PROTO,
-             "fair_flows": flws,
+             "fair_flows": fair_flws,
              "fair_proto": FAIR_PROTO,
              "unfair_edge_delays_us": f"[{dly_us}]",
              "fair_edge_delays_us": f"[{dly_us}]",
@@ -104,8 +104,8 @@ def main():
              "duration_s": DUR_s,
              "pcap": "true" if PCAP else "false",
              "out_dir": sim_dir}
-            for bw_Mbps, dly_us, que_p, flws in itertools.product(
-                BWS_Mbps, DELAYS_us, QUEUE_p, FAIR_FLOWS)]
+            for bw_Mbps, dly_us, que_mult, fair_flws in itertools.product(
+                BWS_Mbps, DELAYS_us, QUEUE_MULTS, FAIR_FLOWS)]
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
             dry_run=DRY_RUN, sync=defaults.SYNC)
 
