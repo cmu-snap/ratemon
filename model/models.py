@@ -17,7 +17,7 @@ from sklearn import svm
 import torch
 
 SMOOTHING_THRESHOLD = 0.4
-SLIDING_WINDOW_SIZE = 30
+SLIDING_WINDOW_SIZE = 20
 
 
 class PytorchModelWrapper:
