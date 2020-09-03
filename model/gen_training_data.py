@@ -25,8 +25,8 @@ DELAY_DELTA_us = 1000
 DELAYS_us = range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us)
 # Router queue size (BDP).
 QUEUE_p = range(1, 32, 4)  # 1 to 32 BDP
-# Number of other flows
-OTHER_FLOWS = range(1, 11)  # 1 to 10 non-BBR flows
+# Number of "fair" flows
+FAIR_FLOWS = range(1, 11)  # 1 to 10 "fair" flows
 # Packet size (bytes)
 PACKET_SIZE_B = 1380
 # Simulation duration (s).
@@ -39,10 +39,12 @@ ENABLE_MITIGATION = False
 PCAP = True
 # Whether to capture csv files.
 CSV = True
-# The number of BBR flows.
+# The number of "unfair" flows.
 UNFAIR_FLOWS = 1
-# The protocol to use for the non-BBR flows.
-OTHER_PROTO = "ns3::TcpNewReno"
+# The protool to use for the "unfair" flows.
+UNFAIR_PROTO = "ns3::TcpCubic"
+# The protocol to use for the "fair" flows.
+FAIR_PROTO = "ns3::TcpNewReno"
 # Whether to return before running experiments.
 DRY_RUN = False
 # Default destination for email updates.
@@ -92,17 +94,18 @@ def main():
                  que_p *
                  max(1, bdp_bps(bw_Mbps, dly_us * 6) / float(PACKET_SIZE_B)))),
              "unfair_flows": UNFAIR_FLOWS,
-             "other_flows": flws,
-             "other_proto": OTHER_PROTO,
+             "unfair_proto": UNFAIR_PROTO,
+             "fair_flows": flws,
+             "fair_proto": FAIR_PROTO,
              "unfair_edge_delays_us": f"[{dly_us}]",
-             "other_edge_delays_us": f"[{dly_us}]",
+             "fair_edge_delays_us": f"[{dly_us}]",
              "payload_B": PACKET_SIZE_B,
              "enable_mitigation": "false",
              "duration_s": DUR_s,
              "pcap": "true" if PCAP else "false",
              "out_dir": sim_dir}
             for bw_Mbps, dly_us, que_p, flws in itertools.product(
-                BWS_Mbps, DELAYS_us, QUEUE_p, OTHER_FLOWS)]
+                BWS_Mbps, DELAYS_us, QUEUE_p, FAIR_FLOWS)]
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
             dry_run=DRY_RUN, sync=defaults.SYNC)
 
