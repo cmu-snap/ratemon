@@ -8,6 +8,7 @@ from os import path
 from matplotlib import pyplot
 import numpy as np
 
+import cl_args
 import utils
 
 
@@ -19,10 +20,8 @@ def main():
     psr.add_argument(
         "--parsed-data", help="The path to the parsed simulation data.",
         required=True, type=str)
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
     dat_flp = args.parsed_data
     out_dir = args.out_dir
     assert path.exists(dat_flp), f"File does not exist: {dat_flp}"
@@ -54,7 +53,7 @@ def main():
             pyplot.ylim(top=1.1)
             pyplot.hlines(
                 queue_fair_occupancy, 0, dat["arrival time us"][-1],
-                colors='k', linestyles='dashdot')
+                colors="k", linestyles="dashdot")
         if ("mathis model label" in fet or "loss" in fet) and "sqrt" not in fet:
             pyplot.ylim(top=1.1)
 

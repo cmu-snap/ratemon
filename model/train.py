@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Based on:
-- https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
-- https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
+https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 """
 
 import argparse
@@ -22,47 +22,12 @@ import numpy as np
 from numpy.lib import recfunctions
 import torch
 
+import cl_args
+import defaults
 import models
 import utils
 
 
-# Parameter defaults.
-DEFAULTS = {
-    "data_dir": ".",
-    "warmup_percent": 0,
-    "keep_percent": 100,
-    "num_sims": sys.maxsize,
-    "sims": [],
-    "model": models.MODEL_NAMES[0],
-    "features": [],
-    "epochs": 100,
-    "num_gpus": 0,
-    "train_batch": sys.maxsize,
-    "test_batch": sys.maxsize,
-    "learning_rate": 0.001,
-    "momentum": 0.09,
-    "kernel": "linear",
-    "degree": 3,
-    "penalty": "l1",
-    "max_iter": 10000,
-    "rfe": "None",
-    "folds": 2,
-    "graph": False,
-    "standardize": True,
-    "early_stop": False,
-    "val_patience": 10,
-    "val_improvement_thresh": 0.1,
-    "conf_trials": 1,
-    "max_attempts": 10,
-    "no_rand": False,
-    "timeout_s": 0,
-    "out_dir": ".",
-    "tmp_dir": None,
-    "regen_data": False,
-    "sync": False
-}
-# The maximum number of epochs when using early stopping.
-EPCS_MAX = 10_000
 # The threshold of the new throughout to the old throughput above which a
 # a training example will not be considered. I.e., the throughput must have
 # decreased to less than this fraction of the original throughput for a
@@ -74,8 +39,6 @@ SHUFFLE = True
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 
 
 def scale_fets(dat, scl_grps, standardize=False):
@@ -103,7 +66,8 @@ def scale_fets(dat, scl_grps, standardize=False):
     scl_grps_prms = np.empty((len(scl_grps_unique), 2), dtype="float64")
     # Function to reduce a structured array.
     rdc = (lambda fnc, arr:
-           fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+           fnc(np.array(
+               [fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
     # Determine the min and the max of each scaling group.
     for scl_grp in scl_grps_unique:
         # Determine the features in this scaling group.
@@ -113,8 +77,10 @@ def scale_fets(dat, scl_grps, standardize=False):
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [
-            np.mean(utils.clean(fet_values)) if standardize else rdc(np.min, fet_values),
-            np.std(utils.clean(fet_values)) if standardize else rdc(np.max, fet_values)
+            np.mean(utils.clean(fet_values))
+            if standardize else rdc(np.min, fet_values),
+            np.std(utils.clean(fet_values))
+            if standardize else rdc(np.max, fet_values)
         ]
 
     # Create an empty array to hold the min and max values (i.e.,
@@ -190,7 +156,9 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     def has_non_finite(arr):
         for fet in arr.dtype.names:
             if not np.isfinite(arr[fet]).all():
-                print(f"    Simulation {sim_flp} has NaNs of Infs in feature {fet}")
+                print(
+                    f"    Simulation {sim_flp} has NaNs of Infs in feature "
+                    f"{fet}")
                 return True
         return False
     if has_non_finite(dat_in) or has_non_finite(dat_out):
@@ -244,11 +212,12 @@ def make_datasets(net, args, dat=None):
         sims = args["sims"]
         if not sims:
             dat_dir = args["data_dir"]
-            sims = [path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+            sims = [
+                path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
         if SHUFFLE:
             # Set the random seed so that multiple parallel instances of
             # this script see the same random order.
-            random.seed(utils.SEED)
+            utils.set_rand_seed()
             random.shuffle(sims)
         num_sims = args["num_sims"]
         if num_sims is not None:
@@ -276,7 +245,7 @@ def make_datasets(net, args, dat=None):
             (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
              args["keep_percent"])
             for idx, sim in enumerate(sims)]
-        if SYNC or args["sync"]:
+        if defaults.SYNC or args["sync"]:
             dat_all = [process_sim(*sim_args) for sim_args in sims_args]
         else:
             with multiprocessing.Pool() as pol:
@@ -330,11 +299,13 @@ def make_datasets(net, args, dat=None):
     assert scl_grps is not None, "Unable to compte scaling groups!"
 
     # Build combined feature lists.
-    dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(*dat_all)
+    dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(
+        *dat_all)
     # Determine the number of flows in each example.
     num_flws = [sim.unfair_flws + sim.other_flws for sim in sims]
-    num_flws = [np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
-                for num_flws_, dat_in in zip(num_flws, dat_in_all)]
+    num_flws = [
+        np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
+        for num_flws_, dat_in in zip(num_flws, dat_in_all)]
     num_flws = np.concatenate(num_flws, axis=0)
     # Stack the arrays.
     dat_in_all = np.concatenate(dat_in_all, axis=0)
@@ -372,8 +343,9 @@ def make_datasets(net, args, dat=None):
     #         print(f"Discarding: {fet}")
     # dat_in_all = dat_in_all[fets]
 
-    return (dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
-            prms_in)
+    return (
+        dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, num_flws,
+        prms_in)
 
 
 def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
@@ -552,8 +524,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
             if bch_idx_trn % bchs_per_log == 0:
                 print(f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
-                      f"{'?' if ely_stp else num_epochs}, "
-                      f"batch: {bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
+                      f"{'?' if ely_stp else num_epochs}, batch: "
+                      f"{bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
                       f"{num_bchs_trn}", end=" ")
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
@@ -575,11 +547,14 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
                 with torch.no_grad():
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
-                        print(f"    Validation batch: {bch_idx_val + 1}/{len(ldr_val)}")
+                        print(
+                            "    Validation batch: "
+                            f"{bch_idx_val + 1}/{len(ldr_val)}")
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference(
-                            ins_val, labs_val, net.net, dev, hidden, los_fnc)[0].item()
+                            ins_val, labs_val, net.net, dev, hidden,
+                            los_fnc)[0].item()
                 # Convert the model back to training mode.
                 net.net.train()
 
@@ -651,7 +626,7 @@ def test(net, ldr_tst, dev):
 
 
 def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-                out_flp):
+                out_dir, out_flp):
     """
     Trains an sklearn model according to the supplied parameters. Returns the
     test error (lower is better).
@@ -678,14 +653,18 @@ def run_sklearn(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
-    acc_tst = net.test(*ldr_tst.dataset.raw())
+    # Select the first return value, which is the overall accuracy.
+    acc_tst = net.test(
+        *ldr_tst.dataset.raw(),
+        graph_prms={
+            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})[0]
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     return acc_tst, tim_trn_s
 
 
 def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
-              out_flp):
+              out_dir, out_flp):
     """
     Trains a PyTorch model according to the supplied parameters. Returns the
     test error (lower is better).
@@ -744,33 +723,13 @@ def run_torch(args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
 
 
 def prepare_args(args_):
-    """
-    Updates the default arguments with the specified values and validates them.
-    """
+    """ Updates the default arguments with the specified values. """
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
     # parameters have values.
-    args = copy.copy(DEFAULTS)
+    args = copy.copy(defaults.DEFAULTS)
     args.update(args_)
-    if args["early_stop"]:
-        args["epochs"] = EPCS_MAX
-    degree = args["degree"]
-    assert degree >= 0, \
-        ("\"degree\" must be an integer greater than or equal to 0, but is: "
-         f"{degree}")
-    max_iter = args["max_iter"]
-    assert max_iter > 0, \
-        f"\"max_iter\" must be greater than 0, but is: {max_iter}"
-    folds = args["folds"]
-    assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
-    keep_prc = args["keep_percent"]
-    assert 0 < keep_prc <= 100, \
-        f"\"keep_percent\" must be in the range (0, 100], but is: {keep_prc}"
-    warmup_prc = args["warmup_percent"]
-    assert 0 <= warmup_prc < 100, \
-        ("\"warmup_percent\" must be in the range [0, 100), but is: "
-         f"{warmup_prc}")
     return args
 
 
@@ -782,9 +741,7 @@ def run_trials(args):
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
-        random.seed(utils.SEED)
-        np.random.seed(utils.SEED)
-        torch.manual_seed(utils.SEED)
+        utils.set_rand_seed()
 
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):
@@ -797,7 +754,7 @@ def run_trials(args):
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        (utils.args_to_str(args, order=sorted(DEFAULTS.keys()))
+        (utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()))
         ) + (
             # Determine the proper extension based on the type of
             # model.
@@ -846,8 +803,12 @@ def run_trials(args):
     ress = []
     while trls > 0 and apts < apts_max:
         apts += 1
-        res = (run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch)(
-            args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws, out_flp)
+        res = (
+            run_sklearn
+            if isinstance(net_tmp, models.SvmSklearnWrapper)
+            else run_torch)(
+                args, dat_in, dat_out, dat_out_raw, dat_out_oracle, num_flws,
+                out_dir, out_flp)
         if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
@@ -889,11 +850,12 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     # and only if sync is False or the configuration is explicity
     # configured to run synchronously.
     cnfs = zip(
-        [{**cnf, "sync": (not sync) or cnf.get("sync", DEFAULTS["sync"])}
+        [{**cnf,
+          "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
          for cnf in cnfs],
         [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
 
-    if SYNC:
+    if defaults.SYNC:
         res = [run_cnf(*cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=3) as pol:
@@ -906,115 +868,15 @@ def main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="An LSTM training framework.")
     psr.add_argument(
-        "--data-dir",
-        help=("The path to a directory containing the"
-              "training/validation/testing data (required)."),
-        required=True, type=str)
-    psr.add_argument(
-        "--warmup-percent", default=DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--keep-percent", default=DEFAULTS["keep_percent"],
-        help="The percent of each simulation's datapoints to keep.", type=float)
-    psr.add_argument(
-        "--num-sims", default=DEFAULTS["num_sims"],
-        help="The number of simulations to consider.", type=int)
-    psr.add_argument(
-        "--model", choices=models.MODEL_NAMES, default=DEFAULTS["model"],
-        help="The model to use.", type=str)
-    psr.add_argument(
-        "--epochs", default=DEFAULTS["epochs"],
-        help="The number of epochs to train for.", type=int)
-    psr.add_argument(
-        "--num-gpus", default=DEFAULTS["num_gpus"],
-        help="The number of GPUs to use.", type=int)
-    psr.add_argument(
-        "--train-batch", default=DEFAULTS["train_batch"],
-        help="The batch size to use during training.", type=int)
-    psr.add_argument(
-        "--test-batch", default=DEFAULTS["test_batch"],
-        help="The batch size to use during validation and testing.", type=int)
-    psr.add_argument(
-        "--learning-rate", default=DEFAULTS["learning_rate"],
-        help="Learning rate for SGD training.", type=float)
-    psr.add_argument(
-        "--momentum", default=DEFAULTS["momentum"],
-        help="Momentum for SGD training.", type=float)
-    psr.add_argument(
-        "--kernel", default=DEFAULTS["kernel"],
-        choices=["linear", "poly", "rbf", "sigmoid"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type kernel. Ignored otherwise."),
-        type=str)
-    psr.add_argument(
-        "--degree", default=DEFAULTS["degree"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
-              "and \"--kernel=poly\", then this is the degree of the polynomial "
-              "that will be fit. Ignored otherwise."),
-        type=int)
-    psr.add_argument(
-        "--penalty", default=DEFAULTS["penalty"], choices=["l1", "l2"],
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type of regularization. Ignored otherwise."))
-    psr.add_argument(
-        "--max-iter", default=DEFAULTS["max_iter"],
-        help=("If the model is an sklearn model, then this is the maximum "
-              "number of iterations to use during the fitting process. Ignored "
-              "otherwise."),
-        type=int)
-    psr.add_argument(
-        "--rfe", choices=["None", "rfe", "rfecv"], default="None",
-        help=(f"If the model is of type \"{models.LrSklearnWrapper().name}\" "
-              f"or \"{models.LrCvSklearnWrapper().name}\", then this is the "
-              "type of recursive feature elimination to use. Ignored "
-              "otherwise."),
-        type=str)
-    psr.add_argument(
-        "--folds", default=DEFAULTS["folds"],
-        help=(f"If the model is of type \"{models.LrCvSklearnWrapper().name}\","
-              " then use this number of cross-validation folds."),
-        type=int)
-    psr.add_argument(
         "--graph", action="store_true",
         help=("If the model is an sklearn model, then analyze and graph the "
               "testing results."))
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--early-stop", action="store_true", help="Enable early stopping.")
-    psr.add_argument(
-        "--val-patience", default=DEFAULTS["val_patience"],
-        help=("The number of times that the validation loss can increase "
-              "before training is automatically aborted."),
-        type=int)
-    psr.add_argument(
-        "--val-improvement-thresh", default=DEFAULTS["val_improvement_thresh"],
-        help="Threshold for percept improvement in validation loss.",
-        type=float)
-    psr.add_argument(
-        "--conf-trials", default=DEFAULTS["conf_trials"],
-        help="The number of trials to run.", type=int)
-    psr.add_argument(
-        "--max-attempts", default=DEFAULTS["max_attempts"],
-        help="The maximum number of failed training attempts to survive.",
-        type=int)
-    psr.add_argument(
-        "--no-rand", action="store_true", help="Use a fixed random seed.")
-    psr.add_argument(
-        "--timeout-s", default=DEFAULTS["timeout_s"],
-        help="Automatically stop training after this amount of time (seconds).",
-        type=float)
-    psr.add_argument(
-        "--out-dir", default=DEFAULTS["out_dir"],
-        help="The directory in which to store output files.", type=str)
-    args = vars(psr.parse_args())
-    # Verify that all arguments are reflected in DEFAULTS.
+    psr, psr_verify = cl_args.add_training(psr)
+    args = vars(psr_verify(psr.parse_args()))
+    # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
-        assert arg in DEFAULTS, f"Argument {arg} missing from DEFAULTS!"
+        assert arg in defaults.DEFAULTS, \
+            f"Argument {arg} missing from defaults.DEFAULTS!"
     run_trials(prepare_args(args))
 
 
