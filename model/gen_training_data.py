@@ -85,6 +85,11 @@ def main():
     logging.basicConfig(level=numeric_level)
     log = logging.getLogger(LOGGER)
 
+    log.info(f"Bandwidths (Mbps): %s", list(BWS_Mbps))
+    log.info(f"Link delays (us): %s", list(DELAYS_us))
+    log.info(f"Queue size (x BDP): %s", list(QUEUE_MULTS))
+    log.info(f"Fair flows: %s", list(FAIR_FLOWS))
+
     # Assemble the configurations.
     cnfs = [{"bottleneck_bandwidth_Mbps": bw_Mbps,
              "bottleneck_delay_us": dly_us,
