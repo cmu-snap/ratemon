@@ -14,45 +14,17 @@ from matplotlib import pyplot
 import numpy as np
 import torch
 
+import cl_args
+import defaults
 import models
 import train
 import utils
 
-manager = multiprocessing.Manager()
-all_accuracy = manager.list()
-all_bucketized_accuracy = manager.list()
-
-bw_dict = manager.dict({
-    1: manager.list(),
-    10: manager.list(),
-    30: manager.list(),
-    50: manager.list(),
-    1000: manager.list()
-})
-
-# RTT in us
-rtt_dict = manager.dict({
-    1000: manager.list(),
-    10000: manager.list(),
-    50000: manager.list(),
-    100000: manager.list(),
-    1000000: manager.list()
-})
-
-# Queue size in BDP
-queue_dict = manager.dict({
-    1: manager.list(),
-    2: manager.list(),
-    4: manager.list(),
-    8: manager.list(),
-    16: manager.list(),
-    32: manager.list(),
-    64: manager.list()
-})
 
 def plot_bar(x_axis, y_axis, file_name):
+    """ Create a bar graph. """
     y_pos = np.arange(len(y_axis))
-    pyplot.bar(y_pos, y_axis, align='center', alpha=0.5)
+    pyplot.bar(y_pos, y_axis, align="center", alpha=0.5)
     pyplot.xticks(y_pos, x_axis)
     pyplot.ylabel("Accuracy")
     pyplot.tight_layout()
@@ -61,9 +33,9 @@ def plot_bar(x_axis, y_axis, file_name):
 
 
 
-def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy, 
-                all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict):
-
+def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
+                standardize, all_accuracy, all_bucketized_accuracy, bw_dict,
+                rtt_dict, queue_dict):
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
         os.makedirs(out_dir)
@@ -71,10 +43,11 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
     # Load and parse the simulation.
     temp_path, sim = (
         train.process_sim(
-            idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
+            idx, total, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = utils.load_tmp_file(temp_path)    
+    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = (
+        utils.load_tmp_file(temp_path))
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
@@ -127,13 +100,16 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
 
     print(
         f"Finish processing {sim.name}\n"
-        f"----Average accuracy for all the processed simulations: {mean_accuracy}\n",
-        f"----Average bucketized accuracy for all the processed simulations: {mean_bucketized_accuracy}\n",)
+        "----Average accuracy for all the processed simulations: "
+        f"{mean_accuracy}\n",
+        "----Average bucketized accuracy for all the processed simulations: "
+        f"{mean_bucketized_accuracy}\n")
 
     for bw_Mbps in bw_dict.keys():
         if bw_dict[bw_Mbps]:
             bw_accuracy = mean(bw_dict[bw_Mbps])
-            print(f"----Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}")
+            print(
+                f"----Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}")
 
     for rtt_us_ in rtt_dict.keys():
         if rtt_dict[rtt_us_]:
@@ -143,51 +119,35 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
     for queue_bdp in queue_dict.keys():
         if queue_dict[queue_bdp]:
             queue_accuracy = mean(queue_dict[queue_bdp])
-            print(f"----Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}")
+            print(
+                f"----Queue size less than {queue_bdp} BDP accuracy "
+                f"{queue_accuracy}")
 
 
 def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(
-        description="Hyper-parameter optimizer for train.py.")
+    psr = argparse.ArgumentParser(description="Analyzes full simulations.")
+    psr, psr_verify = cl_args.add_running(psr)
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
     psr.add_argument(
-        "--simulations", help="The path to a simulations to analyze.", required=True,
-        type=str)
-    psr.add_argument(
-        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--scale-params", help="The path to the input scaling parameters.",
+        "--simulations",
+        help=("The path to a directory of simulations to analyze, or the path "
+              "to a single simulation file."),
         required=True, type=str)
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
-    args = psr.parse_args()
+    args = psr_verify(psr.parse_args())
     mdl_flp = args.model
-    sim_dir = args.simulations
-    warmup_prc = args.warmup_percent
-    scl_prms_flp = args.scale_params
     out_dir = args.out_dir
     standardize = args.standardize
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
-    assert path.exists(sim_dir), f"Simulation file does not exist: {sim_dir}"
-    assert 0 <= warmup_prc < 100, \
-        ("\"warmup_percent\" must be in the range [0, 100), but is: "
-         f"{warmup_prc}")
-    assert path.exists(scl_prms_flp), \
-        f"Scaling parameters file does not exist: {scl_prms_flp}"
-    if not path.exists(out_dir):
-        os.makedirs(out_dir)
+    sim_dir = args.simulations
+    assert path.exists(sim_dir), \
+        f"Simulation dir/file does not exist: {sim_dir}"
+    sim_flps = (
+        [path.join(sim_dir, sim_fln) for sim_fln in os.listdir(sim_dir)]
+        if path.isdir(sim_dir) else [sim_dir])
 
     # Parse the model filepath to determine the model type, and instantiate it.
     net = models.MODELS[
@@ -195,7 +155,7 @@ def main():
         # extract the "model" key.
         utils.str_to_args(
             path.basename(mdl_flp),
-            order=sorted(train.DEFAULTS.keys())
+            order=sorted(defaults.DEFAULTS.keys())
         )["model"]]()
     # # Manually remove the loss event rate sqrt feature.
     # net.in_spc.remove("loss event rate sqrt")
@@ -210,11 +170,46 @@ def main():
     net.net = mdl
     net.graph = True
 
+    manager = multiprocessing.Manager()
+    all_accuracy = manager.list()
+    all_bucketized_accuracy = manager.list()
+
+    # BW in Mbps.
+    bw_dict = manager.dict({
+        1: manager.list(),
+        10: manager.list(),
+        30: manager.list(),
+        50: manager.list(),
+        1000: manager.list()
+    })
+
+    # RTT in us
+    rtt_dict = manager.dict({
+        1000: manager.list(),
+        10000: manager.list(),
+        50000: manager.list(),
+        100000: manager.list(),
+        1000000: manager.list()
+    })
+
+    # Queue size in BDP
+    queue_dict = manager.dict({
+        1: manager.list(),
+        2: manager.list(),
+        4: manager.list(),
+        8: manager.list(),
+        16: manager.list(),
+        32: manager.list(),
+        64: manager.list()
+    })
+
+    total = len(sim_flps)
     func_input = [
-        (path.join(sim_dir, sim), path.join(out_dir, sim.split(".")[0]), net,
-         warmup_prc, scl_prms_flp, standardize, all_accuracy, all_bucketized_accuracy,
-         bw_dict, rtt_dict, queue_dict)
-        for sim in sorted(os.listdir(sim_dir))]
+        (idx, total, sim_flp,
+         path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+         args.warmup_percent, args.scale_params, standardize, all_accuracy,
+         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict)
+        for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()
@@ -225,9 +220,10 @@ def main():
 
     mean_accuracy = mean(all_accuracy)
 
-    with open("results.txt", "w") as f:
-        f.write(
-            f"Average accuracy for all the processed simulations: {mean_accuracy}\n")
+    with open(path.join(out_dir, "results.txt"), "w") as fil:
+        fil.write(
+            "Average accuracy for all the processed simulations: "
+            f"{mean_accuracy}\n")
 
         x_axis = []
         y_axis = []
@@ -235,26 +231,28 @@ def main():
         for bw_Mbps, values in bw_dict.items():
             if values:
                 bw_accuracy = mean(values)
-                f.write(f"Bandwidth less than {bw_Mbps}Mbps accuracy {bw_accuracy}\n")
+                fil.write(
+                    f"Bandwidth <= {bw_Mbps} Mbps, accuracy "
+                    f"{bw_accuracy}\n")
 
                 x_axis.append(f"{bw_Mbps}Mbps")
                 y_axis.append(bw_accuracy)
 
-        plot_bar(x_axis, y_axis, "bandwidth_vs_accuracy.pdf")
+        plot_bar(
+            x_axis, y_axis, path.join(out_dir, "bandwidth_vs_accuracy.pdf"))
 
         x_axis.clear()
         y_axis.clear()
 
-
         for rtt_us, values in rtt_dict.items():
             if values:
                 rtt_accuracy = mean(values)
-                f.write(f"Rtt less than {rtt_us}us accuracy {rtt_accuracy}\n")
+                fil.write(f"Rtt <= {rtt_us} us, accuracy {rtt_accuracy}\n")
 
                 x_axis.append(f"{rtt_us}us")
                 y_axis.append(rtt_accuracy)
 
-        plot_bar(x_axis, y_axis, "rtt_vs_accuracy.pdf")
+        plot_bar(x_axis, y_axis, path.join(out_dir, "rtt_vs_accuracy.pdf"))
 
         x_axis.clear()
         y_axis.clear()
@@ -262,12 +260,14 @@ def main():
         for queue_bdp, values in queue_dict.items():
             if values:
                 queue_accuracy = mean(values)
-                f.write(f"Queue size less than {queue_bdp} BDP accuracy {queue_accuracy}\n")
+                fil.write(
+                    f"Queue size <= {queue_bdp}x BDP, accuracy "
+                    f"{queue_accuracy}\n")
 
                 x_axis.append(f"{queue_bdp}bdp")
                 y_axis.append(queue_accuracy)
 
-        plot_bar(x_axis, y_axis, "queue_vs_accuracy.pdf")
+        plot_bar(x_axis, y_axis, path.join(out_dir, "queue_vs_accuracy.pdf"))
 
 
 if __name__ == "__main__":

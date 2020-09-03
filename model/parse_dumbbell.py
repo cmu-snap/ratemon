@@ -13,11 +13,11 @@ import time
 
 import numpy as np
 
+import cl_args
+import defaults
 import utils
 
 
-# Whether to parse PCAP files synchronously or in parallel.
-SYNC = False
 # Assemble the output dtype.
 #
 # These metrics do not change.
@@ -837,28 +837,26 @@ def main():
         help=("The directory in which the experiment results are stored "
               "(required)."), required=True, type=str)
     psr.add_argument(
-        "--out-dir",
-        help="The directory in which to store output files (required).",
-        required=True, type=str)
-    psr.add_argument(
         "--random-order", action="store_true",
         help="Parse the simulations in a random order.")
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_out(psr)
+    args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
     out_dir = args.out_dir
 
     # Find all simulations.
-    pcaps = [(path.join(exp_dir, sim), out_dir)
-             for sim in sorted(os.listdir(exp_dir))]
+    pcaps = [
+        (path.join(exp_dir, sim), out_dir)
+        for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         # Set the random seed so that multiple instances of this
         # script see the same random order.
-        random.seed(utils.SEED)
+        utils.set_rand_seed()
         random.shuffle(pcaps)
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
-    if SYNC:
+    if defaults.SYNC:
         for pcap in pcaps:
             parse_pcap(*pcap)
     else:

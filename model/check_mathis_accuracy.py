@@ -15,6 +15,7 @@ import utils
 
 
 def process_one(flp):
+    """ Process a single simulation. """
     dat = np.load(flp)
     dat = dat[dat.files[0]]
     labels = dat["mathis model label"]
@@ -60,7 +61,9 @@ def main():
     print(f"Mathis Model accuracy: {(correct / total) * 100:.2f}%")
     print(f"Total: {total} packets")
     print(f"Discarded {total_all - total} packets.")
-    print(f"Accuracy without discarding packets: {(correct / total_all) * 100:.2f}%")
+    print(
+        "Accuracy without discarding packets: "
+        f"{(correct / total_all) * 100:.2f}%")
 
 
 if __name__ == "__main__":

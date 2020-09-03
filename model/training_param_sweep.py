@@ -13,13 +13,13 @@ import time
 import numpy as np
 from matplotlib import pyplot as plt
 
+import cl_args
+import defaults
 import models
 import train
 import utils
 
 
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 # Key to use in the results file.
 RESULTS_KEY = "results"
 # Experiment parameters.
@@ -225,55 +225,16 @@ def main():
     """ This program's entrypoint. """
     psr = argparse.ArgumentParser(
         description="Visualize sklearn training parameters.")
-    psr.add_argument(
-        "--data-dir",
-        help=("The path to a directory containing the"
-              "training/validation/testing data (required)."),
-        required=True, type=str)
-    psr.add_argument(
-        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--model", choices=models.MODEL_NAMES, default=train.DEFAULTS["model"],
-        help="The model to use.", type=str)
-    psr.add_argument(
-        "--kernel", default=train.DEFAULTS["kernel"],
-        choices=["linear", "poly", "rbf", "sigmoid"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type kernel. Ignored otherwise."),
-        type=str)
-    psr.add_argument(
-        "--degree", default=train.DEFAULTS["degree"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
-              "and \"--kernel=poly\", then this is the degree of the polynomial "
-              "that will be fit. Ignored otherwise."),
-        type=int)
-    psr.add_argument(
-        "--penalty", default=train.DEFAULTS["penalty"], choices=["l1", "l2"],
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type of regularization. Ignored otherwise."))
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--no-rand", action="store_true", help="Use a fixed random seed.")
-    psr.add_argument(
-        "--out-dir", default=train.DEFAULTS["out_dir"],
-        help="The directory in which to store output files.", type=str)
+    psr, psr_verify = cl_args.add_training(psr)
     psr.add_argument(
         "--graph-results", action="store_true",
         help=("Look through the output directory for completed experiments, "
               "and graph them."))
-    args = psr.parse_args()
+    args = psr_verify(psr.parse_args())
     args = train.prepare_args(vars(args))
-
     tim_srt_s = time.time()
     out_dir = args["out_dir"]
-    if not path.exists(out_dir):
-        os.makedirs(out_dir)
+
     # Assemble the configurations to test. Sort them based on the
     # product of their hyper-parameters, which is a heuristic of how
     # long they will take to run.
@@ -376,7 +337,7 @@ def main():
         if train.SHUFFLE:
             # Set the random seed so that multiple instances of this
             # script see the same random order.
-            random.seed(utils.SEED)
+            utils.set_rand_seed()
             random.shuffle(sims)
         num_sims_actual = len(sims)
         max_sims = max(NUMS_SIMS)
@@ -388,7 +349,7 @@ def main():
         sim_args = [
             (idx, max_sims, net, sim_flp, out_dir, args["warmup_percent"], 100)
             for idx, sim_flp in enumerate(sims)]
-        if SYNC:
+        if defaults.SYNC:
             dat_all = [train.process_sim(*sim_args_) for sim_args_ in sim_args]
         else:
             with multiprocessing.Pool() as pol:
@@ -439,7 +400,7 @@ def main():
 
     # Train models.
     train.run_cnfs(
-        cnfs, SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
+        cnfs, defaults.SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
 
     # # Remove real data files.
     # for cnf in cnfs:

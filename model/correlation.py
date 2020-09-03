@@ -12,12 +12,12 @@ from matplotlib import pyplot as plt
 import numpy as np
 import seaborn as sns
 
+import cl_args
+import defaults
 import models
 import train
 import utils
 
-# Whether to parse simulation files synchronously or in parallel.
-SYNC = False
 # Features to analyze.
 ALL_FETS = sorted([
     # "1/sqrt loss event rate-windowed-minRtt1",
@@ -280,7 +280,7 @@ def run_cnfs(fets, args, sims):
                 for fet in fets_])
              for fets_ in fets])]
     # Train configurations.
-    if SYNC:
+    if defaults.SYNC:
         res = [train.run_trials(cnf) for cnf in cnfs]
     else:
         with multiprocessing.Pool(processes=4) as pol:
@@ -300,58 +300,8 @@ def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Evaluates feature correlation.")
-    psr.add_argument(
-        "--data-dir",
-        help=("The path to a directory containing the"
-              "training/validation/testing data (required)."),
-        required=True, type=str)
-    psr.add_argument(
-        "--warmup-percent", default=train.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
-              "beginning."),
-        type=float)
-    psr.add_argument(
-        "--num-sims", default=train.DEFAULTS["num_sims"],
-        help="The number of simulations to consider.", type=int)
-    psr.add_argument(
-        "--model", choices=models.MODEL_NAMES, default=train.DEFAULTS["model"],
-        help="The model to use.", type=str)
-    psr.add_argument(
-        "--kernel", default=train.DEFAULTS["kernel"],
-        choices=["linear", "poly", "rbf", "sigmoid"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type kernel. Ignored otherwise."),
-        type=str)
-    psr.add_argument(
-        "--degree", default=train.DEFAULTS["degree"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
-              "and \"--kernel=poly\", then this is the degree of the polynomial "
-              "that will be fit. Ignored otherwise."),
-        type=int)
-    psr.add_argument(
-        "--penalty", default=train.DEFAULTS["penalty"], choices=["l1", "l2"],
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then use this type of regularization. Ignored otherwise."))
-    psr.add_argument(
-        "--max-iter", default=train.DEFAULTS["max_iter"],
-        help=("If the model is an sklearn model, then this is the maximum "
-              "number of iterations to use during the fitting process. Ignored "
-              "otherwise."),
-        type=int)
-    psr.add_argument(
-        "--standardize", action="store_true",
-        help=("Standardize the data so that it has a mean of 0 and a variance "
-              "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-    psr.add_argument(
-        "--val-improvement-thresh", default=train.DEFAULTS["val_improvement_thresh"],
-        help="Threshold for percept improvement in validation loss.",
-        type=float)
-    psr.add_argument(
-        "--no-rand", action="store_true", help="Use a fixed random seed.")
-    psr.add_argument(
-        "--out-dir", default=train.DEFAULTS["out_dir"],
-        help="The directory in which to store output files.", type=str)
-    args = psr.parse_args()
+    psr, psr_verify = cl_args.add_training(psr)
+    args = psr_verify(psr.parse_args())
 
     # Train models.
     # all_fets = sorted(models.MODELS[args.model].in_spc)
@@ -378,7 +328,7 @@ def main():
         if train.SHUFFLE:
             # Set the random seed so that multiple instances of this
             # script see the same random order.
-            random.seed(utils.SEED)
+            utils.set_rand_seed()
             random.shuffle(sims)
         num_sims = args.num_sims
         if num_sims is not None:

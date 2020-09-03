@@ -6,21 +6,18 @@ Hyper-parameter optimization for train.py.
 import argparse
 import itertools
 import multiprocessing
-import sys
 import time
 
 import ax
 import numpy as np
 
-import models
+import cl_args
+import defaults
 import train
 import utils
 
 
 DEFAULT_TLS_OPT = 40
-# When using exhaustive mode, whether to run configurations
-# synchronously or in parallel. Ignored otherwise.
-SYNC = False
 
 
 def main():
@@ -28,44 +25,15 @@ def main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Hyper-parameter optimizer for train.py.")
-    model_opts = sorted(models.MODELS.keys())
-    psr.add_argument(
-        "--model", default=model_opts[0], help="The model to use.",
-        choices=model_opts, type=str)
-    psr.add_argument(
-        "--data-dir",
-        help="The path to the training/validation/testing data (required).",
-        required=True, type=str)
-    psr.add_argument(
-        "--num-sims", default=sys.maxsize,
-        help="The number of simulations to consider.", type=int)
+    psr, psr_verify = cl_args.add_training(psr)
     psr.add_argument(
         "--opt-trials", default=DEFAULT_TLS_OPT,
         help="The number of optimization trials to run.", type=int)
     psr.add_argument(
-        "--conf-trials", default=train.DEFAULTS["conf_trials"],
-        help="The number of trials of each configuration to run.", type=int)
-    psr.add_argument(
-        "--early-stop", action="store_true",
-        help="Enable early stopping as an optimization criterion.")
-    psr.add_argument(
-        "--max-attempts", default=train.DEFAULTS["max_attempts"],
-        help=("The maximum number of failed training attempts to survive, per "
-              "configuration."), type=int)
-    psr.add_argument(
         "--exhaustive", action="store_true",
-        help=("Try all combinations of parameters. Incompatible with parameters "
-              "of type \"range\"."))
-    psr.add_argument(
-        "--no-rand", action="store_true", help="Use a fixed random seed.")
-    psr.add_argument(
-        "--timeout-s", default=train.DEFAULTS["timeout_s"],
-        help="Automatically stop training after this amount of time (seconds).",
-        type=float)
-    psr.add_argument(
-        "--out-dir", default=".",
-        help="The directory in which to store output files.", type=str)
-    args = psr.parse_args()
+        help=("Try all combinations of parameters. Incompatible with "
+              "parameters of type \"range\"."))
+    args = psr_verify(psr.parse_args())
     tls_opt = args.opt_trials
     tls_cnf = args.conf_trials
     no_rand = args.no_rand
@@ -207,7 +175,7 @@ def main():
         cnfs = [
             {**fixed, **dict(params)} for params in itertools.product(*to_vary)]
         print(f"Total trials: {len(cnfs) * tls_cnf}")
-        if SYNC:
+        if defaults.SYNC:
             res = [train.run_trials(cnf)[0] for cnf in cnfs]
         else:
             with multiprocessing.Pool() as pol:
