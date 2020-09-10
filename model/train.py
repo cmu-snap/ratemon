@@ -302,7 +302,7 @@ def make_datasets(net, args, dat=None):
     dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(
         *dat_all)
     # Determine the number of flows in each example.
-    num_flws = [sim.unfair_flws + sim.other_flws for sim in sims]
+    num_flws = [sim.unfair_flws + sim.fair_flws for sim in sims]
     num_flws = [
         np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
         for num_flws_, dat_in in zip(num_flws, dat_in_all)]

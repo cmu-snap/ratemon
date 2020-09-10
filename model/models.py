@@ -153,7 +153,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (sim.unfair_flws + sim.other_flws)),
+                fair=1. / (sim.unfair_flws + sim.fair_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
@@ -797,7 +797,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
@@ -1204,7 +1204,7 @@ class LstmWrapper(PytorchModelWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss

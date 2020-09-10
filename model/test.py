@@ -66,7 +66,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             dat_out_raw=utils.clean(dat_out_raw),
             dat_out_oracle=utils.clean(dat_out_oracle),
             num_flws=np.array(
-                [sim.unfair_flws + sim.other_flws] * dat_in.shape[0],
+                [sim.unfair_flws + sim.fair_flws] * dat_in.shape[0],
                 dtype=float)).raw(),
         graph_prms={
             "out_dir": out_dir,
