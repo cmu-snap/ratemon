@@ -1014,6 +1014,7 @@ class SvmSklearnWrapper(SvmWrapper):
                         self.net.estimator_.coef_[0]),
                     key=lambda p: p[0])
                 print(f"Number of features selected: {len(best_fets)}")
+                qualifier = "All"
             else:
                 # First, sort the features by the absolute value of the
                 # importance and pick the top 20. Then, sort the features
@@ -1023,8 +1024,9 @@ class SvmSklearnWrapper(SvmWrapper):
                         zip(fets, self.net.coef_[0]),
                         key=lambda p: abs(p[1]))[-20:],
                     key=lambda p: p[0])
+                qualifier = "Best"
             print(
-                f"----------\nBest features ({len(best_fets)}):\n" +
+                f"----------\n{qualifier} features ({len(best_fets)}):\n" +
                 "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
                 "\n----------")
             if self.graph:
