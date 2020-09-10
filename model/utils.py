@@ -291,7 +291,7 @@ def parse_packets(flp, flw_idx, direction="data"):
                     elif array[i].startswith("Len"):
                         len_idx = i
                 if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                    len_idx != -1):
+                        len_idx != -1):
                     pkts.append((
                         int(array[seq_idx][4:]),
                         flw_idx,
