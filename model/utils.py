@@ -184,11 +184,11 @@ class Sim():
         self.name = sim
         toks = sim.split("-")
         if sim.endswith(".npz"):
-            # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s.npz
+            # 8Mbps-9000us-489p-1unfair-4fair-9000,9000,9000,9000,9000us-1380B-80s.npz
             # Remove ".npz" from the last token.
             toks[-1] = toks[-1][:-4]
-        # 8Mbps-9000us-489p-1unfair-4other-9000,9000,9000,9000,9000us-1380B-80s
-        (bw_Mbps, btl_delay_us, queue_p, unfair_flws, other_flws, edge_delays,
+        # 8Mbps-9000us-489p-1unfair-4fair-9000,9000,9000,9000,9000us-1380B-80s
+        (bw_Mbps, btl_delay_us, queue_p, unfair_flws, fair_flws, edge_delays,
          payload_B, dur_s) = toks
 
         # Link bandwidth (Mbps).
@@ -199,8 +199,8 @@ class Sim():
         self.queue_p = float(queue_p[:-1])
         # Number of unfair flows
         self.unfair_flws = int(unfair_flws[:-6])
-        # Number of other flows
-        self.other_flws = int(other_flws[:-5])
+        # Number of fair flows
+        self.fair_flws = int(fair_flws[:-4])
         # Edge delays
         self.edge_delays = [
             int(del_us) for del_us in edge_delays[:-2].split(",")]
