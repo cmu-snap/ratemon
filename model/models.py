@@ -893,21 +893,25 @@ class SvmSklearnWrapper(SvmWrapper):
         fair = fair.tolist()[0]
 
         labels = labels.tolist()
+        preds_list = preds.tolist()
         arr_times = [time_ns[0] for time_ns in arr_times]
 
         # Compute sliding window accuracy based on arrival time and RTT
         window_size_ns = SLIDING_WINDOW_NUM_RTT * rtt_ns
         sliding_window_accuracy = [0] * len(raw)
         window_head = 0
+        max_packet = 0
         for i in range(0, len(raw)):
             recv_time = arr_times[i]
             while recv_time - arr_times[window_head] >= window_size_ns:
                 window_head += 1
+            max_packet = max(max_packet, i - window_head)
             queue_occupancy = mean(raw[window_head:i + 1])
-            label = mean(labels[window_head:i + 1])
+            label = mean(preds_list[window_head:i + 1])
             sliding_window_accuracy[i] = (int(label >= SMOOTHING_THRESHOLD)
                                    if queue_occupancy > fair
                                    else int(label < SMOOTHING_THRESHOLD))
+        print(f"Maximum number of packets in sliding window {max_packet}")
 
         if self.graph:
             # Bucketize and compute bucket accuracies.
