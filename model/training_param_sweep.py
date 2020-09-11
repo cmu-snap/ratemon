@@ -366,7 +366,7 @@ def main():
         # Unpack the data.
         dat_all, sims = zip(*dat_all)
         dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
-        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps = zip(*dat_all)
+        dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps,_ = zip(*dat_all)
         dat_in = list(dat_in)
         dat_out = list(dat_out)
         dat_out_raw = list(dat_out_raw)

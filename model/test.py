@@ -110,7 +110,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             idx, total, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = (
+    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _, arr_times) = (
         utils.load_tmp_file(temp_path))
 
     # Load and apply the scaling parameters.
@@ -132,11 +132,13 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             num_flws=np.array(
                 [sim.unfair_flws + sim.fair_flws] * dat_in.shape[0],
                 dtype=float)).raw(),
+        arr_times=arr_times,
         graph_prms={
             "out_dir": out_dir,
             "sort_by_unfairness": False,
             "dur_s": sim.dur_s
-        })
+        }
+        sim=sim)
 
     all_accuracy.append(accuracy)
     mean_accuracy = mean(all_accuracy)

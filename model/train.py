@@ -181,20 +181,26 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
         dat_out_oracle=dat[["mathis model label-ewma-alpha0.01"]],
         sequential=sequential)
 
+    # Packet arrival time
+    arr_times = dat[["mathis model label-ewma-alpha0.01"]]
+
     # Select a fraction of the data.
-    num_rows = dat_in.shape[0]
-    num_to_pick = math.ceil(num_rows * keep_prc / 100)
-    idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
-    dat_in = dat_in[idxs]
-    dat_out = dat_out[idxs]
-    dat_out_raw = dat_out_raw[idxs]
-    dat_out_oracle = dat_out_oracle[idxs]
+    if keep_prc == 100:
+        num_rows = dat_in.shape[0]
+        num_to_pick = math.ceil(num_rows * keep_prc / 100)
+        idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
+        dat_in = dat_in[idxs]
+        dat_out = dat_out[idxs]
+        dat_out_raw = dat_out_raw[idxs]
+        dat_out_oracle = dat_out_oracle[idxs]
+        arr_times = arr_times[idxs]
 
     # To avoid errors with sending large matrices between processes,
     # store the results in a temporary file.
     dat_flp = path.join(tmp_dir, f"{path.basename(sim_flp)[:-4]}_tmp.npz")
     utils.save_tmp_file(
-        dat_flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps)
+        dat_flp, dat_in, dat_out, dat_out_raw,
+        dat_out_oracle, scl_grps, arr_times)
     return dat_flp, sim
 
 
@@ -267,7 +273,7 @@ def make_datasets(net, args, dat=None):
     dim_out = None
     dtype_out = None
     scl_grps = None
-    for dat_in, dat_out, _, _, scl_grps_cur in dat_all:
+    for dat_in, dat_out, _, _, scl_grps_cur, _ in dat_all:
         dim_in_cur = len(dat_in.dtype.names)
         dim_out_cur = len(dat_out.dtype.names)
         dtype_in_cur = dat_in.dtype
