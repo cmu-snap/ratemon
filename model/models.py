@@ -871,7 +871,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
 
     def __plot_queue_occ(self, preds, labels, raw, fair,
-                         arr_times, rtt, flp, x_lim=None):
+                         arr_times, rtt_ns, flp, x_lim=None):
         """
         Plots the queue occupancy and accuracy over time.
 
@@ -889,9 +889,10 @@ class SvmSklearnWrapper(SvmWrapper):
         fair = fair.tolist()[0]
 
         labels = labels.tolist()
+        arr_times = [time_ns[0] for time_ns in arr_times]
 
         # Compute sliding window accuracy based on arrival time and RTT
-        window_size_ns = SLIDING_WINDOW_NUM_RTT * rtt
+        window_size_ns = SLIDING_WINDOW_NUM_RTT * rtt_ns
         sliding_window_accuracy = [0] * len(raw)
         window_head = 0
         for i in range(0, len(raw)):
@@ -1062,10 +1063,10 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot queue occupancy.
-            rtt = (2 * sim.edge_delays + sim.btl_delay_us) * 2
+            rtt_ns = (2 * sim.edge_delays[0] + sim.btl_delay_us) * 2
             sliding_window_accuracy = self.__plot_queue_occ(
                 torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-                dat_out_raw, fair, arr_times, rtt,
+                dat_out_raw, fair, arr_times, rtt_ns,
                 path.join(
                     out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
                 x_lim)

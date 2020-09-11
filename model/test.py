@@ -137,7 +137,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             "out_dir": out_dir,
             "sort_by_unfairness": False,
             "dur_s": sim.dur_s
-        }
+        },
         sim=sim)
 
     all_accuracy.append(accuracy)
