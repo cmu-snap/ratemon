@@ -213,6 +213,10 @@ def main():
         help=("The path to a directory of simulations to analyze, or the path "
               "to a single simulation file."),
         required=True, type=str)
+    psr.add_argument(
+        "--input-file",
+        help=("The path to a file containing a list of simulations."),
+        required=False, default=None, type=str)
     args = psr_verify(psr.parse_args())
     mdl_flp = args.model
     out_dir = args.out_dir
@@ -253,15 +257,29 @@ def main():
     (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
      bucketized_rtt_dict, bucketized_queue_dict) = init_global(manager)
 
-    total = len(sim_flps)
-    func_input = [
-        (idx, total, sim_flp,
-         path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
-         args.warmup_percent, args.scale_params, standardize, all_accuracy,
-         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
-         bucketized_bw_dict, bucketized_rtt_dict,
-         bucketized_queue_dict)
-        for idx, sim_flp in enumerate(sim_flps)]
+    if args.input_file:
+        with open(args.input_file, "r") as input_file:
+            lines = [line.rstrip("\n") for line in input_file]
+
+        total = len(lines)
+        func_input = [
+            (0, total, sim_flp,
+             path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+             10, args.scale_params, standardize, all_accuracy,
+             all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
+             bucketized_bw_dict, bucketized_rtt_dict,
+             bucketized_queue_dict)
+            for sim_flp in lines]
+    else:
+        total = len(sim_flps)
+        func_input = [
+            (idx, total, sim_flp,
+             path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+             args.warmup_percent, args.scale_params, standardize, all_accuracy,
+             all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
+             bucketized_bw_dict, bucketized_rtt_dict,
+             bucketized_queue_dict)
+            for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()
