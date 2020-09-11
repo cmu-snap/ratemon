@@ -182,10 +182,10 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
         sequential=sequential)
 
     # Packet arrival time
-    arr_times = dat[["mathis model label-ewma-alpha0.01"]]
+    arr_times = dat[["arrival time us"]]
 
     # Select a fraction of the data.
-    if keep_prc == 100:
+    if keep_prc != 100:
         num_rows = dat_in.shape[0]
         num_to_pick = math.ceil(num_rows * keep_prc / 100)
         idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
