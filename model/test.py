@@ -147,7 +147,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
     mean_bucketized_accuracy = mean(all_bucketized_accuracy)
 
     for bw_mbps in bw_dict.keys():
-        if sim.bw_mbps <= bw_mbps:
+        if sim.bw_Mbps <= bw_mbps:
             bw_dict[bw_mbps].append(accuracy)
             bucketized_bw_dict[bw_mbps].append(bucketized_accuracy)
             break
@@ -159,7 +159,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             bucketized_rtt_dict[rtt_us_].append(bucketized_accuracy)
             break
 
-    bdp = sim.bw_mbps * rtt_us / sim.payload_B / sim.queue_p
+    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / sim.queue_p
 
     for queue_bdp in queue_dict.keys():
         if bdp <= queue_bdp:
