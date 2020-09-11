@@ -17,7 +17,7 @@ from sklearn import svm
 import torch
 
 SMOOTHING_THRESHOLD = 0.4
-SLIDING_WINDOW_SIZE = 20
+SLIDING_WINDOW_NUM_RTT = 1
 
 
 class PytorchModelWrapper:
@@ -870,22 +870,38 @@ class SvmSklearnWrapper(SvmWrapper):
         return acc
 
 
-    def __plot_queue_occ(self, preds, labels, raw, fair, flp, x_lim=None):
-        """ Plots the queue occupancy and accuracy over time. """
+    def __plot_queue_occ(self, preds, labels, raw, fair,
+                         arr_times, rtt, flp, x_lim=None):
+        """
+        Plots the queue occupancy and accuracy over time.
+
+        preds: Prediction produced by the model
+        dat_out_classes: Ground truth labels.
+        raw: Raw values of the queue occupancy
+        dat_out_oracle: Labels predicted by the Mathis model.
+        fair: Fair share of the flow
+        arr_times: The arrival times of each sample.
+        flp: File name of the saved graph.
+        x_lim: Graph limit on the x axis."""
+
         print("Plotting queue occupancy...")
         raw = raw.tolist()
-        fair = fair.tolist()
+        fair = fair.tolist()[0]
 
-        # Convert labels from -1 and 1 to 0 and 1
-        # labels = (labels + 1) / 2
         labels = labels.tolist()
 
-        bucketized_label = [0] * len(raw)
+        # Compute sliding window accuracy based on arrival time and RTT
+        window_size_ns = SLIDING_WINDOW_NUM_RTT * rtt
+        sliding_window_accuracy = [0] * len(raw)
+        window_head = 0
         for i in range(0, len(raw)):
-            queue_occupancy = mean(raw[max(0, i - SLIDING_WINDOW_SIZE):i + 1])
-            label = mean(labels[max(0, i - SLIDING_WINDOW_SIZE):i + 1])
-            bucketized_label[i] = (int(label >= SMOOTHING_THRESHOLD) 
-                                   if queue_occupancy > fair[0]
+            recv_time = arr_times[i]
+            while recv_time - arr_times[window_head] >= window_size_ns:
+                window_head += 1
+            queue_occupancy = mean(raw[window_head:i + 1])
+            label = mean(labels[window_head:i + 1])
+            sliding_window_accuracy[i] = (int(label >= SMOOTHING_THRESHOLD)
+                                   if queue_occupancy > fair
                                    else int(label < SMOOTHING_THRESHOLD))
 
         if self.graph:
@@ -912,11 +928,9 @@ class SvmSklearnWrapper(SvmWrapper):
             x_axis = list(range(len(buckets)))
             pyplot.plot(x_axis, queue_occupancy_list, "b-")
             pyplot.plot(x_axis, fair_list, "g--")
-            label_accuracy = [0] * len(buckets)
-            bucketized_label = [0] * len(buckets)
-            label_accuracy, bucketized_label = zip(
+            label_accuracy, _ = zip(
                 *(((label, int(label >= SMOOTHING_THRESHOLD))
-                   if queue_occupancy > fair[0] else
+                   if queue_occupancy > fair else
                    (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
                   for queue_occupancy, label in buckets))
             pyplot.plot(x_axis, label_accuracy, "r^")
@@ -928,14 +942,14 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.savefig(flp)
             pyplot.close()
 
-            return sum(bucketized_label) / len(bucketized_label)
-        return 0
+        return sum(sliding_window_accuracy) / len(sliding_window_accuracy)
 
 
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
              num_flws, arr_times=None,
              graph_prms=copy.copy({
-                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
+                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None}),
+             sim=None):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
@@ -1048,13 +1062,15 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot queue occupancy.
-            bucketized_accuracy = self.__plot_queue_occ(
-                dat_out_oracle, dat_out_classes, dat_out_raw, fair,
+            rtt = (2 * sim.edge_delays + sim.btl_delay_us) * 2
+            sliding_window_accuracy = self.__plot_queue_occ(
+                torch.tensor(self.net.predict(dat_in)), dat_out_classes,
+                dat_out_raw, fair, arr_times, rtt,
                 path.join(
                     out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
                 x_lim)
         else:
-            bucketized_accuracy = float("NaN")
+            sliding_window_accuracy = float("NaN")
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model oracle.
@@ -1075,7 +1091,7 @@ class SvmSklearnWrapper(SvmWrapper):
             graph_prms={
                 "flp": path.join(
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
-                "x_lim": x_lim}), bucketized_accuracy
+                "x_lim": x_lim}), sliding_window_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):

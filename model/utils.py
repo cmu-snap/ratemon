@@ -493,12 +493,13 @@ def load(flp):
             fil["dat_out_oracle"], fil["num_flws"])
 
 
-def save_tmp_file(flp, dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps):
+def save_tmp_file(flp, dat_in, dat_out, dat_out_raw,
+                  dat_out_oracle, scl_grps, arr_times):
     """ Saves a single-simulation temporary results file. """
     print(f"Saving temporary data: {flp}")
     np.savez_compressed(
         flp, dat_in=dat_in, dat_out=dat_out, dat_out_raw=dat_out_raw,
-        dat_out_oracle=dat_out_oracle, scl_grps=scl_grps)
+        dat_out_oracle=dat_out_oracle, scl_grps=scl_grps, arr_times=arr_times)
 
 
 def load_tmp_file(flp):
@@ -510,8 +511,9 @@ def load_tmp_file(flp):
         dat_out_raw = fil["dat_out_raw"]
         dat_out_oracle = fil["dat_out_oracle"]
         scl_grps = fil["scl_grps"]
+        arr_times = fil["arr_times"]
     os.remove(flp)
-    return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps
+    return dat_in, dat_out, dat_out_raw, dat_out_oracle, scl_grps, arr_times
 
 
 def get_lock_flp(out_dir):
