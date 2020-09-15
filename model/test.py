@@ -137,8 +137,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             "out_dir": out_dir,
             "sort_by_unfairness": False,
             "dur_s": sim.dur_s
-        },
-        sim=sim)
+        })
 
     all_accuracy.append(accuracy)
     mean_accuracy = mean(all_accuracy)
@@ -212,7 +211,7 @@ def main():
         "--simulations",
         help=("The path to a directory of simulations to analyze, or the path "
               "to a single simulation file."),
-        required=True, type=str)
+        required=False, default=None, type=str)
     psr.add_argument(
         "--input-file",
         help=("The path to a file containing a list of simulations."),
@@ -221,13 +220,22 @@ def main():
     mdl_flp = args.model
     out_dir = args.out_dir
     standardize = args.standardize
-    assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
+    input_file = args.input_file
     sim_dir = args.simulations
-    assert path.exists(sim_dir), \
-        f"Simulation dir/file does not exist: {sim_dir}"
-    sim_flps = (
-        [path.join(sim_dir, sim_fln) for sim_fln in os.listdir(sim_dir)]
-        if path.isdir(sim_dir) else [sim_dir])
+
+    assert sim_dir is None != input_file is None, \
+        "Test takes in either a directory of simulations or " \
+        "an input file containing all the simulations"
+    assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
+    if args.simulations:
+        assert path.exists(sim_dir), \
+            f"Simulation dir/file does not exist: {sim_dir}"
+        sim_flps = (
+            [path.join(sim_dir, sim_fln) for sim_fln in os.listdir(sim_dir)]
+            if path.isdir(sim_dir) else [sim_dir])
+    else:
+        with open(input_file, "r") as input_file:
+            sim_flps = [line.rstrip("\n") for line in input_file]
 
     # Parse the model filepath to determine the model type, and instantiate it.
     net = models.MODELS[
@@ -257,19 +265,6 @@ def main():
     (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
      bucketized_rtt_dict, bucketized_queue_dict) = init_global(manager)
 
-    if args.input_file:
-        with open(args.input_file, "r") as input_file:
-            lines = [line.rstrip("\n") for line in input_file]
-
-        total = len(lines)
-        func_input = [
-            (0, total, sim_flp,
-             path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
-             10, args.scale_params, standardize, all_accuracy,
-             all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
-             bucketized_bw_dict, bucketized_rtt_dict,
-             bucketized_queue_dict)
-            for sim_flp in lines]
     else:
         total = len(sim_flps)
         func_input = [
