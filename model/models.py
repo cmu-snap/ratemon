@@ -154,7 +154,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                fair=1. / (sim.unfair_flws + sim.other_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
@@ -798,7 +798,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
@@ -868,60 +868,74 @@ class SvmSklearnWrapper(SvmWrapper):
         print(f"    Test accuracy: {acc * 100:.2f}%")
         return acc
 
-<<<<<<< HEAD
-    def __plot_queue_occ(self, preds, labels, raw, fair, flp, x_lim=None):
-        """ Plots the queue occupancy and accuracy over time. """
-=======
-
-    def __plot_queue_occ(self, preds, labels, raw, fair,
-                         arr_times, rtt_ns, flp, x_lim=None):
+    def __evaluate_sliding_window(self, preds, raw, fair,
+                                  arr_times, rtt_estimate_us):
         """
-        Plots the queue occupancy and accuracy over time.
+        Returns the sliding window accuracy of predictions based
+        on the rtt estimate and the window size.
 
         preds: Prediction produced by the model
-        dat_out_classes: Ground truth labels.
         raw: Raw values of the queue occupancy
-        dat_out_oracle: Labels predicted by the Mathis model.
         fair: Fair share of the flow
+        rtt_estimate_us: Rtt estimates computed on the receiver side
         arr_times: The arrival times of each sample.
-        flp: File name of the saved graph.
-        x_lim: Graph limit on the x axis."""
-
->>>>>>> 3e9594d (Sliding window based on RTT)
-        print("Plotting queue occupancy...")
+        """
         raw = raw.tolist()
-        fair = fair.tolist()[0]
-
-        labels = labels.tolist()
+        fair = fair.tolist()
         preds_list = preds.tolist()
         arr_times = [time_ns[0] for time_ns in arr_times]
 
+        num_pkts = len(raw)
+
         # Compute sliding window accuracy based on arrival time and RTT
-        window_size_ns = SLIDING_WINDOW_NUM_RTT * rtt_ns
-        sliding_window_accuracy = [0] * len(raw)
+        sliding_window_accuracy = [0] * num_pkts
         window_head = 0
         max_packet = 0
-        for i in range(0, len(raw)):
+        for i in range(num_pkts):
             recv_time = arr_times[i]
-            while recv_time - arr_times[window_head] >= window_size_ns:
+            window_size_us = SLIDING_WINDOW_NUM_RTT * rtt_estimate_us[i]
+            while recv_time - arr_times[window_head] >= window_size_us:
                 window_head += 1
+
             max_packet = max(max_packet, i - window_head)
             queue_occupancy = mean(raw[window_head:i + 1])
             label = mean(preds_list[window_head:i + 1])
             sliding_window_accuracy[i] = (int(label >= SMOOTHING_THRESHOLD)
-                                   if queue_occupancy > fair
-                                   else int(label < SMOOTHING_THRESHOLD))
-        print(f"Maximum number of packets in sliding window {max_packet}")
+                                          if queue_occupancy > fair[i]
+                                          else int(label < SMOOTHING_THRESHOLD))
+
+        assert len(sliding_window_accuracy) == num_pkts
+        assert len(preds) == num_pkts
+        assert len(arr_times) == num_pkts
+        assert len(rtt_estimate_us) == num_pkts
+
+        return sum(sliding_window_accuracy) / len(sliding_window_accuracy)
+
+    def __plot_queue_occ(self, labels, raw, fair, flp, x_lim=None):
+        """
+        Plots the queue occupancy over time.
+
+        labels: Ground truth labels.
+        raw: Raw values of the queue occupancy
+        fair: Fair share of the flow
+        flp: File name of the saved graph.
+        x_lim: Graph limit on the x axis."""
+
+        print("Plotting queue occupancy...")
+        raw = raw.tolist()
+        fair = fair.tolist()
+
+        labels = labels.tolist()
 
         if self.graph:
             # Bucketize and compute bucket accuracies.
-            num_samples = preds.size()[0]
+            num_samples = labels.size()[0]
             num_buckets = min(20 * 4, num_samples)
             num_per_bucket = math.floor(num_samples / num_buckets)
 
             assert num_per_bucket > 0, \
-            ("There must be at least one sample per bucket, but there are "
-             f"{num_samples} samples and only {num_buckets} buckets!")
+                ("There must be at least one sample per bucket, but there are "
+                 f"{num_samples} samples and only {num_buckets} buckets!")
 
             buckets = [
                 (mean(queue_occupancy_),
@@ -933,16 +947,10 @@ class SvmSklearnWrapper(SvmWrapper):
 
             queue_occupancy_list = [
                 queue_occupancy for queue_occupancy, _ in buckets]
-            fair_list = [fair] * len(buckets)
             x_axis = list(range(len(buckets)))
             pyplot.plot(x_axis, queue_occupancy_list, "b-")
-            pyplot.plot(x_axis, fair_list, "g--")
-            label_accuracy, _ = zip(
-                *(((label, int(label >= SMOOTHING_THRESHOLD))
-                   if queue_occupancy > fair else
-                   (1.0 - label, int(label < SMOOTHING_THRESHOLD)))
-                  for queue_occupancy, label in buckets))
-            pyplot.plot(x_axis, label_accuracy, "r^")
+            pyplot.plot(x_axis, fair, "g--")
+
             if x_lim is not None:
                 pyplot.xlim(x_lim)
             pyplot.xlabel("Time")
@@ -951,13 +959,10 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.savefig(flp)
             pyplot.close()
 
-        return sum(sliding_window_accuracy) / len(sliding_window_accuracy)
-
     def test(self, fets, dat_in, dat_out_classes, dat_out_raw, dat_out_oracle,
              num_flws, arr_times=None,
              graph_prms=copy.copy({
-                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None}),
-             sim=None):
+                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
@@ -1009,7 +1014,6 @@ class SvmSklearnWrapper(SvmWrapper):
                         self.net.estimator_.coef_[0]),
                     key=lambda p: p[0])
                 print(f"Number of features selected: {len(best_fets)}")
-                qualifier = "All"
             else:
                 # First, sort the features by the absolute value of the
                 # importance and pick the top 20. Then, sort the features
@@ -1019,9 +1023,8 @@ class SvmSklearnWrapper(SvmWrapper):
                         zip(fets, self.net.coef_[0]),
                         key=lambda p: abs(p[1]))[-20:],
                     key=lambda p: p[0])
-                qualifier = "Best"
             print(
-                f"----------\n{qualifier} features ({len(best_fets)}):\n" +
+                f"----------\nBest features ({len(best_fets)}):\n" +
                 "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
                 "\n----------")
             if self.graph:
@@ -1072,15 +1075,11 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot queue occupancy.
-            rtt_ns = (2 * sim.edge_delays[0] + sim.btl_delay_us) * 2
-            sliding_window_accuracy = self.__plot_queue_occ(
-                torch.tensor(self.net.predict(dat_in)), dat_out_classes,
-                dat_out_raw, fair, arr_times, rtt_ns,
-                path.join(
-                    out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
-                x_lim)
-        else:
-            sliding_window_accuracy = float("NaN")
+
+            self.__plot_queue_occ(dat_out_classes, dat_out_raw, fair,
+                                  path.join(
+                                      out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
+                                  x_lim)
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model oracle.
@@ -1092,16 +1091,25 @@ class SvmSklearnWrapper(SvmWrapper):
                 "flp": path.join(
                     out_dir, "accuracy_vs_unfairness_mathis.pdf"),
                 "x_lim": x_lim})
+
+        predictions = torch.tensor(self.net.predict(dat_in))
+
         # Analyze accuracy vs unfairness for all flows and all degrees
         # of unfairness, for the model itself.
         print(f"Evaluating {self.name} model:")
-        return self.__evaluate(
-            torch.tensor(self.net.predict(dat_in)), dat_out_classes,
+        model_acc = self.__evaluate(
+            predictions, dat_out_classes,
             dat_out_raw, fair, sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
-                "x_lim": x_lim}), sliding_window_accuracy
+                "x_lim": x_lim})
+
+        # Analyze accuracy of a sliding window method
+        sliding_window_accuracy = self.__evaluate_sliding_window(
+            predictions, dat_out_raw, fair, arr_times, dat_extra["rtt estimate"])
+
+        return model_acc, sliding_window_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
@@ -1242,7 +1250,7 @@ class LstmWrapper(PytorchModelWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.unfair_flws + sim.other_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
