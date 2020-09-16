@@ -925,11 +925,9 @@ class SvmSklearnWrapper(SvmWrapper):
         raw = raw.tolist()
         fair = fair.tolist()
 
-        labels = labels.tolist()
-
         if self.graph:
             # Bucketize and compute bucket accuracies.
-            num_samples = labels.size()[0]
+            num_samples = len(raw)
             num_buckets = min(20 * 4, num_samples)
             num_per_bucket = math.floor(num_samples / num_buckets)
 
@@ -939,17 +937,16 @@ class SvmSklearnWrapper(SvmWrapper):
 
             buckets = [
                 (mean(queue_occupancy_),
-                 mean(labels_))
-                for queue_occupancy_, labels_ in [
+                 mean(fair_))
+                for queue_occupancy_, fair_ in [
                     (raw[i:i + num_per_bucket],
-                     labels[i:i + num_per_bucket])
+                     fair[i:i + num_per_bucket])
                     for i in range(0, num_samples, num_per_bucket)]]
 
-            queue_occupancy_list = [
-                queue_occupancy for queue_occupancy, _ in buckets]
+            queue_occupancy_list, fair_list = zip(*buckets)
             x_axis = list(range(len(buckets)))
             pyplot.plot(x_axis, queue_occupancy_list, "b-")
-            pyplot.plot(x_axis, fair, "g--")
+            pyplot.plot(x_axis, fair_list, "g--")
 
             if x_lim is not None:
                 pyplot.xlim(x_lim)
