@@ -223,7 +223,7 @@ def main():
     input_file = args.input_file
     sim_dir = args.simulations
 
-    assert sim_dir is None != input_file is None, \
+    assert (sim_dir is None) != (input_file is None), \
         "Test takes in either a directory of simulations or " \
         "an input file containing all the simulations"
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
@@ -265,16 +265,15 @@ def main():
     (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
      bucketized_rtt_dict, bucketized_queue_dict) = init_global(manager)
 
-    else:
-        total = len(sim_flps)
-        func_input = [
-            (idx, total, sim_flp,
-             path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
-             args.warmup_percent, args.scale_params, standardize, all_accuracy,
-             all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
-             bucketized_bw_dict, bucketized_rtt_dict,
-             bucketized_queue_dict)
-            for idx, sim_flp in enumerate(sim_flps)]
+    total = len(sim_flps)
+    func_input = [
+        (idx, total, sim_flp,
+         path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+         args.warmup_percent, args.scale_params, standardize, all_accuracy,
+         all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
+         bucketized_bw_dict, bucketized_rtt_dict,
+         bucketized_queue_dict)
+        for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()
