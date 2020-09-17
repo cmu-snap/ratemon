@@ -110,8 +110,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             idx, total, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _, arr_times) = (
-        utils.load_tmp_file(temp_path))
+    dat_in, dat_out, dat_extra, _ = utils.load_tmp_file(temp_path)
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
@@ -127,12 +126,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             fets=dat_in.dtype.names,
             dat_in=utils.clean(dat_in),
             dat_out=utils.clean(dat_out),
-            dat_out_raw=utils.clean(dat_out_raw),
-            dat_out_oracle=utils.clean(dat_out_oracle),
-            num_flws=np.array(
-                [sim.unfair_flws + sim.fair_flws] * dat_in.shape[0],
-                dtype=float)).raw(),
-        arr_times=arr_times,
+            dat_extra=dat_extra).raw(),
         graph_prms={
             "out_dir": out_dir,
             "sort_by_unfairness": False,
