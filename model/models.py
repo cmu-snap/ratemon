@@ -9,7 +9,6 @@ import random
 
 from matplotlib import pyplot
 import numpy as np
-from numpy.lib import recfunctions
 import sklearn
 from sklearn import feature_selection
 from sklearn import linear_model
@@ -862,13 +861,14 @@ class SvmSklearnWrapper(SvmWrapper):
                                   rtt_estimates_us):
         """
         Returns the sliding window accuracy of predictions based
-        on the rtt estimate and the window size.
+        on the rtt estimate and the window size. all arguments must be Torch
+        tensors.
 
         preds: Prediction produced by the model
         raw: Raw values of the queue occupancy
         fair: Fair share of the flow
-        rtt_estimate_us: Rtt estimates computed on the receiver side
         arr_times: The arrival times of each sample.
+        rtt_estimates_us: Rtt estimates computed on the receiver side
         """
         utils.assert_tensor(
             preds=preds, raw=raw, fair=fair, arr_times=arr_times,
@@ -901,7 +901,8 @@ class SvmSklearnWrapper(SvmWrapper):
 
     def __plot_queue_occ(self, labels, raw, fair, flp, x_lim=None):
         """
-        Plots the queue occupancy over time.
+        Plots the queue occupancy over time. labels, raw, and fair must be
+        Torch tensors.
 
         labels: Ground truth labels.
         raw: Raw values of the queue occupancy
@@ -945,7 +946,8 @@ class SvmSklearnWrapper(SvmWrapper):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
-        (if self.graph == True) visualizes various metrics.
+        (if self.graph == True) visualizes various metrics. dat_in and
+        dat_out_classes must be Torch tensors. dat_extra must be a Numpy array.
 
         fets: List of feature names.
         dat_in: Test data.
@@ -953,6 +955,7 @@ class SvmSklearnWrapper(SvmWrapper):
         dat_extra: Extra data for each sample.
         graph_prms: Graphing parameters. Used only if self.graph == True.
         """
+        utils.assert_tensor(dat_in=dat_in, dat_out_classes=dat_out_classes)
         sort_by_unfairness = graph_prms["sort_by_unfairness"]
         dur_s = graph_prms["dur_s"]
         assert sort_by_unfairness or dur_s is not None, \
@@ -1054,7 +1057,6 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot queue occupancy.
-
             self.__plot_queue_occ(
                 dat_out_classes, torch.tensor(dat_extra["raw"]),
                 torch.tensor(fair),
