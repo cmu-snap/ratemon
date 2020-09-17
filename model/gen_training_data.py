@@ -14,19 +14,21 @@ import sim
 
 
 # Bandwidth (Mbps).
-BW_MIN_Mbps = 4
+BW_MIN_Mbps = 8
 BW_MAX_Mbps = 48
-BW_DELTA_Mbps = 4
+BW_DELTA_Mbps = 8
 BWS_Mbps = [1] + list(range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps))
 # Link delay (us).
 DELAY_MIN_us = 2000
-DELAY_MAX_us = 20000
+DELAY_MAX_us = 10000
 DELAY_DELTA_us = 2000
 DELAYS_us = [1000] + list(range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us))
 # Router queue size (multiples of the BDP).
-QUEUE_MULTS = [1, 2, 3] + list(range(4, 33, 4))  # 1 to 32 BDP
+QUEUE_MULTS = [1, 2, 3, 4] + list(range(8, 33, 8))  # 1x to 32x BDP.
+# The number of "unfair" flows.
+UNFAIR_FLOWS = range(3, 6)  # 1 t0 5 "unfair" flows.
 # Number of "fair" flows
-FAIR_FLOWS = range(1, 11)  # 1 to 10 "fair" flows
+FAIR_FLOWS = range(3, 6)  # 1 to 10 "fair" flows.
 # Packet size (bytes)
 PACKET_SIZE_B = 1380
 # Simulation duration (s).
@@ -39,8 +41,6 @@ ENABLE_MITIGATION = False
 PCAP = True
 # Whether to capture csv files.
 CSV = True
-# The number of "unfair" flows.
-UNFAIR_FLOWS = 1
 # The protool to use for the "unfair" flows.
 UNFAIR_PROTO = "ns3::TcpCubic"
 # The protocol to use for the "fair" flows.
@@ -85,10 +85,11 @@ def main():
     logging.basicConfig(level=numeric_level)
     log = logging.getLogger(LOGGER)
 
-    log.info(f"Bandwidths (Mbps): %s", list(BWS_Mbps))
-    log.info(f"Link delays (us): %s", list(DELAYS_us))
-    log.info(f"Queue size (x BDP): %s", list(QUEUE_MULTS))
-    log.info(f"Fair flows: %s", list(FAIR_FLOWS))
+    log.info("Bandwidths (Mbps): %s", list(BWS_Mbps))
+    log.info("Link delays (us): %s", list(DELAYS_us))
+    log.info("Queue size (x BDP): %s", list(QUEUE_MULTS))
+    log.info("Unfair flows: %s", list(UNFAIR_FLOWS))
+    log.info("Fair flows: %s", list(FAIR_FLOWS))
 
     # Assemble the configurations.
     cnfs = [{"bottleneck_bandwidth_Mbps": bw_Mbps,
@@ -98,7 +99,7 @@ def main():
              "bottleneck_queue_p": int(round(
                  que_mult *
                  max(1, bdp_bps(bw_Mbps, dly_us * 6) / float(PACKET_SIZE_B)))),
-             "unfair_flows": UNFAIR_FLOWS,
+             "unfair_flows": unfair_flws,
              "unfair_proto": UNFAIR_PROTO,
              "fair_flows": fair_flws,
              "fair_proto": FAIR_PROTO,
@@ -109,8 +110,10 @@ def main():
              "duration_s": DUR_s,
              "pcap": "true" if PCAP else "false",
              "out_dir": sim_dir}
-            for bw_Mbps, dly_us, que_mult, fair_flws in itertools.product(
-                BWS_Mbps, DELAYS_us, QUEUE_MULTS, FAIR_FLOWS)]
+            for (bw_Mbps, dly_us, que_mult, unfair_flws,
+                 fair_flws) in itertools.product(
+                     BWS_Mbps, DELAYS_us, QUEUE_MULTS, UNFAIR_FLOWS,
+                     FAIR_FLOWS)]
     sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
             dry_run=DRY_RUN, sync=defaults.SYNC)
 
