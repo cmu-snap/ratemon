@@ -144,7 +144,6 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.
     assert net.in_spc, f"{net.name}: Empty in spec."
-    assert net.out_spc, f"{net.name}: Empty out spec."
     num_out_fets = len(net.out_spc)
     # This is not a strict requirement from a modeling point of view,
     # but is assumed to make data processing easier.
