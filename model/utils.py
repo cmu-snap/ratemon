@@ -29,10 +29,10 @@ class Dataset(torch.utils.data.Dataset):
         """
         fets: List of input feature names, corresponding to the columns of
             dat_in.
-        dat_in: Numpy array of input data, with two dimensions.
+        dat_in: Numpy array of input data.
         dat_out: Numpy array of output data. Assumed to have a single practical
             dimension only (e.g., dat_out should be of shape (X,), or (X, 1)).
-        dat_extra: Numpy array of extra data. Same shape as dat_out.
+        dat_extra: Numpy array of extra data.
         """
         super(Dataset).__init__()
         shp_in = dat_in.shape
@@ -80,7 +80,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def raw(self):
         """ Returns the raw data underlying this dataset. """
-        return (self.fets, self.dat_in, self.dat_out, self.dat_extra)
+        return self.fets, self.dat_in, self.dat_out, self.dat_extra
 
 
 class BalancedSampler:
@@ -459,7 +459,7 @@ def safe_update_ewma(prev_ewma, new_val, alpha):
 def filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc):
     """
     Filters parsed data based on a desired number of simulations and percent of
-    results from each simulation. Each dat_* is a Python list where each entry
+    results from each simulation. Each dat_* is a Python list, where each entry
     is a Numpy array containing the results of one simulation.
     """
     assert (

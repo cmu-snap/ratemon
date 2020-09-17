@@ -613,7 +613,6 @@ def main():
         # script see the same random order.
         utils.set_rand_seed()
         random.shuffle(pcaps)
-    pcaps = pcaps[5000:]
 
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
