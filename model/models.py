@@ -899,23 +899,81 @@ class SvmSklearnWrapper(SvmWrapper):
                 int(label < SMOOTHING_THRESHOLD))
         return sum(sliding_window_accuracy) / len(sliding_window_accuracy)
 
-    def __plot_queue_occ(self, labels, raw, fair, flp, x_lim=None):
+    def __plot_throughput(self, labels, preds, fair, flp, btk_throughput,
+                          throughput_ewma, x_lim=None):
+        """
+        Plots the fair flow's throughput over time.
+
+        labels: Ground truth labels.
+        preds: Prediction produced by the model
+        fair: Fair share of the flow
+        flp: File name of the saved graph.
+        btk_throughput: Throughput of the bottleneck link
+        throughput_ewma: Throughput ewma computed in parse_dumbbell
+        x_lim: Graph limit on the x axis."""
+
+        # fair = fair.tolist()
+
+        if self.graph:
+            # Bucketize and compute bucket accuracies.
+            num_samples = len(labels)
+            num_buckets = min(20 * 4, num_samples)
+            num_per_bucket = math.floor(num_samples / num_buckets)
+
+            assert num_per_bucket > 0, \
+                ("There must be at least one sample per bucket, but there are "
+                 f"{num_samples} samples and only {num_buckets} buckets!")
+
+            buckets = [
+                (torch.mean(throughput_),
+                 torch.mean(fair_) * btk_throughput,
+                 self.check_output(preds_, labels_) / num_per_bucket,
+                 )
+                for throughput_, fair_, preds_, labels_, in [
+                    (throughput_ewma[i:i + num_per_bucket],
+                     fair[i:i + num_per_bucket],
+                     preds[i:i + num_per_bucket],
+                     labels[i:i + num_per_bucket]
+                     )
+                    for i in range(0, num_samples, num_per_bucket)]]
+
+            throughput_list, fair_list, accurcy_list = zip(*buckets)
+
+            x_axis = list(range(len(buckets)))
+
+            fig, ax1 = pyplot.subplots()
+            ax1.set_xlabel("Time")
+            ax1.set_ylabel("Throughput")
+            ax1.plot(x_axis, throughput_list, "b-")
+            ax1.plot(x_axis, fair_list, "g--")
+
+            ax2 = ax1.twinx()
+
+            ax2.set_ylabel("Accuracy")
+            ax2.plot(x_axis, accurcy_list, "r-")
+
+            if x_lim is not None:
+                pyplot.xlim(x_lim)
+            fig.tight_layout()
+            pyplot.savefig(flp)
+            pyplot.close()
+
+    def __plot_queue_occ(self, raw, fair, flp, x_lim=None):
         """
         Plots the queue occupancy over time. labels, raw, and fair must be
         Torch tensors.
 
-        labels: Ground truth labels.
         raw: Raw values of the queue occupancy
         fair: Fair share of the flow
         flp: File name of the saved graph.
-        x_lim: Graph limit on the x axis.
-        """
-        print("Plotting queue occupancy...")
-        utils.assert_tensor(labels=labels, raw=raw, fair=fair)
+        x_lim: Graph limit on the x axis."""
+
+        # raw = raw.tolist()
+        # fair = fair.tolist()
 
         if self.graph:
             # Bucketize and compute bucket accuracies.
-            num_samples = len(raw)
+            num_samples = len(raw.tolist())
             num_buckets = min(20 * 4, num_samples)
             num_per_bucket = math.floor(num_samples / num_buckets)
 
@@ -1058,11 +1116,20 @@ class SvmSklearnWrapper(SvmWrapper):
 
             # Plot queue occupancy.
             self.__plot_queue_occ(
-                dat_out_classes, torch.tensor(dat_extra["raw"]),
+                torch.tensor(dat_extra["raw"]),
                 torch.tensor(fair),
                 path.join(
                     out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
                 x_lim)
+
+            # Plot throughput
+            self.__plot_throughput(dat_out_classes,
+                                   torch.tensor(self.net.predict(dat_in)),
+                                   torch.tensor(fair), path.join(
+                                       out_dir, f"throughput_{self.name}.pdf"),
+                                   dat_extra["btk_throughput"],
+                                   torch.tensor(dat_extra[defaults.THR_ESTIMATE_FET].copy()),
+                                   x_lim=None)
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model.
