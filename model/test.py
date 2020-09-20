@@ -99,7 +99,7 @@ def init_global(manager):
 def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
                 standardize, all_accuracy, all_bucketized_accuracy, bw_dict,
                 rtt_dict, queue_dict, bucketized_bw_dict, bucketized_rtt_dict,
-                bucketized_queue_dict):
+                bucketized_queue_dict, lock):
     """ Evaluate a single simulation. """
     if not path.exists(out_dir):
         os.makedirs(out_dir)
@@ -133,6 +133,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             "dur_s": sim.dur_s
         })
 
+    lock.acquire()
     all_accuracy.append(accuracy)
     mean_accuracy = mean(all_accuracy)
 
@@ -191,6 +192,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
                 f"----Queue size less than {queue_bdp} BDP accuracy "
                 f"{queue_accuracy}\n"
                 f"    bucketized accuracy {bucketized_queue_accuracy}")
+    lock.release()
 
 
 def main():
@@ -259,6 +261,8 @@ def main():
     (bw_dict, rtt_dict, queue_dict, bucketized_bw_dict,
      bucketized_rtt_dict, bucketized_queue_dict) = init_global(manager)
 
+    lock = manager.Lock()
+
     total = len(sim_flps)
     func_input = [
         (idx, total, sim_flp,
@@ -266,7 +270,7 @@ def main():
          args.warmup_percent, args.scale_params, standardize, all_accuracy,
          all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
          bucketized_bw_dict, bucketized_rtt_dict,
-         bucketized_queue_dict)
+         bucketized_queue_dict, lock)
         for idx, sim_flp in enumerate(sim_flps)]
 
     print(f"Num files: {len(func_input)}")
