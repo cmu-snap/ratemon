@@ -163,6 +163,8 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     dat_extra["raw"] = dat_out
     dat_extra["num_flws"].fill(sim.unfair_flws + sim.fair_flws)
     dat_extra["btk_throughput"].fill(sim.bw_Mbps)
+    for typ in defaults.EXTRA_FETS:
+        dat_extra[typ] = dat[typ]
     dat_extra = recfunctions.repack_fields(dat_extra)
 
     # Convert output features to class labels.
