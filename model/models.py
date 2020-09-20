@@ -914,7 +914,8 @@ class SvmSklearnWrapper(SvmWrapper):
         throughput_ewma: Throughput ewma computed in parse_dumbbell
         x_lim: Graph limit on the x axis."""
 
-        # fair = fair.tolist()
+        fair = fair * btk_throughput
+        throughput_ewma = throughput_ewma * 1380 * 8 / 1000000
 
         if self.graph:
             # Bucketize and compute bucket accuracies.
@@ -928,7 +929,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
             buckets = [
                 (torch.mean(throughput_),
-                 torch.mean(fair_) * btk_throughput,
+                 torch.mean(fair_),
                  self.check_output(preds_, labels_) / num_per_bucket,
                  )
                 for throughput_, fair_, preds_, labels_, in [
@@ -939,7 +940,7 @@ class SvmSklearnWrapper(SvmWrapper):
                      )
                     for i in range(0, num_samples, num_per_bucket)]]
 
-            throughput_list, fair_list, accurcy_list = zip(*buckets)
+            throughput_list, fair_list, accuracy_list = zip(*buckets)
 
             x_axis = list(range(len(buckets)))
 
@@ -952,7 +953,7 @@ class SvmSklearnWrapper(SvmWrapper):
             ax2 = ax1.twinx()
 
             ax2.set_ylabel("Accuracy")
-            ax2.plot(x_axis, accurcy_list, "r-")
+            ax2.plot(x_axis, accuracy_list, "r-")
 
             if x_lim is not None:
                 pyplot.xlim(x_lim)
@@ -970,9 +971,6 @@ class SvmSklearnWrapper(SvmWrapper):
         fair: Fair share of the flow
         flp: File name of the saved graph.
         x_lim: Graph limit on the x axis."""
-
-        # raw = raw.tolist()
-        # fair = fair.tolist()
 
         if self.graph:
             # Bucketize and compute bucket accuracies.
