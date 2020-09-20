@@ -119,6 +119,50 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
+def extract_features(dat, net, num_flws=None):
+    # Split each data matrix into two separate matrices: one with the input
+    # features only and one with the output features only. The names of the
+    # columns correspond to the feature names in in_spc and out_spc.
+    assert net.in_spc, f"{net.name}: Empty in spec."
+    num_out_fets = len(net.out_spc)
+    # This is not a strict requirement from a modeling point of view,
+    # but is assumed to make data processing easier.
+    assert num_out_fets == 1, \
+        (f"{net.name}: Out spec must contain a single feature, but actually "
+         f"contains: {net.out_spc}")
+    dat_in = recfunctions.repack_fields(dat[net.in_spc])
+    dat_out = recfunctions.repack_fields(dat[net.out_spc])
+    # Create a structured array to hold extra data that will not be
+    # used as features but may be needed by the training/testing
+    # process.
+    raw_dtype = [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]
+    dtype = ([("raw", raw_dtype), ("num_flws", "int32")] +
+             [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
+    dat_extra = np.empty(shape=dat.shape, dtype=dtype)
+    dat_extra["raw"] = dat_out
+    if "num_flws" in dat.dtype.names:
+        dat_extra["num_flws"] = dat["num_flws"]
+    else:
+        dat_extra["num_flws"].fill(num_flws)
+    # dat_extra = recfunctions.repack_fields(dat_extra)
+    # Convert output features to class labels.
+    dat_out = net.convert_to_class(sim, dat_out)
+    return dat_in, dat_out, dat_extra
+
+
+def process_bulk(args):
+    data_dir = args["data_dir"]
+    trn, val, tst = [
+        np.memap(flp, dtype, mode="r", shape=(num_pkts,))
+        for flp, (num_pkts, dtype) in
+        ((utils.get_split_data_flp(data_dir, name),
+          utils.load_split_metadata(data_dir, split))
+         for split in ("train", "val", "test"))]
+    # Select a fraction of the training data.
+    trn = trn[:math.ceil(num_pkts * args["train_prc"] / 100)]
+    return extract_features()
+
+
 def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
                 sequential=False):
     """
@@ -140,31 +184,8 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
 
     # Drop the first few packets so that we consider steady-state behavior only.
     dat = dat[math.floor(dat.shape[0] * warmup_prc / 100):]
-    # Split each data matrix into two separate matrices: one with the input
-    # features only and one with the output features only. The names of the
-    # columns correspond to the feature names in in_spc and out_spc.
-    assert net.in_spc, f"{net.name}: Empty in spec."
-    num_out_fets = len(net.out_spc)
-    # This is not a strict requirement from a modeling point of view,
-    # but is assumed to make data processing easier.
-    assert num_out_fets == 1, \
-        (f"{net.name}: Out spec must contain a single feature, but actually "
-         f"contains: {net.out_spc}")
-    dat_in = recfunctions.repack_fields(dat[net.in_spc])
-    dat_out = recfunctions.repack_fields(dat[net.out_spc])
-    # Create a structured array to hold extra data that will not be
-    # used as features but may be needed by the training/testing
-    # process.
-    raw_dtype = [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]
-    dtype = ([("raw", raw_dtype), ("num_flws", "int32")] +
-             [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
-    dat_extra = np.empty(shape=dat.shape, dtype=dtype)
-    dat_extra["raw"] = dat_out
-    dat_extra["num_flws"].fill(sim.unfair_flws + sim.fair_flws)
-    dat_extra = recfunctions.repack_fields(dat_extra)
-
-    # Convert output features to class labels.
-    dat_out = net.convert_to_class(sim, dat_out)
+    dat_in, dat_out, dat_extra = extract_features(
+        dat, net, num_flws=(sim.unfair_flws + sim.fair_flws))
 
     # If the results contains NaNs or Infs, then discard this
     # simulation.
@@ -209,7 +230,7 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     return dat_flp, sim
 
 
-def make_datasets(net, args, dat=None):
+def process_sims(net, args, dat=None):
     """
     Parses the simulation files in data_dir and transforms them (e.g., by
     scaling) into the correct format for the network.
@@ -218,161 +239,190 @@ def make_datasets(net, args, dat=None):
     simulations only. If shuffle is True, then the simulations will be parsed in
     sorted order. Use num_sims and shuffle=True together to simplify debugging.
     """
-    if dat is None:
-        # Find simulations.
-        sims = args["sims"]
-        if not sims:
-            dat_dir = args["data_dir"]
-            sims = [
-                path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
-        if SHUFFLE:
-            # Set the random seed so that multiple parallel instances of
-            # this script see the same random order.
-            utils.set_rand_seed()
-            random.shuffle(sims)
-        num_sims = args["num_sims"]
-        if num_sims is not None:
-            num_sims_actual = len(sims)
-            assert num_sims_actual >= num_sims, \
-                (f"Insufficient simulations. Requested {num_sims}, but only "
-                 f"{num_sims_actual} available.")
-            sims = sims[:num_sims]
-        tot_sims = len(sims)
-        print(f"Found {tot_sims} simulations.")
-
-        # Prepare temporary output directory. The output of parsing each
-        # simulation it written to disk instead of being transfered
-        # between processes because sometimes the data is too large for
-        # Python to send between processes.
-        tmp_dir = args["tmp_dir"]
-        if tmp_dir is None:
-            tmp_dir = args["out_dir"]
-        if not path.isdir(tmp_dir):
-            print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
-            os.makedirs(tmp_dir)
-
-        # Parse simulations.
-        sims_args = [
-            (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
-             args["keep_percent"])
-            for idx, sim in enumerate(sims)]
-        if defaults.SYNC or args["sync"]:
-            dat_all = [process_sim(*sim_args) for sim_args in sims_args]
-        else:
-            with multiprocessing.Pool() as pol:
-                # Each element of dat_all corresponds to a single simulation.
-                dat_all = pol.starmap(process_sim, sims_args)
-        # Throw away results from simulations that could not be parsed.
-        dat_all = [dat for dat in dat_all if dat is not None]
-        print(f"Discarded {tot_sims - len(dat_all)} simulations!")
-        assert dat_all, "No valid simulations found!"
-        dat_all, sims = zip(*dat_all)
-
-        dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
+    out_dir = args["out_dir"]
+    dat_flp = path.join(out_dir, "data.npz")
+    scl_prms_flp = path.join(out_dir, "scale_params.json")
+    # Check for the presence of both the data and the scaling
+    # parameters because the resulting model is useless without the
+    # proper scaling parameters.
+    if (not args["regen_data"] and path.exists(dat_flp) and
+            path.exists(scl_prms_flp)):
+        print("Found existing data!")
+        dat_in, dat_out, dat_extra = utils.load(dat_flp)
+        dat_in_shape = dat_in.shape
+        dat_out_shape = dat_out.shape
+        dat_extra_shape = dat_extra.shape
+        assert dat_out_shape[0] == dat_in_shape[0], \
+            ("Data has invalid shapes (first dimension should agree)! "
+             f"in: {dat_in_shape}, out: {dat_out_shape}")
+        assert dat_extra_shape[0] == dat_in_shape[0], \
+            ("Data has invalid shapes (first dimension should agree)! "
+             f"in: {dat_in_shape}, extra: {dat_extra_shape}")
     else:
-        dat_all, sims = dat
+        if dat is None:
+            print("Regenerating data...")
+            # Find simulations.
+            sims = args["sims"]
+            if not sims:
+                dat_dir = args["data_dir"]
+                sims = [
+                    path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+            if SHUFFLE:
+                # Set the random seed so that multiple parallel instances of
+                # this script see the same random order.
+                utils.set_rand_seed()
+                random.shuffle(sims)
+            num_sims = args["num_sims"]
+            if num_sims is not None:
+                num_sims_actual = len(sims)
+                assert num_sims_actual >= num_sims, \
+                    (f"Insufficient simulations. Requested {num_sims}, but only "
+                    f"{num_sims_actual} available.")
+                sims = sims[:num_sims]
+            tot_sims = len(sims)
+            print(f"Found {tot_sims} simulations.")
 
-    # Validate data.
-    dim_in = None
-    dtype_in = None
-    dim_out = None
-    dtype_out = None
-    dim_extra = None
-    dtype_extra = None
-    scl_grps = None
-    for dat_in, dat_out, dat_extra, scl_grps_cur in dat_all:
-        dim_in_cur = len(dat_in.dtype.names)
-        dim_out_cur = len(dat_out.dtype.names)
-        dim_extra_cur = len(dat_extra.dtype.names)
-        dtype_in_cur = dat_in.dtype
-        dtype_out_cur = dat_out.dtype
-        dtype_extra_cur = dat_extra.dtype
-        if dim_in is None:
-            dim_in = dim_in_cur
-        if dim_out is None:
-            dim_out = dim_out_cur
-        if dim_extra is None:
-            dim_extra = dim_extra_cur
-        if dtype_in is None:
-            dtype_in = dtype_in_cur
-        if dtype_out is None:
-            dtype_out = dtype_out_cur
-        if dtype_extra is None:
-            dtype_extra = dtype_extra_cur
-        if scl_grps is None:
-            scl_grps = scl_grps_cur
-        assert dim_in_cur == dim_in, \
-            f"Invalid input feature dim: {dim_in_cur} != {dim_in}"
-        assert dim_out_cur == dim_out, \
-            f"Invalid output feature dim: {dim_out_cur} != {dim_out}"
-        assert dim_extra_cur == dim_extra, \
-            f"Invalid extra data dim: {dim_extra_cur} != {dim_extra}"
-        assert dtype_in_cur == dtype_in, \
-            f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
-        assert dtype_out_cur == dtype_out, \
-            f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
-        assert dtype_extra_cur == dtype_extra, \
-            f"Invalid extra data dtype: {dtype_extra_cur} != {dtype_extra}"
-        assert (scl_grps_cur == scl_grps).all(), \
-            f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
-    assert dim_in is not None, "Unable to compute input feature dim!"
-    assert dim_out is not None, "Unable to compute output feature dim!"
-    assert dim_extra is not None, "Unable to compute extra data dim!"
-    assert dtype_in is not None, "Unable to compute input dtype!"
-    assert dtype_out is not None, "Unable to compute output dtype!"
-    assert dtype_extra is not None, "Unable to compute extra data dtype!"
-    assert scl_grps is not None, "Unable to compte scaling groups!"
+            # Prepare temporary output directory. The output of parsing each
+            # simulation it written to disk instead of being transfered
+            # between processes because sometimes the data is too large for
+            # Python to send between processes.
+            tmp_dir = args["tmp_dir"]
+            if tmp_dir is None:
+                tmp_dir = args["out_dir"]
+            if not path.isdir(tmp_dir):
+                print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
+                os.makedirs(tmp_dir)
 
-    # Build combined feature lists.
-    dat_in_all, dat_out_all, dat_extra_all, _ = zip(*dat_all)
-    # Stack the arrays.
-    dat_in_all = np.concatenate(dat_in_all, axis=0)
-    dat_out_all = np.concatenate(dat_out_all, axis=0)
-    dat_extra_all = np.concatenate(dat_extra_all, axis=0)
+            # Parse simulations.
+            sims_args = [
+                (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
+                 args["keep_percent"])
+                for idx, sim in enumerate(sims)]
+            if defaults.SYNC or args["sync"]:
+                dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+            else:
+                with multiprocessing.Pool() as pol:
+                    # Each element of dat_all corresponds to a single simulation.
+                    dat_all = pol.starmap(process_sim, sims_args)
+            # Throw away results from simulations that could not be parsed.
+            dat_all = [dat for dat in dat_all if dat is not None]
+            print(f"Discarded {tot_sims - len(dat_all)} simulations!")
+            assert dat_all, "No valid simulations found!"
+            dat_all, sims = zip(*dat_all)
+            dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
+        else:
+            dat_all, sims = dat
 
-    # Convert all instances of -1 (feature value unknown) to the mean
-    # for that feature.
-    bad_fets = []
-    for fet in dat_in_all.dtype.names:
-        fet_values = dat_in_all[fet]
-        if (fet_values == -1).all():
-            bad_fets.append(fet)
-            continue
-        dat_in_all[fet] = np.where(
-            fet_values == -1, np.mean(fet_values), fet_values)
-        assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
-    assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
+        # Validate data.
+        dim_in = None
+        dtype_in = None
+        dim_out = None
+        dtype_out = None
+        dim_extra = None
+        dtype_extra = None
+        scl_grps = None
+        for dat_in, dat_out, dat_extra, scl_grps_cur in dat_all:
+            dim_in_cur = len(dat_in.dtype.names)
+            dim_out_cur = len(dat_out.dtype.names)
+            dim_extra_cur = len(dat_extra.dtype.names)
+            dtype_in_cur = dat_in.dtype
+            dtype_out_cur = dat_out.dtype
+            dtype_extra_cur = dat_extra.dtype
+            if dim_in is None:
+                dim_in = dim_in_cur
+            if dim_out is None:
+                dim_out = dim_out_cur
+            if dim_extra is None:
+                dim_extra = dim_extra_cur
+            if dtype_in is None:
+                dtype_in = dtype_in_cur
+            if dtype_out is None:
+                dtype_out = dtype_out_cur
+            if dtype_extra is None:
+                dtype_extra = dtype_extra_cur
+            if scl_grps is None:
+                scl_grps = scl_grps_cur
+            assert dim_in_cur == dim_in, \
+                f"Invalid input feature dim: {dim_in_cur} != {dim_in}"
+            assert dim_out_cur == dim_out, \
+                f"Invalid output feature dim: {dim_out_cur} != {dim_out}"
+            assert dim_extra_cur == dim_extra, \
+                f"Invalid extra data dim: {dim_extra_cur} != {dim_extra}"
+            assert dtype_in_cur == dtype_in, \
+                f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
+            assert dtype_out_cur == dtype_out, \
+                f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
+            assert dtype_extra_cur == dtype_extra, \
+                f"Invalid extra data dtype: {dtype_extra_cur} != {dtype_extra}"
+            assert (scl_grps_cur == scl_grps).all(), \
+                f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
+        assert dim_in is not None, "Unable to compute input feature dim!"
+        assert dim_out is not None, "Unable to compute output feature dim!"
+        assert dim_extra is not None, "Unable to compute extra data dim!"
+        assert dtype_in is not None, "Unable to compute input dtype!"
+        assert dtype_out is not None, "Unable to compute output dtype!"
+        assert dtype_extra is not None, "Unable to compute extra data dtype!"
+        assert scl_grps is not None, "Unable to compte scaling groups!"
 
-    # Scale input features. Do this here instead of in process_sim()
-    # because all of the features must be scaled using the same
-    # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, args["standardize"])
+        # Build combined feature lists.
+        dat_in, dat_out, dat_extra, _ = zip(*dat)
+        # Stack the arrays.
+        dat_in = np.concatenate(dat_in, axis=0)
+        dat_out = np.concatenate(dat_out, axis=0)
+        dat_extra = np.concatenate(dat_extra, axis=0)
 
-    # # Check if any of the data is malformed and discard features if
-    # # necessary.
-    # fets = []
-    # for fet in dat_in_all.dtype.names:
-    #     fet_values = dat_in_all[fet]
-    #     if ((not np.isnan(fet_values).any()) and
-    #             (not np.isinf(fet_values).any())):
-    #         fets.append(fet)
-    #     else:
-    #         print(f"Discarding: {fet}")
-    # dat_in_all = dat_in_all[fets]
+        # Convert all instances of -1 (feature value unknown) to the mean for
+        # that feature.
+        bad_fets = []
+        for fet in dat_in.dtype.names:
+            fet_values = dat_in[fet]
+            # If all values for this feature are -1, then skip it.
+            if (fet_values == -1).all():
+                bad_fets.append(fet)
+                continue
+            dat_in[fet] = np.where(
+                fet_values == -1,
+                # Calculate the mean of the valid feature values.
+                np.mean(fet_values[np.where(fet_values != -1)]),
+                fet_values)
+            assert (dat_in[fet] != -1).all(), \
+                f"Still found \"-1\" in feature: {fet}"
+        assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
 
-    return dat_in_all, dat_out_all, dat_extra_all, prms_in
+        # Scale input features. Do this here instead of in process_sim()
+        # because all of the features must be scaled using the same
+        # parameters.
+        dat_in, prms_in = scale_fets(dat_in, scl_grps, args["standardize"])
+
+        # Save the processed data so that we do not need to process it again.
+        if save_data:
+            utils.save(dat_flp, dat_in, dat_out, dat_extra)
+
+    # Split the data into training, validation, and test loaders.
+    return split_data(
+        net, dat_in, dat_out, dat_extra, args["train_batch"],
+        args["test_batch"]), prms_in
 
 
-def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
-    """ Generates training data and optionally saves it. """
-    dat_in, dat_out, dat_extra, scl_prms = make_datasets(net, args, dat)
-    # Save the processed data so that we do not need to process it again.
-    if save_data:
-        utils.save(dat_flp, dat_in, dat_out, dat_extra)
+def gen_data(net, args, scl_prms_flp, dat=None, save_data=True):
+    """Builds training, validation and test data loaders.
+
+    If args["sims"] is set or dat is set, then the data is loaded from
+    individual simulations. Otherwise, the data is loaded from bulk
+    train/val/test Splits.
+
+    See process_sims() and process_bulk() for details about these cases.
+
+    net: The model.
+    args: Configuration info.
+
+    """
+    dat_in, dat_out, dat_extra, scl_prms = (
+        process_bulk(args) if (args["sims"] is None and dat is None) else
+        process_sims(net, args, dat, save_data))
+    print(f"Number of input features: {len(dat_in.dtype.names)}")
     # Save scaling parameters.
-    print(f"Saving scaling parameters: {scl_prms_flp}")
-    with open(scl_prms_flp, "w") as fil:
-        json.dump(scl_prms.tolist(), fil)
+    utils.save_scl_prms(args["out_dir"], scl_prms)
     return dat_in, dat_out, dat_extra
 
 
@@ -695,11 +745,6 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     dev = torch.device("cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
     net.net.to(dev)
 
-    # Split the data into training, validation, and test loaders.
-    ldr_trn, ldr_val, ldr_tst = split_data(
-        net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"])
-
     # Explicitly move the training (and maybe validation) data to the target
     # device.
     ldr_trn.dataset.to(dev)
@@ -787,25 +832,7 @@ def run_trials(args):
     if path.exists(out_flp):
         os.remove(out_flp)
 
-    # Load or geenrate training data.
-    dat_flp = path.join(out_dir, "data.npz")
-    scl_prms_flp = path.join(out_dir, "scale_params.json")
-    # Check for the presence of both the data and the scaling
-    # parameters because the resulting model is useless without the
-    # proper scaling parameters.
-    if (not args["regen_data"] and path.exists(dat_flp) and
-            path.exists(scl_prms_flp)):
-        print("Found existing data!")
-        dat_in, dat_out, dat_extra = utils.load(dat_flp)
-        dat_in_shape = dat_in.shape
-        dat_out_shape = dat_out.shape
-        assert dat_in_shape[0] == dat_out_shape[0], \
-            f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
-    else:
-        print("Regenerating data...")
-        dat_in, dat_out, dat_extra = gen_data(
-            net_tmp, args, dat_flp, scl_prms_flp)
-    print(f"Number of input features: {len(dat_in.dtype.names)}")
+
 
     # Visualaize the ground truth data.
     utils.visualize_classes(net_tmp, dat_out)

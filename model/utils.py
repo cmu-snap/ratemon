@@ -3,6 +3,7 @@
 import math
 import os
 from os import path
+import pickle
 import random
 import zipfile
 
@@ -556,3 +557,48 @@ def assert_tensor(**kwargs):
         assert isinstance(val, torch.Tensor), \
         (f"\"{name}\" is of type \"{type(val)}\" when it should be of type "
          "\"torch.Tensor\"")
+
+
+def get_split_data_flp(split_dir, name):
+    return path.join(split_dir, f"{name}.npy")
+
+
+def get_split_metadata_flp(split_dir, name):
+    """
+    Returns the path to the metadata for a Split with the provided name, which
+    stores its data in the provided dir.
+    """
+    return path.join(split_dir, f"{name}_metadata.pickle")
+
+
+def save_split_metadata(split_dir, name, dat):
+    """
+    Saves the metadata associated with a Split with the provided name that
+    stores its data in the provided dir.
+    """
+    with open(get_split_metadata_flp(split_dir, name), "w") as fil:
+        pickle.dump(dat, fil)
+
+
+def load_split_metadata(split_dir, name):
+    """
+    Loads metadata for a Split with the provided name that stores its data in
+    the provided dir.
+    """
+    return pickle.load(get_split_metadata_flp(split_dir, name))
+
+
+def get_scl_prms_flp(out_dir):
+    return path.join(out_dir, "scale_params.json")
+
+
+def save_scl_prms(out_dir, scl_prms):
+    scl_prms_flp = get_scl_prms_flp(out_dir)
+    print(f"Saving scaling parameters: {scl_prms_flp}")
+    with open(scl_prms_flp, "w") as fil:
+        json.dump(scl_prms.tolist(), fil)
+
+
+def load_scl_prms(out_dir):
+    with open(get_scl_prms_flp(out_dir), "r") as fil:
+        return json.load(fil)
