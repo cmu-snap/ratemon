@@ -156,11 +156,13 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
     # used as features but may be needed by the training/testing
     # process.
     raw_dtype = [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]
-    dtype = ([("raw", raw_dtype), ("num_flws", "int32")] +
+    dtype = ([("raw", raw_dtype), ("num_flws", "int32"),
+              ("btk_throughput", "int32")] +
              [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
     dat_extra = np.empty(shape=dat.shape, dtype=dtype)
     dat_extra["raw"] = dat_out
     dat_extra["num_flws"].fill(sim.unfair_flws + sim.fair_flws)
+    dat_extra["btk_throughput"].fill(sim.bw_Mbps)
     dat_extra = recfunctions.repack_fields(dat_extra)
 
     # Convert output features to class labels.
