@@ -111,6 +111,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
     dat_in, dat_out, dat_extra, _ = utils.load_tmp_file(temp_path)
+    dat_extra["btk_throughput"] = sim.bw_Mbps
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
