@@ -436,8 +436,8 @@ def filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc):
     assert (
         len(dat_in) >= num_sims and
         len(dat_out) == len(dat_in) and
-        len(dat_extra) == len(dat_in)), "Malformed arguments!"
-
+        len(dat_extra) == len(dat_in)), \
+        "Arguments contain the wrong number of simulations!"
     # Pick the desired number of simulations.
     dat_in = dat_in[:num_sims]
     dat_out = dat_out[:num_sims]
@@ -445,13 +445,13 @@ def filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc):
     scl_grps = scl_grps[:num_sims]
     # From each simulation, pick the desired fraction.
     if prc != 100:
-        for idx in range(num_sims):
-            num_rows = dat_in[idx].shape[0]
-            idxs = np.random.random_integers(
-                0, num_rows - 1, math.ceil(num_rows * prc / 100))
-            dat_in[idx] = dat_in[idx][idxs]
-            dat_out[idx] = dat_out[idx][idxs]
-            dat_extra[idx] = dat_extra[idx][idxs]
+        frac = prc / 100
+        for sim_idx in range(num_sims):
+            pkt_idxs = np.random.random_integers(
+                0, num_rows - 1, math.ceil(dat_in[sim_idx].shape[0] * frac))
+            dat_in[sim_idx] = dat_in[sim_idx][pkt_idxs]
+            dat_out[sim_idx] = dat_out[sim_idx][pkt_idxs]
+            dat_extra[sim_idx] = dat_extra[sim_idx][pkt_idxs]
     return dat_in, dat_out, dat_extra, scl_grps
 
 
@@ -465,14 +465,23 @@ def save(flp, dat_in, dat_out, dat_extra):
         flp, dat_in=dat_in, dat_out=dat_out, dat_extra=dat_extra)
 
 
-def load(flp):
-    """
-    Loads parsed data. Each returned item is a list where each entry is the
-    results of one simulation.
-    """
+def load_parsed_data(flp):
+    """ Loads parsed data. """
     print(f"Loading data: {flp}")
     with np.load(flp) as fil:
-        return fil["dat_in"], fil["dat_out"], fil["dat_extra"]
+        dat_in = fil["dat_in"]
+        dat_out = fil["dat_out"]
+        dat_extra = fil["dat_extra"]
+    dat_in_shape = dat_in.shape
+    dat_out_shape = dat_out.shape
+    dat_extra_shape = dat_extra.shape
+    assert dat_out_shape[0] == dat_in_shape[0], \
+        ("Data has invalid shapes (first dimension should agree)! "
+         f"in: {dat_in_shape}, out: {dat_out_shape}")
+    assert dat_extra_shape[0] == dat_in_shape[0], \
+        ("Data has invalid shapes (first dimension should agree)! "
+         f"in: {dat_in_shape}, extra: {dat_extra_shape}")
+    return dat_in, dat_out, dat_extra
 
 
 def save_tmp_file(flp, dat_in, dat_out, dat_extra, scl_grps):
@@ -560,13 +569,17 @@ def assert_tensor(**kwargs):
 
 
 def get_split_data_flp(split_dir, name):
+    """
+    Returns the path to the data for a Split with the provided name, which
+    stores its data in the provided directory.
+    """
     return path.join(split_dir, f"{name}.npy")
 
 
 def get_split_metadata_flp(split_dir, name):
     """
     Returns the path to the metadata for a Split with the provided name, which
-    stores its data in the provided dir.
+    stores its data in the provided directory.
     """
     return path.join(split_dir, f"{name}_metadata.pickle")
 
@@ -574,7 +587,7 @@ def get_split_metadata_flp(split_dir, name):
 def save_split_metadata(split_dir, name, dat):
     """
     Saves the metadata associated with a Split with the provided name that
-    stores its data in the provided dir.
+    stores its data in the provided directory.
     """
     with open(get_split_metadata_flp(split_dir, name), "w") as fil:
         pickle.dump(dat, fil)
@@ -583,16 +596,20 @@ def save_split_metadata(split_dir, name, dat):
 def load_split_metadata(split_dir, name):
     """
     Loads metadata for a Split with the provided name that stores its data in
-    the provided dir.
+    the provided directory.
     """
     return pickle.load(get_split_metadata_flp(split_dir, name))
 
 
 def get_scl_prms_flp(out_dir):
+    """
+    Returns the path to a scaling parameters file in the provided directoy.
+    """
     return path.join(out_dir, "scale_params.json")
 
 
 def save_scl_prms(out_dir, scl_prms):
+    """ Saves scaling parameters in the provided directory. """
     scl_prms_flp = get_scl_prms_flp(out_dir)
     print(f"Saving scaling parameters: {scl_prms_flp}")
     with open(scl_prms_flp, "w") as fil:
@@ -600,5 +617,17 @@ def save_scl_prms(out_dir, scl_prms):
 
 
 def load_scl_prms(out_dir):
+    """ Loads scaling parameters from the provided directory. """
     with open(get_scl_prms_flp(out_dir), "r") as fil:
         return json.load(fil)
+
+
+def load_split(split_dir, name):
+        """
+        Loads training, validation, and test split raw data from disk. Returns a
+        tuple of (training, validation, test) data.
+        """
+        num_pkts, dtype = load_split_metadata(split_dir, name)
+        return np.memmap(
+            get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
+            shape=(num_pkts,))

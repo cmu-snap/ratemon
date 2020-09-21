@@ -37,9 +37,9 @@ class Split:
         # Features values that cannot be computed are replaced
         # with -1. When reading the splits later, we can detect
         # incomplete feature values by looking for -1s.
-        flp = path.join(out_dir, f"{self.name}.npy")
         self.dat = np.memmap(
-            flp, dtype=(dtype + [("num_flws", "int32")]), mode="w+",
+            utils.get_split_data_flp(out_dir, name),
+            dtype=(dtype + [("num_flws", "int32")]), mode="w+",
             shape=(num_pkts,))
 
         # The next available index in self.dat. Used if self.shuffle == False.
