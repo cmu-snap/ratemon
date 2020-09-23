@@ -1,0 +1,9 @@
+language: python
+python:
+  - "3.6"
+
+# command to install dependencies
+install:
+  - pip install -r model/requirements.txt
+ # command to run tests
+  - python -m unittest model/tests.py
