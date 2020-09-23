@@ -1,6 +1,8 @@
 language: python
 python:
   - "3.6"
+# Cache pip dependencies.
+cache: pip
 
 # Fix submodules issue.
 # From: https://amcolash.com/2019/07/14/travis-ci-deploy.html
