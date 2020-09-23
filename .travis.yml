@@ -17,9 +17,9 @@ before_install:
     - sed -i "s/git@github.com:/https:\/\/github.com\//" .gitmodules
     - git submodule update --init --recursive
 
-# command to install dependencies
+# Install dependencies.
 install:
     - pip install -r model/requirements.txt
-# command to run tests
+# Run tests.
 script:
     - python -m unittest model/tests.py
