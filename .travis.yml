@@ -15,7 +15,7 @@ before_install:
 
 # command to install dependencies
 install:
-  - pip install -r model/requirements.txt
+    - pip install -r model/requirements.txt
 # command to run tests
 script:
-  - python -m unittest model/tests.py
+    - python -m unittest model/tests.py
