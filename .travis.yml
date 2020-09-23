@@ -2,11 +2,17 @@ language: python
 python:
   - "3.6"
 
-# Use sed to replace the SSH URL with the public URL, then initialize submodules
+# Fix submodules issue.
 # From: https://amcolash.com/2019/07/14/travis-ci-deploy.html
+#
+# Handle git submodules yourself, based off of https://github.com/algolia/examples/issues/24
+git:
+    submodules: false
+# Use sed to replace the SSH URL with the public URL, then initialize submodules
 before_install:
     - sed -i "s/git@github.com:/https:\/\/github.com\//" .gitmodules
     - git submodule update --init --recursive
+
 # command to install dependencies
 install:
   - pip install -r model/requirements.txt
