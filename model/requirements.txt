@@ -1,7 +1,7 @@
-torch
-numpy
-scikit-learn
 ax
 matplotlib
+numpy
+scikit-learn
 scipy
 seaborn
+torch
