@@ -4,13 +4,15 @@ python:
 # Cache pip dependencies.
 cache: pip
 
-# Fix submodules issue.
-# From: https://amcolash.com/2019/07/14/travis-ci-deploy.html
+# Modify submodules to use public URLs instead of SSH.
+# Based on: https://amcolash.com/2019/07/14/travis-ci-deploy.html
 #
-# Handle git submodules yourself, based off of https://github.com/algolia/examples/issues/24
+# Handle git submodules manually.
+# Based on: https://github.com/algolia/examples/issues/24
 git:
     submodules: false
 # Use sed to replace the SSH URL with the public URL, then initialize submodules
+# manually.
 before_install:
     - sed -i "s/git@github.com:/https:\/\/github.com\//" .gitmodules
     - git submodule update --init --recursive

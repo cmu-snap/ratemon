@@ -1,23 +1,25 @@
+#! /usr/bin/env python3
+""" General unit tests. """
 
 from os import path
+# Add the program directory to the system path, in case this script is
+# being executed from a different directory using "python -m unittest ...".
 import sys
 sys.path.append(path.dirname(path.realpath(__file__)))
 
 import unittest
 
 
-class TestThings(unittest.TestCase):
-
-    def test_one(self):
-        self.assertEqual(1 + 1, 2)
-
-    def test_two(self):
-        self.assertEqual(2 + 2, 4)
-
-    def test_three(self):
-        self.assertEqual(3 + 3, 6)
+class TestGeneral(unittest.TestCase):
+    """ General unit tests. """
 
     def test_deps(self):
+        """
+        Tests that the Travis CI environment is configured with all necessary
+        dependencies.
+
+        Implicitly tests that all modules are free of syntax errors.
+        """
         import check_mathis_accuracy
         import cl_args
         import correlation
