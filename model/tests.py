@@ -15,7 +15,7 @@ class TestThings(unittest.TestCase):
         self.assertEqual(2 + 2, 4)
 
     def test_three(self):
-        self.assertEqual(3 + 3, 5)
+        self.assertEqual(3 + 3, 6)
 
     def test_deps(self):
         import check_mathis_accuracy
