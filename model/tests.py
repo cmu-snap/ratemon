@@ -75,6 +75,28 @@ class TestGeneral(unittest.TestCase):
         # Remove files
         shutil.rmtree(TEST_OUTPUT_DIR)
 
+    def test_training(self):
+        command_line_args = (f"./model/train.py --data-dir {SIMULATIONS} "
+                             f"--model=LrSklearn --out-dir {TEST_OUTPUT_DIR} "
+                              "--num-sims=1 --max-iter=1 --keep-percent=5")
+
+        split_args = shlex.split(command_line_args)
+        p = subprocess.Popen(split_args)
+        p.wait()
+        assert(p.returncode == 0)
+
+        # Check if output files are in test_output
+        model_file = False
+        scale_file = False
+        for fname in os.listdir(TEST_OUTPUT_DIR):
+            if fname.endswith('.pickle'):
+                model_file = True
+            if fname == "scale_params.json":
+                scale_file = True
+        assert(model_file and scale_file)
+
+        # Remove files
+        shutil.rmtree(TEST_OUTPUT_DIR)
 
 if __name__ == "__main__":
     unittest.main()
