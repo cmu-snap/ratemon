@@ -13,14 +13,14 @@ import shlex
 import subprocess
 import shutil
 
-TEST_DATA_DIR = "test_data/"
+TEST_DATA_DIR = "model/test_data/"
 LR_MODEL = (TEST_DATA_DIR + "1-3-False-100-2-False-5.0-linear-0.001-10-20"
                             "-LrSklearn-0.09-False-0-1000-l1-False-None-True"
                             "-False-9223372036854775807-0-9223372036854775807"
                             "-0.1-10-0.pickle")
 SCALE_PARAM = TEST_DATA_DIR + "scale_params.json"
 SIMULATIONS = TEST_DATA_DIR + "simulations"
-TEST_OUTPUT_DIR = "test_output/"
+TEST_OUTPUT_DIR = "model/test_output/"
 
 class TestGeneral(unittest.TestCase):
     """ General unit tests. """
@@ -56,9 +56,10 @@ class TestGeneral(unittest.TestCase):
 
         The test should also remove all the files generated from the script.
         """
-        command_line_args = (f"./test.py --model {LR_MODEL} --scale-params " 
-                             f"{SCALE_PARAM} --standardize --simulation "
-                             f"{SIMULATIONS} --out-dir {TEST_OUTPUT_DIR}")
+        command_line_args = (f"./model/test.py --model {LR_MODEL} "
+                             f"--scale-params {SCALE_PARAM} " 
+                             f"--standardize --simulation {SIMULATIONS} "
+                             f"--out-dir {TEST_OUTPUT_DIR}")
         split_args = shlex.split(command_line_args)
         p = subprocess.Popen(split_args)
         p.wait()
