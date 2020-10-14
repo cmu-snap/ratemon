@@ -174,7 +174,7 @@ def parse_pcap(sim_dir, out_dir):
             sim.payload_B, direction="data")
         recv_pcap_flp = path.join(
             sim_dir,
-            (f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.other_flws}-0"
+            (f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.fair_flws}-0"
              ".pcap"))
         recv_pkts = utils.parse_packets(
             recv_pcap_flp, sim.payload_B, direction="data")
