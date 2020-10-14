@@ -566,3 +566,8 @@ def set_rand_seed(seed=SEED):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def bdp_B(bw_Mbps, rtt_us):
+    """ Calculates the BDP in bytes. """
+    return (bw_Mbps / 8. * 1e6) * (rtt_us / 1e6)
