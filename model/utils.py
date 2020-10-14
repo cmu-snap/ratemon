@@ -416,13 +416,17 @@ def safe_sqrt(val):
     return -1 if val < 0 else math.sqrt(val)
 
 
-def safe_mean(dat, start_idx, end_idx):
+def safe_mean(dat, start_idx=None, end_idx=None):
 
     """
     Safely calculates a mean over a window. Any values that are -1
-    (unknown) are discarded. The mean of an empty window if -1
+    (unknown) are discarded. The mean of an empty window is -1
     (unknown).
     """
+    if start_idx is None:
+        start_idx == 0
+    if end_idx is None:
+        end_idx = dat.shape[0]
     # Extract the window.
     dat_win = dat[start_idx:end_idx + 1]
     # Eliminate values that are -1 (unknown).
