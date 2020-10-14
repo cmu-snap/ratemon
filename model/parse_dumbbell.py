@@ -149,7 +149,6 @@ def parse_pcap(sim_dir, out_dir):
     """ Parse a PCAP file. """
     print(f"Parsing: {sim_dir}")
     sim = utils.Sim(sim_dir)
-    assert sim.unfair_flws > 0, f"No unfair flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{sim.name}.npz")
@@ -158,23 +157,22 @@ def parse_pcap(sim_dir, out_dir):
         print(f"    Already parsed: {sim_dir}")
         return
 
-    # Process PCAP files from unfair senders and receivers.
-    #
-    # The final output, with one entry per unfair flow.
-    unfair_flws = []
-    for unfair_idx in range(sim.unfair_flws):
+    tot_flws = sim.unfair_flws + sim.fair_flws
+    # The final output, with one entry per flow.
+    flws = []
+    for flw_idx in range(tot_flws):
         # Since this will not be used in practice, we can calculate
         # the min one-way delay using the simulation's parameters.
-        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
+        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[flw_idx]
 
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
-            path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
+            path.join(sim_dir, f"{sim.name}-{flw_idx + 2}-0.pcap"),
             sim.payload_B, direction="data")
         recv_pcap_flp = path.join(
             sim_dir,
-            (f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.fair_flws}-0"
+            (f"{sim.name}-{flw_idx + 2 + tot_flws}-0"
              ".pcap"))
         recv_pkts = utils.parse_packets(
             recv_pcap_flp, sim.payload_B, direction="data")
@@ -572,7 +570,7 @@ def parse_pcap(sim_dir, out_dir):
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
-        unfair_flws.append(output)
+        flws.append(output)
 
     # Save memory by explicitly deleting the sent and received packets
     # after they have been parsed. This happens outside of the above
@@ -601,7 +599,7 @@ def parse_pcap(sim_dir, out_dir):
             # The number of packets from this flow currently in the
             # window.
             "window_flow_packets": {win: 0 for win in WINDOWS}
-        } for flw in range(sim.unfair_flws)}
+        } for flw in range(tot_flws)}
     # The index of the first packet in the window, for every window
     # size.
     win_start_idxs = {win: 0 for win in WINDOWS}
@@ -610,15 +608,10 @@ def parse_pcap(sim_dir, out_dir):
     # router. Note that we process all flows at once.
     for j, router_pkt in enumerate(router_pkts):
         _, sender, curr_time, _ = router_pkt
-        # Process only packets that are part of one of the unfair
-        # flows. Discard packets that did not make it to the receiver
-        # (e.g., at the end of the experiment).
-        if (sender < sim.unfair_flws and
-                flw_state[sender]["output_idx"] < unfair_flws[sender].shape[0]):
-            # We cannot move this above the if-statement condition
-            # because it is valid only if sender < sim.unfair_flws.
-            output_idx = flw_state[sender]["output_idx"]
-
+        output_idx = flw_state[sender]["output_idx"]
+        # Discard packets that did not make it to the receiver (e.g.,
+        # at the end of the experiment).
+        if output_idx < flws[sender].shape[0]:
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
                 metric = make_ewma_metric(metric, alpha)
@@ -673,10 +666,8 @@ def parse_pcap(sim_dir, out_dir):
                     continue
                 else:
                     raise Exception(f"Unknown EWMA metric: {metric}")
-                unfair_flws[sender][output_idx][metric] = (
-                    utils.safe_update_ewma(
-                        unfair_flws[sender][output_idx - 1][metric],
-                        new, alpha))
+                flws[sender][output_idx][metric] = utils.safe_update_ewma(
+                    flws[sender][output_idx - 1][metric], new, alpha)
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
@@ -732,7 +723,7 @@ def parse_pcap(sim_dir, out_dir):
                     # The current length of the window.
                     win_cur_us = curr_time - router_pkts[win_start_idx][2]
                     # Extract the RTT estimate.
-                    rtt_estimate_us = unfair_flws[
+                    rtt_estimate_us = flws[
                         sender][output_idx][
                             make_win_metric("average RTT estimate us", win)]
                     if rtt_estimate_us == -1:
@@ -794,25 +785,24 @@ def parse_pcap(sim_dir, out_dir):
                     continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
-                unfair_flws[sender][output_idx][metric] = new
+                flws[sender][output_idx][metric] = new
             flw_state[sender]["output_idx"] += 1
             # For the current packet's flow, the number of packets
             # since the last packet in this flow is now 1.
             flw_state[sender]["packets_since_last"] = 1
-        # For each unfair flow except the current packet's flow,
-        # increment the number of packets since the last packet from
-        # that flow.
-        for flw in range(sim.unfair_flws):
+        # For each flow except the current packet's flow, increment
+        # the number of packets since the last packet from that flow.
+        for flw in range(tot_flws):
             if flw != sender:
                 flw_state[flw]["packets_since_last"] += 1
 
     # Determine if there are any NaNs or Infs in the results. For the
-    # results for each unfair flow, look through all features
-    # (columns) and make a note of the features that bad
-    # values. Flatten these lists of feature names, using a set
-    # comprehension to remove duplicates.
+    # results for each flow, look through all features (columns) and
+    # make a note of the features that bad values. Flatten these lists
+    # of feature names, using a set comprehension to remove
+    # duplicates.
     bad_fets = {
-        fet for flw_dat in unfair_flws
+        fet for flw_dat in flws
         for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
     if bad_fets:
         print(f"    Simulation {sim_dir} has NaNs of Infs in features: "
@@ -824,7 +814,7 @@ def parse_pcap(sim_dir, out_dir):
     else:
         print(f"    Saving: {out_flp}")
         np.savez_compressed(
-            out_flp, **{str(k + 1): v for k, v in enumerate(unfair_flws)})
+            out_flp, **{str(k): v for k, v in enumerate(flws)})
 
 
 def main():
