@@ -84,7 +84,9 @@ def main():
     log.info("Bandwidths (Mbps): %s", list(BWS_Mbps))
     log.info("Link delays (us): %s", list(DELAYS_us))
     log.info("Queue size (x BDP): %s", list(QUEUE_MULTS))
+    log.info("Unfair proto: %s", UNFAIR_PROTO)
     log.info("Unfair flows: %s", list(UNFAIR_FLOWS))
+    log.info("Fair proto: %s", FAIR_PROTO)
     log.info("Fair flows: %s", list(FAIR_FLOWS))
 
     # Assemble the configurations.
