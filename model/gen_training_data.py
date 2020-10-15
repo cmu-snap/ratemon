@@ -88,6 +88,7 @@ def main():
     log.info("Unfair flows: %s", list(UNFAIR_FLOWS))
     log.info("Fair proto: %s", FAIR_PROTO)
     log.info("Fair flows: %s", list(FAIR_FLOWS))
+    log.info("Duration (s): %s", DUR_s)
 
     # Assemble the configurations.
     cnfs = [{"bottleneck_bandwidth_Mbps": bw_Mbps,
