@@ -82,7 +82,7 @@ def plot_f1c(flps, out_dir):
         f"This figure uses a single experiment, but {tot_flps} were provided."
     flp = flps[0]
     sim = utils.Sim(flp)
-    x_vals = np.arange(300 * 100, dtype=float) / 100
+    x_vals = np.arange(300 * 1000, dtype=float) / 1000
     with np.load(flp) as fil:
         tot_flws = len(fil.files)
         assert tot_flws == 17, \
@@ -96,7 +96,9 @@ def plot_f1c(flps, out_dir):
             # the throughput at the same time for each flow.
             tputs.append(
                 np.interp(
-                    x_vals, xp=dat[ARRIVAL_TIME_KEY] / 1e6,
+                    x_vals,
+                    # Convert from us to s.
+                    xp=dat[ARRIVAL_TIME_KEY] / 1e6,
                     # Convert from packets/second to Mbps.
                     fp=dat[TPUT_KEY] * PKT_SIZE_B * 8 / 1e6))
 
