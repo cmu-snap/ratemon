@@ -7,10 +7,6 @@ import random
 import zipfile
 
 import numpy as np
-import scapy.utils
-import scapy.layers.l2
-import scapy.layers.inet
-import scapy.layers.ppp
 import torch
 
 
@@ -183,31 +179,30 @@ class Sim():
             sim = path.basename(sim)
         self.name = sim
         toks = sim.split("-")
-        if sim.endswith(".npz"):
-            # 8Mbps-9000us-489p-1unfair-4fair-9000,9000,9000,9000,9000us-1380B-80s.npz
-            # Remove ".npz" from the last token.
-            toks[-1] = toks[-1][:-4]
-        # 8Mbps-9000us-489p-1unfair-4fair-9000,9000,9000,9000,9000us-1380B-80s
-        (bw_Mbps, btl_delay_us, queue_p, unfair_flws, fair_flws, edge_delays,
-         payload_B, dur_s) = toks
+        if sim.endswith(".pcap"):
+            # unfair-cubic-pcc-8bw-30rtt-64q-1pcc-1cubic-20201118T114242.pcap
+            # Remove ".pcap" from the last token.
+            toks[-1] = toks[-1][:-5]
+        # unfair-cubic-pcc-8bw-30rtt-64q-1pcc-1cubic-20201118T114242
+        (_, fair_flw_name, unfair_flw_name, bw_Mbps,
+         rtt_ms, queue_p, unfair_flws, fair_flws, _) = toks
 
         # Link bandwidth (Mbps).
-        self.bw_Mbps = float(bw_Mbps[:-4])
+        self.bw_Mbps = float(bw_Mbps[:-2])
         # Bottleneck router delay (us).
-        self.btl_delay_us = float(btl_delay_us[:-2])
+        self.btl_delay_us = float(rtt_ms[:-3]) * 1000 / 2
         # Queue size (packets).
         self.queue_p = float(queue_p[:-1])
         # Number of unfair flows
-        self.unfair_flws = int(unfair_flws[:-6])
+        self.unfair_flws = int(unfair_flws[:-(len(unfair_flw_name))])
         # Number of fair flows
-        self.fair_flws = int(fair_flws[:-4])
-        # Edge delays
-        self.edge_delays = [
-            int(del_us) for del_us in edge_delays[:-2].split(",")]
-        # Packet size (bytes)
-        self.payload_B = float(payload_B[:-1])
-        # Experiment duration (s).
-        self.dur_s = float(dur_s[:-1])
+        self.fair_flws = int(fair_flws[:-(len(fair_flw_name))])
+        # Edge delays TODO: For backward compatibility purpose, set edge delays to zero. (Or remove it?)
+        self.edge_delays = [0] * (self.unfair_flws + self.fair_flws)
+        # Packet size (bytes) TODO: Add this information to experiment files
+        self.payload_B = float(1448)
+        # Experiment duration (s). TODO: Add this information to experiment files
+        self.dur_s = float(100)
 
 
 def args_to_str(args, order):
@@ -248,7 +243,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, packet_size_B, direction="data"):
+def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
         (seq, sender, timestamp us, timestamp option)
@@ -259,23 +254,48 @@ def parse_packets(flp, packet_size_B, direction="data"):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
+    folder = flp[:flp.rindex("/")]
+    temp_file = folder + "/temp_out"
+
+    client_p = 5555 + unfair_idx
+    server_p = 5201 + unfair_idx
+
+    if direction == "data":
+        filter_s = f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && tcp.len == 1448\""
+    else:
+        filter_s = f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\""
+
+    os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", temp_file]))
+    file = open(temp_file, "r")
+
     pkts = []
-    for pkt_dat, pkt_mdat in scapy.utils.RawPcapReader(flp):
-        ppp = scapy.layers.ppp.PPP(pkt_dat)
-        src = [int(part) for part in ppp[scapy.layers.inet.IP].src.split(".")]
-        if ((direction == "data" and src[0] == 10 and
-             pkt_mdat.wirelen >= packet_size_B) or
-                (direction == "ack" and src[0] == 20)):
-            tcp = ppp[scapy.layers.inet.TCP]
-            pkts.append((
-                # Sequence number.
-                tcp.seq,
-                # Sender.
-                src[2],
-                # Timestamp. Not using parse_time_us for efficiency purpose.
-                pkt_mdat.sec * 1e6 + pkt_mdat.usec,
-                # Timestamp option.
-                tcp.options[0][1]))
+
+    for line in file:
+        array = line.split()
+        # Normal ACK size is 66, slow path of generating the tuples
+        if direction == "ack" and array[6] != "66":
+            seq_idx = -1
+            tsval_idx = -1
+            tsecr_idx = -1
+            for i in range(7, len(array)):
+                if array[i].startswith("Seq"):
+                    seq_idx = i
+                elif array[i].startswith("TSval"):
+                    tsval_idx = i
+                elif array[i].startswith("TSecr"):
+                    tsecr_idx = i
+            if seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1:
+                pkts.append(
+                    (int(array[seq_idx][4:]),
+                     unfair_idx, float(array[1]) * 100000,
+                     (int(array[tsval_idx][6:]),
+                      int(array[tsecr_idx][6:]))))
+        else:
+            # Seq, index, timestamp, TCP option
+            pkts.append((int(array[-6][4:]), unfair_idx, float(array[1])
+                         * 100000, (int(array[-2][6:]), int(array[-1][6:]))))
+
+    os.system(f"rm {temp_file}")
     return pkts
 
 
@@ -417,7 +437,6 @@ def safe_sqrt(val):
 
 
 def safe_mean(dat, start_idx, end_idx):
-
     """
     Safely calculates a mean over a window. Any values that are -1
     (unknown) are discarded. The mean of an empty window if -1
