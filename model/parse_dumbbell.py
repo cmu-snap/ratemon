@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-"""Parses the pcap file of dumbbell topology. """
+"""Parses the pcap file of cloudlab experiments. """
 
 import argparse
 import collections
@@ -163,24 +163,22 @@ def parse_pcap(sim_dir, out_dir):
     # The final output, with one entry per unfair flow.
     unfair_flws = []
     for unfair_idx in range(sim.unfair_flws):
-        # Since this will not be used in practice, we can calculate
-        # the min one-way delay using the simulation's parameters.
-        one_way_us = sim.btl_delay_us + 2 * sim.edge_delays[unfair_idx]
+        one_way_us = sim.btl_delay_us
 
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
-            path.join(sim_dir, f"{sim.name}-{unfair_idx + 2}-0.pcap"),
-            sim.payload_B, direction="data")
-        recv_pcap_flp = path.join(
-            sim_dir,
-            (f"{sim.name}-{unfair_idx + 2 + sim.unfair_flws + sim.fair_flws}-0"
-             ".pcap"))
+            path.join(sim_dir, f"client-tcpdump-{sim.name}.pcap"),
+            unfair_idx, sim.payload_B, direction="data")
+
+        recv_pcap_flp = path.join(sim_dir, f"server-tcpdump-{sim.name}.pcap")
         recv_pkts = utils.parse_packets(
-            recv_pcap_flp, sim.payload_B, direction="data")
+            recv_pcap_flp,
+            unfair_idx,
+            sim.payload_B, direction="data")
         # Ack packets for RTT calculation
         ack_pkts = utils.parse_packets(
-            recv_pcap_flp, sim.payload_B, direction="ack")
+            recv_pcap_flp, unfair_idx, sim.payload_B, direction="ack")
 
         # State that the windowed metrics need to track across packets.
         win_state = {win: {
@@ -376,7 +374,6 @@ def parse_pcap(sim_dir, out_dir):
                 # Update the EWMA.
                 output[j][metric] = utils.safe_update_ewma(
                     -1 if j == 0 else output[j - 1][metric], new, alpha)
-
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
@@ -582,229 +579,7 @@ def parse_pcap(sim_dir, out_dir):
     # by the next loop).
     del sent_pkts
     del recv_pkts
-
-    # Process pcap files from the bottleneck router to determine queue
-    # occupency. Packet lists are of tuples of the form:
-    #     (seq, sender, timestamp us, timestamp option)
-    router_pkts = utils.parse_packets(
-        path.join(sim_dir, f"{sim.name}-1-0.pcap"), sim.payload_B,
-        direction="data")
-    # State pertaining to each flow.
-    flw_state = {
-        flw: {
-            # Index of the output array where the queue occupency
-            # results should be appended.
-            "output_idx": 0,
-            # The number of other flows' packets that have arrived
-            # since the last packet for this flow.
-            "packets_since_last": 0,
-            # The number of packets from this flow currently in the
-            # window.
-            "window_flow_packets": {win: 0 for win in WINDOWS}
-        } for flw in range(sim.unfair_flws)}
-    # The index of the first packet in the window, for every window
-    # size.
-    win_start_idxs = {win: 0 for win in WINDOWS}
-
-    # Loop over all of the packets receiver by the bottleneck
-    # router. Note that we process all flows at once.
-    for j, router_pkt in enumerate(router_pkts):
-        _, sender, curr_time, _ = router_pkt
-        # Process only packets that are part of one of the unfair
-        # flows. Discard packets that did not make it to the receiver
-        # (e.g., at the end of the experiment).
-        if (sender < sim.unfair_flws and
-                flw_state[sender]["output_idx"] < unfair_flws[sender].shape[0]):
-            # We cannot move this above the if-statement condition
-            # because it is valid only if sender < sim.unfair_flws.
-            output_idx = flw_state[sender]["output_idx"]
-
-            # EWMA metrics.
-            for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
-                metric = make_ewma_metric(metric, alpha)
-                if "interarrival time us" in metric:
-                    # The interarrival time is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "throughput p/s" in metric:
-                    # The throughput is calculated using the sender
-                    # and/or receiver logs, above.
-                    continue
-                if "RTT estimate us" in metric:
-                    # The RTT is calculated using the sender and/or
-                    # receiver logs, above.
-                    continue
-                if "RTT estimate ratio" in metric:
-                    # The RTT ratio is calculated using the sender
-                    # and/or receiver logs, above.
-                    continue
-                if "RTT true us" in metric:
-                    # The RTT is calculated using the sender and/or
-                    # receiver logs, above.
-                    continue
-                if "RTT true ratio" in metric:
-                    # The RTT ratio is calculated using the sender
-                    # and/or receiver logs, above.
-                    continue
-                if "loss rate estimate" in metric:
-                    # The estiamted loss rate is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "loss rate true" in metric:
-                    # The true loss rate is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "queue occupancy" in metric:
-                    # The instanteneous queue occupancy is 1 divided
-                    # by the number of packets that have entered the
-                    # queue since the last packet from the same
-                    # flow. This is the fraction of packets added to
-                    # the queue corresponding to this flow, over the
-                    # time since when the flow's last packet arrived.
-                    new = utils.safe_div(
-                        1, flw_state[sender]["packets_since_last"])
-                elif "mathis model throughput p/s" in metric:
-                    # The Mathis model fair throughput is calculated
-                    # using the sender and/or receiver logs, above.
-                    continue
-                elif "mathis model label" in metric:
-                    # The Mathis model label is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                else:
-                    raise Exception(f"Unknown EWMA metric: {metric}")
-                unfair_flws[sender][output_idx][metric] = (
-                    utils.safe_update_ewma(
-                        unfair_flws[sender][output_idx - 1][metric],
-                        new, alpha))
-
-            # Windowed metrics.
-            for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
-                metric = make_win_metric(metric, win)
-                if "average interarrival time us" in metric:
-                    # The average interarrival time is calculated
-                    # using the sender and/or receiver logs, above.
-                    continue
-                if "average throughput p/s" in metric:
-                    # The average throughput is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "average RTT estimate us" in metric:
-                    # The average RTT is calculated using the sender
-                    # and/or receiver logs, above.
-                    continue
-                if "average RTT estimate ratio" in metric:
-                    # The average RTT ratio is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "average RTT true us" in metric:
-                    # The average RTT is calculated using the sender
-                    # and/or receiver logs, above.
-                    continue
-                if "average RTT true ratio" in metric:
-                    # The average RTT ratio is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "loss event rate" in metric:
-                    # The loss event rate is calcualted using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "1/sqrt loss event rate" in metric:
-                    # The reciprocal of the square root of the loss
-                    # event rate is calculated using the sender and/or
-                    # receiver logs, above.
-                    continue
-                if "loss rate estimate" in metric:
-                    # The estimated loss rate is calcualted using the
-                    # sender and/or reciever logs, above.
-                    continue
-                if "loss rate true" in metric:
-                    # The true loss rate is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                if "queue occupancy" in metric:
-                    win_start_idx = win_start_idxs[win]
-                    # By definition, the window now contains one more
-                    # packet from this flow.
-                    win_flw_pkts = (
-                        flw_state[sender]["window_flow_packets"][win] + 1)
-
-                    # The current length of the window.
-                    win_cur_us = curr_time - router_pkts[win_start_idx][2]
-                    # Extract the RTT estimate.
-                    rtt_estimate_us = unfair_flws[
-                        sender][output_idx][
-                            make_win_metric("average RTT estimate us", win)]
-                    if rtt_estimate_us == -1:
-                        # The RTT estimate is -1 (unknown), so we
-                        # cannot calculate the size of the window. We
-                        # must record the new value of
-                        # "window_flow_packets".
-                        flw_state[
-                            sender]["window_flow_packets"][win] = win_flw_pkts
-                        continue
-
-                    # Calculate the target length of the window.
-                    win_target_us = win * rtt_estimate_us
-
-                    # If the current window size is greater than the
-                    # target window size, then shrink the window.
-                    while win_cur_us > win_target_us:
-                        # If the packet that will be removed from
-                        # the window is from this flow, then we
-                        # need to decrease our record of the
-                        # number of this flow's packets in the
-                        # window by one.
-                        if router_pkts[win_start_idx][1] == sender:
-                            win_flw_pkts -= 1
-                        # Move the start of the window forward.
-                        win_start_idx += 1
-                        win_cur_us = curr_time - router_pkts[win_start_idx][2]
-
-                    # If the current window size is smaller than the
-                    # target window size, then grow the window.
-                    while (win_start_idx > 0 and
-                           win_cur_us < win_target_us):
-                        # Move the start of the window backward.
-                        win_start_idx -= 1
-                        win_cur_us = curr_time - router_pkts[win_start_idx][2]
-                        # If the new packet that was added to the
-                        # window is from this flow, then we need
-                        # to increase our record of the number of
-                        # this flow's packets in the window by
-                        # one.
-                        if router_pkts[win_start_idx][1] == sender:
-                            win_flw_pkts += 1
-
-                    # The queue occupancy is the number of this flow's
-                    # packets in the window divided by the total
-                    # number of packets in the window.
-                    new = win_flw_pkts / (j - win_start_idx + 1)
-                    # Record the new values of the state variables.
-                    win_start_idxs[win] = win_start_idx
-                    flw_state[
-                        sender]["window_flow_packets"][win] = win_flw_pkts
-                elif "mathis model throughput p/s" in metric:
-                    # The Mathis model fair throughput is calculated
-                    # using the sender and/or receiver logs, above.
-                    continue
-                elif "mathis model label" in metric:
-                    # The Mathis model label is calculated using the
-                    # sender and/or receiver logs, above.
-                    continue
-                else:
-                    raise Exception(f"Unknown windowed metric: {metric}")
-                unfair_flws[sender][output_idx][metric] = new
-            flw_state[sender]["output_idx"] += 1
-            # For the current packet's flow, the number of packets
-            # since the last packet in this flow is now 1.
-            flw_state[sender]["packets_since_last"] = 1
-        # For each unfair flow except the current packet's flow,
-        # increment the number of packets since the last packet from
-        # that flow.
-        for flw in range(sim.unfair_flws):
-            if flw != sender:
-                flw_state[flw]["packets_since_last"] += 1
+    del ack_pkts
 
     # Determine if there are any NaNs or Infs in the results. For the
     # results for each unfair flow, look through all features
@@ -831,7 +606,7 @@ def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
-        description="Parses the output of gen_training_data.py.")
+        description="Parses the output of cloudlab experiments.")
     psr.add_argument(
         "--exp-dir",
         help=("The directory in which the experiment results are stored "
