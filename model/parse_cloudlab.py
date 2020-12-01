@@ -144,8 +144,8 @@ def parse_pcap(sim_dir, out_dir):
     """ Parse a PCAP file. """
     print(f"Parsing: {sim_dir}")
     sim = utils.Sim(sim_dir)
-    assert sim.cca_1_flws + sim.cca_2_flws > 0, \
-        f"No flows to analyze: {sim_dir}"
+    tot_flws = sim.cca_1_flws + sim.cca_2_flws
+    assert tot_flws > 0, f"No flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{sim.name}.npz")
@@ -158,7 +158,7 @@ def parse_pcap(sim_dir, out_dir):
     #
     # The final output, with one entry per flow.
     flws = []
-    for flw_idx in range(sim.cca_1_flws + sim.cca_2_flws):
+    for flw_idx in range(tot_flws):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
