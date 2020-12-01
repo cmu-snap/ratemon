@@ -182,12 +182,12 @@ class Sim():
         self.name = sim
         toks = sim.split("-")
         if sim.endswith(".pcap"):
-            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100-20201118T114242.pcap
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.pcap
             # Remove ".pcap" from the last token.
             toks[-1] = toks[-1][:-5]
-        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100-20201118T114242
-        (_, cca_1_name, cca_2_name, bw_Mbps,
-         rtt_ms, queue_p, unfair_flws, fair_flws, end_time, _) = toks
+        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
+        (_, cca_1_name, cca_2_name, bw_Mbps, rtt_ms, queue_p, cca_1_flws,
+         cca_2_flws, end_time, _) = toks
 
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
@@ -196,10 +196,10 @@ class Sim():
         # Queue size (packets).
         self.queue_p = float(queue_p[:-1])
         # Number of unfair flows
-        self.cca_1_flws = int(unfair_flws[:-(len(cca_1_name))])
+        self.cca_1_flws = int(cca_1_flws[:-(len(cca_1_name))])
         # Number of fair flows
-        self.cca_2_flws = int(fair_flws[:-(len(cca_2_name))])
-        # Experiment duration (s). TODO: Add this information to experiment files
+        self.cca_2_flws = int(cca_2_flws[:-(len(cca_2_name))])
+        # Experiment duration (s).
         self.dur_s = int(end_time)
 
 
@@ -259,14 +259,19 @@ def parse_packets(flp, flw_idx, direction="data"):
     server_p = CL_PORT_START_SERVER + flw_idx
 
     if direction == "data":
-        filter_s = f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && tcp.len >= 1000\""
+        filter_s = (
+            f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+            "tcp.len >= 1000\"")
     else:
-        filter_s = f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\""
+        filter_s = (
+            f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
 
     os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", temp_file]))
     file = open(temp_file, "r")
 
-    # (Seq, index, timestamp, TCP option, payload size)
+    # Each item is a tuple of the form:
+    #     (sequence number, flow index, timestamp (us), TCP timestamp option,
+    #      payload size (B))
     pkts = []
 
     for line in file:
@@ -286,16 +291,21 @@ def parse_packets(flp, flw_idx, direction="data"):
                     tsecr_idx = i
                 elif array[i].startswith("Len"):
                     len_idx = i
-            if seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and len_idx != -1:
-                pkts.append(
-                    (int(array[seq_idx][4:]),
-                     flw_idx, float(array[1]) * 100000,
-                     (int(array[tsval_idx][6:]),
-                      int(array[tsecr_idx][6:])),
-                     int(array[len_idx][4:])))
+            if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
+                len_idx != -1):
+                pkts.append((
+                    int(array[seq_idx][4:]),
+                    flw_idx,
+                    float(array[1]) * 100000,
+                    (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
+                    int(array[len_idx][4:])))
         else:
-            pkts.append((int(array[-6][4:]), flw_idx, float(array[1])
-                         * 100000, (int(array[-2][6:]), int(array[-1][6:])), int(array[-3][4:])))
+            pkts.append((
+                int(array[-6][4:]),
+                flw_idx,
+                float(array[1]) * 100000,
+                (int(array[-2][6:]), int(array[-1][6:])),
+                int(array[-3][4:])))
 
     subprocess.check_call(["rm", temp_file])
     return pkts
