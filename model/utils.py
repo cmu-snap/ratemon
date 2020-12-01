@@ -296,14 +296,14 @@ def parse_packets(flp, flw_idx, direction="data"):
                 pkts.append((
                     int(array[seq_idx][4:]),
                     flw_idx,
-                    float(array[1]) * 1000000,
+                    float(array[1]) * 1e6,
                     (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
                     int(array[len_idx][4:])))
         else:
             pkts.append((
                 int(array[-6][4:]),
                 flw_idx,
-                float(array[1]) * 1000000,
+                float(array[1]) * 1e6,
                 (int(array[-2][6:]), int(array[-1][6:])),
                 int(array[-3][4:])))
 
