@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-"""Parses the pcap file of CloudLab experiments. """
+"""Parses the output of CloudLab experiments. """
 
 import argparse
 import collections
@@ -158,14 +158,11 @@ def parse_pcap(sim_dir, out_dir):
     #
     # The final output, with one entry per flow.
     flws = []
-    for flw_idx in range(sim.cca_1_flws):
-        one_way_us = sim.rtt_us / 2
-
+    for flw_idx in range(sim.cca_1_flws + sim.cca_2_flws):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
-            path.join(sim_dir, f"client-tcpdump-{sim.name}.pcap"),
-            flw_idx, direction="data")
+            path.join(sim_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
 
         recv_flp = path.join(sim_dir, f"server-tcpdump-{sim.name}.pcap")
         recv_data_pkts = utils.parse_packets(
@@ -204,7 +201,7 @@ def parse_pcap(sim_dir, out_dir):
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
-                print(f"{j}/{len(recv_data_pkts)}")
+                print(f"Flow {flw_idx}: {j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             output[j]["seq"] = recv_pkt_seq
@@ -270,7 +267,8 @@ def parse_pcap(sim_dir, out_dir):
             # since the last packet.
             payload_B = sent_pkts[j + pkt_loss_total_true][4]
             pkt_loss_cur_estimate = math.ceil(
-                0 if recv_pkt_seq == prev_pkt_seq + payload_B
+                0
+                if recv_pkt_seq == prev_pkt_seq + payload_B
                 else (
                     (recv_pkt_seq - highest_seq - payload_B) / payload_B
                     if recv_pkt_seq > highest_seq + payload_B
@@ -287,6 +285,7 @@ def parse_pcap(sim_dir, out_dir):
             # time of this packet to calculate the true
             # sender-receiver delay. Assume that, on the reverse path,
             # packets will experience no queuing delay.
+            one_way_us = sim.rtt_us / 2
             rtt_true_us = (
                 recv_time_cur - sent_pkts[j + pkt_loss_total_true][2] +
                 one_way_us)
@@ -592,7 +591,7 @@ def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
-        description="Parses the output of cloudlab experiments.")
+        description="Parses the output of CloudLab experiments.")
     psr.add_argument(
         "--exp-dir",
         help=("The directory in which the experiment results are stored "

@@ -6,7 +6,7 @@ from os import path
 import random
 import zipfile
 import subprocess
-from defaults import CL_PORT_START_CLIENT, CL_PORT_START_SERVER
+import defaults
 
 import numpy as np
 import torch
@@ -244,7 +244,8 @@ def str_to_args(args_str, order):
 def parse_packets(flp, flw_idx, direction="data"):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
-        (seq, sender, timestamp us, timestamp option, payload length)
+         (sequence number, flow index, timestamp (us), TCP timestamp option,
+          payload size (B))
     with one entry for every packet. Considers only packets in either the "ack"
     or "data" direction.
     """
@@ -252,11 +253,8 @@ def parse_packets(flp, flw_idx, direction="data"):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
-    folder = path.dirname(flp)
-    temp_file = path.join(folder, "temp_out")
-
-    client_p = CL_PORT_START_CLIENT + flw_idx
-    server_p = CL_PORT_START_SERVER + flw_idx
+    client_p = defaults.CL_PORT_START_CLIENT + flw_idx
+    server_p = defaults.CL_PORT_START_SERVER + flw_idx
 
     if direction == "data":
         filter_s = (
@@ -266,48 +264,49 @@ def parse_packets(flp, flw_idx, direction="data"):
         filter_s = (
             f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
 
-    os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", temp_file]))
-    file = open(temp_file, "r")
+    # Strip off the ".pcap" extension and append "_tmp.txt".
+    tmp_flp = f"{flp[:-5]}_tmp.txt"
+    os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", tmp_flp]))
 
     # Each item is a tuple of the form:
     #     (sequence number, flow index, timestamp (us), TCP timestamp option,
     #      payload size (B))
     pkts = []
-
-    for line in file:
-        array = line.split()
-        # Normal ACK size is 66, slow path of generating the tuples
-        if direction == "ack" and array[6] != "66":
-            seq_idx = -1
-            tsval_idx = -1
-            tsecr_idx = -1
-            len_idx = -1
-            for i in range(7, len(array)):
-                if array[i].startswith("Seq"):
-                    seq_idx = i
-                elif array[i].startswith("TSval"):
-                    tsval_idx = i
-                elif array[i].startswith("TSecr"):
-                    tsecr_idx = i
-                elif array[i].startswith("Len"):
-                    len_idx = i
-            if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
+    with open(tmp_flp, "r") as fil:
+        for line in fil:
+            array = line.split()
+            # Normal ACK size is 66, slow path of generating the tuples
+            if direction == "ack" and array[6] != "66":
+                seq_idx = -1
+                tsval_idx = -1
+                tsecr_idx = -1
+                len_idx = -1
+                for i in range(7, len(array)):
+                    if array[i].startswith("Seq"):
+                        seq_idx = i
+                    elif array[i].startswith("TSval"):
+                        tsval_idx = i
+                    elif array[i].startswith("TSecr"):
+                        tsecr_idx = i
+                    elif array[i].startswith("Len"):
+                        len_idx = i
+                if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
                     len_idx != -1):
+                    pkts.append((
+                        int(array[seq_idx][4:]),
+                        flw_idx,
+                        float(array[1]) * 1e6,
+                        (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
+                        int(array[len_idx][4:])))
+            else:
                 pkts.append((
-                    int(array[seq_idx][4:]),
+                    int(array[-6][4:]),
                     flw_idx,
                     float(array[1]) * 1e6,
-                    (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
-                    int(array[len_idx][4:])))
-        else:
-            pkts.append((
-                int(array[-6][4:]),
-                flw_idx,
-                float(array[1]) * 1e6,
-                (int(array[-2][6:]), int(array[-1][6:])),
-                int(array[-3][4:])))
+                    (int(array[-2][6:]), int(array[-1][6:])),
+                    int(array[-3][4:])))
 
-    subprocess.check_call(["rm", temp_file])
+    subprocess.check_call(["rm", tmp_flp])
     return pkts
 
 
