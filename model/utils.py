@@ -4,12 +4,13 @@ import math
 import os
 from os import path
 import random
-import zipfile
 import subprocess
-import defaults
+import zipfile
 
 import numpy as np
 import torch
+
+import defaults
 
 
 # Arguments to ignore when converting an arguments dictionary to a
