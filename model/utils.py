@@ -254,8 +254,8 @@ def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
-    folder = flp[:flp.rindex("/")]
-    temp_file = folder + "/temp_out"
+    folder = path.dirname(flp)
+    temp_file = path.join(folder, "temp_out")
 
     client_p = 5555 + unfair_idx
     server_p = 5201 + unfair_idx
