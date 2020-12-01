@@ -200,7 +200,7 @@ class Sim():
         # Number of fair flows
         self.cca_2_flws = int(cca_2_flws[:-(len(cca_2_name))])
         # Experiment duration (s).
-        self.dur_s = int(end_time)
+        self.dur_s = int(end_time[:-1])
 
 
 def args_to_str(args, order):
@@ -292,18 +292,18 @@ def parse_packets(flp, flw_idx, direction="data"):
                 elif array[i].startswith("Len"):
                     len_idx = i
             if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                len_idx != -1):
+                    len_idx != -1):
                 pkts.append((
                     int(array[seq_idx][4:]),
                     flw_idx,
-                    float(array[1]) * 100000,
+                    float(array[1]) * 1000000,
                     (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
                     int(array[len_idx][4:])))
         else:
             pkts.append((
                 int(array[-6][4:]),
                 flw_idx,
-                float(array[1]) * 100000,
+                float(array[1]) * 1000000,
                 (int(array[-2][6:]), int(array[-1][6:])),
                 int(array[-3][4:])))
 
