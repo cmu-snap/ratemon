@@ -43,3 +43,6 @@ DEFAULTS = {
 EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
 SYNC = False
+# Cloudlab experiments server and client ports
+CL_PORT_START_CLIENT = 5555
+CL_PORT_START_SERVER = 5201

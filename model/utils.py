@@ -5,6 +5,8 @@ import os
 from os import path
 import random
 import zipfile
+import subprocess
+from defaults import CL_PORT_START_CLIENT, CL_PORT_START_SERVER
 
 import numpy as np
 import torch
@@ -180,29 +182,25 @@ class Sim():
         self.name = sim
         toks = sim.split("-")
         if sim.endswith(".pcap"):
-            # unfair-cubic-pcc-8bw-30rtt-64q-1pcc-1cubic-20201118T114242.pcap
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100-20201118T114242.pcap
             # Remove ".pcap" from the last token.
             toks[-1] = toks[-1][:-5]
-        # unfair-cubic-pcc-8bw-30rtt-64q-1pcc-1cubic-20201118T114242
-        (_, fair_flw_name, unfair_flw_name, bw_Mbps,
-         rtt_ms, queue_p, unfair_flws, fair_flws, _) = toks
+        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100-20201118T114242
+        (_, cca_1_name, cca_2_name, bw_Mbps,
+         rtt_ms, queue_p, unfair_flws, fair_flws, end_time, _) = toks
 
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
         # Bottleneck router delay (us).
-        self.btl_delay_us = float(rtt_ms[:-3]) * 1000 / 2
+        self.rtt_us = float(rtt_ms[:-3]) * 1000
         # Queue size (packets).
         self.queue_p = float(queue_p[:-1])
         # Number of unfair flows
-        self.unfair_flws = int(unfair_flws[:-(len(unfair_flw_name))])
+        self.cca_1_flws = int(unfair_flws[:-(len(cca_1_name))])
         # Number of fair flows
-        self.fair_flws = int(fair_flws[:-(len(fair_flw_name))])
-        # Edge delays TODO: For backward compatibility purpose, set edge delays to zero. (Or remove it?)
-        self.edge_delays = [0] * (self.unfair_flws + self.fair_flws)
-        # Packet size (bytes) TODO: Add this information to experiment files
-        self.payload_B = float(1448)
+        self.cca_2_flws = int(fair_flws[:-(len(cca_2_name))])
         # Experiment duration (s). TODO: Add this information to experiment files
-        self.dur_s = float(100)
+        self.dur_s = int(end_time)
 
 
 def args_to_str(args, order):
@@ -243,10 +241,10 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
+def parse_packets(flp, flw_idx, direction="data"):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
-        (seq, sender, timestamp us, timestamp option)
+        (seq, sender, timestamp us, timestamp option, payload length)
     with one entry for every packet. Considers only packets in either the "ack"
     or "data" direction.
     """
@@ -257,17 +255,18 @@ def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
     folder = path.dirname(flp)
     temp_file = path.join(folder, "temp_out")
 
-    client_p = 5555 + unfair_idx
-    server_p = 5201 + unfair_idx
+    client_p = CL_PORT_START_CLIENT + flw_idx
+    server_p = CL_PORT_START_SERVER + flw_idx
 
     if direction == "data":
-        filter_s = f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && tcp.len == 1448\""
+        filter_s = f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && tcp.len >= 1000\""
     else:
         filter_s = f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\""
 
     os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", temp_file]))
     file = open(temp_file, "r")
 
+    # (Seq, index, timestamp, TCP option, payload size)
     pkts = []
 
     for line in file:
@@ -277,6 +276,7 @@ def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
             seq_idx = -1
             tsval_idx = -1
             tsecr_idx = -1
+            len_idx = -1
             for i in range(7, len(array)):
                 if array[i].startswith("Seq"):
                     seq_idx = i
@@ -284,18 +284,20 @@ def parse_packets(flp, unfair_idx, packet_size_B, direction="data"):
                     tsval_idx = i
                 elif array[i].startswith("TSecr"):
                     tsecr_idx = i
-            if seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1:
+                elif array[i].startswith("Len"):
+                    len_idx = i
+            if seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and len_idx != -1:
                 pkts.append(
                     (int(array[seq_idx][4:]),
-                     unfair_idx, float(array[1]) * 100000,
+                     flw_idx, float(array[1]) * 100000,
                      (int(array[tsval_idx][6:]),
-                      int(array[tsecr_idx][6:]))))
+                      int(array[tsecr_idx][6:])),
+                     int(array[len_idx][4:])))
         else:
-            # Seq, index, timestamp, TCP option
-            pkts.append((int(array[-6][4:]), unfair_idx, float(array[1])
-                         * 100000, (int(array[-2][6:]), int(array[-1][6:]))))
+            pkts.append((int(array[-6][4:]), flw_idx, float(array[1])
+                         * 100000, (int(array[-2][6:]), int(array[-1][6:])), int(array[-3][4:])))
 
-    os.system(f"rm {temp_file}")
+    subprocess.check_call(["rm", temp_file])
     return pkts
 
 

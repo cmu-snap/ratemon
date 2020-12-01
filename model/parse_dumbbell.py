@@ -149,7 +149,7 @@ def parse_pcap(sim_dir, out_dir):
     """ Parse a PCAP file. """
     print(f"Parsing: {sim_dir}")
     sim = utils.Sim(sim_dir)
-    assert sim.unfair_flws > 0, f"No unfair flows to analyze: {sim_dir}"
+    assert sim.cca_1_flws > 0, f"No unfair flows to analyze: {sim_dir}"
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{sim.name}.npz")
@@ -162,23 +162,23 @@ def parse_pcap(sim_dir, out_dir):
     #
     # The final output, with one entry per unfair flow.
     unfair_flws = []
-    for unfair_idx in range(sim.unfair_flws):
-        one_way_us = sim.btl_delay_us
+    for flw_idx in range(sim.cca_1_flws):
+        one_way_us = sim.rtt_us / 2
 
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
             path.join(sim_dir, f"client-tcpdump-{sim.name}.pcap"),
-            unfair_idx, sim.payload_B, direction="data")
+            flw_idx, direction="data")
 
         recv_pcap_flp = path.join(sim_dir, f"server-tcpdump-{sim.name}.pcap")
         recv_pkts = utils.parse_packets(
             recv_pcap_flp,
-            unfair_idx,
-            sim.payload_B, direction="data")
+            flw_idx,
+            direction="data")
         # Ack packets for RTT calculation
         ack_pkts = utils.parse_packets(
-            recv_pcap_flp, unfair_idx, sim.payload_B, direction="ack")
+            recv_pcap_flp, flw_idx, direction="ack")
 
         # State that the windowed metrics need to track across packets.
         win_state = {win: {
@@ -210,6 +210,8 @@ def parse_pcap(sim_dir, out_dir):
         ack_idx = 0
 
         for j, recv_pkt in enumerate(recv_pkts):
+            if j % 1000 == 0:
+                print(f"{j}/{len(recv_pkts)}")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             output[j]["seq"] = recv_pkt_seq
@@ -273,12 +275,13 @@ def parse_pcap(sim_dir, out_dir):
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
+            payload_size = sent_pkts[j + pkt_loss_total_true][4]
             pkt_loss_cur_estimate = math.ceil(
-                0 if recv_pkt_seq == prev_pkt_seq + sim.payload_B
+                0 if recv_pkt_seq == prev_pkt_seq + payload_size
                 else (
-                    ((recv_pkt_seq - highest_seq - sim.payload_B) /
-                     sim.payload_B)
-                    if recv_pkt_seq > highest_seq + sim.payload_B
+                    ((recv_pkt_seq - highest_seq - payload_size) /
+                     payload_size)
+                    if recv_pkt_seq > highest_seq + payload_size
                     else (
                         1
                         if (recv_pkt_seq < prev_pkt_seq and
