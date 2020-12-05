@@ -153,7 +153,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
@@ -724,7 +724,7 @@ class SvmSklearnWrapper(SvmWrapper):
         "tt512" not in fet and
         "tt1024" not in fet and
         "mathis model" not in fet)]
-    out_spc = ["queue occupancy-ewma-alpha0.01"]
+    out_spc = ["flow share percentage"]
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
@@ -797,7 +797,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
@@ -1206,7 +1206,7 @@ class LstmWrapper(PytorchModelWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss

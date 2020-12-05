@@ -302,7 +302,7 @@ def make_datasets(net, args, dat=None):
     dat_in_all, dat_out_all, dat_out_all_raw, dat_out_all_oracle, _ = zip(
         *dat_all)
     # Determine the number of flows in each example.
-    num_flws = [sim.unfair_flws + sim.fair_flws for sim in sims]
+    num_flws = [sim.cca_1_flws + sim.cca_2_flws for sim in sims]
     num_flws = [
         np.array([num_flws_] * dat_in.shape[0], dtype=[("num_flws", "int")])
         for num_flws_, dat_in in zip(num_flws, dat_in_all)]
@@ -755,7 +755,7 @@ def run_trials(args):
     out_flp = path.join(
         args["out_dir"],
         (utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()))
-        ) + (
+         ) + (
             # Determine the proper extension based on the type of
             # model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
@@ -853,7 +853,7 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
         [{**cnf,
           "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
          for cnf in cnfs],
-        [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
+        [gate_func, ] * num_cnfs, [post_func, ] * num_cnfs)
 
     if defaults.SYNC:
         res = [run_cnf(*cnf) for cnf in cnfs]
