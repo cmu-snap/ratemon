@@ -15,25 +15,25 @@ import utils
 
 
 # Bandwidth (Mbps).
-BW_MIN_Mbps = 8
-BW_MAX_Mbps = 48
+BW_MIN_Mbps = 10
+BW_MAX_Mbps = 10
 BW_DELTA_Mbps = 8
-BWS_Mbps = [1] + list(range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps))
+BWS_Mbps = list(range(BW_MIN_Mbps, BW_MAX_Mbps + 1, BW_DELTA_Mbps))
 # Link delay (us).
-DELAY_MIN_us = 2000
-DELAY_MAX_us = 10000
+DELAY_MIN_us = 6500
+DELAY_MAX_us = 6500
 DELAY_DELTA_us = 2000
-DELAYS_us = [1000] + list(range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us))
+DELAYS_us = list(range(DELAY_MIN_us, DELAY_MAX_us + 1, DELAY_DELTA_us))
 # Router queue size (multiples of the BDP).
-QUEUE_MULTS = [1, 2, 3, 4] + list(range(8, 33, 8))  # 1x to 32x BDP.
+QUEUE_MULTS = [2**i / 4 for i in range(10)]
 # The number of "unfair" flows.
-UNFAIR_FLOWS = range(3, 6)  # 1 t0 5 "unfair" flows.
+UNFAIR_FLOWS = range(1, 2)
 # Number of "fair" flows
-FAIR_FLOWS = range(3, 6)  # 1 to 10 "fair" flows.
+FAIR_FLOWS = range(1, 2)
 # Packet size (bytes)
 PACKET_SIZE_B = 1380
 # Simulation duration (s).
-DUR_s = 80
+DUR_s = 240
 # Delay until ACK pacing begins.
 WARMUP_s = 60
 # Whether to enable unfairness mitigation.
@@ -43,7 +43,7 @@ PCAP = True
 # Whether to capture csv files.
 CSV = True
 # The protool to use for the "unfair" flows.
-UNFAIR_PROTO = "ns3::TcpCubic"
+UNFAIR_PROTO = "ns3::TcpNewReno"
 # The protocol to use for the "fair" flows.
 FAIR_PROTO = "ns3::TcpBbr"
 # Whether to return before running experiments.

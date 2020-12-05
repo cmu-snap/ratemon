@@ -32,7 +32,7 @@ def get_avg_tputs(flp):
             [utils.safe_mean(fil[flw][TPUT_KEY]) for flw in fil.files])
 
 
-def plot_f1b(flps, out_dir):
+def plot_f1b(flps, var, out_dir):
     """ Generate figure 1b from Ray's paper. """
     datapoints = [get_avg_tputs(flp) for flp in flps]
     # Sort the datapoint based on the simulation BDP.
@@ -62,7 +62,7 @@ def plot_f1b(flps, out_dir):
             # Line with circle markers.
             "o-",
             # The first flow is BBR and the second is Cubic.
-            label=("1 BBR" if idx == 0 else "1 Cubic"))
+            label=("1 BBR" if idx == 0 else f"1 {var}"))
 
     plt.xscale("log", basex=2)
     plt.xticks(x_vals, [f"{x:.2f}" if x < 1 else str(round(x)) for x in x_vals])
@@ -71,11 +71,11 @@ def plot_f1b(flps, out_dir):
     plt.ylim(bottom=0, top=sims[0].bw_Mbps * 1.1)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(path.join(out_dir, "1b.pdf"))
+    plt.savefig(path.join(out_dir, f"1b_{var}.pdf"))
     plt.close()
 
 
-def plot_f1c(flps, out_dir):
+def plot_f1c(flps, var, out_dir):
     """ Generate figure 1c from Ray's paper. """
     tot_flps = len(flps)
     assert tot_flps == 1, \
@@ -109,13 +109,13 @@ def plot_f1c(flps, out_dir):
 
     plt.figure(figsize=(8, 3))
     plt.plot(x_vals, fair_tputs, label="1 BBR")
-    plt.plot(x_vals, unfair_tputs, label="Sum of 16 Cubic")
+    plt.plot(x_vals, unfair_tputs, label=f"Sum of 16 {var}")
     plt.xlabel("Time (s)")
     plt.ylabel("Throughput (Mbps)")
-    plt.ylim(bottom=0, top=sim.bw_Mbps * 1.1)
+    plt.ylim(bottom=0)  # , top=sim.bw_Mbps * 1.1)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(path.join(out_dir, "1c.pdf"))
+    plt.savefig(path.join(out_dir, f"1c_{var}.pdf"))
     plt.close()
 
 
@@ -134,18 +134,23 @@ def main():
         help=("The path to a directory containing a parsed data file for figure "
               "1c."),
         required=True, type=str)
+    psr.add_argument(
+        "--variant", help="The TCP variant competing with BBR.", required=True,
+        type=str)
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     f1b = args.f1b
     f1c = args.f1c
+    var = args.variant
     out_dir = args.out_dir
     assert path.exists(f1b), f"Directory does not exist: {f1b}"
     assert path.exists(f1c), f"Directory does not exist: {f1c}"
     if not path.exists(out_dir):
         os.makedirs(out_dir)
 
-    plot_f1b([path.join(f1b, fln) for fln in os.listdir(f1b)], out_dir)
-    plot_f1c([path.join(f1c, fln) for fln in os.listdir(f1c)], out_dir)
+    plot_f1b([path.join(f1b, fln) for fln in os.listdir(f1b)], var, out_dir)
+    if var == "Cubic":
+        plot_f1c([path.join(f1c, fln) for fln in os.listdir(f1c)], var, out_dir)
 
 
 if __name__ == "__main__":
