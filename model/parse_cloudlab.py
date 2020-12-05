@@ -14,6 +14,7 @@ import time
 
 import numpy as np
 import matplotlib.pyplot as plt
+import shutil
 
 import cl_args
 import defaults
@@ -157,12 +158,13 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
         print(f"    Already parsed: {sim_dir}")
         return
 
-    # If the untar files does not exist, un
+    # Create a temporary folder to untar experiments
     untar_dir = path.join(untar_dir, sim.name)
-    if not path.exists(untar_dir):
-        print(f"{sim.name} has not been untarred. Creating {untar_dir}")
-        os.mkdir(untar_dir)
-        subprocess.check_call(["sudo", "tar", "-xf", sim_dir, "-C", untar_dir])
+    if path.exists(untar_dir):
+        # Delete the folder and then untar experiments
+        shutil.rmtree(untar_dir)
+    os.mkdir(untar_dir)
+    subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
     # Start time of the experiment - very first packet of the first flow
     start_time = 0
@@ -630,6 +632,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
         print(f"    Saving: {out_flp}")
         np.savez_compressed(
             out_flp, **{str(k + 1): v for k, v in enumerate(flws)})
+
+    # Remove untarred folder
+    shutil.rmtree(untar_dir)
 
 
 def main():
