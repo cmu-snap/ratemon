@@ -182,10 +182,12 @@ class Sim():
             sim = path.basename(sim)
         self.name = sim
         toks = sim.split("-")
-        if sim.endswith(".pcap"):
-            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.pcap
-            # Remove ".pcap" from the last token.
-            toks[-1] = toks[-1][:-5]
+        if sim.endswith(".tar.gz"):
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.tar.gz
+            # Remove ".tar.gz" from the last token.
+            toks[-1] = toks[-1][:-7]
+            # Update sim.name
+            self.name = self.name[:-7]
         # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
         (_, cca_1_name, cca_2_name, bw_Mbps, rtt_ms, queue_p, cca_1_flws,
          cca_2_flws, end_time, _) = toks
@@ -291,7 +293,7 @@ def parse_packets(flp, flw_idx, direction="data"):
                     elif array[i].startswith("Len"):
                         len_idx = i
                 if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                    len_idx != -1):
+                        len_idx != -1):
                     pkts.append((
                         int(array[seq_idx][4:]),
                         flw_idx,
@@ -350,8 +352,8 @@ def load_sim(flp, msg=None):
     print(f"{'' if msg is None else f'{msg} - '}Parsing: {flp}")
     try:
         with np.load(flp) as fil:
-            assert len(fil.files) == 1 and "1" in fil.files, \
-                "More than one flow detected!"
+            # assert len(fil.files) == 1 and "1" in fil.files, \
+            #     "More than one flow detected!"
             dat = fil["1"]
     except zipfile.BadZipFile:
         print(f"Bad simulation file: {flp}")
