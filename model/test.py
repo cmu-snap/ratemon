@@ -146,14 +146,14 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             bucketized_bw_dict[bw_mbps].append(bucketized_accuracy)
             break
 
-    rtt_us = (sim.btl_delay_us + 2 * sim.edge_delays[0]) * 2
+    rtt_us = sim.rtt_us
     for rtt_us_ in rtt_dict.keys():
         if rtt_us <= rtt_us_:
             rtt_dict[rtt_us_].append(accuracy)
             bucketized_rtt_dict[rtt_us_].append(bucketized_accuracy)
             break
 
-    bdp = sim.bw_Mbps * rtt_us / sim.payload_B / sim.queue_p
+    bdp = sim.bw_Mbps * rtt_us / (1448) / sim.queue_p
 
     for queue_bdp in queue_dict.keys():
         if bdp <= queue_bdp:

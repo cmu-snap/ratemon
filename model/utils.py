@@ -334,8 +334,8 @@ def load_sim(flp, msg=None):
     print(f"{'' if msg is None else f'{msg} - '}Parsing: {flp}")
     try:
         with np.load(flp) as fil:
-            assert len(fil.files) == 1 and "1" in fil.files, \
-                "More than one flow detected!"
+            # assert len(fil.files) == 1 and "1" in fil.files, \
+            #     "More than one flow detected!"
             dat = fil["1"]
     except zipfile.BadZipFile:
         print(f"Bad simulation file: {flp}")
@@ -584,5 +584,5 @@ def assert_tensor(**kwargs):
     """
     for name, val in kwargs.items():
         assert isinstance(val, torch.Tensor), \
-        (f"\"{name}\" is of type \"{type(val)}\" when it should be of type "
-         "\"torch.Tensor\"")
+            (f"\"{name}\" is of type \"{type(val)}\" when it should be of type "
+             "\"torch.Tensor\"")

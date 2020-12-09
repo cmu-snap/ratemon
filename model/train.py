@@ -161,7 +161,7 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
              [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
     dat_extra = np.empty(shape=dat.shape, dtype=dtype)
     dat_extra["raw"] = dat_out
-    dat_extra["num_flws"].fill(sim.unfair_flws + sim.fair_flws)
+    dat_extra["num_flws"].fill(sim.cca_1_flws + sim.cca_2_flws)
     dat_extra["btk_throughput"].fill(sim.bw_Mbps)
     for typ in defaults.EXTRA_FETS:
         dat_extra[typ] = dat[typ]
@@ -775,7 +775,7 @@ def run_trials(args):
     out_flp = path.join(
         args["out_dir"],
         (utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()))
-        ) + (
+         ) + (
             # Determine the proper extension based on the type of
             # model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
@@ -869,7 +869,7 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
         [{**cnf,
           "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
          for cnf in cnfs],
-        [gate_func,] * num_cnfs, [post_func,] * num_cnfs)
+        [gate_func, ] * num_cnfs, [post_func, ] * num_cnfs)
 
     if defaults.SYNC:
         res = [run_cnf(*cnf) for cnf in cnfs]

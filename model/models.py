@@ -156,7 +156,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
@@ -713,7 +713,7 @@ class SvmSklearnWrapper(SvmWrapper):
         "tt512" not in fet and
         "tt1024" not in fet and
         "mathis model" not in fet)]
-    out_spc = ["queue occupancy-ewma-alpha0.01"]
+    out_spc = ["flow share percentage"]
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
@@ -786,7 +786,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
@@ -1113,21 +1113,21 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.close()
 
             # Plot queue occupancy.
-            self.__plot_queue_occ(
-                torch.tensor(dat_extra["raw"]),
-                torch.tensor(fair),
-                path.join(
-                    out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
-                x_lim)
+            # self.__plot_queue_occ(
+            #     torch.tensor(dat_extra["raw"]),
+            #     torch.tensor(fair),
+            #     path.join(
+            #         out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
+            #     x_lim)
 
             # Plot throughput
-            self.__plot_throughput(dat_out_classes,
-                                   torch.tensor(self.net.predict(dat_in)),
-                                   torch.tensor(fair), path.join(
-                                       out_dir, f"throughput_{self.name}.pdf"),
-                                   dat_extra["btk_throughput"],
-                                   torch.tensor(dat_extra[defaults.THR_ESTIMATE_FET].copy()),
-                                   x_lim=None)
+            self.__plot_throughput(
+                dat_out_classes, torch.tensor(self.net.predict(dat_in)),
+                torch.tensor(fair),
+                path.join(out_dir, f"throughput_{self.name}.pdf"),
+                dat_extra["btk_throughput"],
+                torch.tensor(dat_extra[defaults.THR_ESTIMATE_FET].copy()),
+                x_lim=None)
 
         # Analyze accuracy vs. unfairness for all flows and all
         # degrees of unfairness, for the Mathis Model.
@@ -1302,7 +1302,7 @@ class LstmWrapper(PytorchModelWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.unfair_flws + sim.fair_flws)),
+                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
