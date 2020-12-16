@@ -243,7 +243,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, flw_idx, direction="data"):
+def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
          (sequence number, flow index, timestamp (us), TCP timestamp option,
@@ -259,12 +259,22 @@ def parse_packets(flp, flw_idx, direction="data"):
     server_p = defaults.CL_PORT_START_SERVER + flw_idx
 
     if direction == "data":
-        filter_s = (
-            f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
-            "tcp.len >= 1000\"")
+        if extra_filter:
+            filter_s = (
+                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                f"tcp.len >= 1000 && {extra_filter}\"")
+        else:
+            filter_s = (
+                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                "tcp.len >= 1000\"")
     else:
-        filter_s = (
-            f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
+        if extra_filter:
+            filter_s = (
+                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p} && "
+                f"{extra_filter}\"")
+        else:
+            filter_s = (
+                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
 
     # Strip off the ".pcap" extension and append "_tmp.txt".
     tmp_flp = f"{flp[:-5]}_tmp.txt"

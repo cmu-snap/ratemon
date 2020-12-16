@@ -166,14 +166,13 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
     os.mkdir(untar_dir)
     subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
-    # Start time of the experiment - very first packet of the first flow
-    start_time = 0
-
     # Process PCAP files from senders and receivers.
     #
     # The final output, with one entry per flow.
     flws = []
-    for flw_idx in range(tot_flws):
+
+    # Only process the last flow (unfair flow)
+    for flw_idx in range(tot_flws - 1, tot_flws):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
@@ -214,16 +213,24 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
         # RTT estimation.
         ack_idx = 0
         # Update experiment start time
-        if flw_idx == 0:
-            start_time = recv_data_pkts[0][2]
+        start_time = recv_data_pkts[0][2]
+        # Compute the end time of the first flow
+        end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
+        end_idx = 0
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
                 print(f"Flow {flw_idx}: {j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
-            output[j]["seq"] = recv_pkt_seq
             recv_time_cur = recv_pkt[2]
+
+            if recv_time_cur > end_time:
+                # Stop parsing when the first flow ends
+                end_idx = j
+                break
+
+            output[j]["seq"] = recv_pkt_seq
             # Align arrival time to zero such that all features starts at 0s
             output[j]["arrival time us"] = recv_time_cur - start_time
 
@@ -323,8 +330,11 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
                     # update the throughput EWMA is not "EWMA-ified"
                     # twice. Divide by 1e6 to convert from
                     # microseconds to seconds.
-                    new = utils.safe_div(
-                        1, utils.safe_div(interarr_time_us, 1e6))
+                    output[j][metric] = utils.safe_div(
+                        1e6,
+                        output[j][make_ewma_metric(
+                            "interarrival time us", alpha)])
+                    continue
                 elif "RTT estimate us" in metric:
                     new = rtt_estimate_us
                 elif "RTT estimate ratio" in metric:
@@ -574,7 +584,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
-        flws.append(output)
+        flws.append(output[:end_idx])
 
     # Save memory by explicitly deleting the sent and received packets
     # after they have been parsed. This happens outside of the above
@@ -587,31 +597,38 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
     # Sum the total throughput of all flows, and then compute the flow
     # percentage used by each flow
-    extra_time = 20  # Flows could end later than start_time + duration
+    # extra_time = 20  # Flows could end later than start_time + duration
+    # ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
+    # arrival_time_key = "arrival time us"
+    # x_vals = np.arange((sim.dur_s + extra_time) * 1000, dtype=float) / 1000
+    # total_throughput = [0] * ((sim.dur_s + extra_time) * 1000)
+    # interp_list = []
+    # for flw_dat in flws:
+    #     per_flow_throughput = flw_dat[ground_truth_throughput]
+    #     interpolated = np.interp(
+    #         x_vals,
+    #         # Convert from us to s.
+    #         xp=flw_dat[arrival_time_key] / 1e6,
+    #         fp=per_flow_throughput)
+    #     interp_list.append(interpolated)
+    #     total_throughput = np.add(total_throughput, interpolated)
+
+    # for k, flw_dat in enumerate(flws):
+    #     per_flow_fraction = np.divide(
+    #         interp_list[k],
+    #         total_throughput)
+    #     # Sometimes np.divide could yield weird fraction greater than 1
+    #     percentage = list(map(
+    #         lambda x: min(1.0, per_flow_fraction[int(x / 1000)]),
+    #         flw_dat[arrival_time_key]))
+    #     flw_dat["flow share percentage"] = percentage
+
     ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
-    arrival_time_key = "arrival time us"
-    x_vals = np.arange((sim.dur_s + extra_time) * 1000, dtype=float) / 1000
-    total_throughput = [0] * ((sim.dur_s + extra_time) * 1000)
-    interp_list = []
+    flow_share = "flow share percentage"
+    total_throughput_p = sim.bw_Mbps * (1e6 / 8 / 1448)
     for flw_dat in flws:
         per_flow_throughput = flw_dat[ground_truth_throughput]
-        interpolated = np.interp(
-            x_vals,
-            # Convert from us to s.
-            xp=flw_dat[arrival_time_key] / 1e6,
-            fp=per_flow_throughput)
-        interp_list.append(interpolated)
-        total_throughput = np.add(total_throughput, interpolated)
-
-    for k, flw_dat in enumerate(flws):
-        per_flow_fraction = np.divide(
-            interp_list[k],
-            total_throughput)
-        # Sometimes np.divide could yield weird fraction greater than 1
-        percentage = list(map(
-            lambda x: min(1.0, per_flow_fraction[int(x / 1000)]),
-            flw_dat[arrival_time_key]))
-        flw_dat["flow share percentage"] = percentage
+        flw_dat[flow_share] = per_flow_throughput / total_throughput_p
 
     # Determine if there are any NaNs or Infs in the results. For the
     # results for each flow, look through all features (columns) and

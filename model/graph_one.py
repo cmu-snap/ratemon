@@ -35,7 +35,7 @@ def main():
         dat = fil[fil.files[0]]
 
     sim = utils.Sim(dat_flp)
-    queue_fair_occupancy = 1 / (sim.unfair_flws + sim.fair_flws)
+    queue_fair_occupancy = 1 / (sim.cca_1_flws + sim.cca_2_flws)
 
     for fet in dat.dtype.names:
         if fet == "arrival time us":
