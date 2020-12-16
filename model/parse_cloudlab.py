@@ -216,7 +216,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
         start_time = recv_data_pkts[0][2]
         # Compute the end time of the first flow
         end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
-        end_idx = 0
+        end_idx = len(recv_data_pkts)
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
