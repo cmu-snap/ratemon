@@ -284,10 +284,19 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
             while sent_pkt_seq != recv_pkt_seq:
                 # Packet loss
                 pkt_loss_total_true += 1
-                sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+                if j + pkt_loss_total_true < len(sent_pkts):
+                    sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+                else:
+                    # Couldn't find the packet in sender's trace
+                    # Reduce pkt_loss_total_true by one so that
+                    # the offset is still correct
+                    print(f"Couldn't find {recv_pkt_seq}")
+                    pkt_loss_total_true = pkt_loss_total_true_prev - 1
+                    break
             # Calculate how many packets were lost since receiving the
             # last packet.
-            pkt_loss_cur_true = pkt_loss_total_true - pkt_loss_total_true_prev
+            pkt_loss_cur_true = max(
+                0, pkt_loss_total_true - pkt_loss_total_true_prev)
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
