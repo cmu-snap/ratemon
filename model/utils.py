@@ -287,36 +287,27 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     with open(tmp_flp, "r") as fil:
         for line in fil:
             array = line.split()
-            # Normal ACK size is 66, slow path of generating the tuples
-            if direction == "ack" and array[6] != "66":
-                seq_idx = -1
-                tsval_idx = -1
-                tsecr_idx = -1
-                len_idx = -1
-                for i in range(7, len(array)):
-                    if array[i].startswith("Seq"):
-                        seq_idx = i
-                    elif array[i].startswith("TSval"):
-                        tsval_idx = i
-                    elif array[i].startswith("TSecr"):
-                        tsecr_idx = i
-                    elif array[i].startswith("Len"):
-                        len_idx = i
-                if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                        len_idx != -1):
-                    pkts.append((
-                        int(array[seq_idx][4:]),
-                        flw_idx,
-                        float(array[1]) * 1e6,
-                        (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
-                        int(array[len_idx][4:])))
-            else:
+            seq_idx = -1
+            tsval_idx = -1
+            tsecr_idx = -1
+            len_idx = -1
+            for i in range(7, len(array)):
+                if array[i].startswith("Seq"):
+                    seq_idx = i
+                elif array[i].startswith("TSval"):
+                    tsval_idx = i
+                elif array[i].startswith("TSecr"):
+                    tsecr_idx = i
+                elif array[i].startswith("Len"):
+                    len_idx = i
+            if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
+                    len_idx != -1):
                 pkts.append((
-                    int(array[-6][4:]),
+                    int(array[seq_idx][4:]),
                     flw_idx,
                     float(array[1]) * 1e6,
-                    (int(array[-2][6:]), int(array[-1][6:])),
-                    int(array[-3][4:])))
+                    (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
+                    int(array[len_idx][4:])))
 
     subprocess.check_call(["rm", tmp_flp])
     return pkts
