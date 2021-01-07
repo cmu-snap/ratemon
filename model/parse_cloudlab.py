@@ -243,7 +243,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
                 tsval = recv_ack_pkts[ack_idx][3][0]
                 tsecr = recv_pkt[3][1]
                 ack_idx_old = ack_idx
-                while tsval != tsecr and ack_idx < len(recv_ack_pkts):
+                while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
                     ack_idx += 1
                     tsval = recv_ack_pkts[ack_idx][3][0]
                 if tsval == tsecr:
