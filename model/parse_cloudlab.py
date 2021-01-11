@@ -6,12 +6,15 @@ import collections
 import itertools
 import math
 import multiprocessing
+import subprocess
 import os
 from os import path
 import random
 import time
 
 import numpy as np
+import matplotlib.pyplot as plt
+import shutil
 
 import cl_args
 import defaults
@@ -24,7 +27,8 @@ import utils
 REGULAR = [
     ("seq", "int32"),
     ("arrival time us", "int32"),
-    ("min RTT us", "int32")
+    ("min RTT us", "int32"),
+    ("flow share percentage", "float64")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -140,7 +144,7 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
          if pkt_idx - win_start_idx > 0 else 0))
 
 
-def parse_pcap(sim_dir, out_dir):
+def parse_pcap(sim_dir, untar_dir, out_dir):
     """ Parse a PCAP file. """
     print(f"Parsing: {sim_dir}")
     sim = utils.Sim(sim_dir)
@@ -154,6 +158,17 @@ def parse_pcap(sim_dir, out_dir):
         print(f"    Already parsed: {sim_dir}")
         return
 
+    # Create a temporary folder to untar experiments
+    untar_dir = path.join(untar_dir, sim.name)
+    if path.exists(untar_dir):
+        # Delete the folder and then untar experiments
+        shutil.rmtree(untar_dir)
+    os.mkdir(untar_dir)
+    subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
+
+    # Start time of the experiment - very first packet of the first flow
+    start_time = 0
+
     # Process PCAP files from senders and receivers.
     #
     # The final output, with one entry per flow.
@@ -162,9 +177,9 @@ def parse_pcap(sim_dir, out_dir):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
-            path.join(sim_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
+            path.join(untar_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
 
-        recv_flp = path.join(sim_dir, f"server-tcpdump-{sim.name}.pcap")
+        recv_flp = path.join(untar_dir, f"server-tcpdump-{sim.name}.pcap")
         recv_data_pkts = utils.parse_packets(
             recv_flp, flw_idx, direction="data")
         # Ack packets for RTT calculation
@@ -198,6 +213,9 @@ def parse_pcap(sim_dir, out_dir):
         highest_seq = 0
         # RTT estimation.
         ack_idx = 0
+        # Update experiment start time
+        if flw_idx == 0:
+            start_time = recv_data_pkts[0][2]
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
@@ -206,7 +224,8 @@ def parse_pcap(sim_dir, out_dir):
             recv_pkt_seq = recv_pkt[0]
             output[j]["seq"] = recv_pkt_seq
             recv_time_cur = recv_pkt[2]
-            output[j]["arrival time us"] = recv_time_cur
+            # Align arrival time to zero such that all features starts at 0s
+            output[j]["arrival time us"] = recv_time_cur - start_time
 
             if j > 0:
                 # Receiver-side RTT estimation using the TCP timestamp
@@ -566,6 +585,34 @@ def parse_pcap(sim_dir, out_dir):
     del recv_data_pkts
     del recv_ack_pkts
 
+    # Sum the total throughput of all flows, and then compute the flow
+    # percentage used by each flow
+    extra_time = 20  # Flows could end later than start_time + duration
+    ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
+    arrival_time_key = "arrival time us"
+    x_vals = np.arange((sim.dur_s + extra_time) * 1000, dtype=float) / 1000
+    total_throughput = [0] * ((sim.dur_s + extra_time) * 1000)
+    interp_list = []
+    for flw_dat in flws:
+        per_flow_throughput = flw_dat[ground_truth_throughput]
+        interpolated = np.interp(
+            x_vals,
+            # Convert from us to s.
+            xp=flw_dat[arrival_time_key] / 1e6,
+            fp=per_flow_throughput)
+        interp_list.append(interpolated)
+        total_throughput = np.add(total_throughput, interpolated)
+
+    for k, flw_dat in enumerate(flws):
+        per_flow_fraction = np.divide(
+            interp_list[k],
+            total_throughput)
+        # Sometimes np.divide could yield weird fraction greater than 1
+        percentage = list(map(
+            lambda x: min(1.0, per_flow_fraction[int(x / 1000)]),
+            flw_dat[arrival_time_key]))
+        flw_dat["flow share percentage"] = percentage
+
     # Determine if there are any NaNs or Infs in the results. For the
     # results for each flow, look through all features (columns) and
     # make a note of the features that bad values. Flatten these lists
@@ -575,7 +622,7 @@ def parse_pcap(sim_dir, out_dir):
         fet for flw_dat in flws
         for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
     if bad_fets:
-        print(f"    Simulation {sim_dir} has NaNs of Infs in features: "
+        print(f"    Simulation {untar_dir} has NaNs of Infs in features: "
               f"{bad_fets}")
 
     # Save the results.
@@ -585,6 +632,9 @@ def parse_pcap(sim_dir, out_dir):
         print(f"    Saving: {out_flp}")
         np.savez_compressed(
             out_flp, **{str(k + 1): v for k, v in enumerate(flws)})
+
+    # Remove untarred folder
+    shutil.rmtree(untar_dir)
 
 
 def main():
@@ -597,16 +647,23 @@ def main():
         help=("The directory in which the experiment results are stored "
               "(required)."), required=True, type=str)
     psr.add_argument(
+        "--untar-dir",
+        help=(
+            "The directory in which the untarred experiment results are stored "
+            "(required)."),
+        required=True, type=str)
+    psr.add_argument(
         "--random-order", action="store_true",
         help="Parse the simulations in a random order.")
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
+    untar_dir = args.untar_dir
     out_dir = args.out_dir
 
     # Find all simulations.
     pcaps = [
-        (path.join(exp_dir, sim), out_dir)
+        (path.join(exp_dir, sim), untar_dir, out_dir)
         for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         # Set the random seed so that multiple instances of this

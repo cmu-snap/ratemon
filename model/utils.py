@@ -166,10 +166,12 @@ class Sim():
             sim = path.basename(sim)
         self.name = sim
         toks = sim.split("-")
-        if sim.endswith(".pcap"):
-            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.pcap
-            # Remove ".pcap" from the last token.
-            toks[-1] = toks[-1][:-5]
+        if sim.endswith(".tar.gz"):
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.tar.gz
+            # Remove ".tar.gz" from the last token.
+            toks[-1] = toks[-1][:-7]
+            # Update sim.name
+            self.name = self.name[:-7]
         # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
         (_, cca_1_name, cca_2_name, bw_Mbps, rtt_ms, queue_p, cca_1_flws,
          cca_2_flws, end_time, _) = toks
