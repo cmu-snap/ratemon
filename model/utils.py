@@ -255,8 +255,21 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
-    client_p = defaults.CL_PORT_START_CLIENT + flw_idx
-    server_p = defaults.CL_PORT_START_SERVER + flw_idx
+    # Check client and server ports
+    tcp_conv = subprocess.check_output(
+        ["tshark", "-r", flp, "-q", "-z", "conv,tcp"])
+    client_p_start = 99999
+    server_p_start = 99999
+    for s in tcp_conv.decode('utf-8').split():
+        if s.startswith("192.0.0.4:"):
+            # Client
+            client_p_start = min(client_p_start, int(s[len("192.0.0.4:"):]))
+        if s.startswith("192.0.0.2:"):
+            # Server
+            server_p_start = min(server_p_start, int(s[len("192.0.0.2:"):]))
+
+    client_p = client_p_start + flw_idx
+    server_p = server_p_start + flw_idx
 
     if direction == "data":
         if extra_filter:

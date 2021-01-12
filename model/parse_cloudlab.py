@@ -9,6 +9,7 @@ import multiprocessing
 import subprocess
 import os
 from os import path
+from os import listdir
 import random
 import time
 
@@ -167,18 +168,23 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
     subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
     # Process PCAP files from senders and receivers.
-    #
     # The final output, with one entry per flow.
     flws = []
+
+    # Get the batch number under /tmp/ directory
+    tmp_dir = path.join(untar_dir, "tmp")
+    batch_name = [d for d in os.listdir(tmp_dir) if os.path.isdir(
+        path.join(tmp_dir, d)) and d.startswith("batch_")][0]
+    batch_dir = path.join(tmp_dir, batch_name)
 
     # Only process the last flow (unfair flow)
     for flw_idx in range(tot_flws - 1, tot_flws):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
-            path.join(untar_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
+            path.join(batch_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
 
-        recv_flp = path.join(untar_dir, f"server-tcpdump-{sim.name}.pcap")
+        recv_flp = path.join(batch_dir, f"server-tcpdump-{sim.name}.pcap")
         recv_data_pkts = utils.parse_packets(
             recv_flp, flw_idx, direction="data")
         # Ack packets for RTT calculation
