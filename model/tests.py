@@ -16,7 +16,9 @@ sys.path.append(path.dirname(path.realpath(__file__)))
 TEST_DATA_DIR = "model/test_data/"
 LR_MODEL = (
     TEST_DATA_DIR +
-    "1-3-False-100-2-False-5.0-linear-0.001-10-1-LrSklearn-0.09-False-0-2-l1-False-None-False-False-9223372036854775807-0-9223372036854775807-0.1-10-0.pickle")
+    "1-3-False-100-2-False-5.0-linear-0.001-10-1-LrSklearn-0.09-False-0-2-l1" +
+    "-False-None-False-False-9223372036854775807-0-9223372036854775807-0.1" +
+    "-10-0.pickle")
 SCALE_PARAM = TEST_DATA_DIR + "scale_params.json"
 SIMULATIONS = TEST_DATA_DIR + "simulations/"
 EXPERIMENTS = TEST_DATA_DIR + "experiments/"
