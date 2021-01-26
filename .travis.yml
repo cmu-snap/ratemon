@@ -19,6 +19,8 @@ before_install:
 
 # Install dependencies.
 install:
+    - sudo apt-get update
+    - sudo apt-get install -y tshark
     - pip install -r model/requirements.txt
 # Run tests.
 script:

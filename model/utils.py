@@ -227,7 +227,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, flw_idx, direction="data"):
+def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
          (sequence number, flow index, timestamp (us), TCP timestamp option,
@@ -239,16 +239,39 @@ def parse_packets(flp, flw_idx, direction="data"):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
-    client_p = defaults.CL_PORT_START_CLIENT + flw_idx
-    server_p = defaults.CL_PORT_START_SERVER + flw_idx
+    # Check client and server ports
+    tcp_conv = subprocess.check_output(
+        ["tshark", "-r", flp, "-q", "-z", "conv,tcp"])
+    client_p_start = 99999
+    server_p_start = 99999
+    for s in tcp_conv.decode('utf-8').split():
+        if s.startswith("192.0.0.4:"):
+            # Client
+            client_p_start = min(client_p_start, int(s[len("192.0.0.4:"):]))
+        if s.startswith("192.0.0.2:"):
+            # Server
+            server_p_start = min(server_p_start, int(s[len("192.0.0.2:"):]))
+
+    client_p = client_p_start + flw_idx
+    server_p = server_p_start + flw_idx
 
     if direction == "data":
-        filter_s = (
-            f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
-            "tcp.len >= 1000\"")
+        if extra_filter:
+            filter_s = (
+                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                f"tcp.len >= 1000 && {extra_filter}\"")
+        else:
+            filter_s = (
+                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                "tcp.len >= 1000\"")
     else:
-        filter_s = (
-            f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
+        if extra_filter:
+            filter_s = (
+                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p} && "
+                f"{extra_filter}\"")
+        else:
+            filter_s = (
+                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
 
     # Strip off the ".pcap" extension and append "_tmp.txt".
     tmp_flp = f"{flp[:-5]}_tmp.txt"
@@ -261,36 +284,27 @@ def parse_packets(flp, flw_idx, direction="data"):
     with open(tmp_flp, "r") as fil:
         for line in fil:
             array = line.split()
-            # Normal ACK size is 66, slow path of generating the tuples
-            if direction == "ack" and array[6] != "66":
-                seq_idx = -1
-                tsval_idx = -1
-                tsecr_idx = -1
-                len_idx = -1
-                for i in range(7, len(array)):
-                    if array[i].startswith("Seq"):
-                        seq_idx = i
-                    elif array[i].startswith("TSval"):
-                        tsval_idx = i
-                    elif array[i].startswith("TSecr"):
-                        tsecr_idx = i
-                    elif array[i].startswith("Len"):
-                        len_idx = i
-                if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                        len_idx != -1):
-                    pkts.append((
-                        int(array[seq_idx][4:]),
-                        flw_idx,
-                        float(array[1]) * 1e6,
-                        (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
-                        int(array[len_idx][4:])))
-            else:
+            seq_idx = -1
+            tsval_idx = -1
+            tsecr_idx = -1
+            len_idx = -1
+            for i in range(7, len(array)):
+                if array[i].startswith("Seq"):
+                    seq_idx = i
+                elif array[i].startswith("TSval"):
+                    tsval_idx = i
+                elif array[i].startswith("TSecr"):
+                    tsecr_idx = i
+                elif array[i].startswith("Len"):
+                    len_idx = i
+            if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
+                    len_idx != -1):
                 pkts.append((
-                    int(array[-6][4:]),
+                    int(array[seq_idx][4:]),
                     flw_idx,
                     float(array[1]) * 1e6,
-                    (int(array[-2][6:]), int(array[-1][6:])),
-                    int(array[-3][4:])))
+                    (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
+                    int(array[len_idx][4:])))
 
     subprocess.check_call(["rm", tmp_flp])
     return pkts
