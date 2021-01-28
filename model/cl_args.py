@@ -122,7 +122,7 @@ def add_training(psr, psr_verify=lambda args: args):
         "--test-batch", default=defaults.DEFAULTS["test_batch"],
         help="The batch size to use during validation and testing.", type=int)
     psr.add_argument(
-        "--learning-rate", default=defaults.DEFAULTS["learning_rate"],
+        "--lr", default=defaults.DEFAULTS["lr"],
         help="Learning rate for SGD training.", type=float)
     psr.add_argument(
         "--momentum", default=defaults.DEFAULTS["momentum"],
