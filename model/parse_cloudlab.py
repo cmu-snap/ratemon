@@ -181,8 +181,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
       for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
     if skip_smoothed else []))
 
-    # Only process the last flow (unfair flow)
-    for flw_idx in range(tot_flws - 1, tot_flws):
+    for flw_idx in range(tot_flws):
         # Packet lists are of tuples of the form:
         #     (seq, sender, timestamp us, timestamp option)
         sent_pkts = utils.parse_packets(
