@@ -247,7 +247,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
-                print(f"Flow {flw_idx}: {j}/{len(recv_data_pkts)} packets")
+                print(
+                    f"Flow {flw_idx + 1}/{tot_flws}: "
+                    f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             recv_time_cur = recv_pkt[2]

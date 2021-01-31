@@ -240,8 +240,9 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
     # Check client and server ports
-    tcp_conv = subprocess.check_output(
-        ["tshark", "-r", flp, "-q", "-z", "conv,tcp"])
+    cmd = ["tshark", "-r", flp, "-q", "-z", "conv,tcp"]
+    print(f"Running: {' '.join(cmd)}")
+    tcp_conv = subprocess.check_output(cmd)
     client_p_start = 99999
     server_p_start = 99999
     for s in tcp_conv.decode('utf-8').split():
@@ -275,7 +276,9 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
 
     # Strip off the ".pcap" extension and append "_tmp.txt".
     tmp_flp = f"{flp[:-5]}_tmp.txt"
-    os.system(" ".join(["tshark", "-r", flp, filter_s, ">>", tmp_flp]))
+    cmd = " ".join(["tshark", "-r", flp, filter_s, ">>", tmp_flp])
+    print(f"Running: {cmd}")
+    os.system(cmd)
 
     # Each item is a tuple of the form:
     #     (sequence number, flow index, timestamp (us), TCP timestamp option,
