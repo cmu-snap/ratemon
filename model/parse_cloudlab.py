@@ -20,6 +20,9 @@ import defaults
 import utils
 
 
+# Whether to calculate EWMA and windowed features.
+DO_SMOOTHED_FEATURES = False
+
 # Assemble the output dtype.
 #
 # These metrics do not change.
@@ -85,11 +88,12 @@ def make_win_metric(metric, win):
 
 
 # The final dtype combines each metric at multiple granularities.
-DTYPE = (REGULAR +
-         [(make_ewma_metric(metric, alpha), typ)
-          for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-         [(make_win_metric(metric, win), typ)
-          for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
+DTYPE = (REGULAR + (
+    ([(make_ewma_metric(metric, alpha), typ)
+      for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
+     [(make_win_metric(metric, win), typ)
+      for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
+    if DO_SMOOTHED_FEATURES else []))
 
 
 def make_interval_weight(num_intervals):
@@ -332,6 +336,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
+                if not DO_SMOOTHED_FEATURES:
+                    continue
+
                 metric = make_ewma_metric(metric, alpha)
                 if "interarrival time us" in metric:
                     new = interarr_time_us
@@ -409,6 +416,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
+                if not DO_SMOOTHED_FEATURES:
+                    continue
+
                 metric = make_win_metric(metric, win)
                 # If we have not been able to estimate the min RTT
                 # yet, then we cannot compute any of the windowed
