@@ -688,9 +688,8 @@ def main():
               "(required)."), required=True, type=str)
     psr.add_argument(
         "--untar-dir",
-        help=(
-            "The directory in which the untarped experiment results are stored "
-            "(required)."),
+        help=("The directory in which the untarred experiment intermediate "
+              "files are stored (required)."),
         required=True, type=str)
     psr.add_argument(
         "--random-order", action="store_true",
