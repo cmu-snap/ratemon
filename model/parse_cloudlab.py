@@ -193,6 +193,29 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # Ack packets for RTT calculation
         recv_ack_pkts = utils.parse_packets(recv_flp, flw_idx, direction="ack")
 
+        # The final output. -1 implies that a value was unable to be
+        # calculated.
+        output = np.empty(len(recv_data_pkts), dtype=dtype)
+        output.fill(-1)
+
+        skip = False
+        if not sent_pkts:
+            skip = True
+            print("Warning: No sent packets for flow {flw_idx} in: {sim_dir}")
+        if not recv_data_pkts:
+            skip = True
+            print(
+                f"Warning: No received data packets for flow {flw_idx} in: "
+                f"{sim_dir}")
+        if not recv_ack_pkts:
+            skip = True
+            print(
+                f"Warning: No received ACK packets for flow {flw_idx} in: "
+                f"{sim_dir}")
+        if skip:
+            flws.append(output)
+            continue
+
         # State that the windowed metrics need to track across packets.
         win_state = {win: {
             # The index at which this window starts.
@@ -207,11 +230,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             # For "loss rate estimated".
             "loss_queue_estimate": collections.deque()
         } for win in WINDOWS}
-
-        # The final output. -1 implies that a value was unable to be
-        # calculated.
-        output = np.empty(len(recv_data_pkts), dtype=dtype)
-        output.fill(-1)
         # Total number of packet losses up to the current received
         # packet.
         pkt_loss_total_true = 0
