@@ -20,9 +20,6 @@ import defaults
 import utils
 
 
-# Whether to calculate EWMA and windowed features.
-DO_SMOOTHED_FEATURES = False
-
 # Assemble the output dtype.
 #
 # These metrics do not change.
@@ -92,15 +89,6 @@ def make_win_metric(metric, win):
     return f"{metric}-windowed-minRtt{win}"
 
 
-# The final dtype combines each metric at multiple granularities.
-DTYPE = (REGULAR + (
-    ([(make_ewma_metric(metric, alpha), typ)
-      for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-     [(make_win_metric(metric, win), typ)
-      for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
-    if DO_SMOOTHED_FEATURES else []))
-
-
 def make_interval_weight(num_intervals):
     """ Used to calculate loss event rate. """
     return [
@@ -152,7 +140,7 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
          if pkt_idx - win_start_idx > 0 else 0))
 
 
-def parse_pcap(sim_dir, untar_dir, out_dir):
+def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     """ Parse a PCAP file. """
     print(f"Parsing: {sim_dir}")
     sim = utils.Sim(sim_dir)
@@ -184,6 +172,15 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
         path.join(tmp_dir, d)) and d.startswith("batch_")][0]
     batch_dir = path.join(tmp_dir, batch_name)
 
+    # Create the (super-complicated) dtype. The dtype combines each metric at
+    # multiple granularities.
+    dtype = (REGULAR + (
+    ([(make_ewma_metric(metric, alpha), typ)
+      for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
+     [(make_win_metric(metric, win), typ)
+      for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
+    if skip_smoothed else []))
+
     # Only process the last flow (unfair flow)
     for flw_idx in range(tot_flws - 1, tot_flws):
         # Packet lists are of tuples of the form:
@@ -214,7 +211,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
         # The final output. -1 implies that a value was unable to be
         # calculated.
-        output = np.empty(len(recv_data_pkts), dtype=DTYPE)
+        output = np.empty(len(recv_data_pkts), dtype=dtype)
         output.fill(-1)
         # Total number of packet losses up to the current received
         # packet.
@@ -349,7 +346,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
-                if not DO_SMOOTHED_FEATURES:
+                if skip_smoothed:
                     continue
 
                 metric = make_ewma_metric(metric, alpha)
@@ -429,7 +426,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
-                if not DO_SMOOTHED_FEATURES:
+                if skip_smoothed:
                     continue
 
                 metric = make_win_metric(metric, win)
@@ -710,15 +707,19 @@ def main():
     psr.add_argument(
         "--random-order", action="store_true",
         help="Parse the simulations in a random order.")
+    psr.add_argument(
+        "--skip-smoothed-features", action="store_true",
+        help="Do not calculate EWMA and windowed features.")
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
     untar_dir = args.untar_dir
     out_dir = args.out_dir
+    skip_smoothed = args.skip_smoothed
 
     # Find all simulations.
     pcaps = [
-        (path.join(exp_dir, sim), untar_dir, out_dir)
+        (path.join(exp_dir, sim), untar_dir, out_dir, skip_smoothed)
         for sim in sorted(os.listdir(exp_dir))]
     if args.random_order:
         # Set the random seed so that multiple instances of this
