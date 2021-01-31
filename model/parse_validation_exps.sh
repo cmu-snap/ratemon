@@ -22,7 +22,8 @@ do
         EXP_DIR="$ITERS_DIR/iter_$ITER/batchsize_$BATCH_SIZE"
 
         python "$HOME/src/unfair/model/parse_cloudlab.py" --exp-dir "$EXP_DIR" \
-               --untar-dir "$UNTAR_DIR" --out-dir "$EXP_DIR"
+               --untar-dir "$UNTAR_DIR" --out-dir "$EXP_DIR" \
+               --skip-smoothed-features
     done
 done
 
