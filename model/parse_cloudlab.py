@@ -9,13 +9,11 @@ import multiprocessing
 import subprocess
 import os
 from os import path
-from os import listdir
 import random
+import shutil
 import time
 
 import numpy as np
-import matplotlib.pyplot as plt
-import shutil
 
 import cl_args
 import defaults
