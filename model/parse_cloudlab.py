@@ -715,7 +715,7 @@ def main():
     exp_dir = args.exp_dir
     untar_dir = args.untar_dir
     out_dir = args.out_dir
-    skip_smoothed = args.skip_smoothed
+    skip_smoothed = args.skip_smoothed_features
 
     # Find all simulations.
     pcaps = [
