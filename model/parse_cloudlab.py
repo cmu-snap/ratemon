@@ -739,7 +739,7 @@ def main():
     # Find all simulations.
     pcaps = [
         (path.join(exp_dir, sim), untar_dir, out_dir, skip_smoothed)
-        for sim in sorted(os.listdir(exp_dir))]
+        for sim in sorted(os.listdir(exp_dir)) if sim.endswith(".tar.gz")]
     if args.random_order:
         # Set the random seed so that multiple instances of this
         # script see the same random order.
