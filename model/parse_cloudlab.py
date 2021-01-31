@@ -30,7 +30,12 @@ REGULAR = [
     ("seq", "int32"),
     ("arrival time us", "int32"),
     ("min RTT us", "int32"),
-    ("flow share percentage", "float64")
+    ("flow share percentage", "float64"),
+    ("interarrival time us", "int32"),
+    ("packets lost since last packet estimate", "int32"),
+    ("packets lost since last packet true", "int32"),
+    ("payload B", "int32"),
+    ("RTT estimate us", "int32")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -282,6 +287,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
                 recv_time_prev = -1
                 interarr_time_us = -1
 
+            output[j]["interarrival time us"] = interarr_time_us
+            output[j]["payload B"] = recv_pkt[4]
+            output[j]["RTT estimate us"] = rtt_estimate_us
+
             # Calculate the true packet loss rate. Count the number of
             # dropped packets by checking if the sequence numbers at
             # sender and receiver are the same. If not, the packet is
@@ -323,6 +332,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
             pkt_loss_total_estimate += pkt_loss_cur_estimate
             prev_pkt_seq = recv_pkt_seq
             highest_seq = max(highest_seq, prev_pkt_seq)
+
+            output[j]["packets lost since last packet estimate"] = (
+                pkt_loss_cur_estimate)
+            output[j]["packets lost since last packet true"] = pkt_loss_cur_true
 
             # Calculate the true RTT and RTT ratio. Look up the send
             # time of this packet to calculate the true
