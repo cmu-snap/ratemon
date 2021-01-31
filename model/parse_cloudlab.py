@@ -659,12 +659,15 @@ def parse_pcap(sim_dir, untar_dir, out_dir):
     #         flw_dat[arrival_time_key]))
     #     flw_dat["flow share percentage"] = percentage
 
-    ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
-    flow_share = "flow share percentage"
-    total_throughput_p = sim.bw_Mbps * (1e6 / 8 / 1448)
-    for flw_dat in flws:
-        per_flow_throughput = flw_dat[ground_truth_throughput]
-        flw_dat[flow_share] = per_flow_throughput / total_throughput_p
+    total_throughput_p = sim.bw_Mbps * 1e6 / 8 / 1448
+    # Use index variables to make sure that no data is being copied.
+    # TODO: Is this a correct idea?
+    for j in range(len(flws)):
+        # I think that these are vector operations that assign an entire column
+        # at a time.
+        per_flow_throughput = flws[j]["throughput p/s-ewma-alpha0.003"]
+        flws[j]["flow share percentage"] = (
+            per_flow_throughput / total_throughput_p)
 
     # Determine if there are any NaNs or Infs in the results. For the
     # results for each flow, look through all features (columns) and
