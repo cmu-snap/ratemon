@@ -322,9 +322,11 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
             output[j]["interarrival time us"] = interarr_time_us
             output[j]["payload B"] = recv_pkt[4]
-            output[j]["throughput b/s"] = (
-                (1 / (output[j]["interarrival time us"] / 1e6))
-                * output[j]["payload B"] * 8)
+            output[j]["throughput b/s"] = utils.safe_mul(
+                utils.safe_mul(
+                    utils.safe_div(1e6, interarr_time_us),
+                    output[j]["payload B"]),
+                8)
             output[j]["RTT estimate us"] = rtt_estimate_us
 
             # Calculate the true packet loss rate. Count the number of
