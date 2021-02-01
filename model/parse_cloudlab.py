@@ -198,6 +198,12 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             # If this experiment does not have any flows, then skip it.
             print(f"Unable to parse packets for flow {flw_idx}: {exc}")
             flws.append(np.empty(0, dtype=dtype))
+
+            # Create these variables so that there is not a error when they are
+            # explicitly deleted after all flows have been processed.
+            sent_pkts = None
+            recv_data_pkts = None
+            recv_ack_pkts = None
             continue
 
         # The final output. -1 implies that a value was unable to be
