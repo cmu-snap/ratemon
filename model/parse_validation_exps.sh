@@ -3,13 +3,15 @@
 # Parses the output of run_many_for_validation.sh, from rware?cctestbed, to
 # validate the CloudLab parallel testbed.
 #
-# Usage: ./parse_validation_exps.sh <iterations dir> <scratch (untar) dir>
+# Usage: ./parse_validation_exps.sh \
+#     <cmu-snap:unfair repo dir> <iterations dir> <scratch (untar) dir>
 
 set -o errexit
 set -o nounset
 
-ITERS_DIR=$1
-UNTAR_DIR=$2
+UNFAIR_DIR=$1
+ITERS_DIR=$2
+UNTAR_DIR=$3
 mkdir -p "$UNTAR_DIR"
 
 NUM_ITERS=10
@@ -21,7 +23,7 @@ do
     do
         EXP_DIR="$ITERS_DIR/iter_$ITER/batchsize_$BATCH_SIZE"
 
-        python "$HOME/src/unfair/model/parse_cloudlab.py" --exp-dir "$EXP_DIR" \
+        python "$UNFAIR_DIR/model/parse_cloudlab.py" --exp-dir "$EXP_DIR" \
                --untar-dir "$UNTAR_DIR" --out-dir "$EXP_DIR" \
                --skip-smoothed-features
     done
