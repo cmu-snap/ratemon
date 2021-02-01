@@ -95,7 +95,7 @@ class BalancedSampler:
         assert isinstance(dataset, Dataset), \
             "Dataset must be an instance of utils.Dataset."
         # Determine the unique classes.
-        _, dat_out = dataset.raw()
+        _, _, dat_out, _ = dataset.raw()
         clss = set(dat_out.tolist())
         num_clss = len(clss)
         assert batch_size >= num_clss, \

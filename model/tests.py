@@ -76,8 +76,13 @@ class TestGeneral(unittest.TestCase):
 
         # Check if output files are in parsed_experiments
         assert(os.path.exists(PARSED_EXPERIMENTS + f"{exp_name}.npz"))
+        # Remove files
+        shutil.rmtree(PARSED_EXPERIMENTS)
 
-    def test_training(self):
+    def test_training_lrsklearn(self):
+        """
+        Tests the training process for the logistic regression model.
+        """
         command_line_args = (
             f"./model/train.py --data-dir {SIMULATIONS} "
             f"--model=LrSklearn --out-dir {TEST_OUTPUT_DIR} "
@@ -93,6 +98,34 @@ class TestGeneral(unittest.TestCase):
         scale_file = False
         for fname in os.listdir(TEST_OUTPUT_DIR):
             if fname.endswith('.pickle'):
+                model_file = True
+            if fname == "scale_params.json":
+                scale_file = True
+        assert(model_file and scale_file)
+
+        # Remove files
+        shutil.rmtree(TEST_OUTPUT_DIR)
+
+    def test_training_binarydnn(self):
+        """
+        Tests the training process for the binary dnn model.
+        """
+        command_line_args = (
+            f"./model/train.py --data-dir {SIMULATIONS} "
+            f"--model=BinaryDnn --out-dir {TEST_OUTPUT_DIR} "
+            "--num-sims=2 --max-iter=1 --keep-percent=5 "
+            "--train-batch=10")
+
+        split_args = shlex.split(command_line_args)
+        p = subprocess.Popen(split_args)
+        p.wait()
+        assert(p.returncode == 0)
+
+        # Check if output files are in test_output
+        model_file = False
+        scale_file = False
+        for fname in os.listdir(TEST_OUTPUT_DIR):
+            if fname.endswith('.pth'):
                 model_file = True
             if fname == "scale_params.json":
                 scale_file = True

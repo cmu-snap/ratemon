@@ -18,7 +18,7 @@ DEFAULTS = {
     "num_gpus": 0,
     "train_batch": sys.maxsize,
     "test_batch": sys.maxsize,
-    "learning_rate": 0.001,
+    "lr": 0.001,
     "momentum": 0.09,
     "kernel": "linear",
     "degree": 3,
