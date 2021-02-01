@@ -175,11 +175,11 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
     dtype = (REGULAR + (
-    ([(make_ewma_metric(metric, alpha), typ)
-      for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-     [(make_win_metric(metric, win), typ)
-      for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
-    if skip_smoothed else []))
+        [] if skip_smoothed else (
+            [(make_ewma_metric(metric, alpha), typ)
+             for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
+            [(make_win_metric(metric, win), typ)
+             for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])))
 
     for flw_idx in range(tot_flws):
         try:
