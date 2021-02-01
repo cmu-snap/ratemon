@@ -182,35 +182,45 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     if skip_smoothed else []))
 
     for flw_idx in range(tot_flws):
-        # Packet lists are of tuples of the form:
-        #     (seq, sender, timestamp us, timestamp option)
-        sent_pkts = utils.parse_packets(
-            path.join(batch_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
+        try:
+            # Packet lists are of tuples of the form:
+            #     (seq, sender, timestamp us, timestamp option)
+            sent_pkts = utils.parse_packets(path.join(
+                batch_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
 
-        recv_flp = path.join(batch_dir, f"server-tcpdump-{sim.name}.pcap")
-        recv_data_pkts = utils.parse_packets(
-            recv_flp, flw_idx, direction="data")
-        # Ack packets for RTT calculation
-        recv_ack_pkts = utils.parse_packets(recv_flp, flw_idx, direction="ack")
+            recv_flp = path.join(batch_dir, f"server-tcpdump-{sim.name}.pcap")
+            recv_data_pkts = utils.parse_packets(
+                recv_flp, flw_idx, direction="data")
+            # Ack packets for RTT calculation
+            recv_ack_pkts = utils.parse_packets(
+                recv_flp, flw_idx, direction="ack")
+        except RuntimeError as exc:
+            # If this experiment does not have any flows, then skip it.
+            print(f"Unable to parse packets for flow {flw_idx}: {exc}")
+            flws.append(np.empty(0, dtype=dtype))
+            continue
 
         # The final output. -1 implies that a value was unable to be
         # calculated.
         output = np.empty(len(recv_data_pkts), dtype=dtype)
         output.fill(-1)
 
+        # If this flow does not have any packets, then skip it.
         skip = False
         if not sent_pkts:
             skip = True
-            print("Warning: No sent packets for flow {flw_idx} in: {sim_dir}")
+            print(
+                f"Warning: No data packets sent for flow {flw_idx} in: "
+                f"{sim_dir}")
         if not recv_data_pkts:
             skip = True
             print(
-                f"Warning: No received data packets for flow {flw_idx} in: "
+                f"Warning: No data packets received for flow {flw_idx} in: "
                 f"{sim_dir}")
         if not recv_ack_pkts:
             skip = True
             print(
-                f"Warning: No received ACK packets for flow {flw_idx} in: "
+                f"Warning: No ACK packets sent for flow {flw_idx} in: "
                 f"{sim_dir}")
         if skip:
             flws.append(output)

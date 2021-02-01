@@ -243,15 +243,18 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     cmd = ["tshark", "-r", flp, "-q", "-z", "conv,tcp"]
     print(f"Running: {' '.join(cmd)}")
     tcp_conv = subprocess.check_output(cmd)
-    client_p_start = 99999
-    server_p_start = 99999
-    for s in tcp_conv.decode('utf-8').split():
+    client_p_start = sys.maxsize
+    server_p_start = sys.maxsize
+    for s in tcp_conv.decode("utf-8").split():
         if s.startswith("192.0.0.4:"):
             # Client
             client_p_start = min(client_p_start, int(s[len("192.0.0.4:"):]))
         if s.startswith("192.0.0.2:"):
             # Server
             server_p_start = min(server_p_start, int(s[len("192.0.0.2:"):]))
+
+    if client_p_start == sys.maxsize or server_p_start == sys.maxsize:
+        raise RuntimeError(f"No flows found in: {flp}")
 
     client_p = client_p_start + flw_idx
     server_p = server_p_start + flw_idx
