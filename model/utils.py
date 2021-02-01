@@ -5,12 +5,11 @@ import os
 from os import path
 import random
 import subprocess
+import sys
 import zipfile
 
 import numpy as np
 import torch
-
-import defaults
 
 
 # Arguments to ignore when converting an arguments dictionary to a
@@ -555,7 +554,7 @@ def create_lock_file(out_dir):
     """ Creates a lock file in out_dir. """
     lock_flp = get_lock_flp(out_dir)
     if not path.exists(lock_flp):
-        with open(lock_flp, "w") as fil:
+        with open(lock_flp, "w") as _:
             pass
 
 
@@ -584,7 +583,7 @@ def get_npz_headers(flp):
         """ Decodes the header information of a single NPY file. """
         npy = archive.open(name)
         version = np.lib.format.read_magic(npy)
-        shape, fortran, dtype = np.lib.format._read_array_header(npy, version)
+        shape, _, dtype = np.lib.format._read_array_header(npy, version)
         return name[:-4], shape, dtype
 
     with zipfile.ZipFile(flp) as archive:

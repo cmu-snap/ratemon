@@ -762,6 +762,7 @@ def main():
         for pcap in pcaps:
             parse_pcap(*pcap)
     else:
+        # By default, use all available cores.
         with multiprocessing.Pool() as pol:
             pol.starmap(parse_pcap, pcaps)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
