@@ -304,11 +304,17 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
                     len_idx = i
             if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
                     len_idx != -1):
+                tsecr_substring = array[tsecr_idx][6:]
+                tsecr_end = (
+                    tsecr_substring.index("[")
+                    if "[" in tsecr_substring else len(tsecr_substring))
+
                 pkts.append((
                     int(array[seq_idx][4:]),
                     flw_idx,
                     float(array[1]) * 1e6,
-                    (int(array[tsval_idx][6:]), int(array[tsecr_idx][6:])),
+                    (int(array[tsval_idx][6:]),
+                     int(tsecr_substring[:tsecr_end])),
                     int(array[len_idx][4:])))
 
     subprocess.check_call(["rm", tmp_flp])
