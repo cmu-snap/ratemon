@@ -257,7 +257,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # RTT estimation.
         ack_idx = 0
         # Update experiment start time
-        start_time = recv_data_pkts[0][2]
+        start_time = 0  # recv_data_pkts[0][2]
         # Compute the end time of the first flow
         end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
         end_idx = len(recv_data_pkts)
