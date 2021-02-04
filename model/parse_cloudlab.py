@@ -249,7 +249,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         } for win in WINDOWS}
         # Total number of packet losses up to the current received
         # packet.
-        pkt_loss_total_true = 0
+        # pkt_loss_total_true = 0
         pkt_loss_total_estimate = 0
         # Loss rate estimation.
         prev_pkt_seq = 0
@@ -328,29 +328,34 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                 8)
             output[j]["RTT estimate us"] = rtt_estimate_us
 
-            # Calculate the true packet loss rate. Count the number of
-            # dropped packets by checking if the sequence numbers at
-            # sender and receiver are the same. If not, the packet is
-            # dropped, and the pkt_loss_total_true counter increases
-            # by one to keep the index offset at sender
-            sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
-            pkt_loss_total_true_prev = pkt_loss_total_true
-            while sent_pkt_seq != recv_pkt_seq:
-                # Packet loss
-                pkt_loss_total_true += 1
-                if j + pkt_loss_total_true < len(sent_pkts):
-                    sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
-                else:
-                    # Couldn't find the packet in sender's trace
-                    # Reduce pkt_loss_total_true by one so that
-                    # the offset is still correct
-                    print(f"Couldn't find {recv_pkt_seq}")
-                    pkt_loss_total_true = pkt_loss_total_true_prev - 1
-                    break
-            # Calculate how many packets were lost since receiving the
-            # last packet.
-            pkt_loss_cur_true = max(
-                0, pkt_loss_total_true - pkt_loss_total_true_prev)
+            # pkt_loss_total_true_prev = pkt_loss_total_true
+            # # Calculate the true packet loss rate. Count the number of
+            # # dropped packets by checking if the sequence numbers at
+            # # sender and receiver are the same. If not, the packet is
+            # # dropped, and the pkt_loss_total_true counter increases
+            # # by one to keep the index offset at sender
+            # print("------")
+            # print(f"len(sent_pkts): {len(sent_pkts)}")
+            # print(f"len(recv_data_pkts): {len(recv_data_pkts)}")
+            # print(f"j: {j}")
+            # print(f"pkt_loss_total_true: {pkt_loss_total_true}")
+            # sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+            # while sent_pkt_seq != recv_pkt_seq:
+            #     # Packet loss
+            #     pkt_loss_total_true += 1
+            #     if j + pkt_loss_total_true < len(sent_pkts):
+            #         sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
+            #     else:
+            #         # Couldn't find the packet in sender's trace
+            #         # Reduce pkt_loss_total_true by one so that
+            #         # the offset is still correct
+            #         print(f"Couldn't find {recv_pkt_seq}")
+            #         pkt_loss_total_true = pkt_loss_total_true_prev - 1
+            #         break
+            # # Calculate how many packets were lost since receiving the
+            # # last packet.
+            # pkt_loss_cur_true = max(
+            #     0, pkt_loss_total_true - pkt_loss_total_true_prev)
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
@@ -371,17 +376,17 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
             output[j]["packets lost since last packet estimate"] = (
                 pkt_loss_cur_estimate)
-            output[j]["packets lost since last packet true"] = pkt_loss_cur_true
+            # output[j]["packets lost since last packet true"] = pkt_loss_cur_true
 
-            # Calculate the true RTT and RTT ratio. Look up the send
-            # time of this packet to calculate the true
-            # sender-receiver delay. Assume that, on the reverse path,
-            # packets will experience no queuing delay.
-            one_way_us = sim.rtt_us / 2
-            rtt_true_us = (
-                recv_time_cur - sent_pkts[j + pkt_loss_total_true][2] +
-                one_way_us)
-            rtt_true_ratio = rtt_true_us / (2 * one_way_us)
+            # # Calculate the true RTT and RTT ratio. Look up the send
+            # # time of this packet to calculate the true
+            # # sender-receiver delay. Assume that, on the reverse path,
+            # # packets will experience no queuing delay.
+            # one_way_us = sim.rtt_us / 2
+            # rtt_true_us = (
+            #     recv_time_cur - sent_pkts[j + pkt_loss_total_true][2] +
+            #     one_way_us)
+            # rtt_true_ratio = rtt_true_us / (2 * one_way_us)
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
