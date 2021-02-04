@@ -300,8 +300,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     # Otherwise, use the previous RTT estimate and
                     # reset ack_idx to search again for the next
                     # packet.
-                    rtt_estimate_us = output[
-                        j - 1][make_ewma_metric("RTT estimate us", alpha=1.)]
+                    rtt_estimate_us = output[j - 1]["RTT estimate us"]
                     ack_idx = ack_idx_old
                 # Update the min RTT estimate.
                 min_rtt_us = utils.safe_min(
@@ -321,11 +320,11 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                 interarr_time_us = -1
 
             output[j]["interarrival time us"] = interarr_time_us
-            output[j]["payload B"] = recv_pkt[4]
+            payload_B = recv_pkt[4]
+            output[j]["payload B"] = payload_B
             output[j]["throughput b/s"] = utils.safe_mul(
                 utils.safe_mul(
-                    utils.safe_div(1e6, interarr_time_us),
-                    output[j]["payload B"]),
+                    utils.safe_div(1e6, interarr_time_us), payload_B),
                 8)
             output[j]["RTT estimate us"] = rtt_estimate_us
 
@@ -355,7 +354,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
-            payload_B = sent_pkts[j + pkt_loss_total_true][4]
             pkt_loss_cur_estimate = math.ceil(
                 0
                 if recv_pkt_seq == prev_pkt_seq + payload_B
