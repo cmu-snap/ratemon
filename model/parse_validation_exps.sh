@@ -15,10 +15,10 @@ UNTAR_DIR=$3
 mkdir -p "$UNTAR_DIR"
 
 NUM_ITERS=10
-
-for (( ITER=1; ITER<=NUM_ITERS; ITER++ ))
+#for (( ITER=1; ITER<=NUM_ITERS; ITER++ ))
+for (( ITER=NUM_ITERS; ITER>=1; ITER-- ))
 do
-    for BATCH_SIZE in 1 5 10 15 20:
+    for BATCH_SIZE in 20 10 5 1
     do
         EXP_DIR="$ITERS_DIR/iter_$ITER/batchsize_$BATCH_SIZE"
 
