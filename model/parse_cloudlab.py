@@ -259,7 +259,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # Update experiment start time
         start_time = 0  # recv_data_pkts[0][2]
         # Compute the end time of the first flow
-        end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
+        #end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
         end_idx = len(recv_data_pkts)
 
         for j, recv_pkt in enumerate(recv_data_pkts):
@@ -271,10 +271,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             recv_pkt_seq = recv_pkt[0]
             recv_time_cur = recv_pkt[2]
 
-            if recv_time_cur > end_time:
-                # Stop parsing when the first flow ends
-                end_idx = j
-                break
+            # if recv_time_cur > end_time:
+            #     # Stop parsing when the first flow ends
+            #     end_idx = j
+            #     break
 
             output[j]["seq"] = recv_pkt_seq
             # Align arrival time to zero such that all features starts at 0s
