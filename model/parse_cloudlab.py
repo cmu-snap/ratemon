@@ -33,6 +33,7 @@ REGULAR = [
     ("packets lost since last packet estimate", "int32"),
     ("packets lost since last packet true", "int32"),
     ("payload B", "int32"),
+    ("total so far B", "int32"),
     ("RTT estimate us", "int32")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
@@ -322,6 +323,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             output[j]["interarrival time us"] = interarr_time_us
             payload_B = recv_pkt[4]
             output[j]["payload B"] = payload_B
+
+            output[j]["total so far B"] = (
+                payload_B + (0 if j == 0 else output[j - 1]["total so far B"]))
+
             output[j]["throughput b/s"] = utils.safe_mul(
                 utils.safe_mul(
                     utils.safe_div(1e6, interarr_time_us), payload_B),
