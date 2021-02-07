@@ -31,7 +31,8 @@ REGULAR = [
     ("interarrival time us", "int32"),
     ("throughput b/s", "float32"),
     ("packets lost since last packet estimate", "int32"),
-    ("packets lost since last packet true", "int32"),
+    ("loss rate at queue", "float64"),
+    ("retransmission rate", "float64"),
     ("payload B", "int32"),
     ("total so far B", "int32"),
     ("RTT estimate us", "int32")
@@ -156,23 +157,18 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         print(f"    Already parsed: {sim_dir}")
         return
 
-    # Create a temporary folder to untar experiments
-    untar_dir = path.join(untar_dir, sim.name)
-    if path.exists(untar_dir):
-        # Delete the folder and then untar experiments
-        shutil.rmtree(untar_dir)
-    os.mkdir(untar_dir)
+    # Create a temporary folder to untar experiments.
+    if not path.exists(untar_dir):
+        os.mkdir(untar_dir)
+    exp_dir = path.join(untar_dir, sim.name)
+    # If this experiment already has been untarred, then delete the old files.
+    if path.exists(exp_dir):
+        shutil.rmtree(exp_dir)
     subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
     flws = []
-
-    # Get the batch number under /tmp/ directory
-    tmp_dir = path.join(untar_dir, "tmp")
-    batch_name = [d for d in os.listdir(tmp_dir) if os.path.isdir(
-        path.join(tmp_dir, d)) and d.startswith("batch_")][0]
-    batch_dir = path.join(tmp_dir, batch_name)
 
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
@@ -188,9 +184,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             # Packet lists are of tuples of the form:
             #     (seq, sender, timestamp us, timestamp option)
             sent_pkts = utils.parse_packets(path.join(
-                batch_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
+                exp_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
 
-            recv_flp = path.join(batch_dir, f"server-tcpdump-{sim.name}.pcap")
+            recv_flp = path.join(exp_dir, f"server-tcpdump-{sim.name}.pcap")
             recv_data_pkts = utils.parse_packets(
                 recv_flp, flw_idx, direction="data")
             # Ack packets for RTT calculation
@@ -208,8 +204,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             recv_ack_pkts = None
             continue
 
-        # The final output. -1 implies that a value was unable to be
-        # calculated.
+        # The final output. -1 implies that a value could not be calculated.
         output = np.empty(len(recv_data_pkts), dtype=dtype)
         output.fill(-1)
 
@@ -257,11 +252,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         highest_seq = 0
         # RTT estimation.
         ack_idx = 0
-        # Update experiment start time
-        start_time = 0  # recv_data_pkts[0][2]
-        # Compute the end time of the first flow
-        #end_time = utils.parse_packets(recv_flp, 0, direction="data")[-1][2]
-        end_idx = len(recv_data_pkts)
 
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
@@ -272,14 +262,9 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             recv_pkt_seq = recv_pkt[0]
             recv_time_cur = recv_pkt[2]
 
-            # if recv_time_cur > end_time:
-            #     # Stop parsing when the first flow ends
-            #     end_idx = j
-            #     break
-
             output[j]["seq"] = recv_pkt_seq
             # Align arrival time to zero such that all features starts at 0s
-            output[j]["arrival time us"] = recv_time_cur - start_time
+            output[j]["arrival time us"] = recv_time_cur
 
             if j > 0:
                 # Receiver-side RTT estimation using the TCP timestamp
@@ -333,35 +318,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                 8)
             output[j]["RTT estimate us"] = rtt_estimate_us
 
-            # pkt_loss_total_true_prev = pkt_loss_total_true
-            # # Calculate the true packet loss rate. Count the number of
-            # # dropped packets by checking if the sequence numbers at
-            # # sender and receiver are the same. If not, the packet is
-            # # dropped, and the pkt_loss_total_true counter increases
-            # # by one to keep the index offset at sender
-            # print("------")
-            # print(f"len(sent_pkts): {len(sent_pkts)}")
-            # print(f"len(recv_data_pkts): {len(recv_data_pkts)}")
-            # print(f"j: {j}")
-            # print(f"pkt_loss_total_true: {pkt_loss_total_true}")
-            # sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
-            # while sent_pkt_seq != recv_pkt_seq:
-            #     # Packet loss
-            #     pkt_loss_total_true += 1
-            #     if j + pkt_loss_total_true < len(sent_pkts):
-            #         sent_pkt_seq = sent_pkts[j + pkt_loss_total_true][0]
-            #     else:
-            #         # Couldn't find the packet in sender's trace
-            #         # Reduce pkt_loss_total_true by one so that
-            #         # the offset is still correct
-            #         print(f"Couldn't find {recv_pkt_seq}")
-            #         pkt_loss_total_true = pkt_loss_total_true_prev - 1
-            #         break
-            # # Calculate how many packets were lost since receiving the
-            # # last packet.
-            # pkt_loss_cur_true = max(
-            #     0, pkt_loss_total_true - pkt_loss_total_true_prev)
-
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
             pkt_loss_cur_estimate = math.ceil(
@@ -381,17 +337,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
             output[j]["packets lost since last packet estimate"] = (
                 pkt_loss_cur_estimate)
-            # output[j]["packets lost since last packet true"] = pkt_loss_cur_true
-
-            # # Calculate the true RTT and RTT ratio. Look up the send
-            # # time of this packet to calculate the true
-            # # sender-receiver delay. Assume that, on the reverse path,
-            # # packets will experience no queuing delay.
-            # one_way_us = sim.rtt_us / 2
-            # rtt_true_us = (
-            #     recv_time_cur - sent_pkts[j + pkt_loss_total_true][2] +
-            #     one_way_us)
-            # rtt_true_ratio = rtt_true_us / (2 * one_way_us)
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
@@ -666,7 +611,74 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
-        flws.append(output[:end_idx])
+
+        # Calculate the number of retransmissions. Truncate the sent packets
+        # at the last occurence of the last packet to be received.
+        #
+        # Get the sequence number of the last received packet.
+        last_seq = output[-1]["seq"]
+        # Find when this packet was sent. Assume that if this packet was
+        # retransmitted, then the last retransmission is the one that arrived at
+        # the receiver (which may be an incorrect assumption).
+        sent_idx = len(sent_pkts) - 1
+        while sent_idx >= 0 and sent_pkts[sent_idx][0] != last_seq:
+            sent_idx -= 1
+        # Convert from index to packet count.
+        sent_idx += 1
+        sent_seqs = set()
+        for sent_pkt in sent_pkts[:sent_idx]:
+            sent_seqs.add(sent_pkt[0])
+        if sent_idx == 0:
+            print(
+                "Warning: Did not find when the last received packet was sent.")
+        else:
+            output[-1]["retransmission rate"] = 1 - (len(sent_seqs) / sent_idx)
+
+        # toks = sim.name.split("-")
+        # q_log_flp = path.join(
+        #     exp_dir,
+        #     "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
+        #     ".log")
+
+        # # Calculate the raw drop rate at the bottleneck queue.
+        # deq_idx = None
+        # drop_rate = None
+
+        # print(f"last_seq: {last_seq}")
+        # with open(q_log_flp, "r") as fil:
+        #     # Find the dequeue log corresponding to the last packet that was
+        #     # received.
+        #     for line_idx, line in reversed(list(enumerate(fil))):
+        #         # Need to filter by flow.
+
+        #         if line.startswith("1"):
+        #             seq = int(line.split(",")[3], 16)
+        #             #print(f"Checking seq: {seq}")
+        #             if seq == last_seq:
+        #                 deq_idx = line_idx
+        #                 break
+        #     if deq_idx is None:
+        #         print(
+        #             "Warning: Did not find when last received packet was "
+        #             "dequeued.")
+        #     else:
+        #         # Find the most recent stats log before the last received
+        #         # packet was dequeued.
+        #         for line_idx, line in reversed(list(enumerate(fil[:deq_idx]))):
+        #             if line.startswith("stats"):
+        #                 enqueued, _, dropped = [
+        #                     int(tok) for tok in line.split(":")[1].split(",")]
+        #                 drop_rate = dropped / (enqueued + dropped)
+        #                 break
+        # if drop_rate is None:
+        #     print(
+        #         "Warning: Did not calculate the loss rate at the bottleneck "
+        #         "queue.")
+        # else:
+        #     output[-1]["loss rate at queue"] = drop_rate
+        # print(f"loss rate at queue: {output[-1]['loss rate at queue']}")
+
+        flws.append(output)
 
     # Save memory by explicitly deleting the sent and received packets
     # after they have been parsed. This happens outside of the above
