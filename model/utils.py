@@ -169,11 +169,16 @@ class Sim():
             # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242.tar.gz
             # Remove ".tar.gz" from the last token.
             toks[-1] = toks[-1][:-7]
-            # Update sim.name
+            # Update sim.name.
             self.name = self.name[:-7]
+        elif sim.endswith(".npz"):
+            # Remove ".npz" from the last token.
+            toks[-1] = toks[-1][:-4]
+            # Update sim.name.
+            self.name = self.name[:-4]
         # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
-        (_, cca_1_name, cca_2_name, bw_Mbps, rtt_ms, queue_p, cca_1_flws,
-         cca_2_flws, end_time, _) = toks
+        (_, self.cca_1_name, self.cca_2_name, bw_Mbps, rtt_ms, queue_p,
+         cca_1_flws, cca_2_flws, end_time, _) = toks
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
         # Bottleneck router delay (us).
@@ -181,9 +186,9 @@ class Sim():
         # Queue size (packets).
         self.queue_p = float(queue_p[:-1])
         # Number of CCA 1 flows.
-        self.cca_1_flws = int(cca_1_flws[:-(len(cca_1_name))])
+        self.cca_1_flws = int(cca_1_flws[:-(len(self.cca_1_name))])
         # Number of CCA 2 flows.
-        self.cca_2_flws = int(cca_2_flws[:-(len(cca_2_name))])
+        self.cca_2_flws = int(cca_2_flws[:-(len(self.cca_2_name))])
         # Experiment duration (s).
         self.dur_s = int(end_time[:-1])
 
