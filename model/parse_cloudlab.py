@@ -749,7 +749,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             out_flp, **{str(k + 1): v for k, v in enumerate(flws)})
 
     # Remove untarred folder
-    shutil.rmtree(untar_dir)
+    shutil.rmtree(exp_dir)
 
 
 def main():
