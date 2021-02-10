@@ -183,14 +183,21 @@ class Sim():
         self.bw_Mbps = float(bw_Mbps[:-2])
         # Bottleneck router delay (us).
         self.rtt_us = float(rtt_ms[:-3]) * 1000
+        # Bandwidth-delay product (bits).
+        self.bdp_b = self.bw_Mbps * self.rtt_us
         # Queue size (packets).
         self.queue_p = float(queue_p[:-1])
+        # Queue size (multiples of the BDP).
+        self.queue_bdp = self.queue_p / (self.bdp_b / 8 / 1514)
         # Number of CCA 1 flows.
         self.cca_1_flws = int(cca_1_flws[:-(len(self.cca_1_name))])
         # Number of CCA 2 flows.
         self.cca_2_flws = int(cca_2_flws[:-(len(self.cca_2_name))])
         # Experiment duration (s).
         self.dur_s = int(end_time[:-1])
+        # Largest RTT that this experiment should experiment, based on the size
+        # of the bottleneck queue and the RTT.
+        self.calculated_max_rtt_us = (self.queue_bdp + 1) * self.rtt_us
 
 
 def args_to_str(args, order):
