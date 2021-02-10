@@ -431,7 +431,7 @@ def safe_min(val1, val2):
     then that value is discarded and the other value becomes the
     min. If both values are discarded, then the min is -1 (unknown).
     """
-    unsafe = (-1, 0)
+    unsafe = {-1, 0}
     return (
         -1 if val1 in unsafe and val2 in unsafe else (
             val2 if val1 in unsafe else (
@@ -452,7 +452,7 @@ def safe_div(num, den):
     Safely divides two values. If either value is -1 or the
     denominator is 0, then the result is -1 (unknown).
     """
-    return -1 if num == -1 or den in (-1, 0) else num / den
+    return -1 if num == -1 or den in {-1, 0} else num / den
 
 
 def safe_sqrt(val):
@@ -463,12 +463,16 @@ def safe_sqrt(val):
     return -1 if val < 0 else math.sqrt(val)
 
 
-def safe_mean(dat, start_idx, end_idx):
+def safe_mean(dat, start_idx=None, end_idx=None):
     """
     Safely calculates a mean over a window. Any values that are -1
     (unknown) are discarded. The mean of an empty window if -1
     (unknown).
     """
+    if start_idx is None:
+        start_idx = 0
+    if end_idx is None:
+        end_idx = dat.shape[0] - 1
     # Extract the window.
     dat_win = dat[start_idx:end_idx + 1]
     # Eliminate values that are -1 (unknown).

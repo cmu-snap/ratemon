@@ -253,6 +253,18 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # RTT estimation.
         ack_idx = 0
 
+        # Determine which packets are retransmissions. Ignore these packets when
+        # estimating the RTT.
+        #
+        # All sequence numbers that have been sent.
+        unique_pkts = set()
+        # Sequence numbers that have been sent multiple times.
+        retrans_pkts = set()
+        for sent_pkt in sent_pkts:
+            sent_pkt_seq = sent_pkt[0]
+            (retrans_pkts
+             if sent_pkt_seq in unique_pkts else unique_pkts).add(sent_pkt_seq)
+
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
                 print(
@@ -263,35 +275,37 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             recv_time_cur = recv_pkt[2]
 
             output[j]["seq"] = recv_pkt_seq
-            # Align arrival time to zero such that all features starts at 0s
             output[j]["arrival time us"] = recv_time_cur
 
             if j > 0:
-                # Receiver-side RTT estimation using the TCP timestamp
-                # option. Attempt to find a new RTT estimate. Move
-                # ack_idx to the first occurance of the timestamp
-                # option TSval corresponding to the current packet's
-                # TSecr.
-                tsval = recv_ack_pkts[ack_idx][3][0]
-                tsecr = recv_pkt[3][1]
-                ack_idx_old = ack_idx
-                while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
-                    ack_idx += 1
-                    tsval = recv_ack_pkts[ack_idx][3][0]
-                if tsval == tsecr:
-                    # If we found a timestamp option match, then
-                    # update the RTT estimate.
-                    rtt_estimate_us = recv_time_cur - recv_ack_pkts[ack_idx][2]
+                prev_rtt_estimate_us = output[j - 1]["RTT estimate us"]
+                if recv_pkt_seq in retrans_pkts:
+                    rtt_estimate_us = prev_rtt_estimate_us
                 else:
-                    # Otherwise, use the previous RTT estimate and
-                    # reset ack_idx to search again for the next
-                    # packet.
-                    rtt_estimate_us = output[j - 1]["RTT estimate us"]
-                    ack_idx = ack_idx_old
+                    # Receiver-side RTT estimation using the TCP timestamp
+                    # option. Attempt to find a new RTT estimate. Move
+                    # ack_idx to the first occurance of the timestamp
+                    # option TSval corresponding to the current packet's
+                    # TSecr.
+                    tsval = recv_ack_pkts[ack_idx][3][0]
+                    tsecr = recv_pkt[3][1]
+                    ack_idx_old = ack_idx
+                    while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
+                        ack_idx += 1
+                        tsval = recv_ack_pkts[ack_idx][3][0]
+                    if tsval == tsecr:
+                        # If we found a timestamp option match, then
+                        # update the RTT estimate.
+                        rtt_estimate_us = recv_time_cur - recv_ack_pkts[ack_idx][2]
+                    else:
+                        # Otherwise, use the previous RTT estimate and
+                        # reset ack_idx to search again for the next
+                        # packet.
+                        rtt_estimate_us = prev_rtt_estimate_us
+                        ack_idx = ack_idx_old
                 # Update the min RTT estimate.
                 min_rtt_us = utils.safe_min(
                     output[j - 1]["min RTT us"], rtt_estimate_us)
-                output[j]["min RTT us"] = min_rtt_us
                 # Compute the new RTT ratio.
                 rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
 
@@ -317,6 +331,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     utils.safe_div(1e6, interarr_time_us), payload_B),
                 8)
             output[j]["RTT estimate us"] = rtt_estimate_us
+            output[j]["min RTT us"] = min_rtt_us
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
