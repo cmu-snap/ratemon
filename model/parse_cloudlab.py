@@ -670,17 +670,20 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # Calculate the raw drop rate at the bottleneck queue.
         deq_idx = None
         drop_rate = None
-        with open(q_log_flp, "r") as fil:
-            q_log = list(fil)
-        # Find the dequeue log corresponding to the last packet that was
-        # received.
-        for line_idx, line in reversed(list(enumerate(q_log))):
-            if line.startswith("1"):
-                toks = line.split(",")
-                if int(toks[2], 16) == server_port:
-                    if int(toks[3], 16) == last_seq:
+        if path.exists(q_log_flp):
+            with open(q_log_flp, "r") as fil:
+                q_log = list(fil)
+                # Find the dequeue log corresponding to the last packet that was
+                # received.
+            for line_idx, line in reversed(list(enumerate(q_log))):
+                if line.startswith("1"):
+                    toks = line.split(",")
+                    if (int(toks[2], 16) == server_port and
+                            int(toks[3], 16) == last_seq):
                         deq_idx = line_idx
                         break
+        else:
+            print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
         if deq_idx is None:
             print(
                 "Warning: Did not find when the last received packet "
