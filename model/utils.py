@@ -4,8 +4,6 @@ import math
 import os
 from os import path
 import random
-import subprocess
-import sys
 import zipfile
 
 import numpy as np
@@ -238,7 +236,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
+def parse_packets(flp, client_port, server_port,  direction="data", extra_filter=None):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
          (sequence number, flow index, timestamp (us), TCP timestamp option,
@@ -250,52 +248,36 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
     assert direction in dir_opts, \
         f"\"direction\" must be one of {dir_opts}, but is: {direction}"
 
-    # Check client and server ports
-    cmd = ["tshark", "-r", flp, "-q", "-z", "conv,tcp"]
-    print(f"Running: {' '.join(cmd)}")
-    tcp_conv = subprocess.check_output(cmd)
-    client_p_start = sys.maxsize
-    server_p_start = sys.maxsize
-    for s in tcp_conv.decode("utf-8").split():
-        if s.startswith("192.0.0.4:"):
-            # Client
-            client_p_start = min(client_p_start, int(s[len("192.0.0.4:"):]))
-        if s.startswith("192.0.0.2:"):
-            # Server
-            server_p_start = min(server_p_start, int(s[len("192.0.0.2:"):]))
-
-    if client_p_start == sys.maxsize or server_p_start == sys.maxsize:
-        raise RuntimeError(f"No flows found in: {flp}")
-
-    client_p = client_p_start + flw_idx
-    server_p = server_p_start + flw_idx
-
     if direction == "data":
         if extra_filter:
             filter_s = (
-                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                f"\"tcp.srcport == {client_port} && tcp.dstport == {server_port} && "
                 f"tcp.len >= 1000 && {extra_filter}\"")
         else:
             filter_s = (
-                f"\"tcp.srcport == {client_p} && tcp.dstport == {server_p} && "
+                f"\"tcp.srcport == {client_port} && tcp.dstport == {server_port} && "
                 "tcp.len >= 1000\"")
     else:
         if extra_filter:
             filter_s = (
-                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p} && "
+                f"\"tcp.srcport == {server_port} && tcp.dstport == {client_port} && "
                 f"{extra_filter}\"")
         else:
             filter_s = (
-                f"\"tcp.srcport == {server_p} && tcp.dstport == {client_p}\"")
+                f"\"tcp.srcport == {server_port} && tcp.dstport == {client_port}\"")
 
     # Strip off the ".pcap" extension and append "_tmp.txt".
     tmp_flp = f"{flp[:-5]}_tmp.txt"
-    cmd = " ".join(["tshark", "-r", flp, filter_s, ">>", tmp_flp])
+
+    cmd = " ".join(
+        ["tshark", "-n", "-o", "tcp.relative_sequence_numbers:false",
+         "-o", "tcp.analyze_sequence_numbers:false", "-r", flp, filter_s,
+         ">>", tmp_flp])
     print(f"Running: {cmd}")
     os.system(cmd)
 
     # Each item is a tuple of the form:
-    #     (sequence number, flow index, timestamp (us), TCP timestamp option,
+    #     (sequence number, timestamp (us), TCP timestamp option,
     #      payload size (B))
     pkts = []
     with open(tmp_flp, "r") as fil:
@@ -323,13 +305,12 @@ def parse_packets(flp, flw_idx, direction="data", extra_filter=None):
 
                 pkts.append((
                     int(array[seq_idx][4:]),
-                    flw_idx,
                     float(array[1]) * 1e6,
                     (int(array[tsval_idx][6:]),
                      int(tsecr_substring[:tsecr_end])),
                     int(array[len_idx][4:])))
-
-    subprocess.check_call(["rm", tmp_flp])
+    # Delete the temporary file.
+    os.remove(tmp_flp)
     return pkts
 
 

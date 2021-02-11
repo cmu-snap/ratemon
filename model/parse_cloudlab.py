@@ -13,6 +13,7 @@ import random
 import shutil
 import time
 
+import json
 import numpy as np
 
 import cl_args
@@ -24,14 +25,14 @@ import utils
 #
 # These metrics do not change.
 REGULAR = [
-    ("seq", "int32"),
+    ("seq", "uint32"),
     ("arrival time us", "int32"),
     ("min RTT us", "int32"),
     ("flow share percentage", "float64"),
     ("interarrival time us", "int32"),
     ("throughput b/s", "float32"),
     ("packets lost since last packet estimate", "int32"),
-    ("loss rate at queue", "float64"),
+    ("drop rate at bottleneck queue", "float64"),
     ("retransmission rate", "float64"),
     ("payload B", "int32"),
     ("total so far B", "int32"),
@@ -166,6 +167,12 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         shutil.rmtree(exp_dir)
     subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
+    # TODO: Determine flow src and dst ports
+    sim_params_flp = path.join(exp_dir, f"{sim.name}.json")
+    with open(sim_params_flp, "r") as fil:
+        params = json.load(fil)
+    flw_ports = [(flw[5], flw[4]) for flw in params["flows"]]
+
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
     flws = []
@@ -179,19 +186,20 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             [(make_win_metric(metric, win), typ)
              for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])))
 
-    for flw_idx in range(tot_flws):
+    for flw_idx, (client_port, server_port) in enumerate(flw_ports):
         try:
             # Packet lists are of tuples of the form:
             #     (seq, sender, timestamp us, timestamp option)
-            sent_pkts = utils.parse_packets(path.join(
-                exp_dir, f"client-tcpdump-{sim.name}.pcap"), flw_idx)
+            sent_pkts = utils.parse_packets(
+                path.join(exp_dir, f"client-tcpdump-{sim.name}.pcap"),
+                client_port, server_port, direction="data")
 
             recv_flp = path.join(exp_dir, f"server-tcpdump-{sim.name}.pcap")
             recv_data_pkts = utils.parse_packets(
-                recv_flp, flw_idx, direction="data")
+                recv_flp, client_port, server_port, direction="data")
             # Ack packets for RTT calculation
             recv_ack_pkts = utils.parse_packets(
-                recv_flp, flw_idx, direction="ack")
+                recv_flp, client_port, server_port, direction="ack")
         except RuntimeError as exc:
             # If this experiment does not have any flows, then skip it.
             print(f"Unable to parse packets for flow {flw_idx}: {exc}")
@@ -272,45 +280,46 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
-            recv_time_cur = recv_pkt[2]
+            recv_time_cur = recv_pkt[1]
 
             output[j]["seq"] = recv_pkt_seq
             output[j]["arrival time us"] = recv_time_cur
 
             if j > 0:
+                prev_min_rtt_us = output[j - 1]["min RTT us"]
                 prev_rtt_estimate_us = output[j - 1]["RTT estimate us"]
                 if recv_pkt_seq in retrans_pkts:
-                    rtt_estimate_us = prev_rtt_estimate_us
+                    min_rtt_us = prev_min_rtt_us
                 else:
                     # Receiver-side RTT estimation using the TCP timestamp
                     # option. Attempt to find a new RTT estimate. Move
                     # ack_idx to the first occurance of the timestamp
                     # option TSval corresponding to the current packet's
                     # TSecr.
-                    tsval = recv_ack_pkts[ack_idx][3][0]
-                    tsecr = recv_pkt[3][1]
+                    tsval = recv_ack_pkts[ack_idx][2][0]
+                    tsecr = recv_pkt[2][1]
                     ack_idx_old = ack_idx
                     while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
                         ack_idx += 1
-                        tsval = recv_ack_pkts[ack_idx][3][0]
+                        tsval = recv_ack_pkts[ack_idx][2][0]
                     if tsval == tsecr:
                         # If we found a timestamp option match, then
                         # update the RTT estimate.
-                        rtt_estimate_us = recv_time_cur - recv_ack_pkts[ack_idx][2]
+                        rtt_estimate_us = recv_time_cur - recv_ack_pkts[ack_idx][1]
                     else:
                         # Otherwise, use the previous RTT estimate and
                         # reset ack_idx to search again for the next
                         # packet.
                         rtt_estimate_us = prev_rtt_estimate_us
                         ack_idx = ack_idx_old
-                # Update the min RTT estimate.
-                min_rtt_us = utils.safe_min(
-                    output[j - 1]["min RTT us"], rtt_estimate_us)
+                    # Update the min RTT estimate.
+                    min_rtt_us = utils.safe_min(
+                        prev_min_rtt_us, rtt_estimate_us)
+
                 # Compute the new RTT ratio.
                 rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
-
                 # Calculate the inter-arrival time.
-                recv_time_prev = recv_data_pkts[j - 1][2]
+                recv_time_prev = output[j - 1]["arrival time us"]
                 interarr_time_us = recv_time_cur - recv_time_prev
             else:
                 rtt_estimate_us = -1
@@ -320,7 +329,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                 interarr_time_us = -1
 
             output[j]["interarrival time us"] = interarr_time_us
-            payload_B = recv_pkt[4]
+            payload_B = recv_pkt[3]
             output[j]["payload B"] = payload_B
 
             output[j]["total so far B"] = (
@@ -448,13 +457,13 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
 
                 # Move the start of the window forward.
                 while ((recv_time_cur -
-                        recv_data_pkts[win_state[win]["window_start_idx"]][2]) >
+                        recv_data_pkts[win_state[win]["window_start_idx"]][1]) >
                        win_size_us):
                     win_state[win]["window_start_idx"] += 1
                 win_start_idx = win_state[win]["window_start_idx"]
 
                 if "average interarrival time us" in metric:
-                    new = ((recv_time_cur - recv_data_pkts[win_start_idx][2]) /
+                    new = ((recv_time_cur - recv_data_pkts[win_start_idx][1]) /
                            (j - win_start_idx + 1))
                 elif "average throughput p/s" in metric:
                     # We base the throughput calculation on the
@@ -649,49 +658,50 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         else:
             output[-1]["retransmission rate"] = 1 - (len(sent_seqs) / sent_idx)
 
-        # toks = sim.name.split("-")
-        # q_log_flp = path.join(
-        #     exp_dir,
-        #     "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
-        #     ".log")
-
-        # # Calculate the raw drop rate at the bottleneck queue.
-        # deq_idx = None
-        # drop_rate = None
-
-        # print(f"last_seq: {last_seq}")
-        # with open(q_log_flp, "r") as fil:
-        #     # Find the dequeue log corresponding to the last packet that was
-        #     # received.
-        #     for line_idx, line in reversed(list(enumerate(fil))):
-        #         # Need to filter by flow.
-
-        #         if line.startswith("1"):
-        #             seq = int(line.split(",")[3], 16)
-        #             #print(f"Checking seq: {seq}")
-        #             if seq == last_seq:
-        #                 deq_idx = line_idx
-        #                 break
-        #     if deq_idx is None:
-        #         print(
-        #             "Warning: Did not find when last received packet was "
-        #             "dequeued.")
-        #     else:
-        #         # Find the most recent stats log before the last received
-        #         # packet was dequeued.
-        #         for line_idx, line in reversed(list(enumerate(fil[:deq_idx]))):
-        #             if line.startswith("stats"):
-        #                 enqueued, _, dropped = [
-        #                     int(tok) for tok in line.split(":")[1].split(",")]
-        #                 drop_rate = dropped / (enqueued + dropped)
-        #                 break
-        # if drop_rate is None:
-        #     print(
-        #         "Warning: Did not calculate the loss rate at the bottleneck "
-        #         "queue.")
-        # else:
-        #     output[-1]["loss rate at queue"] = drop_rate
-        # print(f"loss rate at queue: {output[-1]['loss rate at queue']}")
+        # Calculate the drop rate at the bottleneck queue.
+        #
+        # Determine the path to the bottleneck queue log file.
+        toks = sim.name.split("-")
+        q_log_flp = path.join(
+            exp_dir,
+            "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
+            ".log")
+        # Calculate the raw drop rate at the bottleneck queue.
+        deq_idx = None
+        drop_rate = None
+        with open(q_log_flp, "r") as fil:
+            q_log = list(fil)
+        # Find the dequeue log corresponding to the last packet that was
+        # received.
+        for line_idx, line in reversed(list(enumerate(q_log))):
+            if line.startswith("1"):
+                toks = line.split(",")
+                if int(toks[2], 16) == server_port:
+                    if int(toks[3], 16) == last_seq:
+                        deq_idx = line_idx
+                        break
+        if deq_idx is None:
+            print(
+                "Warning: Did not find when the last received packet "
+                f"(seq: {last_seq}) was dequeued.")
+        else:
+            # Find the most recent stats log before the last received
+            # packet was dequeued.
+            for line_idx, line in reversed(
+                    list(enumerate(q_log[:deq_idx]))):
+                if line.startswith("stats"):
+                    toks = line.split(":")[1].split(",")
+                    if int(toks[0], 16) == server_port:
+                        enqueued, _, dropped = [
+                            int(tok) for tok in toks[1:]]
+                        drop_rate = dropped / (enqueued + dropped)
+                        break
+        if drop_rate is None:
+            print(
+                "Warning: Did not calculate the drop rate at the bottleneck "
+                f"queue for flow {flw_idx}.")
+        else:
+            output[-1]["drop rate at bottleneck queue"] = drop_rate
 
         flws.append(output)
 
