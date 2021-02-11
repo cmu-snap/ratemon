@@ -654,7 +654,8 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             sent_seqs.add(sent_pkt[0])
         if sent_idx == 0:
             print(
-                "Warning: Did not find when the last received packet was sent.")
+                "Warning: Did not find when the last received packet "
+                f"(seq: {last_seq}) was sent.")
         else:
             output[-1]["retransmission rate"] = 1 - (len(sent_seqs) / sent_idx)
 
