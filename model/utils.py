@@ -239,7 +239,8 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, client_port, server_port,  direction="data", extra_filter=None):
+def parse_packets(flp, client_port, server_port,  direction="data",
+                  extra_filter=None):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
          (sequence number, flow index, timestamp (us), TCP timestamp option,

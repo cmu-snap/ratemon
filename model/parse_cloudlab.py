@@ -171,7 +171,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     sim_params_flp = path.join(exp_dir, f"{sim.name}.json")
     with open(sim_params_flp, "r") as fil:
         params = json.load(fil)
-    flw_ports = [(flw[5], flw[4]) for flw in params["flows"]]
+    # List of tuples of the form: (client start port, server port)
+    flw_ports = [(client_port, flw[4])
+                 for flw in params["flows"]
+                 for client_port in range(flw[3], flw[3] + flw[-1])]
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
