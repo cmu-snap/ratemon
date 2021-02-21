@@ -196,6 +196,9 @@ class Sim():
         # Largest RTT that this experiment should experiment, based on the size
         # of the bottleneck queue and the RTT.
         self.calculated_max_rtt_us = (self.queue_bdp + 1) * self.rtt_us
+        # Fair share bandwidth for each flow.
+        self.target_per_flow_bw_Mbps = (
+            self.bw_Mbps / (self.cca_1_flws + self.cca_2_flws))
 
 
 def args_to_str(args, order):
