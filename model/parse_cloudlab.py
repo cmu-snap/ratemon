@@ -681,7 +681,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             for line_idx, line in reversed(list(enumerate(q_log))):
                 if line.startswith("1"):
                     toks = line.split(",")
-                    if (int(toks[2], 16) == server_port and
+                    if (int(toks[2], 16) == client_port and
                             int(toks[3], 16) == last_seq):
                         deq_idx = line_idx
                         break
@@ -698,7 +698,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     list(enumerate(q_log[:deq_idx]))):
                 if line.startswith("stats"):
                     toks = line.split(":")[1].split(",")
-                    if int(toks[0], 16) == server_port:
+                    if int(toks[0], 16) == client_port:
                         enqueued, _, dropped = [
                             int(tok) for tok in toks[1:]]
                         drop_rate = dropped / (enqueued + dropped)
