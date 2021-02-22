@@ -274,9 +274,13 @@ def parse_packets(flp, client_port, server_port,  direction="data",
     tmp_flp = f"{flp[:-5]}_tmp.txt"
 
     cmd = " ".join(
-        ["tshark", "-n", "-o", "tcp.relative_sequence_numbers:false",
-         "-o", "tcp.analyze_sequence_numbers:false", "-r", flp, filter_s,
-         ">>", tmp_flp])
+        ["tshark", "-n",
+         # The AMQP protocol uses port 5672, which our flows may use. tshark
+         # tries to parse those packets as AMQP packets, which gives a warning.
+         "--disable-protocol", "amqp",
+         "-o", "tcp.relative_sequence_numbers:false",
+         "-o", "tcp.analyze_sequence_numbers:false",
+         "-r", flp, filter_s, ">>", tmp_flp])
     print(f"Running: {cmd}")
     os.system(cmd)
 
