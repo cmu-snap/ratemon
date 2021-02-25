@@ -673,36 +673,40 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # Calculate the raw drop rate at the bottleneck queue.
         deq_idx = None
         drop_rate = None
+        q_log = None
         if path.exists(q_log_flp):
-            with open(q_log_flp, "r") as fil:
-                q_log = list(fil)
-                # Find the dequeue log corresponding to the last packet that was
-                # received.
-            for line_idx, line in reversed(list(enumerate(q_log))):
-                if line.startswith("1"):
-                    toks = line.split(",")
-                    if (int(toks[2], 16) == client_port and
-                            int(toks[3], 16) == last_seq):
-                        deq_idx = line_idx
+            q_log = parse_queue_log(q_log_flp)
+            # Find the dequeue log corresponding to the last packet that was
+            # received.
+            for record_idx, record in reversed(list(enumerate(q_log))):
+                if record[0] == "deq":
+                    if (record[2] == client_port and record[3] == last_seq):
+                        deq_idx = record_idx
                         break
         else:
             print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
-        if deq_idx is None:
+        if q_log is None or deq_idx is None:
             print(
                 "Warning: Did not find when the last received packet "
                 f"(seq: {last_seq}) was dequeued.")
         else:
             # Find the most recent stats log before the last received
             # packet was dequeued.
-            for line_idx, line in reversed(
+            for record_idx, record in reversed(
                     list(enumerate(q_log[:deq_idx]))):
-                if line.startswith("stats"):
-                    toks = line.split(":")[1].split(",")
-                    if int(toks[0], 16) == client_port:
-                        enqueued, _, dropped = [
-                            int(tok) for tok in toks[1:]]
-                        drop_rate = dropped / (enqueued + dropped)
+                if record[0] == "stats":
+                    if record[1] == client_port:
+                        drop_rate = record[2] / (record[2] + record[4])
                         break
+
+            # Calculate the Goh-Barabasi score up to the last packet received.
+            enq_records = np.array(
+                record for record in q_log[:deq_idx] if record[0] == "enq")
+
+            interarr_us = []
+            for idx in range(len(1, enq_records)):
+                interarr_us = 0
+
         if drop_rate is None:
             print(
                 "Warning: Did not calculate the drop rate at the bottleneck "

@@ -239,7 +239,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, client_port, server_port,  direction="data",
+def parse_packets(flp, client_port, server_port, direction="data",
                   extra_filter=None):
     """
     Parses a PCAP file. Returns a list of tuples of the form:
@@ -320,6 +320,53 @@ def parse_packets(flp, client_port, server_port,  direction="data",
     # Delete the temporary file.
     os.remove(tmp_flp)
     return pkts
+
+
+def parse_q_stats(toks):
+    """
+    Parses a "stats" line of a BESS queue log. Line should be of the form:
+        stats:time ns,src port,enqueued,dequeued,dropped
+    """
+    return (
+        ("stats",) +
+        tuple(
+            int(tok, 16) if tok.startswith("0x") else int(tok)
+            for tok in line.split(":")[1].split(",")))
+
+
+def parse_q_enq_deq(toks):
+    """
+    Parses a packet log line of a BESS queue log. Line should be of the form:
+        0 or 1,time ns,src port,seq,payload B,qsize,dropped,queued,batch size
+    """
+    (event, time_ns, src_port, seq, datalen, qsize, dropped, queued,
+     batch_size) = [
+         int(tok, 16) if tok.startswith("0x") else int(tok)
+         for tok in line.split(",")]
+
+    event_options = {0, 1}
+    assert event in event_options, f"Event \"{event}\" not in {event_options}"
+    if event == 0:
+        event = "enq"
+    else:
+        event = "deq"
+
+    return (
+        event, time_ns / 1e3, src_port, seq, payload_B, qsize, dropped, queued,
+        batch_size)
+
+
+def parse_queue_log(flp):
+    """
+
+    """
+    print(f"Parsing queue log: {flp}")
+    with open(flp, "r") as fil:
+        q_log = list(fil)
+    return [
+        parse_q_stats(line) if line.startswith("stats")
+        else parse_q_enq_deq(line)
+        for line in q_log]
 
 
 def scale(val, min_in, max_in, min_out, max_out):
