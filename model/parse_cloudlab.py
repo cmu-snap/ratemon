@@ -675,7 +675,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         drop_rate = None
         q_log = None
         if path.exists(q_log_flp):
-            q_log = parse_queue_log(q_log_flp)
+            q_log = utils.parse_queue_log(q_log_flp)
             # Find the dequeue log corresponding to the last packet that was
             # received.
             for record_idx, record in reversed(list(enumerate(q_log))):
@@ -695,7 +695,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             for record_idx, record in reversed(
                     list(enumerate(q_log[:deq_idx]))):
                 if record[0] == "stats":
-                    if record[1] == client_port:
+                    if record[2] == client_port:
                         drop_rate = record[2] / (record[2] + record[4])
                         break
 

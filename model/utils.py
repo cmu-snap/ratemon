@@ -323,7 +323,7 @@ def parse_packets(flp, client_port, server_port, direction="data",
     return pkts
 
 
-def parse_q_stats(toks):
+def parse_q_stats(line):
     """
     Parses a "stats" line of a BESS queue log. Line should be of the form:
         stats:time ns,src port,enqueued,dequeued,dropped
@@ -335,12 +335,12 @@ def parse_q_stats(toks):
             for tok in line.split(":")[1].split(",")))
 
 
-def parse_q_enq_deq(toks):
+def parse_q_enq_deq(line):
     """
     Parses a packet log line of a BESS queue log. Line should be of the form:
         0 or 1,time ns,src port,seq,payload B,qsize,dropped,queued,batch size
     """
-    (event, time_ns, src_port, seq, datalen, qsize, dropped, queued,
+    (event, time_ns, src_port, seq, payload_B, qsize, dropped, queued,
      batch_size) = [
          int(tok, 16) if tok.startswith("0x") else int(tok)
          for tok in line.split(",")]
@@ -367,7 +367,7 @@ def parse_queue_log(flp):
     return [
         parse_q_stats(line) if line.startswith("stats")
         else parse_q_enq_deq(line)
-        for line in q_log]
+        for line in q_log if line.strip() != ""]
 
 
 def scale(val, min_in, max_in, min_out, max_out):
