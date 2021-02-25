@@ -679,10 +679,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             # Find the dequeue log corresponding to the last packet that was
             # received.
             for record_idx, record in reversed(list(enumerate(q_log))):
-                if record[0] == "deq":
-                    if (record[2] == client_port and record[3] == last_seq):
-                        deq_idx = record_idx
-                        break
+                if (record[0] == "deq" and record[2] == client_port and
+                        record[3] == last_seq):
+                    deq_idx = record_idx
+                    break
         else:
             print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
         if q_log is None or deq_idx is None:
@@ -692,13 +692,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         else:
             # Find the most recent stats log before the last received
             # packet was dequeued.
-            for record_idx, record in reversed(
-                    list(enumerate(q_log[:deq_idx]))):
-                if record[0] == "stats":
-                    if record[2] == client_port:
-                        drop_rate = record[2] / (record[2] + record[4])
-                        break
-
+            for record in reversed(list(q_log[:deq_idx])):
+                if record[0] == "stats" and record[1] == client_port:
+                    drop_rate = record[4] / (record[2] + record[4])
+                    break
         if drop_rate is None:
             print(
                 "Warning: Did not calculate the drop rate at the bottleneck "
