@@ -278,6 +278,7 @@ def parse_packets(flp, client_port, server_port, direction="data",
          # The AMQP protocol uses port 5672, which our flows may use. tshark
          # tries to parse those packets as AMQP packets, which gives a warning.
          "--disable-protocol", "amqp",
+         "--disable-protocol", "hzlcst",
          "-o", "tcp.relative_sequence_numbers:false",
          "-o", "tcp.analyze_sequence_numbers:false",
          "-r", flp, filter_s, ">>", tmp_flp])
