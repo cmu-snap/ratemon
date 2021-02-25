@@ -491,6 +491,14 @@ def safe_mul(val1, val2):
     return -1 if val1 == -1 or val2 == -1 else val1 * val2
 
 
+def safe_sub(val1, val2):
+    """
+    Safely subtracts two values. If either value is -1, then the
+    result is -1 (unknown).
+    """
+    return -1 if val1 == -1 or val2 == -1 else val1 - val2
+
+
 def safe_div(num, den):
     """
     Safely divides two values. If either value is -1 or the
@@ -501,28 +509,54 @@ def safe_div(num, den):
 
 def safe_sqrt(val):
     """
-    Safely calculates the square root of a value. If the value is less
-    than or equal to 0, then the result is -1 (unknown).
+    Safely calculates the square root of a value. If the value is -1 (unknown),
+    then the result is -1 (unknown).
     """
-    return -1 if val < 0 else math.sqrt(val)
+    return -1 if val == -1 else math.sqrt(val)
+
+
+def safe_abs(val):
+    """
+    Safely calculates the absolute value of a value. If the value is -1
+    (unknown), then the result is -1 (unknown).
+    """
+    return -1 if val == -1 else abs(val)
+
+
+def get_safe(dat, start_idx=None, end_idx=None):
+    """
+    Returns a filtered window between the two specified indices, with all
+    unknown values (-1) removed.
+    """
+    if start_idx is None:
+        start_idx = 0
+    if end_idx is None:
+        end_idx = 0 if dat.shape[0] == 0 else dat.shape[0] - 1
+    # Extract the window.
+    dat_win = dat[start_idx:end_idx + 1]
+    # Eliminate values that are -1 (unknown).
+    return dat_win[dat_win != -1]
+
+
+def safe_sum(dat, start_idx=None, end_idx=None):
+    """
+    Safely calculates a sum over a window. Any values that are -1
+    (unknown) are discarded. The sum of an empty window is -1 (unknown).
+    """
+    dat_safe = get_safe(dat, start_idx, end_idx)
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_safe.shape[0] == 0 else np.sum(dat_safe)
 
 
 def safe_mean(dat, start_idx=None, end_idx=None):
     """
     Safely calculates a mean over a window. Any values that are -1
-    (unknown) are discarded. The mean of an empty window if -1
+    (unknown) are discarded. The mean of an empty window is -1
     (unknown).
     """
-    if start_idx is None:
-        start_idx = 0
-    if end_idx is None:
-        end_idx = dat.shape[0] - 1
-    # Extract the window.
-    dat_win = dat[start_idx:end_idx + 1]
-    # Eliminate values that are -1 (unknown).
-    dat_win = dat_win[dat_win != -1]
+    dat_safe = get_safe(dat, start_idx, end_idx)
     # If the window is empty, then the mean is -1 (unknown).
-    return -1 if dat_win.shape[0] == 0 else np.mean(dat_win)
+    return -1 if dat_safe.shape[0] == 0 else np.mean(dat_safe)
 
 
 def safe_update_ewma(prev_ewma, new_val, alpha):
