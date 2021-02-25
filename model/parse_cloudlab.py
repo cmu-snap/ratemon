@@ -699,14 +699,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                         drop_rate = record[2] / (record[2] + record[4])
                         break
 
-            # Calculate the Goh-Barabasi score up to the last packet received.
-            enq_records = np.array(
-                record for record in q_log[:deq_idx] if record[0] == "enq")
-
-            interarr_us = []
-            for idx in range(len(1, enq_records)):
-                interarr_us = 0
-
         if drop_rate is None:
             print(
                 "Warning: Did not calculate the drop rate at the bottleneck "
