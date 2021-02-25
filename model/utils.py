@@ -504,8 +504,8 @@ def safe_sub(val1, val2):
 
 def safe_div(num, den):
     """
-    Safely divides two values. If either value is -1 or the
-    denominator is 0, then the result is -1 (unknown).
+    Safely divides two values. If either value is -1 or the denominator is 0,
+    then the result is -1 (unknown).
     """
     return -1 if num == -1 or den in {-1, 0} else num / den
 
