@@ -45,10 +45,7 @@ EWMAS = [
     ("throughput p/s", "float64"),
     ("RTT estimate us", "float64"),
     ("RTT estimate ratio", "float64"),
-    ("RTT true us", "float64"),
-    ("RTT true ratio", "float64"),
     ("loss rate estimate", "float64"),
-    ("loss rate true", "float64"),
     ("mathis model throughput p/s", "float64"),
     # -1 no applicable (no loss yet), 0 lower than or equal to fair
     # throughput, 1 higher. This is not an EWMA metric itself, but is
@@ -62,12 +59,9 @@ WINDOWED = [
     ("average throughput p/s", "float64"),
     ("average RTT estimate us", "float64"),
     ("average RTT estimate ratio", "float64"),
-    ("average RTT true us", "float64"),
-    ("average RTT true ratio", "float64"),
     ("loss event rate", "float64"),
     ("1/sqrt loss event rate", "float64"),
     ("loss rate estimate", "float64"),
-    ("loss rate true", "float64"),
     ("mathis model throughput p/s", "float64"),
     # -1 no applicable (no loss yet), 0 lower than or equal to fair
     # throughput, 1 higher. This is not a windowed metric itself, but
@@ -167,11 +161,11 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         shutil.rmtree(exp_dir)
     subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
 
-    # TODO: Determine flow src and dst ports
+    # Determine flow src and dst ports.
     sim_params_flp = path.join(exp_dir, f"{sim.name}.json")
     with open(sim_params_flp, "r") as fil:
         params = json.load(fil)
-    # List of tuples of the form: (client start port, server port)
+    # List of tuples of the form: (client port, server port)
     flw_ports = [(client_port, flw[4])
                  for flw in params["flowsets"]
                  for client_port in flw[3]]
@@ -390,20 +384,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     new = rtt_estimate_us
                 elif "RTT estimate ratio" in metric:
                     new = rtt_estimate_ratio
-                elif "RTT true us" in metric:
-                    new = rtt_true_us
-                elif "RTT true ratio" in metric:
-                    new = rtt_true_ratio
                 elif "loss rate estimate" in metric:
                     # See comment in case for "loss rate true".
                     new = pkt_loss_cur_estimate / (
                         pkt_loss_cur_estimate + 1)
-                elif "loss rate true" in metric:
-                    # Divide the pkt_loss_cur_true by
-                    # (pkt_loss_cur_true + 1) because over the course
-                    # of sending (pkt_loss_cur_true + 1) packets, one
-                    # got through and pkt_loss_cur_true were lost.
-                    new = pkt_loss_cur_true / (pkt_loss_cur_true + 1)
                 elif "mathis model throughput p/s" in metric:
                     # Use the estimated loss rate to compute the
                     # Mathis model fair throughput. Contrary to the
@@ -485,14 +469,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     new = utils.safe_mean(
                         output[
                             make_ewma_metric("RTT estimate ratio", alpha=1.)],
-                        win_start_idx, j)
-                elif "average RTT true us" in metric:
-                    new = utils.safe_mean(
-                        output[make_ewma_metric("RTT true us", alpha=1.)],
-                        win_start_idx, j)
-                elif "average RTT true ratio" in metric:
-                    new = utils.safe_mean(
-                        output[make_ewma_metric("RTT true ratio", alpha=1.)],
                         win_start_idx, j)
                 elif "loss event rate" in metric and "1/sqrt" not in metric:
                     rtt_estimate_us = output[
@@ -604,14 +580,6 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     win_state[win]["loss_queue_estimate"], new = loss_rate(
                         win_state[win]["loss_queue_estimate"], win_start_idx,
                         pkt_loss_cur_estimate, recv_time_cur, recv_time_prev,
-                        win_size_us, j)
-                elif "loss rate true" in metric:
-                    # We do not need to check whether recv_time_prev
-                    # is -1 (unknown) because the windowed metrics
-                    # skip the case where j == 0.
-                    win_state[win]["loss_queue_true"], new = loss_rate(
-                        win_state[win]["loss_queue_true"], win_start_idx,
-                        pkt_loss_cur_true, recv_time_cur, recv_time_prev,
                         win_size_us, j)
                 elif "mathis model throughput p/s" in metric:
                     # Use the loss event rate to compute the Mathis
