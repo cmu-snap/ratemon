@@ -153,6 +153,14 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         print(f"\tAlready parsed: {exp_flp}")
         return
 
+    # Grab the lock file for this experiment.
+    lock_flp = path.join(out_dir, f"{exp.name}.lock")
+    if path.exists(lock_flp):
+        print(f"\tParsing already in progress: {exp_flp}")
+        return
+    with open(lock_flp, "w"):
+        pass
+
     # Create a temporary folder to untar experiments.
     if not path.exists(untar_dir):
         os.mkdir(untar_dir)
@@ -754,6 +762,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
 
     # Remove untarred folder
     shutil.rmtree(exp_dir)
+    # Remove lock file.
+    os.remove(lock_flp)
 
 
 def main():
