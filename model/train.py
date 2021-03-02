@@ -33,7 +33,7 @@ import utils
 # decreased to less than this fraction of the original throughput for a
 # training example to be considered.
 NEW_TPT_TSH = 0.925
-# Set to false to parse the simulations in sorted order.
+# Set to false to parse the experiments in sorted order.
 SHUFFLE = True
 # The number of times to log progress during one epoch.
 LOGS_PER_EPC = 5
@@ -119,24 +119,50 @@ def scale_fets(dat, scl_grps, standardize=False):
     return new, scl_prms
 
 
-def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
-                sequential=False):
+def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
+                cca, sequential=False):
     """
-    Loads and processes data from a single simulation.
+    Loads and processes data from a single experiment.
 
-    For logging purposes, "idx" is the index of this simulation amongst "total"
-    simulations total. Uses "net" to determine the relevant input and output
-    features. "sim_flp" is the path to the simulation file. The parsed results
+    For logging purposes, "idx" is the index of this experiment amongst "total"
+    experiments total. Uses "net" to determine the relevant input and output
+    features. "exp_flp" is the path to the experiment file. The parsed results
     are stored in "tmp_dir". Drops the first "warmup_prc" percent of packets.
-    Of the remaining packets, only "keep_prc" percent are kept. See
+    Of the remaining packets, only "keep_prc" percent are kept. Flows using the
+    congestion control algorithm "cca" will be selected. See
     utils.save_tmp_file() for the format of the results file.
 
-    Returns the path to the results file and a descriptive utils.Sim object.
+    Returns the path to the results file and a descriptive utils.Exp object.
     """
-    sim, dat = utils.load_sim(
-        sim_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
+    exp, dat = utils.load_exp(
+        exp_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if dat is None:
+        print(f"\tError loading {exp_flp}")
         return None
+
+    # Determine which flows to extract based on the specified CCA.
+    if cca == exp.cca_1_name:
+        flw_idxs = range(exp.cca_1_flws)
+    elif cca == exp.cca_2_name:
+        flw_idxs = range(exp.cca_1_flws, exp.tot_flws)
+    else:
+        print(f"\tCCA {cca} not found in {exp_flp}")
+        return None
+
+    dat_combined = None
+    for flw_idx in flw_idxs:
+        dat_flw = dat[flw_idx]
+        # Select a fraction of the data.
+        if keep_prc != 100:
+            num_rows = dat_flw.shape[0]
+            num_to_pick = math.ceil(num_rows * keep_prc / 100)
+            dat_flw = dat_flw[
+                np.random.random_integers(0, num_rows - 1, num_to_pick)]
+        if dat_combined is None:
+            dat_combined = dat_flw
+        else:
+            dat_combined = np.concatenate((dat_combined, dat_flw))
+    dat = dat_combined
 
     # Drop the first few packets so that we consider steady-state behavior only.
     dat = dat[math.floor(dat.shape[0] * warmup_prc / 100):]
@@ -161,31 +187,24 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
              [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
     dat_extra = np.empty(shape=dat.shape, dtype=dtype)
     dat_extra["raw"] = dat_out
-    dat_extra["num_flws"].fill(sim.cca_1_flws + sim.cca_2_flws)
-    dat_extra["btk_throughput"].fill(sim.bw_Mbps)
+    dat_extra["num_flws"].fill(exp.cca_1_flws + exp.cca_2_flws)
+    dat_extra["btk_throughput"].fill(exp.bw_Mbps)
     for typ in defaults.EXTRA_FETS:
         dat_extra[typ] = dat[typ]
     dat_extra = recfunctions.repack_fields(dat_extra)
 
     # Convert output features to class labels.
-    dat_out = net.convert_to_class(sim, dat_out)
+    dat_out = net.convert_to_class(exp, dat_out)
 
-    # If the results contains NaNs or Infs, then discard this
-    # simulation.
-    def has_non_finite(arr):
-        for fet in arr.dtype.names:
-            if not np.isfinite(arr[fet]).all():
-                print(
-                    f"    Simulation {sim_flp} has NaNs of Infs in feature "
-                    f"{fet}")
-                return True
-        return False
-    if has_non_finite(dat_in) or has_non_finite(dat_out):
+    # If the results contains NaNs or Infs, then discard this experiment.
+    if (utils.has_non_finite(dat_in) or utils.has_non_finite(dat_out) or
+        utils.has_non_finite(dat_extra)):
+        print(f"\tExperiment {exp_flp} contains NaNs of Infs.")
         return None
 
     # Verify data.
     assert dat_in.shape[0] == dat_out.shape[0], \
-        f"{sim_flp}: Input and output should have the same number of rows."
+        f"{exp_flp}: Input and output should have the same number of rows."
     # Find the uniques classes in the output features and make sure
     # that they are properly formed. Assumes that dat_out is a
     # structured numpy array containing a column named "class".
@@ -194,87 +213,84 @@ def process_sim(idx, total, net, sim_flp, tmp_dir, warmup_prc, keep_prc,
 
     # Transform the data as required by this specific model.
     dat_in, dat_out, dat_extra, scl_grps = net.modify_data(
-        sim, dat_in, dat_out, dat_extra, sequential=sequential)
-
-    # Select a fraction of the data.
-    if keep_prc != 100:
-        num_rows = dat_in.shape[0]
-        num_to_pick = math.ceil(num_rows * keep_prc / 100)
-        idxs = np.random.random_integers(0, num_rows - 1, num_to_pick)
-        dat_in = dat_in[idxs]
-        dat_out = dat_out[idxs]
-        dat_extra = dat_extra[idxs]
+        exp, dat_in, dat_out, dat_extra, sequential=sequential)
 
     # To avoid errors with sending large matrices between processes,
     # store the results in a temporary file.
-    dat_flp = path.join(tmp_dir, f"{path.basename(sim_flp)[:-4]}_tmp.npz")
+    dat_flp = path.join(tmp_dir, f"{path.basename(exp_flp)[:-4]}_tmp.npz")
     utils.save_tmp_file(
         dat_flp, dat_in, dat_out, dat_extra, scl_grps)
-    return dat_flp, sim
+    return dat_flp, exp
 
 
 def make_datasets(net, args, dat=None):
     """
-    Parses the simulation files in data_dir and transforms them (e.g., by
+    Parses the experiment files in data_dir and transforms them (e.g., by
     scaling) into the correct format for the network.
 
-    If num_sims is not None, then this function selects the first num_sims
-    simulations only. If shuffle is True, then the simulations will be parsed in
-    sorted order. Use num_sims and shuffle=True together to simplify debugging.
+    If num_exps is not None, then this function selects the first num_exps
+    experiments only. If shuffle is True, then the experiments will be parsed in
+    sorted order. Use num_expss and shuffle=True together to simplify debugging.
     """
     if dat is None:
-        # Find simulations.
-        sims = args["sims"]
-        if not sims:
+        # Find experiments.
+        exps = args["exps"]
+        if not exps:
             dat_dir = args["data_dir"]
-            sims = [
-                path.join(dat_dir, sim) for sim in sorted(os.listdir(dat_dir))]
+            exps = [
+                path.join(dat_dir, exp)
+                for exp in sorted(os.listdir(dat_dir))
+                if exp.endswith("npz")]
         if SHUFFLE:
             # Set the random seed so that multiple parallel instances of
             # this script see the same random order.
             utils.set_rand_seed()
-            random.shuffle(sims)
-        num_sims = args["num_sims"]
-        if num_sims is not None:
-            num_sims_actual = len(sims)
-            assert num_sims_actual >= num_sims, \
-                (f"Insufficient simulations. Requested {num_sims}, but only "
-                 f"{num_sims_actual} available.")
-            sims = sims[:num_sims]
-        tot_sims = len(sims)
-        print(f"Found {tot_sims} simulations.")
+            random.shuffle(exps)
+        num_exps = args["num_exps"]
+        if num_exps is not None:
+            num_exps_actual = len(exps)
+            assert num_exps_actual >= num_exps, \
+                (f"Insufficient experiments. Requested {num_exps}, but only "
+                 f"{num_exps_actual} available.")
+            exps = exps[:num_exps]
+        tot_exps = len(exps)
+        print(f"Found {tot_exps} experiments.")
 
         # Prepare temporary output directory. The output of parsing each
-        # simulation it written to disk instead of being transfered
-        # between processes because sometimes the data is too large for
-        # Python to send between processes.
+        # experiment is written to disk instead of being transfered between
+        # processes because sometimes the data is too large for Python to send
+        # between processes.
         tmp_dir = args["tmp_dir"]
         if tmp_dir is None:
             tmp_dir = args["out_dir"]
-        if not path.isdir(tmp_dir):
-            print(f"Temporary directory does not exist. Creating it: {tmp_dir}")
-            os.makedirs(tmp_dir)
+        # To keep files organized, create a randomly-named subdirectory.
+        tmp_dir = path.join(
+            tmp_dir, f"train_{random.randrange(int(time.time()))}")
+        os.makedirs(tmp_dir)
 
-        # Parse simulations.
-        sims_args = [
-            (idx, tot_sims, net, sim, tmp_dir, args["warmup_percent"],
-             args["keep_percent"])
-            for idx, sim in enumerate(sims)]
+        # Parse experiments.
+        exps_args = [
+            (idx, tot_exps, net, exp, tmp_dir, args["warmup_percent"],
+             args["keep_percent"], args["cca"])
+            for idx, exp in enumerate(exps)]
         if defaults.SYNC or args["sync"]:
-            dat_all = [process_sim(*sim_args) for sim_args in sims_args]
+            dat_all = [process_exp(*exp_args) for exp_args in exps_args]
         else:
             with multiprocessing.Pool() as pol:
-                # Each element of dat_all corresponds to a single simulation.
-                dat_all = pol.starmap(process_sim, sims_args)
-        # Throw away results from simulations that could not be parsed.
+                # Each element of dat_all corresponds to a single experiment.
+                dat_all = pol.starmap(process_exp, exps_args)
+        # Throw away results from experiments that could not be parsed.
         dat_all = [dat for dat in dat_all if dat is not None]
-        print(f"Discarded {tot_sims - len(dat_all)} simulations!")
-        assert dat_all, "No valid simulations found!"
-        dat_all, sims = zip(*dat_all)
-
+        print(f"Discarded {tot_exps - len(dat_all)} experiments!")
+        assert dat_all, "No valid experiments found!"
+        dat_all, exps = zip(*dat_all)
         dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
+
+        # Remove the temporary subdirectory that we created (will fail if it's
+        # not empty).
+        os.rmdir(tmp_dir)
     else:
-        dat_all, sims = dat
+        dat_all, exps = dat
 
     # Validate data.
     dim_in = None
@@ -347,7 +363,7 @@ def make_datasets(net, args, dat=None):
         assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
     assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
 
-    # Scale input features. Do this here instead of in process_sim()
+    # Scale input features. Do this here instead of in process_exp()
     # because all of the features must be scaled using the same
     # parameters.
     dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, args["standardize"])
@@ -882,11 +898,19 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
 def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(description="An LSTM training framework.")
+    psr = argparse.ArgumentParser(
+        description="Train a model on the output of gen_features.py.")
     psr.add_argument(
         "--graph", action="store_true",
         help=("If the model is an sklearn model, then analyze and graph the "
               "testing results."))
+    psr.add_argument(
+        "--cca", default=defaults.DEFAULTS["cca"], help="The CCA to train on.",
+        required=False)
+    psr.add_argument(
+        "--tmp-dir", default=defaults.DEFAULTS["tmp_dir"],
+        help=("The directory in which to store temporary files. For best "
+              "performance, use an in-memory filesystem."))
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     # Verify that all arguments are reflected in defaults.DEFAULTS.

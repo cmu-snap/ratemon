@@ -10,8 +10,8 @@ DEFAULTS = {
     "data_dir": ".",
     "warmup_percent": 0,
     "keep_percent": 100,
-    "num_sims": sys.maxsize,
-    "sims": [],
+    "num_exps": sys.maxsize,
+    "exps": [],
     "model": models.MODEL_NAMES[0],
     "features": [],
     "epochs": 100,
@@ -38,7 +38,8 @@ DEFAULTS = {
     "out_dir": ".",
     "tmp_dir": None,
     "regen_data": False,
-    "sync": False
+    "sync": False,
+    "cca": "bbr"
 }
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000

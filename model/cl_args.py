@@ -37,25 +37,25 @@ def add_warmup(psr, psr_verify=lambda args: args):
 
     psr.add_argument(
         "--warmup-percent", default=defaults.DEFAULTS["warmup_percent"],
-        help=("The percent of each simulation's datapoint to drop from the "
+        help=("The percent of each experiment's datapoint to drop from the "
               "beginning."),
         type=float)
     return psr, lambda args: verify(psr_verify(args))
 
 
-def add_num_sims(psr, psr_verify=lambda args: args):
+def add_num_exps(psr, psr_verify=lambda args: args):
     """
-    Adds a "num-sims" argument to the provided ArgumentParser, and returns it.
+    Adds a "num-exps" argument to the provided ArgumentParser, and returns it.
     """
     def verify(args):
-        num_sims = args.num_sims
-        assert num_sims >= 0, \
-            f"\"num-sims\" cannot be negative, but is: {num_sims}"
+        num_exps = args.num_exps
+        assert num_exps >= 0, \
+            f"\"num-exps\" cannot be negative, but is: {num_exps}"
         return args
 
     psr.add_argument(
-        "--num-sims", default=defaults.DEFAULTS["num_sims"],
-        help="The number of simulations to consider.", required=False, type=int)
+        "--num-exps", default=defaults.DEFAULTS["num_exps"],
+        help="The number of experiments to consider.", required=False, type=int)
     return psr, lambda args: verify(psr_verify(args))
 
 
@@ -95,7 +95,7 @@ def add_training(psr, psr_verify=lambda args: args):
              f"{keep_prc}")
         return args
 
-    psr, psr_verify = add_num_sims(*add_common(psr, psr_verify))
+    psr, psr_verify = add_num_exps(*add_common(psr, psr_verify))
     psr.add_argument(
         "--data-dir",
         help=("The path to a directory containing the"
@@ -103,7 +103,7 @@ def add_training(psr, psr_verify=lambda args: args):
         required=True, type=str)
     psr.add_argument(
         "--keep-percent", default=defaults.DEFAULTS["keep_percent"],
-        help="The percent of each simulation's datapoints to keep.", type=float)
+        help="The percent of each experiment's datapoints to keep.", type=float)
     psr.add_argument(
         "--no-rand", action="store_true", help="Use a fixed random seed.")
     psr.add_argument(

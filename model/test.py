@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" Evalaute the model on simulations. """
+""" Evalaute the model on experiments. """
 
 import argparse
 import json
@@ -96,18 +96,18 @@ def init_global(manager):
             bucketized_rtt_dict, bucketized_queue_dict)
 
 
-def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
+def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
                 standardize, all_accuracy, all_bucketized_accuracy, bw_dict,
                 rtt_dict, queue_dict, bucketized_bw_dict, bucketized_rtt_dict,
                 bucketized_queue_dict, lock):
-    """ Evaluate a single simulation. """
+    """ Evaluate a single experiment. """
     if not path.exists(out_dir):
         os.makedirs(out_dir)
 
-    # Load and parse the simulation.
-    temp_path, sim = (
-        train.process_sim(
-            idx, total, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
+    # Load and parse the experiment.
+    temp_path, exp = (
+        train.process_exp(
+            idx, total, net=net, exp_flp=exp_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
     dat_in, dat_out, dat_extra, _ = utils.load_tmp_file(temp_path)
@@ -120,7 +120,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
     # Visualize the ground truth data.
     utils.visualize_classes(net, dat_out)
 
-    # Test the simulation.
+    # Test the experiment.
     accuracy, bucketized_accuracy = net.test(
         *utils.Dataset(
             fets=dat_in.dtype.names,
@@ -130,7 +130,7 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
         graph_prms={
             "out_dir": out_dir,
             "sort_by_unfairness": False,
-            "dur_s": sim.dur_s
+            "dur_s": exp.dur_s
         })
 
     lock.acquire()
@@ -141,19 +141,19 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
     mean_bucketized_accuracy = mean(all_bucketized_accuracy)
 
     for bw_mbps in bw_dict.keys():
-        if sim.bw_Mbps <= bw_mbps:
+        if exp.bw_Mbps <= bw_mbps:
             bw_dict[bw_mbps].append(accuracy)
             bucketized_bw_dict[bw_mbps].append(bucketized_accuracy)
             break
 
-    rtt_us = sim.rtt_us
+    rtt_us = exp.rtt_us
     for rtt_us_ in rtt_dict.keys():
         if rtt_us <= rtt_us_:
             rtt_dict[rtt_us_].append(accuracy)
             bucketized_rtt_dict[rtt_us_].append(bucketized_accuracy)
             break
 
-    bdp = sim.bw_Mbps * rtt_us / (1448) / sim.queue_p
+    bdp = exp.bw_Mbps * rtt_us / (1448) / exp.queue_p
 
     for queue_bdp in queue_dict.keys():
         if bdp <= queue_bdp:
@@ -162,10 +162,10 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
             break
 
     print(
-        f"Finish processing {sim.name}\n"
-        "----Average accuracy for all the processed simulations: "
+        f"Finish processing {exp.name}\n"
+        "----Average accuracy for all the processed experiments: "
         f"{mean_accuracy}\n"
-        "----Average bucketized accuracy for all the processed simulations: "
+        "----Average bucketized accuracy for all the processed experiments: "
         f"{mean_bucketized_accuracy}\n")
 
     for bw_mbps in bw_dict.keys():
@@ -198,40 +198,40 @@ def process_one(idx, total, sim_flp, out_dir, net, warmup_prc, scl_prms_flp,
 def main():
     """ This program's entrypoint. """
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(description="Analyzes full simulations.")
+    psr = argparse.ArgumentParser(description="Analyzes full experiments.")
     psr, psr_verify = cl_args.add_running(psr)
     psr.add_argument(
         "--model", help="The path to a trained model file.", required=True,
         type=str)
     psr.add_argument(
-        "--simulations",
-        help=("The path to a directory of simulations to analyze, or the path "
-              "to a single simulation file."),
+        "--experiments",
+        help=("The path to a directory of experiments to analyze, or the path "
+              "to a single experiment file."),
         required=False, default=None, type=str)
     psr.add_argument(
         "--input-file",
-        help=("The path to a file containing a list of simulations."),
+        help=("The path to a file containing a list of experiments."),
         required=False, default=None, type=str)
     args = psr_verify(psr.parse_args())
     mdl_flp = args.model
     out_dir = args.out_dir
     standardize = args.standardize
     input_file = args.input_file
-    sim_dir = args.simulations
+    exp_dir = args.experiments
 
-    assert (sim_dir is None) != (input_file is None), \
-        "Test takes in either a directory of simulations or " \
-        "an input file containing all the simulations"
+    assert (exp_dir is None) != (input_file is None), \
+        "Test takes in either a directory of experiments or " \
+        "an input file containing all the experiments"
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
-    if args.simulations:
-        assert path.exists(sim_dir), \
-            f"Simulation dir/file does not exist: {sim_dir}"
-        sim_flps = (
-            [path.join(sim_dir, sim_fln) for sim_fln in os.listdir(sim_dir)]
-            if path.isdir(sim_dir) else [sim_dir])
+    if args.experiments:
+        assert path.exists(exp_dir), \
+            f"Experiment dir/file does not exist: {exp_dir}"
+        exp_flps = (
+            [path.join(exp_dir, exp_fln) for exp_fln in os.listdir(exp_dir)]
+            if path.isdir(exp_dir) else [exp_dir])
     else:
         with open(input_file, "r") as input_file:
-            sim_flps = [line.rstrip("\n") for line in input_file]
+            exp_flps = [line.rstrip("\n") for line in input_file]
 
     # Parse the model filepath to determine the model type, and instantiate it.
     net = models.MODELS[
@@ -263,15 +263,15 @@ def main():
 
     lock = manager.Lock()
 
-    total = len(sim_flps)
+    total = len(exp_flps)
     func_input = [
-        (idx, total, sim_flp,
-         path.join(out_dir, path.basename(sim_flp).split(".")[0]), net,
+        (idx, total, exp_flp,
+         path.join(out_dir, path.basename(exp_flp).split(".")[0]), net,
          args.warmup_percent, args.scale_params, standardize, all_accuracy,
          all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict,
          bucketized_bw_dict, bucketized_rtt_dict,
          bucketized_queue_dict, lock)
-        for idx, sim_flp in enumerate(sim_flps)]
+        for idx, exp_flp in enumerate(exp_flps)]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()
@@ -284,7 +284,7 @@ def main():
 
     with open(path.join(out_dir, "results.txt"), "w") as fil:
         fil.write(
-            "Average accuracy for all the processed simulations: "
+            "Average accuracy for all the processed experiments: "
             f"{mean_accuracy}\n")
 
         x_axis = []

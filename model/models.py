@@ -1409,11 +1409,11 @@ class SvmSklearnWrapper(SvmWrapper):
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
                 "x_lim": x_lim})
 
-        # Analyze accuracy of a sliding window method
-        sliding_window_accuracy = self.__evaluate_sliding_window(
-            predictions, torch.tensor(raw), torch.tensor(fair),
-            torch.tensor(dat_extra[defaults.ARRIVAL_TIME_FET].copy()),
-            torch.tensor(dat_extra[defaults.RTT_ESTIMATE_FET].copy()))
+        # # Analyze accuracy of a sliding window method
+        # sliding_window_accuracy = self.__evaluate_sliding_window(
+        #     predictions, torch.tensor(raw), torch.tensor(fair),
+        #     torch.tensor(dat_extra[defaults.ARRIVAL_TIME_FET].copy()),
+        #     torch.tensor(dat_extra[defaults.RTT_ESTIMATE_FET].copy()))
 
         return model_acc, sliding_window_accuracy
 
