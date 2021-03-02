@@ -138,32 +138,33 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
          if pkt_idx - win_start_idx > 0 else 0))
 
 
-def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
+def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     """ Parse a PCAP file. """
-    print(f"Parsing: {sim_dir}")
-    sim = utils.Sim(sim_dir)
-    tot_flws = sim.cca_1_flws + sim.cca_2_flws
-    assert tot_flws > 0, f"No flows to analyze: {sim_dir}"
+    print(f"Parsing: {exp_flp}")
+    exp = utils.Exp(exp_flp)
+    tot_flws = exp.cca_1_flws + exp.cca_2_flws
+    if tot_flws == 0:
+        print(f"\tNo flows to analyze: {exp_flp}")
 
     # Construct the output filepaths.
-    out_flp = path.join(out_dir, f"{sim.name}.npz")
+    out_flp = path.join(out_dir, f"{exp.name}.npz")
     # If the output file exists, then we do not need to parse this file.
     if path.exists(out_flp):
-        print(f"    Already parsed: {sim_dir}")
+        print(f"\tAlready parsed: {exp_flp}")
         return
 
     # Create a temporary folder to untar experiments.
     if not path.exists(untar_dir):
         os.mkdir(untar_dir)
-    exp_dir = path.join(untar_dir, sim.name)
+    exp_dir = path.join(untar_dir, exp.name)
     # If this experiment already has been untarred, then delete the old files.
     if path.exists(exp_dir):
         shutil.rmtree(exp_dir)
-    subprocess.check_call(["tar", "-xf", sim_dir, "-C", untar_dir])
+    subprocess.check_call(["tar", "-xf", exp_flp, "-C", untar_dir])
 
     # Determine flow src and dst ports.
-    sim_params_flp = path.join(exp_dir, f"{sim.name}.json")
-    with open(sim_params_flp, "r") as fil:
+    params_flp = path.join(exp_dir, f"{exp.name}.json")
+    with open(params_flp, "r") as fil:
         params = json.load(fil)
     # List of tuples of the form: (client port, server port)
     flw_ports = [(client_port, flw[4])
@@ -188,10 +189,10 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             # Packet lists are of tuples of the form:
             #     (seq, sender, timestamp us, timestamp option)
             sent_pkts = utils.parse_packets(
-                path.join(exp_dir, f"client-tcpdump-{sim.name}.pcap"),
+                path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"),
                 client_port, server_port, direction="data")
 
-            recv_flp = path.join(exp_dir, f"server-tcpdump-{sim.name}.pcap")
+            recv_flp = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
             recv_data_pkts = utils.parse_packets(
                 recv_flp, client_port, server_port, direction="data")
             # Ack packets for RTT calculation
@@ -219,17 +220,17 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             skip = True
             print(
                 f"Warning: No data packets sent for flow {flw_idx} in: "
-                f"{sim_dir}")
+                f"{exp_flp}")
         if not recv_data_pkts:
             skip = True
             print(
                 f"Warning: No data packets received for flow {flw_idx} in: "
-                f"{sim_dir}")
+                f"{exp_flp}")
         if not recv_ack_pkts:
             skip = True
             print(
                 f"Warning: No ACK packets sent for flow {flw_idx} in: "
-                f"{sim_dir}")
+                f"{exp_flp}")
         if skip:
             flws.append(output)
             continue
@@ -453,7 +454,18 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
                     new = ((recv_time_cur - recv_data_pkts[win_start_idx][1]) /
                            (j - win_start_idx + 1))
                 elif "average throughput p/s" in metric:
-                    # We base the throughput calculation on the
+                    # Sum up the payloads of the packets in the window.
+                    total_bytes = utils.safe_sum(
+                        output[win_start_idx:j + 1]["payload B"])
+                    # Divide by the duration of the window.
+                    start_time = output[win_start_idx - 1]["arrival time us"]
+                    end_time = output[j]["arrival time us"]
+
+                    new = utils.safe_div(
+                        utils.safe_mul(total_bytes, 8),
+                        utils.safe_div(
+                            utils.safe_sub(end_time, start_time), 1e6))
+
                     # average interarrival time over the window.
                     avg_interarr_time_us = output[j][
                         make_win_metric("average interarrival time us", win)]
@@ -633,7 +645,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
         # Calculate the drop rate at the bottleneck queue.
         #
         # Determine the path to the bottleneck queue log file.
-        toks = sim.name.split("-")
+        toks = exp.name.split("-")
         q_log_flp = path.join(
             exp_dir,
             "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
@@ -687,8 +699,8 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     # extra_time = 20  # Flows could end later than start_time + duration
     # ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
     # arrival_time_key = "arrival time us"
-    # x_vals = np.arange((sim.dur_s + extra_time) * 1000, dtype=float) / 1000
-    # total_throughput = [0] * ((sim.dur_s + extra_time) * 1000)
+    # x_vals = np.arange((exp.dur_s + extra_time) * 1000, dtype=float) / 1000
+    # total_throughput = [0] * ((exp.dur_s + extra_time) * 1000)
     # interp_list = []
     # for flw_dat in flws:
     #     per_flow_throughput = flw_dat[ground_truth_throughput]
@@ -711,7 +723,7 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
     #     flw_dat["flow share percentage"] = percentage
 
     if not skip_smoothed:
-        total_throughput_p = sim.bw_Mbps * 1e6 / 8 / 1448
+        total_throughput_p = exp.bw_Mbps * 1e6 / 8 / 1448
         # Use index variables to make sure that no data is being copied.
         # TODO: Is this a correct idea?
         for j in range(len(flws)):
@@ -721,23 +733,22 @@ def parse_pcap(sim_dir, untar_dir, out_dir, skip_smoothed):
             flws[j]["flow share percentage"] = (
                 per_flow_throughput / total_throughput_p)
 
-    # Determine if there are any NaNs or Infs in the results. For the
-    # results for each flow, look through all features (columns) and
-    # make a note of the features that bad values. Flatten these lists
-    # of feature names, using a set comprehension to remove
-    # duplicates.
+    # Determine if there are any NaNs or Infs in the results. For the results
+    # for each flow, look through all features (columns) and make a note of the
+    # features that bad values. Flatten these lists of feature names, using a
+    # set comprehension to remove duplicates.
     bad_fets = {
         fet for flw_dat in flws
         for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
     if bad_fets:
-        print(f"    Simulation {untar_dir} has NaNs of Infs in features: "
-              f"{bad_fets}")
+        print(
+            f"\tExperiment {exp_flp} has NaNs of Infs in features: {bad_fets}")
 
     # Save the results.
     if path.exists(out_flp):
-        print(f"    Output already exists: {out_flp}")
+        print(f"\tOutput already exists: {out_flp}")
     else:
-        print(f"    Saving: {out_flp}")
+        print(f"\tSaving: {out_flp}")
         np.savez_compressed(
             out_flp, **{str(k + 1): v for k, v in enumerate(flws)})
 
@@ -761,10 +772,13 @@ def main():
         required=True, type=str)
     psr.add_argument(
         "--random-order", action="store_true",
-        help="Parse the simulations in a random order.")
+        help="Parse experiments in a random order.")
     psr.add_argument(
         "--skip-smoothed-features", action="store_true",
         help="Do not calculate EWMA and windowed features.")
+    psr.add_argument(
+        "--parallel", default=multiprocessing.cpu_count(),
+        help="The number of files to parse in parallel.", type=int)
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
@@ -772,10 +786,10 @@ def main():
     out_dir = args.out_dir
     skip_smoothed = args.skip_smoothed_features
 
-    # Find all simulations.
+    # Find all experiments.
     pcaps = [
-        (path.join(exp_dir, sim), untar_dir, out_dir, skip_smoothed)
-        for sim in sorted(os.listdir(exp_dir)) if sim.endswith(".tar.gz")]
+        (path.join(exp_dir, exp), untar_dir, out_dir, skip_smoothed)
+        for exp in sorted(os.listdir(exp_dir)) if exp.endswith(".tar.gz")]
     if args.random_order:
         # Set the random seed so that multiple instances of this
         # script see the same random order.
@@ -786,11 +800,11 @@ def main():
     tim_srt_s = time.time()
     if defaults.SYNC:
         for pcap in pcaps:
-            parse_pcap(*pcap)
+            parse_exp(*pcap)
     else:
         # By default, use all available cores.
-        with multiprocessing.Pool() as pol:
-            pol.starmap(parse_pcap, pcaps)
+        with multiprocessing.Pool(processes=args.parallel) as pol:
+            pol.starmap(parse_exp, pcaps)
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
 
