@@ -803,7 +803,7 @@ def main():
     if args.random_order:
         # Set the random seed so that multiple instances of this
         # script see the same random order.
-        utils.set_rand_seed()
+        utils.set_rand_seed(int(time.time()))
         random.shuffle(pcaps)
 
     print(f"Num files: {len(pcaps)}")
