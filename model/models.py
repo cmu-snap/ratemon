@@ -1415,7 +1415,7 @@ class SvmSklearnWrapper(SvmWrapper):
         #     torch.tensor(dat_extra[defaults.ARRIVAL_TIME_FET].copy()),
         #     torch.tensor(dat_extra[defaults.RTT_ESTIMATE_FET].copy()))
 
-        return model_acc, sliding_window_accuracy
+        return model_acc, 0  # sliding_window_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
