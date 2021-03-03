@@ -285,6 +285,7 @@ def parse_packets(flp, client_port, server_port, direction="data",
          "--disable-protocol", "ilp",
          "--disable-protocol", "ulp",
          "--disable-protocol", "ssl",
+         "--disable-protocol", "pcp",
          "-o", "tcp.relative_sequence_numbers:false",
          "-o", "tcp.analyze_sequence_numbers:false",
          "-r", flp, filter_s, ">>", tmp_flp])
