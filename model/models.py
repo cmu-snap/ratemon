@@ -1272,20 +1272,24 @@ class SvmSklearnWrapper(SvmWrapper):
             ("If \"sort_by_unfairness\" is False, then \"dur_s\" must not be "
              "None.")
 
-        # Compute the fair share. Convert from int to float to avoid
-        # all values being rounded to 0.
+        # Run inference. Everything after the following line is just analysis.
+        predictions = torch.tensor(self.net.predict(dat_in))
+
+        # Compute the bandwidth fair share fraction. Convert from int to float
+        # to avoid all values being rounded to 0.
         fair = np.reciprocal(dat_extra["num_flws"].astype(float))
+
+        # Create the output directory.
+        out_dir = path.join(graph_prms["out_dir"], self.name)
+        if self.graph:
+            if not path.exists(out_dir):
+                os.makedirs(out_dir)
+
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
             # Compute the maximum unfairness.
             (-1, ((dat_extra["raw"] - fair) / fair).max().item())
             if sort_by_unfairness else (0, graph_prms["dur_s"]))
-        # Optionally create the output directory.
-        out_dir = path.join(graph_prms["out_dir"], self.name)
-        if self.graph:
-            # Create the output directory.
-            if not path.exists(out_dir):
-                os.makedirs(out_dir)
 
         # Analyze feature coefficients. The underlying model's .coef_
         # attribute may not exist.
@@ -1317,6 +1321,8 @@ class SvmSklearnWrapper(SvmWrapper):
                 f"----------\n{qualifier} features ({len(best_fets)}):\n" +
                 "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
                 "\n----------")
+
+            # Graph feature coefficients.
             if self.graph:
                 names, coefs = zip(*best_fets)
                 num_fets = len(names)
@@ -1383,8 +1389,7 @@ class SvmSklearnWrapper(SvmWrapper):
                 torch.tensor(dat_extra[defaults.THR_ESTIMATE_FET].copy()),
                 x_lim=None)
 
-        # Analyze accuracy vs. unfairness for all flows and all
-        # degrees of unfairness, for the Mathis Model.
+        # Analyze overall accuracy for the Mathis Model.
         print("Evaluting Mathis Model:")
         raw = dat_extra["raw"].copy()
         self.__evaluate(
@@ -1396,10 +1401,7 @@ class SvmSklearnWrapper(SvmWrapper):
                     out_dir, "accuracy_vs_unfairness_mathis.pdf"),
                 "x_lim": x_lim})
 
-        predictions = torch.tensor(self.net.predict(dat_in))
-
-        # Analyze accuracy vs unfairness for all flows and all degrees
-        # of unfairness, for the model itself.
+        # Analyze overall accuracy for our model itself.
         print(f"Evaluating {self.name} model:")
         model_acc = self.__evaluate(
             predictions, dat_out_classes, torch.tensor(raw), torch.tensor(fair),
@@ -1411,7 +1413,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # # Analyze accuracy of a sliding window method
         # sliding_window_accuracy = self.__evaluate_sliding_window(
-        #     predictions, torch.tensor(raw), torch.tensor(fair),
+         #     predictions, torch.tensor(raw), torch.tensor(fair),
         #     torch.tensor(dat_extra[defaults.ARRIVAL_TIME_FET].copy()),
         #     torch.tensor(dat_extra[defaults.RTT_ESTIMATE_FET].copy()))
 
