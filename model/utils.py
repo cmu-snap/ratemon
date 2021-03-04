@@ -308,7 +308,6 @@ def parse_packets(flp, client_ip, server_ip, flws_ports):
                         break
                 else:
                     ts = (-1, -1)
-
             flw_to_pkts[flw][dir_idx][idx] = (
                 # Sequence number.
                 tcp.seq,

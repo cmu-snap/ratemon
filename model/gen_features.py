@@ -35,6 +35,7 @@ REGULAR = [
     ("drop rate at bottleneck queue", "float64"),
     ("retransmission rate", "float64"),
     ("payload B", "int32"),
+    ("wire len B", "int32"),
     ("total so far B", "int32"),
     ("RTT estimate us", "int32")
 ]
@@ -189,8 +190,6 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"),
         client_ip, server_ip, flws_ports)
 
-    return
-
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
     flws = []
@@ -204,31 +203,10 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             [(make_win_metric(metric, win), typ)
              for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])))
 
-    for flw_idx, (client_port, server_port) in enumerate(flws_ports):
-        try:
-            # Packet lists are of tuples of the form:
-            #     (seq, sender, timestamp us, timestamp option)
-            sent_pkts = utils.parse_packets(
-                path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"),
-                client_port, server_port, direction="data")
-
-            recv_flp = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
-            recv_data_pkts = utils.parse_packets(
-                recv_flp, client_port, server_port, direction="data")
-            # Ack packets for RTT calculation
-            recv_ack_pkts = utils.parse_packets(
-                recv_flp, client_port, server_port, direction="ack")
-        except RuntimeError as exc:
-            # If this experiment does not have any flows, then skip it.
-            print(f"Unable to parse packets for flow {flw_idx}: {exc}")
-            flws.append(np.empty(0, dtype=dtype))
-
-            # Create these variables so that there is not a error when they are
-            # explicitly deleted after all flows have been processed.
-            sent_pkts = None
-            recv_data_pkts = None
-            recv_ack_pkts = None
-            continue
+    for flw_idx, flw in enumerate(flws_ports):
+        client_port, server_port = flw
+        sent_pkts = flw_to_pkts_client[flw][0]
+        recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
 
         # The final output. -1 implies that a value could not be calculated.
         output = np.empty(len(recv_data_pkts), dtype=dtype)
@@ -236,17 +214,17 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
 
         # If this flow does not have any packets, then skip it.
         skip = False
-        if not sent_pkts:
+        if sent_pkts.shape[0] == 0:
             skip = True
             print(
                 f"Warning: No data packets sent for flow {flw_idx} in: "
                 f"{exp_flp}")
-        if not recv_data_pkts:
+        if recv_data_pkts.shape[0] == 0:
             skip = True
             print(
                 f"Warning: No data packets received for flow {flw_idx} in: "
                 f"{exp_flp}")
-        if not recv_ack_pkts:
+        if recv_ack_pkts.shape[0] == 0:
             skip = True
             print(
                 f"Warning: No ACK packets sent for flow {flw_idx} in: "
@@ -314,8 +292,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # ack_idx to the first occurance of the timestamp
                     # option TSval corresponding to the current packet's
                     # TSecr.
-                    tsval = recv_ack_pkts[ack_idx][2][0]
-                    tsecr = recv_pkt[2][1]
+                    tsval = recv_ack_pkts[ack_idx][2]
+                    tsecr = recv_pkt[3]
                     ack_idx_old = ack_idx
                     while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
                         ack_idx += 1
@@ -347,8 +325,9 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 interarr_time_us = -1
 
             output[j]["interarrival time us"] = interarr_time_us
-            payload_B = recv_pkt[3]
+            payload_B = recv_pkt[4]
             output[j]["payload B"] = payload_B
+            output[j]["wire len B"] = recv_pkt[5]
 
             output[j]["total so far B"] = (
                 payload_B + (0 if j == 0 else output[j - 1]["total so far B"]))
