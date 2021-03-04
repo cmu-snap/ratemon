@@ -1046,49 +1046,93 @@ class SvmSklearnWrapper(SvmWrapper):
         clss_str["class"] = clss
         return clss_str
 
-    def __evaluate(self, preds, labels, raw, fair, sort_by_unfairness=False,
-                   graph_prms=None):
+    def __evaluate(self, preds, labels, raw, fair, out_dir,
+                   sort_by_unfairness=False, graph_prms=None):
         """
         Returns the accuracy of predictions compared to ground truth
         labels. If self.graph == True, then this function also graphs
         the accuracy. preds, labels, raw, and fair must be Torch tensors.
         """
         utils.assert_tensor(preds=preds, labels=labels, raw=raw, fair=fair)
-        # Compute the distance from fair, then divide by fair to
-        # compute the relative unfairness.
-        diffs = (raw - fair) / fair
-        if sort_by_unfairness:
-            # Sort based on unfairness.
-            diffs, indices = torch.sort(diffs)
-            preds = preds[indices]
-            labels = labels[indices]
-        # Bucketize and compute bucket accuracies.
-        num_samples = preds.size()[0]
-        num_buckets = min(20 * (1 if sort_by_unfairness else 4), num_samples)
-        num_per_bucket = math.floor(num_samples / num_buckets)
-        assert num_per_bucket > 0, \
-            ("There must be at least one sample per bucket, but there are "
-             f"{num_samples} samples and only {num_buckets} buckets!")
-        # The resulting buckets are tuples of three values:
-        #   (x-axis value for bucket, number predicted correctly, total)
-        buckets = [
-            (x,
-             self.check_output(preds_, labels_),
-             preds_.size()[0])
-            for x, preds_, labels_ in [
-                # Each bucket is defined by a tuple of three values:
-                #   (x-axis value for bucket, predictions, ground truth labels).
-                # The x-axis is the mean relative difference for this
-                # bucket. A few values at the end may be discarded.
-                (torch.mean(diffs[i:i + num_per_bucket]),
-                 preds[i:i + num_per_bucket],
-                 labels[i:i + num_per_bucket])
-                for i in range(0, num_samples, num_per_bucket)]]
+
+        # Overall accuracy.
+        acc = torch.sum(preds == labels) / preds.size()[0]
+
+        # Break down the accuracy into false positives/negatives, precision, and
+        # recall.
+        labels_neg = labels == 0
+        labels_pos = labels == 1
+        preds_neg = preds == 0
+        preds_pos = preds == 1
+
+        true_pos = torch.sum(torch.logical_and(preds_pos, labels_pos))
+        false_pos = torch.sum(torch.logical_and(preds_pos, labels_neg))
+        false_neg = torch.sum(torch.logical_and(preds_pos, labels_neg))
+
+        false_pos_rate = false_pos / torch.sum(labels_neg)
+        false_neg_rate = false_neg / torch.sum(labels_pos)
+
+        precision = true_pos / (true_pos + false_pos)
+        recall = true_pos / (true_pos + false_neg)
+
+        frac_preds_pos = torch.sum(preds_pos) / preds_pos.size()[0]
+        frac_preds_neg = torch.sum(preds_neg) / preds_neg.size()[0]
+
+        frac_labels_pos = torch.sum(labels_pos) / labels_pos.size()[0]
+        frac_labels_neg = torch.sum(labels_neg) / labels_neg.size()[0]
+
+        msg = (
+            f"\tTest accuracy: {acc * 100:.2f}%\n"
+            f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
+            f"\tFalse positive rate: {false_pos_rate * 100:.2f}%\n"
+            f"\tPrecision: {precision:.4f}\n"
+            f"\tRecall: {recall:.4f}\n"
+            f"\tPercent predicted 0: {frac_preds_neg * 100:.2f}%\n"
+            f"\tPercent predicted 1: {frac_preds_pos * 100:.2f}%\n"
+            f"\tPercent labeled 0: {frac_labels_neg * 100:.2f}%\n"
+            f"\tPercent labeled 1: {frac_labels_pos * 100:.2f}%\n"
+        )
+        print(msg)
+        with open(path.join(out_dir, "results.txt"), "a+") as fil:
+            fil.write(msg)
+
         if self.graph:
             assert graph_prms is not None, \
                 "\"graph_prms\" must be a dict(), not None."
             assert "flp" in graph_prms, "\"flp\" not in \"graph_prms\"!"
             assert "x_lim" in graph_prms, "\"x_lim\" not in \"graph_prms\"!"
+
+            # Compute the distance from fair, then divide by fair to
+            # compute the relative unfairness.
+            diffs = (raw - fair) / fair
+            if sort_by_unfairness:
+                # Sort based on unfairness.
+                diffs, indices = torch.sort(diffs)
+                preds = preds[indices]
+                labels = labels[indices]
+            # Bucketize and compute bucket accuracies.
+            num_samples = preds.size()[0]
+            num_buckets = min(20 * (1 if sort_by_unfairness else 4), num_samples)
+            num_per_bucket = math.floor(num_samples / num_buckets)
+            assert num_per_bucket > 0, \
+                ("There must be at least one sample per bucket, but there are "
+                 f"{num_samples} samples and only {num_buckets} buckets!")
+            # The resulting buckets are tuples of three values:
+            #   (x-axis value for bucket, number predicted correctly, total)
+            buckets = [
+                (x,
+                 self.check_output(preds_, labels_),
+                 preds_.size()[0])
+                for x, preds_, labels_ in [
+                    # Each bucket is defined by a tuple of three values:
+                    #   (x-axis value for bucket, predictions, ground truth labels).
+                    # The x-axis is the mean relative difference for this
+                    # bucket. A few values at the end may be discarded.
+                    (torch.mean(diffs[i:i + num_per_bucket]),
+                     preds[i:i + num_per_bucket],
+                     labels[i:i + num_per_bucket])
+                    for i in range(0, num_samples, num_per_bucket)]]
+
             # Plot each bucket's accuracy.
             pyplot.plot(
                 ([x for x, _, _ in buckets]
@@ -1105,10 +1149,6 @@ class SvmSklearnWrapper(SvmWrapper):
             pyplot.tight_layout()
             pyplot.savefig(graph_prms["flp"])
             pyplot.close()
-        # Compute the overall accuracy.
-        _, corrects, totals = zip(*buckets)
-        acc = sum(corrects) / sum(totals)
-        print(f"    Test accuracy: {acc * 100:.2f}%")
         return acc
 
     def __evaluate_sliding_window(self, preds, raw, fair, arr_times,
@@ -1281,9 +1321,8 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # Create the output directory.
         out_dir = path.join(graph_prms["out_dir"], self.name)
-        if self.graph:
-            if not path.exists(out_dir):
-                os.makedirs(out_dir)
+        if not path.exists(out_dir):
+            os.makedirs(out_dir)
 
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
@@ -1352,6 +1391,7 @@ class SvmSklearnWrapper(SvmWrapper):
                     dat_out_classes[valid],
                     torch.tensor(dat_extra["raw"][valid]),
                     torch.tensor(fair[valid]),
+                    out_dir,
                     sort_by_unfairness,
                     graph_prms={
                         "flp": path.join(
@@ -1395,7 +1435,7 @@ class SvmSklearnWrapper(SvmWrapper):
         self.__evaluate(
             torch.tensor(dat_extra[defaults.MATHIS_MODEL_FET].copy()),
             dat_out_classes, torch.tensor(raw), torch.tensor(fair),
-            sort_by_unfairness,
+            out_dir, sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
                     out_dir, "accuracy_vs_unfairness_mathis.pdf"),
@@ -1405,7 +1445,7 @@ class SvmSklearnWrapper(SvmWrapper):
         print(f"Evaluating {self.name} model:")
         model_acc = self.__evaluate(
             predictions, dat_out_classes, torch.tensor(raw), torch.tensor(fair),
-            sort_by_unfairness,
+            out_dir, sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
                     out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
