@@ -7,6 +7,10 @@ import random
 import zipfile
 
 import numpy as np
+import scapy
+import scapy.layers.l2
+import scapy.layers.inet
+import scapy.utils
 import torch
 
 
@@ -241,93 +245,91 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, client_port, server_port, direction="data",
-                  extra_filter=None):
+def parse_packets(flp, client_ip, server_ip, flws_ports):
     """
-    Parses a PCAP file. Returns a list of tuples of the form:
-         (sequence number, flow index, timestamp (us), TCP timestamp option,
-          payload size (B))
-    with one entry for every packet. Considers only packets in either the "ack"
-    or "data" direction.
+    Parses a PCAP file. Considers packets between a specified client and server
+    using specified ports only.
+
+    Returns a dictionary mapping flow to a tuple containing two lists, one for
+    data packets and one for ACK packets:
+        {
+              (client port, server port) :
+                  ([ list of data packets ], [ list of ACK packets ])
+        }
+
+    Each packet is a tuple of the form:
+         (sequence number, timestamp (us), TCP timestamp option,
+          TCP payload size (B), total packet size (B))
     """
-    dir_opts = ["ack", "data"]
-    assert direction in dir_opts, \
-        f"\"direction\" must be one of {dir_opts}, but is: {direction}"
+    # Use list() to read the pcap file all at once (minimize seeks).
+    pkts = list(scapy.utils.RawPcapReader(flp))
 
-    if direction == "data":
-        if extra_filter:
-            filter_s = (
-                f"\"tcp.srcport == {client_port} && tcp.dstport == {server_port} && "
-                f"tcp.len >= 1000 && {extra_filter}\"")
+    def make_empty():
+        """ Make an empty numpy array to store the packets. """
+        arr = np.empty((len(pkts), 6), dtype=int)
+        arr.fill(-1)
+        return arr
+
+    def remove_unused_rows(arr):
+        """ Returns a filtered array with all rows containing -1 removed. """
+        filt = lambda row: (row != -1).all()
+        return arr[np.array([filt(row) for row in arr])]
+
+    # Format described above. In this form, the arrays will be sparse. Unused
+    # rows will be removed later.
+    flw_to_pkts = {
+        flw_ports: (make_empty(), make_empty()) for flw_ports in flws_ports}
+    for idx, (pkt_dat, pkt_mdat) in enumerate(pkts):
+        ether = scapy.layers.l2.Ether(pkt_dat)
+        # Assume that this is a TCP/IP packet.
+        ip = ether[scapy.layers.inet.IP]
+        tcp = ether[scapy.layers.inet.TCP]
+        # Determine this packet's direction. Assume that the client IP address
+        # if 192.0.0.4 and the server IP address is 192.0.0.2. Assume that all
+        # packets are between the client and server.
+        if ip.src[-1] == "4":
+            dir_idx = 0
+            flw = (tcp.sport, tcp.dport)
         else:
-            filter_s = (
-                f"\"tcp.srcport == {client_port} && tcp.dstport == {server_port} && "
-                "tcp.len >= 1000\"")
-    else:
-        if extra_filter:
-            filter_s = (
-                f"\"tcp.srcport == {server_port} && tcp.dstport == {client_port} && "
-                f"{extra_filter}\"")
-        else:
-            filter_s = (
-                f"\"tcp.srcport == {server_port} && tcp.dstport == {client_port}\"")
+            dir_idx = 1
+            flw = (tcp.dport, tcp.sport)
+        # Assume that the packets are between the relevent machines. Only check
+        # the ports.
+        if flw in flw_to_pkts:
+            # Decode the TCP Timestamp option.
+            if len(tcp.options) >= 3 and tcp.options[2][0] == "Timestamp":
+                # Fast path: it is usually the third option.
+                ts = tcp.options[2][1]
+            else:
+                # Slow path: check all of the options.
+                for option_name, option in tcp.options:
+                    if option_name == "Timestamp":
+                        ts = option
+                        break
+                else:
+                    ts = (-1, -1)
 
-    # Strip off the ".pcap" extension and append "_tmp.txt".
-    tmp_flp = f"{flp[:-5]}_tmp.txt"
+            flw_to_pkts[flw][dir_idx][idx] = (
+                # Sequence number.
+                tcp.seq,
+                # Timestamp. Not using parse_time_us for efficiency purpose. Use
+                # 1000000 instead of 1e6 to avoid converting floats.
+                pkt_mdat.sec * 1000000 + pkt_mdat.usec,
+                # Timestamp option.
+                ts[0],
+                ts[1],
+                # TCP payload. Length of the IP packet minus the length of the
+                # IP header minus the length of the TCP header.
+                ip.len - ip.ihl - (tcp.dataofs * 4),
+                # Total packet size. Length of the IP packet plus the size of
+                # the Ethernet header.
+                ip.len + 14)
 
-    cmd = " ".join(
-        ["tshark", "-n",
-         # The AMQP protocol uses port 5672, which our flows may use. tshark
-         # tries to parse those packets as AMQP packets, which gives a warning.
-         "--disable-protocol", "amqp",
-         "--disable-protocol", "hzlcst",
-         "--disable-protocol", "openflow",
-         "--disable-protocol", "ilp",
-         "--disable-protocol", "ulp",
-         "--disable-protocol", "ssl",
-         "--disable-protocol", "pcp",
-         "-o", "tcp.relative_sequence_numbers:false",
-         "-o", "tcp.analyze_sequence_numbers:false",
-         "-r", flp, filter_s, ">>", tmp_flp])
-    print(f"Running: {cmd}")
-    os.system(cmd)
-
-    # Each item is a tuple of the form:
-    #     (sequence number, timestamp (us), TCP timestamp option,
-    #      payload size (B))
-    pkts = []
-    with open(tmp_flp, "r") as fil:
-        for line in fil:
-            array = line.split()
-            seq_idx = -1
-            tsval_idx = -1
-            tsecr_idx = -1
-            len_idx = -1
-            for i in range(7, len(array)):
-                if array[i].startswith("Seq"):
-                    seq_idx = i
-                elif array[i].startswith("TSval"):
-                    tsval_idx = i
-                elif array[i].startswith("TSecr"):
-                    tsecr_idx = i
-                elif array[i].startswith("Len"):
-                    len_idx = i
-            if (seq_idx != -1 and tsecr_idx != -1 and tsecr_idx != -1 and
-                    len_idx != -1):
-                tsecr_substring = array[tsecr_idx][6:]
-                tsecr_end = (
-                    tsecr_substring.index("[")
-                    if "[" in tsecr_substring else len(tsecr_substring))
-
-                pkts.append((
-                    int(array[seq_idx][4:]),
-                    float(array[1]) * 1e6,
-                    (int(array[tsval_idx][6:]),
-                     int(tsecr_substring[:tsecr_end])),
-                    int(array[len_idx][4:])))
-    # Delete the temporary file.
-    os.remove(tmp_flp)
-    return pkts
+    # Remove unused rows.
+    for flw in flw_to_pkts.keys():
+        data, ack = flw_to_pkts[flw]
+        flw_to_pkts[flw] = (remove_unused_rows(data), remove_unused_rows(ack))
+    return flw_to_pkts
 
 
 def parse_q_stats(line):

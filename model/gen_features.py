@@ -175,9 +175,21 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     with open(params_flp, "r") as fil:
         params = json.load(fil)
     # List of tuples of the form: (client port, server port)
-    flw_ports = [(client_port, flw[4])
+    flws_ports = [(client_port, flw[4])
                  for flw in params["flowsets"]
                  for client_port in flw[3]]
+
+    client_ip = params["client"][3]
+    server_ip = params["server"][3]
+
+    flw_to_pkts_client = utils.parse_packets(
+        path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"),
+        client_ip, server_ip, flws_ports)
+    flw_to_pkts_server = utils.parse_packets(
+        path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"),
+        client_ip, server_ip, flws_ports)
+
+    return
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
@@ -192,7 +204,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             [(make_win_metric(metric, win), typ)
              for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])))
 
-    for flw_idx, (client_port, server_port) in enumerate(flw_ports):
+    for flw_idx, (client_port, server_port) in enumerate(flws_ports):
         try:
             # Packet lists are of tuples of the form:
             #     (seq, sender, timestamp us, timestamp option)
