@@ -1069,7 +1069,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
         true_pos = torch.sum(torch.logical_and(preds_pos, labels_pos))
         false_pos = torch.sum(torch.logical_and(preds_pos, labels_neg))
-        false_neg = torch.sum(torch.logical_and(preds_pos, labels_neg))
+        false_neg = torch.sum(torch.logical_and(preds_neg, labels_pos))
 
         false_pos_rate = false_pos / torch.sum(labels_neg)
         false_neg_rate = false_neg / torch.sum(labels_pos)
