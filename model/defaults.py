@@ -46,7 +46,7 @@ DEFAULTS = {
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
-SYNC = False
+SYNC = True
 # Features to store as extra data for each sample.
 MATHIS_MODEL_FET = "mathis model label-ewma-alpha0.01"
 RTT_ESTIMATE_FET = "RTT estimate us-ewma-alpha0.01"
