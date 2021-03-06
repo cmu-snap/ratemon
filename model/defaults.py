@@ -39,7 +39,9 @@ DEFAULTS = {
     "tmp_dir": None,
     "regen_data": False,
     "sync": False,
-    "cca": "bbr"
+    "cca": "bbr",
+    "n_estimators": 100,
+    "max_depth": 10
 }
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000

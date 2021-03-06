@@ -10,9 +10,11 @@ import random
 from matplotlib import pyplot
 import numpy as np
 import sklearn
+from sklearn import ensemble
 from sklearn import feature_selection
 from sklearn import linear_model
 from sklearn import svm
+from sklearn.experimental import enable_hist_gradient_boosting
 import torch
 
 import defaults
@@ -1528,6 +1530,29 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
         return self.net
 
 
+class GbdtSklearnWrapper(SvmSklearnWrapper):
+
+    name = "GbdtSklearn"
+    params = ["n_estimators", "lr", "max_depth"]
+
+    def new(self, **kwargs):
+        self.net = ensemble.GradientBoostingClassifier(
+            n_estimators=kwargs["n_estimators"], learning_rate=kwargs["lr"],
+            max_depth=kwargs["max_depth"])
+        return self.net
+
+
+class HistGbdtSklearnWrapper(SvmSklearnWrapper):
+
+    name = "HistGbdtSklearn"
+    params = ["max_iter"]
+
+    def new(self, **kwargs):
+        self.net = ensemble.HistGradientBoostingClassifier(
+            max_iter=kwargs["max_iter"])
+        return self.net
+
+
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
@@ -1739,6 +1764,8 @@ MODELS = {mdl.name: mdl for mdl in [
     SvmSklearnWrapper,
     LrSklearnWrapper,
     LrCvSklearnWrapper,
+    GbdtSklearnWrapper,
+    HistGbdtSklearnWrapper,
     LstmWrapper
 ]}
 MODEL_NAMES = sorted(MODELS.keys())
