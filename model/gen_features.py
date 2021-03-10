@@ -710,16 +710,18 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     #         flw_dat[arrival_time_key]))
     #     flw_dat["flow share percentage"] = percentage
 
+
+    # We cannot simply add up the throughput of all flows because we cannot line
+    # up the flow results because no two packets arrive at the same time.
+    # Therefore, we must fall back to using the configured bandwidth as a proxy
+    # for the total throughput.
     if not skip_smoothed:
         total_throughput_bps = exp.bw_Mbps * 1e6
         # Use index variables to make sure that no data is being copied.
-        # TODO: Is this a correct idea?
-        for j in range(len(flws)):
-            # I think that these are vector operations that assign an entire column
-            # at a time.
-            per_flow_throughput = flws[j]["throughput b/s-ewma-alpha0.003"]
-            flws[j]["flow share percentage"] = (
-                per_flow_throughput / total_throughput_bps)
+        for flw_idx in range(len(flws)):
+            flws[flw_idx]["flow share percentage"] = utils.safe_div(
+                flws[flw_idx][make_win_metric("average throughput b/s", 2**3)],
+                total_throughput_bps)
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the

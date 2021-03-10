@@ -15,6 +15,7 @@ import os
 from os import path
 import pickle
 import random
+import shutil
 import sys
 import time
 
@@ -266,6 +267,8 @@ def make_datasets(net, args, dat=None):
         # To keep files organized, create a randomly-named subdirectory.
         tmp_dir = path.join(
             tmp_dir, f"train_{random.randrange(int(time.time()))}")
+        if path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
         os.makedirs(tmp_dir)
 
         # Parse experiments.
@@ -383,7 +386,8 @@ def make_datasets(net, args, dat=None):
     return dat_in_all, dat_out_all, dat_extra_all, prms_in
 
 
-def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
+def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True,
+             balance=False):
     """ Generates training data and optionally saves it. """
     dat_in, dat_out, dat_extra, scl_prms = make_datasets(net, args, dat)
     # Save the processed data so that we do not need to process it again.
@@ -397,7 +401,7 @@ def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
 
 
 def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-               use_val=False):
+               use_val=False, balanced=False):
     """
     Divides the input and output data into training, validation, and
     testing sets and constructs data loaders.
@@ -440,7 +444,7 @@ def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
     # 50% for training, 20% for validation, 30% for testing.
     num_val = int(round(num_exps * 0.2)) if use_val else 0
     num_tst = int(round(num_exps * 0.3))
-    print((f"    Data - train: {num_exps - num_val - num_tst}, val: {num_val}, "
+    print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
            f"test: {num_tst}"))
     # Validation.
     dat_val_in = dat_in[:num_val]
@@ -455,16 +459,24 @@ def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
     dat_trn_out = dat_out[num_val + num_tst:]
     dat_trn_extra = dat_extra[num_val + num_tst:]
 
+    print(dat_trn_in.shape(), dat_trn_out.shape(), dat_trn_extra.shape())
+
     # Create the dataloaders.
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
-    ldr_trn = (
-        torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
-        if isinstance(net, models.SvmSklearnWrapper)
-        else torch.utils.data.DataLoader(
+    ldr_trn, foo = (
+        (torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False), False)
+        if isinstance(net, models.SvmSklearnWrapper) and not balanced
+        else (torch.utils.data.DataLoader(
             dataset_trn,
             batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False)))
+                dataset_trn, bch_trn, drop_last=False, drop_populous=True)), True))
+
+    dat_in, dat_out = list(ldr_trn)[0]
+    print("Balanced training data:")
+    utils.visualize_classes(net, dat_out)
+    print(foo)
+    exit()
     ldr_val = (
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
@@ -574,19 +586,19 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
             loss.backward()
             opt.step()
             if bch_idx_trn % bchs_per_log == 0:
-                print(f"    Training loss: {loss:.5f}")
+                print(f"\tTraining loss: {loss:.5f}")
 
             # Run on validation set, print statistics, and (maybe) checkpoint
             # every VAL_PER batches.
             if ely_stp and not bch_idx_trn % bchs_per_val:
-                print("    Validation pass:")
+                print("\tValidation pass:")
                 # For efficiency, convert the model to evaluation mode.
                 net.net.eval()
                 with torch.no_grad():
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
                         print(
-                            "    Validation batch: "
+                            "\tValidation batch: "
                             f"{bch_idx_val + 1}/{len(ldr_val)}")
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
@@ -600,7 +612,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
                     los_val_min = los_val
                 # Calculate the percent improvement in the validation loss.
                 prc = (los_val_min - los_val) / los_val_min * 100
-                print(f"    Validation error improvement: {prc:.2f}%")
+                print(f"\tValidation error improvement: {prc:.2f}%")
 
                 # If the percent improvement in the validation loss is greater
                 # than a small threshold, then take this as the new best version
@@ -675,14 +687,21 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     # Split the data into training, validation, and test loaders.
     ldr_trn, _, ldr_tst = split_data(
         net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"])
+        args["test_batch"], balanced=True)
+    # Extract the balanced data from the training dataloader.
+    dat_in, dat_out = list(ldr_trn)[0]
+    print("Balanced training data:")
+    utils.visualize_classes(net, dat_out)
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(*(ldr_trn.dataset.raw()[1:3]))
+    net.train(dat_in, dat_out)
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
+    # Free memory for the test data.
     del ldr_trn
+    del dat_in
+    del dat_out
     # Save the model.
     print(f"Saving final model: {out_flp}")
     with open(out_flp, "wb") as fil:

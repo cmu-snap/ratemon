@@ -17,4 +17,6 @@ FEATURES = [
         "alpha0.9" not in fet and
         "tt512" not in fet and
         "tt1024" not in fet and
-        "mathis model" not in fet)]
+        "mathis model" not in fet and
+        "inverse" not in fet and
+        "average throughput" not in fet)]

@@ -4,6 +4,7 @@ import math
 import os
 from os import path
 import random
+import sys
 import zipfile
 
 import numpy as np
@@ -93,7 +94,7 @@ class BalancedSampler:
     for many other Samplers, one for each class.
     """
 
-    def __init__(self, dataset, batch_size, drop_last):
+    def __init__(self, dataset, batch_size, drop_last, drop_populous):
         assert isinstance(dataset, Dataset), \
             "Dataset must be an instance of utils.Dataset."
         # Determine the unique classes.
@@ -103,38 +104,73 @@ class BalancedSampler:
         assert batch_size >= num_clss, \
             (f"The batch size ({batch_size}) must be at least as large as the "
              f"number of classes ({num_clss})!")
-        assert batch_size % num_clss == 0, \
+        # If we set the batch size, then it must be evenly divisible by the
+        # number of classes.
+        assert (batch_size == sys.maxsize) or (batch_size % num_clss == 0), \
             (f"The number of classes ({num_clss}) must evenly divide the batch "
              f"size ({batch_size})!")
 
         print("Balancing classes...")
         # Find the indices for each class.
         clss_idxs = {cls: torch.where(dat_out == cls)[0] for cls in clss}
-        # Determine the number of examples in the most populous class.
-        max_examples = max(len(cls_idxs) for cls_idxs in clss_idxs.values())
-        # Generate new samples to fill in under-represented classes.
-        for cls, cls_idxs in clss_idxs.items():
-            num_examples = len(cls_idxs)
-            # If this class has insufficient examples...
-            if num_examples < max_examples:
-                new_examples = max_examples - num_examples
-                # Duplicate existing examples to make this class balanced.
-                # Append the duplicated examples to the true examples.
-                clss_idxs[cls] = torch.cat(
-                    (cls_idxs,
-                     torch.multinomial(
-                         # Sample from the existing examples using a uniform
-                         # distribution.
-                         torch.ones((num_examples,)),
-                         num_samples=new_examples,
-                         # Sample with replacement in case the number of new
-                         # examples is greater than the number of existing
-                         # examples.
-                         replacement=True)),
-                    dim=0)
-                print(f"    Added {new_examples} examples to class {cls}.")
+
+        if drop_populous:
+            # Determine the number of examples in the most populous class.
+            target_examples = min(len(cls_idxs) for cls_idxs in clss_idxs.values())
+            # Remove samples from the popular classes.
+            for cls, cls_idxs in clss_idxs.items():
+                num_examples = len(cls_idxs)
+                # If this class has too many examples...
+                if num_examples > target_examples:
+                    # Select a subset of the samples.
+                    clss_idxs[cls] = torch.multinomial(
+                        # Sample from the existing examples using a uniform
+                        # distribution.
+                        torch.ones((num_examples,)),
+                        num_samples=target_examples,
+                        # Do not sample with replacement because num_samples is
+                        # guaranteed to be greater than or equal to target_samples.
+                        replacement=False)
+                    print(f"\tRemoved {num_examples - target_examples} examples from class {cls}.")
+        else:
+            # Determine the number of examples in the most populous class.
+            target_examples = max(len(cls_idxs) for cls_idxs in clss_idxs.values())
+            # Generate new samples to fill in under-represented classes.
+            for cls, cls_idxs in clss_idxs.items():
+                num_examples = len(cls_idxs)
+                # If this class has insufficient examples...
+                if num_examples < target_examples:
+                    new_examples = target_examples - num_examples
+                    # Duplicate existing examples to make this class balanced.
+                    # Append the duplicated examples to the true examples.
+                    clss_idxs[cls] = torch.cat(
+                        (cls_idxs,
+                         torch.multinomial(
+                             # Sample from the existing examples using a uniform
+                             # distribution.
+                             torch.ones((num_examples,)),
+                             num_samples=new_examples,
+                             # Sample with replacement in case the number of new
+                             # examples is greater than the number of existing
+                             # examples.
+                             replacement=True)),
+                        dim=0)
+                    print(f"\tAdded {new_examples} examples to class {cls}.")
+
         # Create a BatchSampler iterator for each class.
         examples_per_cls = batch_size // num_clss
+        print(f"examples_per_cls: {examples_per_cls}")
+
+        for cls, cls_idxs in clss_idxs.items():
+            print(cls, cls_idxs.size())
+
+        # self.samplers = {}
+        # for cls, cls_idxs in clss_idxs.items():
+        #     print(cls, cls_idxs.size())
+        #     self.samplers[cls] = torch.utils.data.BatchSampler(
+        #         torch.utils.data.RandomSampler(cls_idxs, replacement=False),
+        #         examples_per_cls, drop_last)
+
         self.samplers = {
             cls: torch.utils.data.BatchSampler(
                 torch.utils.data.RandomSampler(cls_idxs, replacement=False),
@@ -143,12 +179,13 @@ class BalancedSampler:
         # After __iter__() is called, this will contain an iterator for each
         # class.
         self.iters = {}
-        self.num_batches = max_examples // examples_per_cls
+        self.num_batches = target_examples // examples_per_cls
 
     def __iter__(self):
         # Create an iterator for each class.
         self.iters = {
             cls: iter(sampler) for cls, sampler in self.samplers.items()}
+        print("iter")
         return self
 
     def __len__(self):
@@ -156,6 +193,7 @@ class BalancedSampler:
 
     def __next__(self):
         # Pull examples from each class and merge them into a single list.
+        print("next")
         return [idx for it in self.iters.values() for idx in next(it)]
 
 
@@ -461,11 +499,12 @@ def visualize_classes(net, dat):
     """ Prints statistics about the classes in dat. """
     # Visualaize the ground truth data.
     clss = net.get_classes()
-    # Assumes that dat is a structured numpy array containing a
-    # column named "class".
-    tots = [
-        ((dat if dat.dtype.names is None else dat["class"]) == cls).sum()
-        for cls in clss]
+    # Handles the cases where dat is a torch tensor, numpy unstructured array,
+    # or numpy structured array containing a column named "class".
+    dat = (
+        dat if isinstance(dat, torch.Tensor) or dat.dtype.names is None
+        else dat["class"])
+    tots = [(dat == cls).sum() for cls in clss]
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("Classes:\n" + "\n".join(

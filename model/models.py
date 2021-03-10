@@ -462,7 +462,7 @@ class SvmSklearnWrapper(SvmWrapper):
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
-    num_clss = 2
+    num_clss = 3
     multiclass = num_clss > 2
 
     def new(self, **kwargs):
@@ -531,7 +531,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
+                percent_to_class, fair=1. / sim.tot_flws),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
