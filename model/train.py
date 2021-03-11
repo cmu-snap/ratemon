@@ -25,6 +25,7 @@ import torch
 
 import cl_args
 import defaults
+import features
 import models
 import utils
 
@@ -185,12 +186,12 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
     raw_dtype = [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]
     dtype = ([("raw", raw_dtype), ("num_flws", "int32"),
               ("btk_throughput", "int32")] +
-             [typ for typ in dat.dtype.descr if typ[0] in defaults.EXTRA_FETS])
+             [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
     dat_extra = np.empty(shape=dat.shape, dtype=dtype)
     dat_extra["raw"] = dat_out
     dat_extra["num_flws"].fill(exp.cca_1_flws + exp.cca_2_flws)
     dat_extra["btk_throughput"].fill(exp.bw_Mbps)
-    for typ in defaults.EXTRA_FETS:
+    for typ in features.EXTRA_FETS:
         dat_extra[typ] = dat[typ]
     dat_extra = recfunctions.repack_fields(dat_extra)
 
@@ -386,8 +387,7 @@ def make_datasets(net, args, dat=None):
     return dat_in_all, dat_out_all, dat_extra_all, prms_in
 
 
-def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True,
-             balance=False):
+def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
     """ Generates training data and optionally saves it. """
     dat_in, dat_out, dat_extra, scl_prms = make_datasets(net, args, dat)
     # Save the processed data so that we do not need to process it again.
@@ -401,7 +401,7 @@ def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True,
 
 
 def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-               use_val=False, balanced=False):
+               use_val=False, balance=False):
     """
     Divides the input and output data into training, validation, and
     testing sets and constructs data loaders.
@@ -459,24 +459,19 @@ def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
     dat_trn_out = dat_out[num_val + num_tst:]
     dat_trn_extra = dat_extra[num_val + num_tst:]
 
-    print(dat_trn_in.shape(), dat_trn_out.shape(), dat_trn_extra.shape())
+    print("Training data:")
+    utils.visualize_classes(net, dat_trn_out)
 
     # Create the dataloaders.
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
-    ldr_trn, foo = (
-        (torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False), False)
-        if isinstance(net, models.SvmSklearnWrapper) and not balanced
-        else (torch.utils.data.DataLoader(
+    ldr_trn = (
+        torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
+        if isinstance(net, models.SvmSklearnWrapper) and not balance
+        else torch.utils.data.DataLoader(
             dataset_trn,
             batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False, drop_populous=True)), True))
-
-    dat_in, dat_out = list(ldr_trn)[0]
-    print("Balanced training data:")
-    utils.visualize_classes(net, dat_out)
-    print(foo)
-    exit()
+                dataset_trn, bch_trn, drop_last=False, drop_populous=True)))
     ldr_val = (
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
@@ -687,7 +682,7 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     # Split the data into training, validation, and test loaders.
     ldr_trn, _, ldr_tst = split_data(
         net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"], balanced=True)
+        args["test_batch"], balance=True)
     # Extract the balanced data from the training dataloader.
     dat_in, dat_out = list(ldr_trn)[0]
     print("Balanced training data:")
@@ -847,6 +842,7 @@ def run_trials(args):
     print(f"Number of input features: {len(dat_in.dtype.names)}")
 
     # Visualaize the ground truth data.
+    print("All data:")
     utils.visualize_classes(net_tmp, dat_out)
 
     # TODO: Parallelize attempts.

@@ -18,80 +18,12 @@ import numpy as np
 
 import cl_args
 import defaults
+import features
 import utils
 
 
-# Assemble the output dtype.
-#
-# These metrics do not change.
-REGULAR = [
-    ("seq", "uint32"),
-    ("arrival time us", "int32"),
-    ("min RTT us", "int32"),
-    ("flow share percentage", "float64"),
-    ("interarrival time us", "int32"),
-    ("inverse interarrival time 1/us", "float32"),
-    ("packets lost since last packet estimate", "int32"),
-    ("drop rate at bottleneck queue", "float64"),
-    ("retransmission rate", "float64"),
-    ("payload B", "int32"),
-    ("wire len B", "int32"),
-    ("total so far B", "int32"),
-    ("RTT estimate us", "int32")
-]
-# These metrics are exponentially-weighted moving averages (EWMAs),
-# that are recorded for various values of alpha.
-EWMAS = [
-    ("interarrival time us", "float64"),
-    ("inverse interarrival time 1/us", "float64"),
-    ("RTT estimate us", "float64"),
-    ("RTT estimate ratio", "float64"),
-    ("loss rate estimate", "float64"),
-    ("mathis model throughput b/s", "float64")
-]
-# These metrics are calculated over an window of packets, for varies
-# window sizes.
-WINDOWED = [
-    ("average interarrival time us", "float64"),
-    ("inverse average interarrival time 1/us", "float64"),
-    ("average throughput b/s", "float64"),
-    ("average RTT estimate us", "float64"),
-    ("average RTT estimate ratio", "float64"),
-    ("loss event rate", "float64"),
-    ("1/sqrt loss event rate", "float64"),
-    ("loss rate estimate", "float64"),
-    ("mathis model throughput b/s", "float64"),
-    # -1 no applicable (no loss yet), 0 lower than or equal to fair
-    # throughput, 1 higher. This is not a windowed metric itself, but
-    # is based on the "mathis model throughput b/s" metric.
-    ("mathis model label", "int32")
-]
-# The alpha values at which to evaluate the EWMA metrics.
-ALPHAS = [i / 1000 for i in range(1, 11)] + [i / 10 for i in range(1, 11)]
-# The window durations (multiples of the minimum RTT) at which to
-# evaluate the window-based metrics.
-WINDOWS = [2**i for i in range(11)]
 # Mathis model constant.
 MATHIS_C = math.sqrt(3 / 2)
-
-
-def make_ewma_metric(metric, alpha):
-    """ Format the name of an EWMA metric. """
-    return f"{metric}-ewma-alpha{alpha}"
-
-
-def make_win_metric(metric, win):
-    """ Format the name of a windowed metric. """
-    return f"{metric}-windowed-minRtt{win}"
-
-
-def make_smoothed_features():
-    """ Return a dtype for all EWMA and windowed metrics. """
-    return (
-        [(make_ewma_metric(metric, alpha), typ)
-         for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-        [(make_win_metric(metric, win), typ)
-         for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
 
 
 def make_interval_weight(num_intervals):
@@ -202,10 +134,12 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
 
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
-    dtype = (REGULAR + ([] if skip_smoothed else make_smoothed_features()))
+    dtype = (
+        features.REGULAR +
+        ([] if skip_smoothed else features.make_smoothed_features()))
 
     for flw_idx, flw in enumerate(flws_ports):
-        client_port, server_port = flw
+        client_port = flw[0]
         sent_pkts = flw_to_pkts_client[flw][0]
         recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
 
@@ -247,7 +181,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             "loss_queue_true": collections.deque(),
             # For "loss rate estimated".
             "loss_queue_estimate": collections.deque()
-        } for win in WINDOWS}
+        } for win in features.WINDOWS}
         # Total number of packet losses up to the current received
         # packet.
         # pkt_loss_total_true = 0
@@ -302,7 +236,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     if tsval == tsecr:
                         # If we found a timestamp option match, then
                         # update the RTT estimate.
-                        rtt_estimate_us = recv_time_cur - recv_ack_pkts[ack_idx][1]
+                        rtt_estimate_us = (
+                            recv_time_cur - recv_ack_pkts[ack_idx][1])
                     else:
                         # Otherwise, use the previous RTT estimate and
                         # reset ack_idx to search again for the next
@@ -360,11 +295,12 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 pkt_loss_cur_estimate)
 
             # EWMA metrics.
-            for (metric, _), alpha in itertools.product(EWMAS, ALPHAS):
+            for (metric, _), alpha in itertools.product(
+                    features.EWMAS, features.ALPHAS):
                 if skip_smoothed:
                     continue
 
-                metric = make_ewma_metric(metric, alpha)
+                metric = features.make_ewma_metric(metric, alpha)
                 if "interarrival time us" in metric:
                     new = interarr_time_us
                 elif "inverse interarrival time 1/us" in metric:
@@ -374,8 +310,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # inverse interarrival time EWMA is not "EWMA-ified" twice.
                     output[j][metric] = utils.safe_div(
                         1,
-                        output[j][
-                            make_ewma_metric("interarrival time us", alpha)])
+                        output[j][features.make_ewma_metric(
+                            "interarrival time us", alpha)])
                     continue
                 elif "RTT estimate us" in metric:
                     new = rtt_estimate_us
@@ -417,11 +353,12 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     -1 if j == 0 else output[j - 1][metric], new, alpha)
 
             # Windowed metrics.
-            for (metric, _), win in itertools.product(WINDOWED, WINDOWS):
+            for (metric, _), win in itertools.product(
+                    features.WINDOWED, features.WINDOWS):
                 if skip_smoothed:
                     continue
 
-                metric = make_win_metric(metric, win)
+                metric = features.make_win_metric(metric, win)
                 # If we have not been able to estimate the min RTT
                 # yet, then we cannot compute any of the windowed
                 # metrics.
@@ -444,7 +381,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # seconds.
                     new = utils.safe_div(
                         1,
-                        output[j][make_win_metric(
+                        output[j][features.make_win_metric(
                             "average interarrival time us", win)])
                 elif "average throughput b/s" in metric:
                     # Sum up the payloads of the packets in the window.
@@ -462,16 +399,17 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                             utils.safe_sub(end_time, start_time), 1e6))
                 elif "average RTT estimate us" in metric:
                     new = utils.safe_mean(
-                        output[make_ewma_metric("RTT estimate us", alpha=1.)],
+                        output[features.make_ewma_metric(
+                            "RTT estimate us", alpha=1.)],
                         win_start_idx, j)
                 elif "average RTT estimate ratio" in metric:
                     new = utils.safe_mean(
-                        output[
-                            make_ewma_metric("RTT estimate ratio", alpha=1.)],
+                        output[features.make_ewma_metric(
+                            "RTT estimate ratio", alpha=1.)],
                         win_start_idx, j)
                 elif "loss event rate" in metric and "1/sqrt" not in metric:
-                    rtt_estimate_us = output[
-                        j][make_win_metric("average RTT estimate us", win)]
+                    rtt_estimate_us = output[j][features.make_win_metric(
+                        "average RTT estimate us", win)]
                     if rtt_estimate_us == -1:
                         # The RTT estimate is -1 (unknown), so we
                         # cannot compute the loss event rate.
@@ -570,8 +508,9 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # Use the loss event rate to compute
                     # 1 / sqrt(loss event rate).
                     new = utils.safe_div(
-                        1, utils.safe_sqrt(
-                            output[j][make_win_metric("loss event rate", win)]))
+                        1,
+                        utils.safe_sqrt(output[j][
+                            features.make_win_metric("loss event rate", win)]))
                 elif "loss rate estimate" in metric:
                     # We do not need to check whether recv_time_prev
                     # is -1 (unknown) because the windowed metrics
@@ -599,9 +538,9 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # fair throughput to compute the Mathis model
                     # label.
                     new = utils.safe_mathis_label(
-                        output[j][make_win_metric(
+                        output[j][features.make_win_metric(
                             "average throughput b/s", win)],
-                        output[j][make_win_metric(
+                        output[j][features.make_win_metric(
                             "mathis model throughput b/s", win)])
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
@@ -720,7 +659,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         # Use index variables to make sure that no data is being copied.
         for flw_idx in range(len(flws)):
             flws[flw_idx]["flow share percentage"] = utils.safe_div(
-                flws[flw_idx][make_win_metric("average throughput b/s", 2**3)],
+                flws[flw_idx][
+                    features.make_win_metric("average throughput b/s", 2**3)],
                 total_throughput_bps)
 
     # Determine if there are any NaNs or Infs in the results. For the results

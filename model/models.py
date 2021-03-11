@@ -17,7 +17,6 @@ from sklearn import svm
 from sklearn.experimental import enable_hist_gradient_boosting
 import torch
 
-import defaults
 import features
 import utils
 
@@ -131,7 +130,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
     num_clss = 2
 
     def __init__(self, win=100, rtt_buckets=False, windows=False):
-        super(BinaryModelWrapper, self).__init__()
+        super().__init__()
 
         self.win = win
         self.rtt_buckets = rtt_buckets
@@ -224,7 +223,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # on the chosen index fit within the simulation.
         first_arr_time = None
         start_idx = None
-        for idx, arr_time in enumerate(dat_extra[defaults.ARRIVAL_TIME_FET]):
+        for idx, arr_time in enumerate(dat_extra[features.ARRIVAL_TIME_FET]):
             if first_arr_time is None:
                 first_arr_time = arr_time
                 continue
@@ -260,14 +259,14 @@ class BinaryModelWrapper(PytorchModelWrapper):
         for win_idx, pkt_idx in enumerate(pkt_idxs):
             # Find the first packet in this window (whose index will
             # be win_start_idx).
-            cur_arr_time = dat_extra[defaults.ARRIVAL_TIME_FET][pkt_idx]
+            cur_arr_time = dat_extra[features.ARRIVAL_TIME_FET][pkt_idx]
             win_start_idx = None
             # Move backwards from the last packet in the window until
             # we find a packet whose arrival time is more that dur_us
             # in the past.
             for arr_time_idx in range(pkt_idx, -1, -1):
                 if (cur_arr_time -
-                        dat_extra[defaults.ARRIVAL_TIME_FET][arr_time_idx] >
+                        dat_extra[features.ARRIVAL_TIME_FET][arr_time_idx] >
                         dur_us):
                     # This packet is the first packet that is too far
                     # in the past, so we will start the window on the
@@ -382,7 +381,7 @@ class BinaryDnn(torch.nn.Module):
     """ A simple binary classifier neural network. """
 
     def __init__(self, num_ins, num_outs):
-        super(BinaryDnn, self).__init__()
+        super().__init__()
         dim_1 = min(num_ins, 64)
         dim_2 = min(dim_1, 32)
         dim_3 = min(dim_2, 16)
@@ -424,7 +423,7 @@ class SvmWrapper(BinaryModelWrapper):
 
     def modify_data(self, sim, dat_in, dat_out, dat_extra, sequential):
         dat_in, dat_out, dat_extra, scl_grps = (
-            super(SvmWrapper, self).modify_data(
+            super().modify_data(
                 sim, dat_in, dat_out, dat_extra, sequential))
         # Map [0,1] to [-1, 1]
         # fet = dat_out.dtype.names[0]
@@ -445,7 +444,7 @@ class Svm(torch.nn.Module):
     """ A simple SVM binary classifier. """
 
     def __init__(self, num_ins):
-        super(Svm, self).__init__()
+        super().__init__()
         self.fc = torch.nn.Linear(num_ins, 1)
         print(f"SVM:\n    Linear: {self.fc.in_features}x{self.fc.out_features}")
 
@@ -917,14 +916,14 @@ class SvmSklearnWrapper(SvmWrapper):
                 torch.tensor(fair),
                 path.join(out_dir, f"throughput_{self.name}.pdf"),
                 dat_extra["btk_throughput"],
-                torch.tensor(dat_extra[defaults.THR_ESTIMATE_FET].copy()),
+                torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
                 x_lim=None)
 
         # Analyze overall accuracy for the Mathis Model.
         print("Evaluting Mathis Model:")
         raw = dat_extra["raw"].copy()
         self.__evaluate(
-            torch.tensor(dat_extra[defaults.MATHIS_MODEL_FET].copy()),
+            torch.tensor(dat_extra[features.MATHIS_MODEL_FET].copy()),
             dat_out_classes, torch.tensor(raw), torch.tensor(fair),
             out_dir, sort_by_unfairness,
             graph_prms={
@@ -945,8 +944,8 @@ class SvmSklearnWrapper(SvmWrapper):
         # # Analyze accuracy of a sliding window method
         # sliding_window_accuracy = self.__evaluate_sliding_window(
          #     predictions, torch.tensor(raw), torch.tensor(fair),
-        #     torch.tensor(dat_extra[defaults.ARRIVAL_TIME_FET].copy()),
-        #     torch.tensor(dat_extra[defaults.RTT_ESTIMATE_FET].copy()))
+        #     torch.tensor(dat_extra[features.ARRIVAL_TIME_FET].copy()),
+        #     torch.tensor(dat_extra[features.RTT_ESTIMATE_FET].copy()))
 
         return model_acc, 0  # sliding_window_accuracy
 
@@ -1058,7 +1057,7 @@ class LstmWrapper(PytorchModelWrapper):
     params = ["lr"]
 
     def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
-        super(LstmWrapper, self).__init__()
+        super().__init__()
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
         self.num_lyrs = num_lyrs
@@ -1123,7 +1122,7 @@ class Lstm(torch.nn.Module):
     """ An LSTM that classifies a flow into one of five fairness categories. """
 
     def __init__(self, in_dim, hid_dim, num_lyrs, out_dim):
-        super(Lstm, self).__init__()
+        super().__init__()
         self.hid_dim = hid_dim
         self.lstm = torch.nn.LSTM(in_dim, self.hid_dim)
         self.fc = torch.nn.Linear(self.hid_dim, out_dim)
@@ -1155,7 +1154,7 @@ class SimpleOne(torch.nn.Module):
     out_spc = ["ack_period_us"]
 
     def __init__(self):
-        super(SimpleOne, self).__init__()
+        super().__init__()
         assert len(SimpleOne.in_spc) == 1
         assert len(SimpleOne.out_spc) == 1
         self.fc = torch.nn.Linear(1, 1)
@@ -1172,7 +1171,7 @@ class FcOne(torch.nn.Module):
     out_spc = SimpleOne.out_spc
 
     def __init__(self):
-        super(FcOne, self).__init__()
+        super().__init__()
         assert len(FcOne.in_spc) == 3
         assert len(FcOne.out_spc) == 1
         self.fc = torch.nn.Linear(3, 1)
@@ -1188,7 +1187,7 @@ class FcTwo(torch.nn.Module):
     out_spc = SimpleOne.out_spc
 
     def __init__(self):
-        super(FcTwo, self).__init__()
+        super().__init__()
         assert len(FcTwo.in_spc) == 3
         assert len(FcTwo.out_spc) == 1
         self.fc1 = torch.nn.Linear(3, 32)
@@ -1207,7 +1206,7 @@ class FcThree(torch.nn.Module):
     out_spc = SimpleOne.out_spc
 
     def __init__(self):
-        super(FcThree, self).__init__()
+        super().__init__()
         assert len(FcThree.in_spc) == 3
         assert len(FcThree.out_spc) == 1
         self.fc1 = torch.nn.Linear(3, 16)
@@ -1228,7 +1227,7 @@ class FcFour(torch.nn.Module):
     out_spc = SimpleOne.out_spc
 
     def __init__(self):
-        super(FcFour, self).__init__()
+        super().__init__()
         assert len(FcFour.in_spc) == 3
         assert len(FcFour.out_spc) == 1
         self.fc1 = torch.nn.Linear(3, 16)

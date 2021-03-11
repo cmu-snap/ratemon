@@ -72,7 +72,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def __len__(self):
         """ Returns the number of items in this Dataset. """
-        return len(self.dat_in)
+        return self.dat_in.size()[0]
 
     def __getitem__(self, idx):
         """ Returns a specific (input, output) pair from this Dataset. """
@@ -97,8 +97,10 @@ class BalancedSampler:
     def __init__(self, dataset, batch_size, drop_last, drop_populous):
         assert isinstance(dataset, Dataset), \
             "Dataset must be an instance of utils.Dataset."
-        # Determine the unique classes.
         _, _, dat_out, _ = dataset.raw()
+        assert_tensor(dat_out=dat_out)
+
+        # Determine the unique classes.
         clss = set(dat_out.tolist())
         num_clss = len(clss)
         assert batch_size >= num_clss, \
@@ -115,29 +117,35 @@ class BalancedSampler:
         clss_idxs = {cls: torch.where(dat_out == cls)[0] for cls in clss}
 
         if drop_populous:
-            # Determine the number of examples in the most populous class.
-            target_examples = min(len(cls_idxs) for cls_idxs in clss_idxs.values())
+            # Determine the number of examples in the least populous class.
+            target_examples = min(
+                cls_idxs.size()[0] for cls_idxs in clss_idxs.values())
             # Remove samples from the popular classes.
             for cls, cls_idxs in clss_idxs.items():
-                num_examples = len(cls_idxs)
+                num_examples = cls_idxs.size()[0]
                 # If this class has too many examples...
                 if num_examples > target_examples:
                     # Select a subset of the samples.
-                    clss_idxs[cls] = torch.multinomial(
+                    clss_idxs[cls] = cls_idxs[torch.multinomial(
                         # Sample from the existing examples using a uniform
                         # distribution.
                         torch.ones((num_examples,)),
                         num_samples=target_examples,
                         # Do not sample with replacement because num_samples is
-                        # guaranteed to be greater than or equal to target_samples.
-                        replacement=False)
-                    print(f"\tRemoved {num_examples - target_examples} examples from class {cls}.")
+                        # guaranteed to be greater than or equal to
+                        # target_samples.
+                        replacement=False)]
+                    print(
+                        f"\tRemoved {num_examples - target_examples} examples "
+                        f"from class {cls}.")
+
         else:
             # Determine the number of examples in the most populous class.
-            target_examples = max(len(cls_idxs) for cls_idxs in clss_idxs.values())
+            target_examples = max(
+                cls_idxs.size()[0] for cls_idxs in clss_idxs.values())
             # Generate new samples to fill in under-represented classes.
             for cls, cls_idxs in clss_idxs.items():
-                num_examples = len(cls_idxs)
+                num_examples = cls_idxs.size()[0]
                 # If this class has insufficient examples...
                 if num_examples < target_examples:
                     new_examples = target_examples - num_examples
@@ -159,21 +167,9 @@ class BalancedSampler:
 
         # Create a BatchSampler iterator for each class.
         examples_per_cls = batch_size // num_clss
-        print(f"examples_per_cls: {examples_per_cls}")
-
-        for cls, cls_idxs in clss_idxs.items():
-            print(cls, cls_idxs.size())
-
-        # self.samplers = {}
-        # for cls, cls_idxs in clss_idxs.items():
-        #     print(cls, cls_idxs.size())
-        #     self.samplers[cls] = torch.utils.data.BatchSampler(
-        #         torch.utils.data.RandomSampler(cls_idxs, replacement=False),
-        #         examples_per_cls, drop_last)
-
         self.samplers = {
             cls: torch.utils.data.BatchSampler(
-                torch.utils.data.RandomSampler(cls_idxs, replacement=False),
+                torch.utils.data.SubsetRandomSampler(cls_idxs),
                 examples_per_cls, drop_last)
             for cls, cls_idxs in clss_idxs.items()}
         # After __iter__() is called, this will contain an iterator for each
@@ -185,7 +181,6 @@ class BalancedSampler:
         # Create an iterator for each class.
         self.iters = {
             cls: iter(sampler) for cls, sampler in self.samplers.items()}
-        print("iter")
         return self
 
     def __len__(self):
@@ -193,8 +188,9 @@ class BalancedSampler:
 
     def __next__(self):
         # Pull examples from each class and merge them into a single list.
-        print("next")
-        return [idx for it in self.iters.values() for idx in next(it)]
+        idxs = [idx for it in self.iters.values() for idx in next(it)]
+        random.shuffle(idxs)
+        return idxs
 
 
 class Exp():
@@ -283,7 +279,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, client_ip, server_ip, flws_ports):
+def parse_packets(flp, flws_ports):
     """
     Parses a PCAP file. Considers packets between a specified client and server
     using specified ports only.
@@ -310,8 +306,8 @@ def parse_packets(flp, client_ip, server_ip, flws_ports):
 
     def remove_unused_rows(arr):
         """ Returns a filtered array with all rows containing -1 removed. """
-        filt = lambda row: (row != -1).all()
-        return arr[np.array([filt(row) for row in arr])]
+        filt_fnc = lambda row: (row != -1).all()
+        return arr[np.array([filt_fnc(row) for row in arr])]
 
     # Format described above. In this form, the arrays will be sparse. Unused
     # rows will be removed later.
@@ -507,8 +503,8 @@ def visualize_classes(net, dat):
     tots = [(dat == cls).sum() for cls in clss]
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
-    print("Classes:\n" + "\n".join(
-        [f"    {cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
+    print("\n".join(
+        [f"\t{cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
     tot_actual = np.prod(np.array(dat.shape))
     assert tot == tot_actual, \

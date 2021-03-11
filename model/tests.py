@@ -42,11 +42,12 @@ class TestGeneral(unittest.TestCase):
         import correlation
         import defaults
         import fet_hists
+        import features
+        import gen_features
         import gen_training_data
         import graph_one
         import hyper
         import models
-        import parse_cloudlab
         import prepare_data
         import sim
         import test
