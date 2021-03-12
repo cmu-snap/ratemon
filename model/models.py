@@ -1042,11 +1042,15 @@ class GbdtSklearnWrapper(SvmSklearnWrapper):
 class HistGbdtSklearnWrapper(SvmSklearnWrapper):
 
     name = "HistGbdtSklearn"
-    params = ["max_iter"]
+    params = [
+        "max_iter", "l2_regularization", "early_stop", "lr",
+        "l2_regularization"]
 
     def new(self, **kwargs):
         self.net = ensemble.HistGradientBoostingClassifier(
-            max_iter=kwargs["max_iter"])
+            verbose=1, learning_rate=kwargs["lr"], max_iter=kwargs["max_iter"],
+            l2_regularization=kwargs["l2_regularization"],
+            early_stopping=kwargs["early_stop"], validation_fraction=20/70)
         return self.net
 
 

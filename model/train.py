@@ -941,6 +941,11 @@ def main():
     psr.add_argument(
         "--analyze-features", action="store_true",
         help="Analyze feature importance.")
+    psr.add_argument(
+        "--l2-regularization", default=defaults.DEFAULTS["l2_regularization"],
+        required=False, type=float,
+        help=("If the model is of type \"{models.HistGbdtSklearnWrapper().name}\", "
+              "then use this as the L2 regularization parameter."))
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \
