@@ -94,7 +94,7 @@ class BalancedSampler:
     for many other Samplers, one for each class.
     """
 
-    def __init__(self, dataset, batch_size, drop_last, drop_populous):
+    def __init__(self, dataset, batch_size, drop_last, drop_popular):
         assert isinstance(dataset, Dataset), \
             "Dataset must be an instance of utils.Dataset."
         _, _, dat_out, _ = dataset.raw()
@@ -116,7 +116,7 @@ class BalancedSampler:
         # Find the indices for each class.
         clss_idxs = {cls: torch.where(dat_out == cls)[0] for cls in clss}
 
-        if drop_populous:
+        if drop_popular:
             # Determine the number of examples in the least populous class.
             target_examples = min(
                 cls_idxs.size()[0] for cls_idxs in clss_idxs.values())
@@ -153,7 +153,7 @@ class BalancedSampler:
                     # Append the duplicated examples to the true examples.
                     clss_idxs[cls] = torch.cat(
                         (cls_idxs,
-                         torch.multinomial(
+                         cls_idxs[torch.multinomial(
                              # Sample from the existing examples using a uniform
                              # distribution.
                              torch.ones((num_examples,)),
@@ -161,7 +161,7 @@ class BalancedSampler:
                              # Sample with replacement in case the number of new
                              # examples is greater than the number of existing
                              # examples.
-                             replacement=True)),
+                             replacement=True)]),
                         dim=0)
                     print(f"\tAdded {new_examples} examples to class {cls}.")
 

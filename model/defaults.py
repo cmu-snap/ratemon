@@ -41,7 +41,10 @@ DEFAULTS = {
     "sync": False,
     "cca": "bbr",
     "n_estimators": 100,
-    "max_depth": 10
+    "max_depth": 10,
+    "balance": False,
+    "drop_popular": True,
+    "analyze_features": False
 }
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000

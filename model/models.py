@@ -12,7 +12,9 @@ import numpy as np
 import sklearn
 from sklearn import ensemble
 from sklearn import feature_selection
+from sklearn import inspection
 from sklearn import linear_model
+from sklearn import metrics
 from sklearn import svm
 from sklearn.experimental import enable_hist_gradient_boosting
 import torch
@@ -545,46 +547,23 @@ class SvmSklearnWrapper(SvmWrapper):
         """
         utils.assert_tensor(preds=preds, labels=labels, raw=raw, fair=fair)
 
+        def log(msg):
+            print(msg)
+            with open(path.join(out_dir, "results.txt"), "a+") as fil:
+                fil.write(msg + "\n")
+
         # Overall accuracy.
         acc = torch.sum(preds == labels) / preds.size()[0]
 
-        # Break down the accuracy into false positives/negatives, precision, and
-        # recall.
-        labels_neg = labels == 0
-        labels_pos = labels == 1
-        preds_neg = preds == 0
-        preds_pos = preds == 1
+        print("Test labels:")
+        utils.visualize_classes(self, labels)
+        print("Test predictions:")
+        utils.visualize_classes(self, preds)
 
-        true_pos = torch.sum(torch.logical_and(preds_pos, labels_pos))
-        false_pos = torch.sum(torch.logical_and(preds_pos, labels_neg))
-        false_neg = torch.sum(torch.logical_and(preds_neg, labels_pos))
-
-        false_pos_rate = false_pos / torch.sum(labels_neg)
-        false_neg_rate = false_neg / torch.sum(labels_pos)
-
-        precision = true_pos / (true_pos + false_pos)
-        recall = true_pos / (true_pos + false_neg)
-
-        frac_preds_pos = torch.sum(preds_pos) / preds_pos.size()[0]
-        frac_preds_neg = torch.sum(preds_neg) / preds_neg.size()[0]
-
-        frac_labels_pos = torch.sum(labels_pos) / labels_pos.size()[0]
-        frac_labels_neg = torch.sum(labels_neg) / labels_neg.size()[0]
-
-        msg = (
-            f"\tTest accuracy: {acc * 100:.2f}%\n"
-            f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
-            f"\tFalse positive rate: {false_pos_rate * 100:.2f}%\n"
-            f"\tPrecision: {precision:.4f}\n"
-            f"\tRecall: {recall:.4f}\n"
-            f"\tPercent predicted 0: {frac_preds_neg * 100:.2f}%\n"
-            f"\tPercent predicted 1: {frac_preds_pos * 100:.2f}%\n"
-            f"\tPercent labeled 0: {frac_labels_neg * 100:.2f}%\n"
-            f"\tPercent labeled 1: {frac_labels_pos * 100:.2f}%\n"
-        )
-        print(msg)
-        with open(path.join(out_dir, "results.txt"), "a+") as fil:
-            fil.write(msg)
+        log(
+            f"Test accuracy: {acc * 100:.2f}%\n" +
+            "Classification report:\n" +
+            metrics.classification_report(labels, preds))
 
         if self.graph:
             assert graph_prms is not None, \
@@ -602,7 +581,8 @@ class SvmSklearnWrapper(SvmWrapper):
                 labels = labels[indices]
             # Bucketize and compute bucket accuracies.
             num_samples = preds.size()[0]
-            num_buckets = min(20 * (1 if sort_by_unfairness else 4), num_samples)
+            num_buckets = min(
+                20 * (1 if sort_by_unfairness else 4), num_samples)
             num_per_bucket = math.floor(num_samples / num_buckets)
             assert num_per_bucket > 0, \
                 ("There must be at least one sample per bucket, but there are "
@@ -615,7 +595,8 @@ class SvmSklearnWrapper(SvmWrapper):
                  preds_.size()[0])
                 for x, preds_, labels_ in [
                     # Each bucket is defined by a tuple of three values:
-                    #   (x-axis value for bucket, predictions, ground truth labels).
+                    #   (x-axis value for bucket, predictions,
+                    #    ground truth labels).
                     # The x-axis is the mean relative difference for this
                     # bucket. A few values at the end may be discarded.
                     (torch.mean(diffs[i:i + num_per_bucket]),
@@ -782,7 +763,8 @@ class SvmSklearnWrapper(SvmWrapper):
 
     def test(self, fets, dat_in, dat_out_classes, dat_extra,
              graph_prms=copy.copy({
-                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
+                 "analyze_features": False, "out_dir": ".",
+                 "sort_by_unfairness": True, "dur_s": None})):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
@@ -820,54 +802,65 @@ class SvmSklearnWrapper(SvmWrapper):
             (-1, ((dat_extra["raw"] - fair) / fair).max().item())
             if sort_by_unfairness else (0, graph_prms["dur_s"]))
 
-        # Analyze feature coefficients. The underlying model's .coef_
-        # attribute may not exist.
-        try:
-            if isinstance(
-                    self.net,
-                    (sklearn.feature_selection.RFE,
-                     sklearn.feature_selection.RFECV)):
-                # Since the model was trained using RFE, display all
-                # features. Sort the features alphabetically.
-                best_fets = sorted(
-                    zip(
-                        np.array(fets)[np.where(self.net.ranking_ == 1)],
-                        self.net.estimator_.coef_[0]),
-                    key=lambda p: p[0])
-                print(f"Number of features selected: {len(best_fets)}")
-                qualifier = "All"
-            else:
-                # First, sort the features by the absolute value of the
-                # importance and pick the top 20. Then, sort the features
-                # alphabetically.
-                best_fets = sorted(
-                    sorted(
-                        zip(fets, self.net.coef_[0]),
-                        key=lambda p: abs(p[1]))[-20:],
-                    key=lambda p: p[0])
-                qualifier = "Best"
-            print(
-                f"----------\n{qualifier} features ({len(best_fets)}):\n" +
-                "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
-                "\n----------")
+        if graph_prms["analyze_features"]:
+            # Analyze feature coefficients. The underlying model's .coef_
+            # attribute may not exist.
+            print("Analyzing feature importances...")
+            try:
+                if isinstance(
+                        self.net,
+                        (sklearn.feature_selection.RFE,
+                         sklearn.feature_selection.RFECV)):
+                    # Since the model was trained using RFE, display all
+                    # features. Sort the features alphabetically.
+                    best_fets = sorted(
+                        zip(
+                            np.array(fets)[np.where(self.net.ranking_ == 1)],
+                            self.net.estimator_.coef_[0]),
+                        key=lambda p: p[0])
+                    print(f"Number of features selected: {len(best_fets)}")
+                    qualifier = "All"
+                else:
+                    if isinstance(
+                            self.net, ensemble.HistGradientBoostingClassifier):
+                        imps = inspection.permutation_importance(
+                            self.net, dat_in, dat_out_classes, n_repeats=10,
+                            random_state=0).importances_mean
+                    else:
+                        imps = self.net.coef_[0]
 
-            # Graph feature coefficients.
-            if self.graph:
-                names, coefs = zip(*best_fets)
-                num_fets = len(names)
-                y_vals = list(range(num_fets))
-                pyplot.figure(figsize=(7, 0.2 * num_fets))
-                pyplot.barh(y_vals, coefs, align="center")
-                pyplot.yticks(y_vals, names)
-                pyplot.ylim((-1, num_fets))
-                pyplot.xlabel("Feature coefficient")
-                pyplot.ylabel("Feature name")
-                pyplot.tight_layout()
-                pyplot.savefig(path.join(out_dir, f"features_{self.name}.pdf"))
-                pyplot.close()
-        except AttributeError:
-            # Coefficients are only available with a linear kernel.
-            print("Warning: Unable to extract coefficients!")
+                    # First, sort the features by the absolute value of the
+                    # importance and pick the top 20. Then, sort the features
+                    # alphabetically.
+                    best_fets = sorted(
+                        sorted(
+                            zip(fets, imps),
+                            key=lambda p: abs(p[1]))[-20:],
+                        key=lambda p: p[0])
+                    qualifier = "Best"
+                print(
+                    f"----------\n{qualifier} features ({len(best_fets)}):\n" +
+                    "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
+                    "\n----------")
+
+                # Graph feature coefficients.
+                if self.graph:
+                    names, coefs = zip(*best_fets)
+                    num_fets = len(names)
+                    y_vals = list(range(num_fets))
+                    pyplot.figure(figsize=(7, 0.2 * num_fets))
+                    pyplot.barh(y_vals, coefs, align="center")
+                    pyplot.yticks(y_vals, names)
+                    pyplot.ylim((-1, num_fets))
+                    pyplot.xlabel("Feature coefficient")
+                    pyplot.ylabel("Feature name")
+                    pyplot.tight_layout()
+                    pyplot.savefig(
+                        path.join(out_dir, f"features_{self.name}.pdf"))
+                    pyplot.close()
+            except AttributeError:
+                # Coefficients are only available with a linear kernel.
+                print("Warning: Unable to extract coefficients!")
 
         if self.graph:
             # Analyze, for each number of flows, accuracy vs. unfairness.
@@ -919,17 +912,17 @@ class SvmSklearnWrapper(SvmWrapper):
                 torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
                 x_lim=None)
 
-        # Analyze overall accuracy for the Mathis Model.
-        print("Evaluting Mathis Model:")
+        # # Analyze overall accuracy for the Mathis Model.
+        # print("Evaluting Mathis Model:")
         raw = dat_extra["raw"].copy()
-        self.__evaluate(
-            torch.tensor(dat_extra[features.MATHIS_MODEL_FET].copy()),
-            dat_out_classes, torch.tensor(raw), torch.tensor(fair),
-            out_dir, sort_by_unfairness,
-            graph_prms={
-                "flp": path.join(
-                    out_dir, "accuracy_vs_unfairness_mathis.pdf"),
-                "x_lim": x_lim})
+        # self.__evaluate(
+        #     torch.tensor(dat_extra[features.MATHIS_MODEL_FET].copy()),
+        #     dat_out_classes, torch.tensor(raw), torch.tensor(fair),
+        #     out_dir, sort_by_unfairness,
+        #     graph_prms={
+        #         "flp": path.join(
+        #             out_dir, "accuracy_vs_unfairness_mathis.pdf"),
+        #         "x_lim": x_lim})
 
         # Analyze overall accuracy for our model itself.
         print(f"Evaluating {self.name} model:")

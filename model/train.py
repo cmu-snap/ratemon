@@ -401,7 +401,7 @@ def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
 
 
 def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-               use_val=False, balance=False):
+               use_val=False, balance=False, drop_popular=True):
     """
     Divides the input and output data into training, validation, and
     testing sets and constructs data loaders.
@@ -466,12 +466,14 @@ def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
     ldr_trn = (
         torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False)
-        if isinstance(net, models.SvmSklearnWrapper) and not balance
-        else torch.utils.data.DataLoader(
             dataset_trn,
             batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False, drop_populous=True)))
+                dataset_trn, bch_trn, drop_last=False,
+                drop_popular=drop_popular))
+        if balance
+        else torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
+
     ldr_val = (
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
@@ -682,11 +684,13 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     # Split the data into training, validation, and test loaders.
     ldr_trn, _, ldr_tst = split_data(
         net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"], balance=True)
-    # Extract the balanced data from the training dataloader.
+        args["test_batch"], balance=args["balance"],
+        drop_popular=args["drop_popular"])
+    # Extract the training data from the training dataloader.
     dat_in, dat_out = list(ldr_trn)[0]
-    print("Balanced training data:")
-    utils.visualize_classes(net, dat_out)
+    if args["balance"]:
+        print("Balanced training data:")
+        utils.visualize_classes(net, dat_out)
     # Training.
     print("Training...")
     tim_srt_s = time.time()
@@ -708,7 +712,8 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     acc_tst = net.test(
         *ldr_tst.dataset.raw(),
         graph_prms={
-            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})[0]
+            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None,
+            "analyze_features": args["analyze_features"]})[0]
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     return acc_tst, tim_trn_s
@@ -926,8 +931,20 @@ def main():
         "--tmp-dir", default=defaults.DEFAULTS["tmp_dir"],
         help=("The directory in which to store temporary files. For best "
               "performance, use an in-memory filesystem."))
+    psr.add_argument(
+        "--balance", action="store_true",
+        help="Balance the training data classes")
+    psr.add_argument(
+        "--drop-popular", action="store_true",
+        help=("Drop samples from popular classes instead of adding samples to "
+              "unpopular classes. Must be used with \"--balance\"."))
+    psr.add_argument(
+        "--analyze-features", action="store_true",
+        help="Analyze feature importance.")
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
+    assert (not args["drop_popular"]) or args["balance"], \
+        "\"--drop-popular\" must be used with \"--balance\"."
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
         assert arg in defaults.DEFAULTS, \
