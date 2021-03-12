@@ -552,18 +552,34 @@ class SvmSklearnWrapper(SvmWrapper):
             with open(path.join(out_dir, "results.txt"), "a+") as fil:
                 fil.write(msg + "\n")
 
-        # Overall accuracy.
-        acc = torch.sum(preds == labels) / preds.size()[0]
-
         print("Test labels:")
         utils.visualize_classes(self, labels)
         print("Test predictions:")
         utils.visualize_classes(self, preds)
 
+        # Overall accuracy.
+        acc = torch.sum(preds == labels) / preds.size()[0]
         log(
             f"Test accuracy: {acc * 100:.2f}%\n" +
             "Classification report:\n" +
-            metrics.classification_report(labels, preds))
+            metrics.classification_report(labels, preds, digits=4))
+        for cls in self.get_classes():
+            # Break down the accuracy into false positives/negatives.
+            labels_neg = labels != cls
+            labels_pos = labels == cls
+            preds_neg = preds != cls
+            preds_pos = preds == cls
+
+            false_pos_rate = (
+                torch.sum(torch.logical_and(preds_pos, labels_neg)) /
+                torch.sum(labels_neg))
+            false_neg_rate = (
+                torch.sum(torch.logical_and(preds_neg, labels_pos)) /
+                torch.sum(labels_pos))
+
+            log(f"Class {cls}:\n"
+                f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
+                f"\tFalse positive rate: {false_pos_rate * 100:.2f}%")
 
         if self.graph:
             assert graph_prms is not None, \
