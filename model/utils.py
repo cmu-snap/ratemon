@@ -1,5 +1,6 @@
 """ Utility functions. """
 
+import json
 import math
 import os
 from os import path
@@ -833,11 +834,11 @@ def load_scl_prms(out_dir):
 
 
 def load_split(split_dir, name):
-        """
-        Loads training, validation, and test split raw data from disk. Returns a
-        tuple of (training, validation, test) data.
-        """
-        num_pkts, dtype = load_split_metadata(split_dir, name)
-        return np.memmap(
-            get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
-            shape=(num_pkts,))
+    """
+    Loads training, validation, and test split raw data from disk. Returns a
+    tuple of (training, validation, test) data.
+    """
+    num_pkts, dtype = load_split_metadata(split_dir, name)
+    return np.memmap(
+        get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
+        shape=(num_pkts,))

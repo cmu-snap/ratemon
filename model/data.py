@@ -1,6 +1,9 @@
 """ Creates training, validation, and test data. """
 
-import numpy
+import os
+from os import path
+
+import numpy as np
 from numpy.lib import recfunctions
 import torch
 
@@ -56,7 +59,7 @@ def get_bulk_data(args):
         extract_fets(utils.load_split(data_dir, name), net)
         for name in ["train", "val", "test"]]
     # Select a fraction of the training data.
-    num_pkts = math.ceil(num_pkts * args["train_prc"] / 100)]
+    num_pkts = math.ceil(num_pkts * args["train_prc"] / 100)
     trn = (dat[:num_pkts] for dat in trn)
 
     # TODO: Scale input data.

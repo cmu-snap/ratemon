@@ -61,7 +61,7 @@ def plot_bar(x_axis, y_axis, file_name):
 
 
 
-def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy, 
+def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, all_accuracy,
                 all_bucketized_accuracy, bw_dict, rtt_dict, queue_dict):
 
     """ Evaluate a single simulation. """
@@ -74,7 +74,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
             idx=0, total=1, net=net, sim_flp=sim_flp, tmp_dir=out_dir,
             warmup_prc=warmup_prc, keep_prc=100, sequential=True))
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = utils.load_tmp_file(temp_path)    
+    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = utils.load_tmp_file(temp_path)
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:

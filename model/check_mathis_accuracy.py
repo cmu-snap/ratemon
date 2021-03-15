@@ -20,7 +20,7 @@ def process_one(flp):
     dat = dat[dat.files[0]]
     labels = dat["mathis model label"]
     valid = np.where(labels != -1)
-    sim = utils.Sim(flp)
+    exp = utils.Exp(flp)
     return (
         (
             (labels[valid] ==
@@ -28,7 +28,7 @@ def process_one(flp):
              # occupancy to the fair queue occupancy (convert to ints to
              # generate class labels).
              (dat["queue occupancy ewma-alpha0.5"][valid] > (
-                 1 / (sim.unfair_flws + sim.fair_flws))).astype(int)
+                 1 / exp.tot_flws)).astype(int)
              # Count the number of correct predictions by converting
              # from bools to ints and summing them up.
             ).astype(int).sum()),

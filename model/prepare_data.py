@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Reads parsed simulation files created by parse_dumbell.py and
-creates unified training, validation, and test sets.
+Reads parsed experiment files created by gen_features.py and creates unified
+training, validation, and test sets.
 """
 
 import argparse
@@ -154,7 +154,7 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     num_sims = len(sim_flps)
     for idx, sim_flp in enumerate(sim_flps):
         # Load the simulation.
-        sim, dat = utils.load_sim(
+        sim, dat = utils.load_exp(
             sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")
         if dat is None:
             continue
@@ -208,7 +208,7 @@ def main():
         "--test-split", default=30, help="Test data fraction",
         required=False, type=float)
     psr, psr_verify = cl_args.add_out(
-        *cl_args.add_warmup(*cl_args.add_num_sims(psr)))
+        *cl_args.add_warmup(*cl_args.add_num_exps(psr)))
     args = psr_verify(psr.parse_args())
 
     split_prcs = {

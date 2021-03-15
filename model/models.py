@@ -70,7 +70,7 @@ class PytorchModelWrapper:
         return torch.zeros(()), torch.zeros(())
 
     @staticmethod
-    def convert_to_class(sim, dat_out):
+    def convert_to_class(exp, dat_out):
         """ Converts real-valued feature values into classes. """
         return dat_out
 
@@ -78,7 +78,7 @@ class PytorchModelWrapper:
         """ Returns a list of all possible class labels. """
         return list(range(self.num_clss))
 
-    def modify_data(self, sim, dat_in, dat_out):
+    def modify_data(self, exp, dat_in, dat_out):
         """ Performs an arbitrary transformation on the data. """
         return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
 
@@ -149,7 +149,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 len(self.in_spc)))
 
     @staticmethod
-    def convert_to_class(sim, dat_out):
+    def convert_to_class(exp, dat_out):
         # Verify that the output features consist of exactly one column.
         assert len(dat_out.dtype.names) == 1, "Should be only one column."
         # Map a conversion function across all entries. Note that
@@ -160,7 +160,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
+                fair=1. / (exp.cca_1_flws + exp.cca_2_flws)),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
@@ -209,7 +209,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
             (f"Error building counts! Bucketed {bucketed_pkts} of {num_pkts} "
              "packets!")
 
-    def __create_buckets(self, sim, dat_in, dat_out, dat_extra, sequential):
+    def __create_buckets(self, exp, dat_in, dat_out, dat_extra, sequential):
         """
         Divides dat_in into windows and divides each window into self.win
         buckets, which each defines a temporal interval. The value of
@@ -218,11 +218,11 @@ class BinaryModelWrapper(PytorchModelWrapper):
         the last packet in the window.
         """
         print("Creating arrival time buckets...")
-        # 100x the min RTT (as determined by the simulation parameters).
-        dur_us = 100 * 2 * (sim.edge_delays[0] * 2 + sim.btl_delay_us)
+        # 100x the min RTT (as determined by the experiment parameters).
+        dur_us = 100 * 2 * (exp.edge_delays[0] * 2 + exp.btl_delay_us)
         # Determine the safe starting index. Do not pick indices
         # between 0 and start_idx to make sure that all windows ending
-        # on the chosen index fit within the simulation.
+        # on the chosen index fit within the experiment.
         first_arr_time = None
         start_idx = None
         for idx, arr_time in enumerate(dat_extra[features.ARRIVAL_TIME_FET]):
@@ -242,9 +242,9 @@ class BinaryModelWrapper(PytorchModelWrapper):
             pkt_idxs = list(range(start_idx, num_pkts))
         else:
             # The number of windows is the number of times the window
-            # durations fits within the simulation.
-            num_wins = 10 * math.floor(sim.dur_s * 1e6 / dur_us)
-            # Select random intervals from this simulation to create the
+            # durations fits within the experiment.
+            num_wins = 10 * math.floor(exp.dur_s * 1e6 / dur_us)
+            # Select random intervals from this experiment to create the
             # new input data. win_idx is the index into
             # dat_in_new. pkt_idx is the index of the last packet in this
             # window.
@@ -310,10 +310,10 @@ class BinaryModelWrapper(PytorchModelWrapper):
         num_pkts = dat_in.shape[0]
         num_wins = math.ceil(num_pkts / self.win)
         fets = [(name, typ) for name, typ in dat_in.dtype.descr if name != ""]
-        # Select random intervals from this simulation to create the
+        # Select random intervals from this experiment to create the
         # new input data. Do not pick indices between 0 and self.win
         # to make sure that all windows ending on the chosen index fit
-        # within the simulation.
+        # within the experiment.
         pkt_idxs = random.choices(range(self.win, num_pkts), k=num_wins)
         # The new data format consists of self.win copies of the
         # existing input features. All copies of a particular feature
@@ -346,14 +346,14 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # becomes the ground truth for the entire window.
         return dat_in_new, np.take(dat_out, pkt_idxs), scl_grps
 
-    def modify_data(self, sim, dat_in, dat_out, dat_extra, sequential):
+    def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
         """
-        Extracts from the set of simulations many separate intervals. Each
+        Extracts from the set of experiments many separate intervals. Each
         interval becomes a training example.
         """
         dat_in, dat_out, dat_extra, scl_grps = (
             self.__create_buckets(
-                sim, dat_in, dat_out, dat_extra, sequential)
+                exp, dat_in, dat_out, dat_extra, sequential)
             if self.rtt_buckets else (
                 self.__create_windows(dat_in, dat_out, sequential)
                 if self.windows else (
@@ -423,10 +423,10 @@ class SvmWrapper(BinaryModelWrapper):
         self.net = Svm(self.num_ins)
         return self.net
 
-    def modify_data(self, sim, dat_in, dat_out, dat_extra, sequential):
+    def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
         dat_in, dat_out, dat_extra, scl_grps = (
             super().modify_data(
-                sim, dat_in, dat_out, dat_extra, sequential))
+                exp, dat_in, dat_out, dat_extra, sequential))
         # Map [0,1] to [-1, 1]
         # fet = dat_out.dtype.names[0]
         # dat_out[fet] = dat_out[fet] * 2 - 1
@@ -497,9 +497,9 @@ class SvmSklearnWrapper(SvmWrapper):
         print()
 
     @staticmethod
-    def convert_to_class(sim, dat_out):
+    def convert_to_class(exp, dat_out):
         if SvmSklearnWrapper.num_clss == 2:
-            return BinaryModelWrapper.convert_to_class(sim, dat_out)
+            return BinaryModelWrapper.convert_to_class(exp, dat_out)
         assert SvmSklearnWrapper.num_clss == 3, \
             ("Only 2 or 3 classes are supported, not: "
              f"{SvmSklearnWrapper.num_clss}")
@@ -532,7 +532,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / sim.tot_flws),
+                percent_to_class, fair=1. / exp.tot_flws),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss
@@ -1091,7 +1091,7 @@ class LstmWrapper(PytorchModelWrapper):
                 weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
 
     @staticmethod
-    def convert_to_class(sim, dat_out):
+    def convert_to_class(exp, dat_out):
         assert len(dat_out.dtype.names) == 1, "Should be only one column."
 
         def percent_to_class(prc, fair):
@@ -1129,7 +1129,7 @@ class LstmWrapper(PytorchModelWrapper):
         # value.
         clss = np.vectorize(
             functools.partial(
-                percent_to_class, fair=1. / (sim.cca_1_flws + sim.cca_2_flws)),
+                percent_to_class, fair=1. / (exp.cca_1_flws + exp.cca_2_flws)),
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
         clss_str["class"] = clss

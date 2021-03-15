@@ -44,84 +44,6 @@ LOGS_PER_EPC = 5
 VALS_PER_EPC = 15
 
 
-def scale_fets(dat, scl_grps, standardize=False):
-    """
-    Returns a copy of dat with the columns normalized. If standardize
-    is True, then the scaling groups are normalized to a mean of 0 and
-    a variance of 1. If standardize is False, then the scaling groups
-    are normalized to the range [0, 1]. Also returns an array of shape
-    (dat_all[0].shape[1], 2) where row i contains the scaling
-    parameters of column i in dat. If standardize is True, then the
-    scaling parameters are the mean and standard deviation of that
-    column's scaling group. If standardize is False, then the scaling
-    parameters are the min and max of that column's scaling group.
-    """
-    fets = dat.dtype.names
-    assert fets is not None, \
-        f"The provided array is not structured. dtype: {dat.dtype.descr}"
-    assert len(scl_grps) == len(fets), \
-        f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
-
-    # Determine the unique scaling groups.
-    scl_grps_unique = set(scl_grps)
-    # Create an empty array to hold the min and max values (i.e.,
-    # scaling parameters) for each scaling group.
-    scl_grps_prms = np.empty((len(scl_grps_unique), 2), dtype="float64")
-    # Function to reduce a structured array.
-    rdc = (lambda fnc, arr:
-           fnc(np.array(
-               [fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
-    # Determine the min and the max of each scaling group.
-    for scl_grp in scl_grps_unique:
-        # Determine the features in this scaling group.
-        scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
-                        if scl_grps[fet_idx] == scl_grp]
-        # Extract the columns corresponding to this scaling group.
-        fet_values = dat[scl_grp_fets]
-        # Record the min and max of these columns.
-        scl_grps_prms[scl_grp] = [
-            np.mean(utils.clean(fet_values))
-            if standardize else rdc(np.min, fet_values),
-            np.std(utils.clean(fet_values))
-            if standardize else rdc(np.max, fet_values)
-        ]
-
-    # Create an empty array to hold the min and max values (i.e.,
-    # scaling parameters) for each column (i.e., feature).
-    scl_prms = np.empty((len(fets), 2), dtype="float64")
-    # Create an empty array to hold the rescaled features.
-    new = np.empty(dat.shape, dtype=dat.dtype)
-    # Rescale each feature based on its scaling group's min and max.
-    for fet_idx, fet in enumerate(fets):
-        # Look up the parameters for this feature's scaling group.
-        prm_1, prm_2 = scl_grps_prms[scl_grps[fet_idx]]
-        # Store this min and max in the list of per-column scaling parameters.
-        scl_prms[fet_idx] = np.array([prm_1, prm_2])
-        fet_values = dat[fet]
-        if standardize:
-            # prm_1 is the mean and prm_2 is the standard deviation.
-            scaled = (
-                # Handle the rare case where the standard deviation is
-                # 0 (meaning that all of the feature values are the
-                # same), in which case return an array of zeros.
-                np.zeros(
-                    fet_values.shape, dtype=fet_values.dtype) if prm_2 == 0
-                else (fet_values - prm_1) / prm_2)
-        else:
-            # prm_1 is the min and prm_2 is the max.
-            scaled = (
-                # Handle the rare case where the min and the max are
-                # the same (meaning that all of the feature values are
-                # the same.
-                np.zeros(
-                    fet_values.shape, dtype=fet_values.dtype) if prm_1 == prm_2
-                else utils.scale(
-                    fet_values, prm_1, prm_2, min_out=0, max_out=1))
-        new[fet] = scaled
-
-    return new, scl_prms
-
-
 def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
                 cca, sequential=False):
     """
@@ -691,8 +613,9 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     #     net, dat_in, dat_out, dat_extra, args["train_batch"],
     #     args["test_batch"], balance=args["balance"],
     #     drop_popular=args["drop_popular"])
-    # # Extract the training data from the training dataloader.
-    # dat_in, dat_out = list(ldr_trn)[0]
+
+    # Extract the training data from the training dataloader.
+    dat_in, dat_out = list(ldr_trn)[0]
     # if args["balance"]:
     #     print("Balanced training data:")
     #     utils.visualize_classes(net, dat_out)
@@ -865,12 +788,12 @@ def run_trials(args):
     # print("All data:")
     # utils.visualize_classes(net_tmp, dat_out)
 
-    # # Load the training, validation, and test data.
-    # ldr_trn, ldr_val, ldr_tst = data.get_dataloaders(
-    #     args, net_tmp, save_data=True)
+    # Load the training, validation, and test data.
+    ldr_trn, ldr_val, ldr_tst = data.get_dataloaders(
+        args, net_tmp, save_data=True)
 
     # Visualaize the ground truth data.
-    utils.visualize_classes(net_tmp, ldrs=(trn_ldr, val_ldr, tst_ldr))
+    utils.visualize_classes(net_tmp, ldrs=(ldr_trn, ldr_val, ldr_tst))
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]

@@ -28,7 +28,7 @@ def get_avg_tputs(flp):
     """ Returns the average throughput for each flow. """
     with np.load(flp) as fil:
         return (
-            utils.Sim(flp),
+            utils.Exp(flp),
             [utils.safe_mean(fil[flw][TPUT_KEY]) for flw in fil.files])
 
 
@@ -81,7 +81,7 @@ def plot_f1c(flps, var, out_dir):
     assert tot_flps == 1, \
         f"This figure uses a single experiment, but {tot_flps} were provided."
     flp = flps[0]
-    sim = utils.Sim(flp)
+    sim = utils.Exp(flp)
     x_vals = np.arange(300 * 1000, dtype=float) / 1000
     with np.load(flp) as fil:
         tot_flws = len(fil.files)

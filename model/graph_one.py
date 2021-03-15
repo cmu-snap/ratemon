@@ -34,7 +34,7 @@ def main():
              f"but the provided simulation contains {num_unfair} unfair flows!")
         dat = fil[fil.files[0]]
 
-    sim = utils.Sim(dat_flp)
+    sim = utils.Exp(dat_flp)
     queue_fair_occupancy = 1 / (sim.cca_1_flws + sim.cca_2_flws)
 
     for fet in dat.dtype.names:
