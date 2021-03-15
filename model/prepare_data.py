@@ -20,7 +20,7 @@ import utils
 class Split:
     """ Represents either the training, validation, or test split. """
 
-    def __init__(self, name, prc, flp, dtype, num_pkts_tot, shuffle):
+    def __init__(self, name, prc, out_dir, dtype, num_pkts_tot, shuffle):
         self.name = name
         print(f"Initializing split \"{self.name}\"...")
         self.frac = prc / 100
@@ -37,7 +37,10 @@ class Split:
         # Features values that cannot be computed are replaced
         # with -1. When reading the splits later, we can detect
         # incomplete feature values by looking for -1s.
-        self.dat = np.memmap(flp, dtype, mode="w+", shape=(num_pkts,))
+        self.dat = np.memmap(
+            utils.get_split_data_flp(out_dir, name),
+            dtype=(dtype + [("num_flws", "int32")]), mode="w+",
+            shape=(num_pkts,))
 
         # The next available index in self.dat. Used if self.shuffle == False.
         self.idx = 0
@@ -45,13 +48,19 @@ class Split:
         # reduced as the split is populated.
         self.dat_available_idxs = set(range(num_pkts))
 
+        # Save this Split's metadata so that its data file can be !read later.
+        utils.save_split_metadata(
+            out_dir, self.name, dat=(num_pkts, self.dat.dtype.descr))
 
-    def take(self, sim_dat, sim_available_idxs):
+
+    def take(self, sim_dat, sim_available_idxs, sim):
         """
         Takes this Split's specified fraction of data from sim_dat,
         choosing from sim_available_idxs. Removes the chosen indices from
         sim_available_idxs and returns the modified version.
         """
+        # Need to append a column for the number of flows
+
         assert not self.finished, "Trying to call a method on a finished Split."
         num_sim_pkts = sim_dat.shape[0]
         num_new = math.floor(num_sim_pkts * self.frac)
@@ -74,7 +83,7 @@ class Split:
                  f"there are only {num_slots_remaining} packet slots "
                  "available!")
             dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
-            self.dat[dat_new_idxs] = sim_dat[sim_new_idxs]
+            selected_rows = self.dat[dat_new_idxs]
         else:
             start_idx = self.idx
             self.idx = self.idx + num_new
@@ -82,7 +91,14 @@ class Split:
                 (f"Index {self.idx} into \"{self.name}\" split does not fit "
                  f"within shape {self.dat.shape}")
             dat_new_idxs = range(start_idx, self.idx)
-            self.dat[start_idx:self.idx] = sim_dat[sim_new_idxs]
+            selected_rows = self.dat[start_idx:self.idx]
+        # Assign the feature values.
+        num_cols = len(self.dat.dtype.names)
+        selected_rows[:num_cols - 1] = sim_dat[sim_new_idxs]
+        # Assign the number of flows.
+        selected_rows[num_cols].fill(
+            sim.unfair_flws + sim.fair_flws)
+
         self.dat_available_idxs -= set(dat_new_idxs)
         return sim_available_idxs
 
@@ -129,7 +145,7 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     print("Preparing split files...")
     splits = {
         name: Split(
-            name, prc, path.join(out_dir, f"{name}.npy"), dtype, num_pkts,
+            name, prc, out_dir, dtype, num_pkts,
             shuffle=name == "train")
         for name, prc in split_prcs.items()}
     # Keep track of the number of packets that do not get selected for
@@ -138,8 +154,8 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     num_sims = len(sim_flps)
     for idx, sim_flp in enumerate(sim_flps):
         # Load the simulation.
-        dat = utils.load_sim(
-            sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")[1]
+        sim, dat = utils.load_sim(
+            sim_flp, msg=f"{idx + 1:{f'0{len(str(num_sims))}'}}/{num_sims}")
         if dat is None:
             continue
         # Remove a percentage of packets from the beginning of the
@@ -150,7 +166,7 @@ def merge(sim_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
         all_idxs = set(range(dat.shape[0]))
         # For each split, take a fraction of the simulation packets.
         for split in splits.values():
-            all_idxs = split.take(dat, all_idxs)
+            all_idxs = split.take(dat, all_idxs, sim)
         # Record how many packets are not being moved to one of the
         # merged files.
         pkts_forgotten += len(all_idxs)

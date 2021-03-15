@@ -24,6 +24,7 @@ from numpy.lib import recfunctions
 import torch
 
 import cl_args
+import data
 import defaults
 import features
 import models
@@ -400,89 +401,89 @@ def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
     return dat_in, dat_out, dat_extra
 
 
-def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-               use_val=False, balance=False, drop_popular=True):
-    """
-    Divides the input and output data into training, validation, and
-    testing sets and constructs data loaders.
-    """
-    print("Creating train/val/test data...")
+# def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
+#                use_val=False, balance=False, drop_popular=True):
+#     """
+#     Divides the input and output data into training, validation, and
+#     testing sets and constructs data loaders.
+#     """
+#     print("Creating train/val/test data...")
 
-    fets = dat_in.dtype.names
-    # Keep track of the dtype of dat_extra so that we can recreate it
-    # as a structured array.
-    extra_dtype = dat_extra.dtype.descr
-    # Destroy columns names to make merging the matrices easier. I.e.,
-    # convert from structured to regular numpy arrays.
-    dat_in = utils.clean(dat_in)
-    dat_out = utils.clean(dat_out)
-    dat_extra = utils.clean(dat_extra)
-    # Shuffle the data to ensure that the training, validation, and
-    # test sets are uniformly sampled. To shuffle all of the arrays
-    # together, we must first merge them into a combined matrix.
-    num_cols_in = dat_in.shape[1]
-    merged = np.concatenate(
-        (dat_in, dat_out, dat_extra), axis=1)
-    np.random.shuffle(merged)
-    dat_in = merged[:, :num_cols_in]
-    dat_out = merged[:, num_cols_in]
-    # Rebuilding dat_extra is more complicated because we need it to
-    # be a structed array (for ease of use).
-    num_exps = dat_in.shape[0]
-    dat_extra = np.empty((num_exps,), dtype=extra_dtype)
-    num_cols = merged.shape[1]
-    num_cols_extra = num_cols - (num_cols_in + 1)
-    extra_names = dat_extra.dtype.names
-    num_cols_extra_expected = len(extra_names)
-    assert num_cols_extra == num_cols_extra_expected, \
-        (f"Error while reassembling \"dat_extra\". {num_cols_extra} columns "
-         f"does not match {num_cols_extra_expected} expected columns: "
-         f"{extra_names}")
-    for name, merged_idx in zip(extra_names, range(num_cols_in + 1, num_cols)):
-        dat_extra[name] = merged[:, merged_idx]
+#     fets = dat_in.dtype.names
+#     # Keep track of the dtype of dat_extra so that we can recreate it
+#     # as a structured array.
+#     extra_dtype = dat_extra.dtype.descr
+#     # Destroy columns names to make merging the matrices easier. I.e.,
+#     # convert from structured to regular numpy arrays.
+#     dat_in = utils.clean(dat_in)
+#     dat_out = utils.clean(dat_out)
+#     dat_extra = utils.clean(dat_extra)
+#     # Shuffle the data to ensure that the training, validation, and
+#     # test sets are uniformly sampled. To shuffle all of the arrays
+#     # together, we must first merge them into a combined matrix.
+#     num_cols_in = dat_in.shape[1]
+#     merged = np.concatenate(
+#         (dat_in, dat_out, dat_extra), axis=1)
+#     np.random.shuffle(merged)
+#     dat_in = merged[:, :num_cols_in]
+#     dat_out = merged[:, num_cols_in]
+#     # Rebuilding dat_extra is more complicated because we need it to
+#     # be a structed array (for ease of use).
+#     num_exps = dat_in.shape[0]
+#     dat_extra = np.empty((num_exps,), dtype=extra_dtype)
+#     num_cols = merged.shape[1]
+#     num_cols_extra = num_cols - (num_cols_in + 1)
+#     extra_names = dat_extra.dtype.names
+#     num_cols_extra_expected = len(extra_names)
+#     assert num_cols_extra == num_cols_extra_expected, \
+#         (f"Error while reassembling \"dat_extra\". {num_cols_extra} columns "
+#          f"does not match {num_cols_extra_expected} expected columns: "
+#          f"{extra_names}")
+#     for name, merged_idx in zip(extra_names, range(num_cols_in + 1, num_cols)):
+#         dat_extra[name] = merged[:, merged_idx]
 
-    # 50% for training, 20% for validation, 30% for testing.
-    num_val = int(round(num_exps * 0.2)) if use_val else 0
-    num_tst = int(round(num_exps * 0.3))
-    print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
-           f"test: {num_tst}"))
-    # Validation.
-    dat_val_in = dat_in[:num_val]
-    dat_val_out = dat_out[:num_val]
-    dat_val_extra = dat_extra[:num_val]
-    # Testing.
-    dat_tst_in = dat_in[num_val:num_val + num_tst]
-    dat_tst_out = dat_out[num_val:num_val + num_tst]
-    dat_tst_extra = dat_extra[num_val:num_val + num_tst]
-    # Training.
-    dat_trn_in = dat_in[num_val + num_tst:]
-    dat_trn_out = dat_out[num_val + num_tst:]
-    dat_trn_extra = dat_extra[num_val + num_tst:]
+#     # 50% for training, 20% for validation, 30% for testing.
+#     num_val = int(round(num_exps * 0.2)) if use_val else 0
+#     num_tst = int(round(num_exps * 0.3))
+#     print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
+#            f"test: {num_tst}"))
+#     # Validation.
+#     dat_val_in = dat_in[:num_val]
+#     dat_val_out = dat_out[:num_val]
+#     dat_val_extra = dat_extra[:num_val]
+#     # Testing.
+#     dat_tst_in = dat_in[num_val:num_val + num_tst]
+#     dat_tst_out = dat_out[num_val:num_val + num_tst]
+#     dat_tst_extra = dat_extra[num_val:num_val + num_tst]
+#     # Training.
+#     dat_trn_in = dat_in[num_val + num_tst:]
+#     dat_trn_out = dat_out[num_val + num_tst:]
+#     dat_trn_extra = dat_extra[num_val + num_tst:]
 
-    print("Training data:")
-    utils.visualize_classes(net, dat_trn_out)
+#     print("Training data:")
+#     utils.visualize_classes(net, dat_trn_out)
 
-    # Create the dataloaders.
-    dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
-    ldr_trn = (
-        torch.utils.data.DataLoader(
-            dataset_trn,
-            batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False,
-                drop_popular=drop_popular))
-        if balance
-        else torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
+#     # Create the dataloaders.
+#     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
+#     ldr_trn = (
+#         torch.utils.data.DataLoader(
+#             dataset_trn,
+#             batch_sampler=utils.BalancedSampler(
+#                 dataset_trn, bch_trn, drop_last=False,
+#                 drop_popular=drop_popular))
+#         if balance
+#         else torch.utils.data.DataLoader(
+#             dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
 
-    ldr_val = (
-        torch.utils.data.DataLoader(
-            utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
-            batch_size=bch_tst, shuffle=False, drop_last=False)
-        if use_val else None)
-    ldr_tst = torch.utils.data.DataLoader(
-        utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
-        batch_size=bch_tst, shuffle=False, drop_last=False)
-    return ldr_trn, ldr_val, ldr_tst
+#     ldr_val = (
+#         torch.utils.data.DataLoader(
+#             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
+#             batch_size=bch_tst, shuffle=False, drop_last=False)
+#         if use_val else None)
+#     ldr_tst = torch.utils.data.DataLoader(
+#         utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
+#         batch_size=bch_tst, shuffle=False, drop_last=False)
+#     return ldr_trn, ldr_val, ldr_tst
 
 
 def init_hidden(net, bch, dev):
@@ -498,8 +499,8 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
-def inference(ins, labs, net_raw, dev,
-              hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
+def inference_torch(ins, labs, net_raw, dev,
+                    hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
     """
     Runs a single inference pass. Returns the output of net, or the
     loss if los_fnc is not None.
@@ -528,8 +529,8 @@ def inference(ins, labs, net_raw, dev,
     return los_fnc(out, labs), hidden
 
 
-def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
-          val_imp_thresh, tim_out_s, opt_params):
+def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
+                out_flp, val_imp_thresh, tim_out_s, opt_params):
     """ Trains a model. """
     print("Training...")
     los_fnc = net.los_fnc()
@@ -578,7 +579,8 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference(ins, labs, net.net, dev, hidden, los_fnc)
+            loss, hidden = inference_torch(
+                ins, labs, net.net, dev, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -599,7 +601,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
                             f"{bch_idx_val + 1}/{len(ldr_val)}")
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
-                        los_val += inference(
+                        los_val += inference_torch(
                             ins_val, labs_val, net.net, dev, hidden,
                             los_fnc)[0].item()
                 # Convert the model back to training mode.
@@ -662,7 +664,7 @@ def test_torch(net, ldr_tst, dev):
             hidden = init_hidden(net, bch=bch_tst, dev=dev)
             # Run inference. The first element of the output is the
             # number of correct predictions.
-            num_correct += inference(
+            num_correct += inference_torch(
                 ins, labs, net.net, dev, hidden, los_fnc=net.check_output)[0]
             total += bch_tst * seq_len
     # Convert the model back to training mode.
@@ -672,32 +674,36 @@ def test_torch(net, ldr_tst, dev):
     return acc_tst
 
 
-def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
+def run_sklearn(args, out_dir, out_flp, ldrs):
     """
     Trains an sklearn model according to the supplied parameters. Returns the
     test error (lower is better).
     """
+    # Unpack the dataloaders.
+    ldr_trn, _, ldr_tst = ldrs
     # Construct the model.
     print("Building model...")
     net = models.MODELS[args["model"]]()
     net.new(**{param: args[param] for param in net.params})
-    # Split the data into training, validation, and test loaders.
-    ldr_trn, _, ldr_tst = split_data(
-        net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"], balance=args["balance"],
-        drop_popular=args["drop_popular"])
-    # Extract the training data from the training dataloader.
-    dat_in, dat_out = list(ldr_trn)[0]
-    if args["balance"]:
-        print("Balanced training data:")
-        utils.visualize_classes(net, dat_out)
+
+    # # Split the data into training, validation, and test loaders.
+    # ldr_trn, _, ldr_tst = split_data(
+    #     net, dat_in, dat_out, dat_extra, args["train_batch"],
+    #     args["test_batch"], balance=args["balance"],
+    #     drop_popular=args["drop_popular"])
+    # # Extract the training data from the training dataloader.
+    # dat_in, dat_out = list(ldr_trn)[0]
+    # if args["balance"]:
+    #     print("Balanced training data:")
+    #     utils.visualize_classes(net, dat_out)
+
     # Training.
     print("Training...")
     tim_srt_s = time.time()
     net.train(dat_in, dat_out)
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
-    # Free memory for the test data.
+    # Explicitly delete the training dataloader to save memory.
     del ldr_trn
     del dat_in
     del dat_out
@@ -714,15 +720,19 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
             "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None,
             "analyze_features": args["analyze_features"]})
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    # Explicitly delete the test dataloader to save memory.
     del ldr_tst
     return acc_tst, tim_trn_s
 
 
-def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
+def run_torch(args, out_dir, out_flp, ldrs):
     """
     Trains a PyTorch model according to the supplied parameters. Returns the
     test error (lower is better).
     """
+    # Unpack the dataloaders.
+    ldr_trn, ldr_val, ldr_tst = ldrs
+
     # Instantiate and configure the network. Move it to the proper device.
     net = models.MODELS[args["model"]]()
     net.new()
@@ -733,10 +743,10 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     dev = torch.device("cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
     net.net.to(dev)
 
-    # Split the data into training, validation, and test loaders.
-    ldr_trn, ldr_val, ldr_tst = split_data(
-        net, dat_in, dat_out, dat_extra, args["train_batch"],
-        args["test_batch"])
+    # # Split the data into training, validation, and test loaders.
+    # ldr_trn, ldr_val, ldr_tst = split_data(
+    #     net, dat_in, dat_out, dat_extra, args["train_batch"],
+    #     args["test_batch"])
 
     # Explicitly move the training (and maybe validation) data to the target
     # device.
@@ -747,7 +757,7 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
 
     # Training.
     tim_srt_s = time.time()
-    net = train(
+    net = train_torch(
         net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
         args["val_patience"], out_flp, args["val_improvement_thresh"],
         args["timeout_s"],
@@ -755,8 +765,8 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
 
-    # Explicitly delete the training and validation data so that they are
-    # removed from the target device.
+    # Explicitly delete the training and validation data to save
+    # memory on the target device.
     del ldr_trn
     del ldr_val
     # This is necessary for the GPU memory to be released.
@@ -771,8 +781,12 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     tim_srt_s = time.time()
     acc_tst = test_torch(net, ldr_tst, dev)
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+
+    # Explicitly delete the test data to save memory on the target device.
     del ldr_tst
+    # This is necessary for the GPU memory to be released.
     torch.cuda.empty_cache()
+
     return acc_tst, tim_trn_s
 
 
@@ -789,18 +803,20 @@ def prepare_args(args_):
 
 def run_trials(args):
     """
-    Run args["conf_trials"] trials and survive args["max_attempts"] failed
+    Runs args["conf_trials"] trials and survives args["max_attempts"] failed
     attempts.
     """
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
         utils.set_rand_seed()
-
+    # Prepare the output directory.
     out_dir = args["out_dir"]
     if not path.isdir(out_dir):
         print(f"Output directory does not exist. Creating it: {out_dir}")
         os.makedirs(out_dir)
+    # Create a temporary model to use during the data preparation
+    # process. Another model will be created for the actual training.
     net_tmp = models.MODELS[args["model"]]()
     # Verify that the necessary supplemental parameters are present.
     for param in net_tmp.params:
@@ -814,6 +830,9 @@ def run_trials(args):
             # model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
             else ".pth"))
+    # If a trained model file already exists, then delete it.
+    if path.exists(out_flp):
+        os.remove(out_flp)
     # If custom features are specified, then overwrite the model's
     # default features.
     fets = args["features"]
@@ -821,33 +840,37 @@ def run_trials(args):
         net_tmp.in_spc = fets
     else:
         args["features"] = net_tmp.in_spc
-    # If a trained model file already exists, then delete it.
-    if path.exists(out_flp):
-        os.remove(out_flp)
 
-    # Load or geenrate training data.
-    dat_flp = path.join(out_dir, "data.npz")
-    scl_prms_flp = path.join(out_dir, "scale_params.json")
-    # Check for the presence of both the data and the scaling
-    # parameters because the resulting model is useless without the
-    # proper scaling parameters.
-    if (not args["regen_data"] and path.exists(dat_flp) and
-            path.exists(scl_prms_flp)):
-        print("Found existing data!")
-        dat_in, dat_out, dat_extra = utils.load(dat_flp)
-        dat_in_shape = dat_in.shape
-        dat_out_shape = dat_out.shape
-        assert dat_in_shape[0] == dat_out_shape[0], \
-            f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
-    else:
-        print("Regenerating data...")
-        dat_in, dat_out, dat_extra = gen_data(
-            net_tmp, args, dat_flp, scl_prms_flp)
-    print(f"Number of input features: {len(dat_in.dtype.names)}")
+    # # Load or geenrate training data.
+    # dat_flp = path.join(out_dir, "data.npz")
+    # scl_prms_flp = path.join(out_dir, "scale_params.json")
+    # # Check for the presence of both the data and the scaling
+    # # parameters because the resulting model is useless without the
+    # # proper scaling parameters.
+    # if (not args["regen_data"] and path.exists(dat_flp) and
+    #         path.exists(scl_prms_flp)):
+    #     print("Found existing data!")
+    #     dat_in, dat_out, dat_extra = utils.load(dat_flp)
+    #     dat_in_shape = dat_in.shape
+    #     dat_out_shape = dat_out.shape
+    #     assert dat_in_shape[0] == dat_out_shape[0], \
+    #         f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
+    # else:
+    #     print("Regenerating data...")
+    #     dat_in, dat_out, dat_extra = gen_data(
+    #         net_tmp, args, dat_flp, scl_prms_flp)
+    # print(f"Number of input features: {len(dat_in.dtype.names)}")
+
+    # # Visualaize the ground truth data.
+    # print("All data:")
+    # utils.visualize_classes(net_tmp, dat_out)
+
+    # # Load the training, validation, and test data.
+    # ldr_trn, ldr_val, ldr_tst = data.get_dataloaders(
+    #     args, net_tmp, save_data=True)
 
     # Visualaize the ground truth data.
-    print("All data:")
-    utils.visualize_classes(net_tmp, dat_out)
+    utils.visualize_classes(net_tmp, ldrs=(trn_ldr, val_ldr, tst_ldr))
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
@@ -859,7 +882,8 @@ def run_trials(args):
         res = (
             run_sklearn
             if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else run_torch)(args, dat_in, dat_out, dat_extra, out_dir, out_flp)
+            else run_torch)(
+                args, out_dir, out_flp, ldrs=(ldr_trn, ldr_val, ldr_tst))
         if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
@@ -878,7 +902,10 @@ def run_trials(args):
 
 
 def run_cnf(cnf, gate_func=None, post_func=None):
-    """ Evaluate a single configuration. """
+    """
+    Executes a single configuration. Assumes that the arguments have already
+    been processed with prepare_args().
+    """
     func = run_trials
     # Optionally decide whether to run a configuration.
     if gate_func is not None:
@@ -892,7 +919,7 @@ def run_cnf(cnf, gate_func=None, post_func=None):
 
 def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     """
-    Evaluates many configurations. Assumes that the arguments have already been
+    Executes many configurations. Assumes that the arguments have already been
     processed with prepare_args().
     """
     num_cnfs = len(cnfs)

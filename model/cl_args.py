@@ -59,17 +59,17 @@ def add_num_exps(psr, psr_verify=lambda args: args):
     return psr, lambda args: verify(psr_verify(args))
 
 
-def add_common(psr, psr_verify=lambda args: args):
+def add_standardize(psr, psr_verify=lambda args: args):
     """
-    Adds common arguments to the provided ArgumentParser, and returns it.
+    Adds a "standardize" argument to the provided ArgumentParser, and returns
+    it.
     """
     psr.add_argument(
         "--standardize", action="store_true",
         help=("Standardize the data so that it has a mean of 0 and a variance "
               "of 1. Otherwise, data will be rescaled to the range [0, 1]."))
-
     # "standardize" does not require verification.
-    return add_out(*add_warmup(psr, psr_verify))
+    return psr, psr_verify
 
 
 def add_training(psr, psr_verify=lambda args: args):
@@ -95,15 +95,15 @@ def add_training(psr, psr_verify=lambda args: args):
              f"{keep_prc}")
         return args
 
-    psr, psr_verify = add_num_exps(*add_common(psr, psr_verify))
+    psr, psr_verify = add_out(*add_standardize(psr, psr_verify))
     psr.add_argument(
         "--data-dir",
         help=("The path to a directory containing the"
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(
-        "--keep-percent", default=defaults.DEFAULTS["keep_percent"],
-        help="The percent of each experiment's datapoints to keep.", type=float)
+        "--training-data-percent", default=defaults.DEFAULTS["train_prc"],
+        help="The percent of the total training data to use.", type=float)
     psr.add_argument(
         "--no-rand", action="store_true", help="Use a fixed random seed.")
     psr.add_argument(
@@ -198,7 +198,7 @@ def add_running(psr, psr_verify=lambda args: args):
             f"Scale parameters file does not exist: {scl_prms_flp}"
         return args
 
-    psr, psr_verify = add_common(psr, psr_verify)
+    psr, psr_verify = add_out(*add_standardize(*add_warmup(psr, psr_verify)))
     psr.add_argument(
         "--scale-params", help="The path to the input scaling parameters.",
         required=True, type=str)
