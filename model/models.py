@@ -581,6 +581,8 @@ class SvmSklearnWrapper(SvmWrapper):
                 f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
                 f"\tFalse positive rate: {false_pos_rate * 100:.2f}%")
 
+        print("Graph:", self.graph)
+
         if self.graph:
             assert graph_prms is not None, \
                 "\"graph_prms\" must be a dict(), not None."
@@ -956,7 +958,7 @@ class SvmSklearnWrapper(SvmWrapper):
         #     torch.tensor(dat_extra[features.ARRIVAL_TIME_FET].copy()),
         #     torch.tensor(dat_extra[features.RTT_ESTIMATE_FET].copy()))
 
-        return model_acc, 0  # sliding_window_accuracy
+        return model_acc  # sliding_window_accuracy
 
 
 class LrSklearnWrapper(SvmSklearnWrapper):
@@ -1010,6 +1012,7 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
     params = ["max_iter", "rfe", "graph", "folds"]
 
     def new(self, **kwargs):
+        self.graph = kwargs["graph"]
         # Use L1 regularization. Since the number of samples is
         # greater than the number of features, solve the primal
         # optimization problem instead of its dual. Automatically set
@@ -1030,9 +1033,10 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
 class GbdtSklearnWrapper(SvmSklearnWrapper):
 
     name = "GbdtSklearn"
-    params = ["n_estimators", "lr", "max_depth"]
+    params = ["n_estimators", "lr", "max_depth", "graph"]
 
     def new(self, **kwargs):
+        self.graph = kwargs["graph"]
         self.net = ensemble.GradientBoostingClassifier(
             n_estimators=kwargs["n_estimators"], learning_rate=kwargs["lr"],
             max_depth=kwargs["max_depth"])
@@ -1044,9 +1048,10 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
     name = "HistGbdtSklearn"
     params = [
         "max_iter", "l2_regularization", "early_stop", "lr",
-        "l2_regularization"]
+        "l2_regularization", "graph"]
 
     def new(self, **kwargs):
+        self.graph = kwargs["graph"]
         self.net = ensemble.HistGradientBoostingClassifier(
             verbose=1, learning_rate=kwargs["lr"], max_iter=kwargs["max_iter"],
             l2_regularization=kwargs["l2_regularization"],

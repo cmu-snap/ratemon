@@ -17,7 +17,7 @@ import torch
 
 # Arguments to ignore when converting an arguments dictionary to a
 # string.
-ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features"]
+ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features", "exps"]
 # The random seed.
 SEED = 1337
 # Name to use for lock files.

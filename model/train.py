@@ -639,7 +639,7 @@ def train(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max, out_flp,
     return net
 
 
-def test(net, ldr_tst, dev):
+def test_torch(net, ldr_tst, dev):
     """ Tests a model. """
     print("Testing...")
     # The number of testing samples that were predicted correctly.
@@ -708,12 +708,11 @@ def run_sklearn(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     # Testing.
     print("Testing...")
     tim_srt_s = time.time()
-    # Select the first return value, which is the overall accuracy.
     acc_tst = net.test(
         *ldr_tst.dataset.raw(),
         graph_prms={
             "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None,
-            "analyze_features": args["analyze_features"]})[0]
+            "analyze_features": args["analyze_features"]})
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     return acc_tst, tim_trn_s
@@ -770,7 +769,7 @@ def run_torch(args, dat_in, dat_out, dat_extra, out_dir, out_flp):
     # Testing.
     ldr_tst.dataset.to(dev)
     tim_srt_s = time.time()
-    acc_tst = test(net, ldr_tst, dev)
+    acc_tst = test_torch(net, ldr_tst, dev)
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
     del ldr_tst
     torch.cuda.empty_cache()
