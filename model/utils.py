@@ -16,14 +16,7 @@ import scapy.layers.inet
 import scapy.utils
 import torch
 
-
-# Arguments to ignore when converting an arguments dictionary to a
-# string.
-ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features", "exps"]
-# The random seed.
-SEED = 1337
-# Name to use for lock files.
-LOCK_FLN = "lock"
+import defaults
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -252,7 +245,7 @@ def args_to_str(args, order):
     for key in order:
         assert key in args, f"Key {key} not in args: {args}"
     return "-".join(
-        [str(args[key]) for key in order if key not in ARGS_TO_IGNORE])
+        [str(args[key]) for key in order if key not in defaults.ARGS_TO_IGNORE])
 
 
 def str_to_args(args_str, order):
@@ -265,7 +258,7 @@ def str_to_args(args_str, order):
     toks = ".".join(args_str.split(".")[:-1]).split("-")
     # Remove elements of order that args_to_str() does not use when
     # encoding strings.
-    order = [key for key in order if key not in ARGS_TO_IGNORE]
+    order = [key for key in order if key not in defaults.ARGS_TO_IGNORE]
     num_toks = len(toks)
     num_order = len(order)
     assert num_toks == num_order, \
@@ -703,7 +696,7 @@ def load_tmp_file(flp):
 
 def get_lock_flp(out_dir):
     """ Returns the path to a lock file in out_dir. """
-    return path.join(out_dir, LOCK_FLN)
+    return path.join(out_dir, defaults.LOCK_FLN)
 
 
 def create_lock_file(out_dir):
@@ -748,7 +741,7 @@ def get_npz_headers(flp):
             if name.endswith(".npy")]
 
 
-def set_rand_seed(seed=SEED):
+def set_rand_seed(seed=defaults.SEED):
     """ Sets the Python, numpy, and Torch random seeds to seed. """
     random.seed(seed)
     np.random.seed(seed)

@@ -14,7 +14,6 @@ import numpy as np
 import cl_args
 import defaults
 import train
-import utils
 
 
 DEFAULT_TLS_OPT = 40
@@ -191,7 +190,7 @@ def main():
             evaluation_function=lambda cnf: train.run_trials(cnf)[0],
             minimize=True,
             total_trials=args.opt_trials,
-            random_seed=utils.SEED if no_rand else None)
+            random_seed=defaults.SEED if no_rand else None)
         best_err = best_vals[0]["objective"]
     print((f"Done with hyper-parameter optimization - "
            f"{time.time() - tim_srt_s:.2f} seconds"))

@@ -2,8 +2,6 @@
 
 import sys
 
-import models
-
 
 # Parameter defaults.
 DEFAULTS = {
@@ -12,7 +10,7 @@ DEFAULTS = {
     "keep_percent": 100,
     "num_exps": sys.maxsize,
     "exps": [],
-    "model": models.MODEL_NAMES[0],
+    "model": "HistGbdtSklearn",
     "features": [],
     "epochs": 100,
     "num_gpus": 0,
@@ -47,7 +45,14 @@ DEFAULTS = {
     "analyze_features": False,
     "l2_regularization": 0
 }
+# Arguments to ignore when converting an arguments dictionary to a
+# string.
+ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features", "exps"]
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
 SYNC = False
+# The random seed.
+SEED = 1337
+# Name to use for lock files.
+LOCK_FLN = "lock"
