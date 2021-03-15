@@ -25,13 +25,13 @@ ERR_FLN = "failed.json"
 LOGGER = path.basename(__file__).split(".")[0]
 
 
-def check_output(cnf, logger):
+def check_output(cnf, logger, msg):
     """ Runs a configuration and returns its output. """
     args = ([path.join(NS3_DIR, "build", "scratch", APP),] +
             [f"--{arg}={val}" for arg, val in cnf.items()])
     cmd = f"LD_LIBRARY_PATH={os.environ['LD_LIBRARY_PATH']} {' '.join(args)}"
     log = logging.getLogger(logger)
-    log.info("Running: %s", cmd)
+    log.info("Running%s: %s", f" ({msg})" if msg is not None else "", cmd)
     try:
         res = subprocess.check_output(
             args, stderr=subprocess.STDOUT, env=os.environ).decode().split("\n")
@@ -60,14 +60,15 @@ def check_output(cnf, logger):
     return res
 
 
-def run(cnf, res_fnc, logger):
+def run(cnf, res_fnc, logger, idx, total):
     """
     Runs a configuration. If res_fnc is not None, then returns the result of
     parsing the configuration's output using res_fnc, otherwise returns None.
     """
     # Build the arguments array, run the simulation, and iterate over each line
     # in its output.
-    out = check_output(cnf, logger)
+    out = check_output(
+        cnf, logger, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if res_fnc is None:
         return None
     return res_fnc(out)
@@ -108,15 +109,21 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
         json.dump(cnfs, fil, indent=4)
 
     # Simulate the configurations.
-    log.info("Num simulations: %s", len(cnfs))
+    num_cnfs = len(cnfs)
+    log.info("Num simulations: %s", num_cnfs)
     if dry_run:
         return []
     tim_srt_s = time.time()
     if sync:
-        data = [run(cnf, res_fnc, logger) for cnf in cnfs]
+        data = [
+            run(cnf, res_fnc, logger, idx, num_cnfs)
+            for idx, cnf in enumerate(cnfs)]
     else:
         with multiprocessing.Pool() as pool:
-            data = pool.starmap(run, ((cnf, res_fnc, logger) for cnf in cnfs))
+            data = pool.starmap(
+                run,
+                ((cnf, res_fnc, logger, idx, num_cnfs)
+                 for idx, cnf in enumerate(cnfs)))
     log.critical(
         "Done with simulations - time: %.2f seconds", time.time() - tim_srt_s)
     return list(zip(cnfs, data))
