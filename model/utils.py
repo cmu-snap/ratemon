@@ -761,3 +761,8 @@ def has_non_finite(arr):
         if not np.isfinite(arr[fet]).all():
             return True
     return False
+
+
+def bdp_B(bw_Mbps, rtt_us):
+    """ Calculates the BDP in bytes. """
+    return (bw_Mbps / 8. * 1e6) * (rtt_us / 1e6)
