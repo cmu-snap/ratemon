@@ -74,6 +74,7 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
         print(f"\tCCA {cca} not found in {exp_flp}")
         return None
 
+    # Combine flows.
     dat_combined = None
     for flw_idx in flw_idxs:
         dat_flw = dat[flw_idx]
@@ -103,14 +104,15 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
          f"contains: {net.out_spc}")
     dat_in = recfunctions.repack_fields(dat[net.in_spc])
     dat_out = recfunctions.repack_fields(dat[net.out_spc])
-    # Create a structured array to hold extra data that will not be
-    # used as features but may be needed by the training/testing
-    # process.
-    raw_dtype = [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]
-    dtype = ([("raw", raw_dtype), ("num_flws", "int32"),
-              ("btk_throughput", "int32")] +
-             [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
-    dat_extra = np.empty(shape=dat.shape, dtype=dtype)
+    # Create a structured array to hold extra data that will not be used as
+    # features but may be needed by the training/testing process.
+    dtype_extra = (
+        # The "raw" entry is the unconverted out_spc.
+        [("raw",
+          [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]),
+         ("num_flws", "int32"), ("btk_throughput", "int32")] +
+        [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
+    dat_extra = np.empty(shape=dat.shape, dtype=dtype_extra)
     dat_extra["raw"] = dat_out
     dat_extra["num_flws"].fill(exp.cca_1_flws + exp.cca_2_flws)
     dat_extra["btk_throughput"].fill(exp.bw_Mbps)

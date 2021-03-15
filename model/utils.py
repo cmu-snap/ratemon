@@ -466,7 +466,6 @@ def load_exp(flp, msg=None):
                     f"the number of flows ({exp.tot_flws}): {flp}")
                 dat = None
 
-
     except zipfile.BadZipFile:
         print(f"Bad simulation file: {flp}")
         dat = None
@@ -741,7 +740,7 @@ def get_npz_headers(flp):
         npy = archive.open(name)
         version = np.lib.format.read_magic(npy)
         shape, _, dtype = np.lib.format._read_array_header(npy, version)
-        return name[:-4], shape, dtype
+        return [name[:-4], shape, dtype]
 
     with zipfile.ZipFile(flp) as archive:
         return [
@@ -800,7 +799,7 @@ def save_split_metadata(split_dir, name, dat):
     Saves the metadata associated with a Split with the provided name that
     stores its data in the provided directory.
     """
-    with open(get_split_metadata_flp(split_dir, name), "w") as fil:
+    with open(get_split_metadata_flp(split_dir, name), "wb") as fil:
         pickle.dump(dat, fil)
 
 
@@ -809,7 +808,8 @@ def load_split_metadata(split_dir, name):
     Loads metadata for a Split with the provided name that stores its data in
     the provided directory.
     """
-    return pickle.load(get_split_metadata_flp(split_dir, name))
+    with open(get_split_metadata_flp(split_dir, name), "rb") as fil:
+        return pickle.load(fil)
 
 
 def get_scl_prms_flp(out_dir):
