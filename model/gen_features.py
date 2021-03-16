@@ -49,7 +49,7 @@ def compute_weighted_average(curr_event_size, loss_event_intervals,
     return weight_total / max(interval_total_0, interval_total_1)
 
 
-def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
+def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur_us,
               recv_time_prev, win_size_us, pkt_idx):
     """ Calculates the loss rate over a window. """
     # If there were packet losses since the last received packet, then
@@ -57,7 +57,7 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
     if pkt_loss_cur > 0 and pkt_idx > 0:
         # The average time between when packets should have arrived,
         # since we received the last packet.
-        loss_interval = ((recv_time_cur - recv_time_prev) / (pkt_loss_cur + 1))
+        loss_interval = ((recv_time_cur_us - recv_time_prev) / (pkt_loss_cur + 1))
         # Look at each lost packet...
         for k in range(pkt_loss_cur):
             # Record the time at which this packet should have
@@ -65,7 +65,7 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur,
             loss_q.append(recv_time_prev + (k + 1) * loss_interval)
 
     # Discard old losses.
-    while loss_q and (loss_q[0] < recv_time_cur - win_size_us):
+    while loss_q and (loss_q[0] < recv_time_cur_us - win_size_us):
         loss_q.popleft()
 
     # The loss rate is the number of losses in the window divided by
@@ -81,6 +81,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     """ Parse a PCAP file. """
     print(f"Parsing: {exp_flp}")
     exp = utils.Exp(exp_flp)
+    bw_bps = exp.bw_Mbps * 1e6
     tot_flws = exp.cca_1_flws + exp.cca_2_flws
     if tot_flws == 0:
         print(f"\tNo flows to analyze: {exp_flp}")
@@ -122,6 +123,14 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"), flws_ports)
     flw_to_pkts_server = utils.parse_packets(
         path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"), flws_ports)
+
+    # List of tuples of the form: ( time of first packet, time of last packet )
+    flws_time_bounds = [
+        # [0] selects the data packets (as opposed to the ACKs). [:,1] selects
+        # the column pertaining to arrival time. [[0, -1]] Selects the first
+        # and last arrival times.
+        flw_to_pkts_client[flw][0][:,1][[0, -1]]
+        for flw in flws_ports]
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
@@ -206,10 +215,17 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
-            recv_time_cur = recv_pkt[1]
+            recv_time_cur_us = recv_pkt[1]
 
             output[j]["seq"] = recv_pkt_seq
-            output[j]["arrival time us"] = recv_time_cur
+            output[j]["arrival time us"] = recv_time_cur_us
+
+            # Count how many flows were active when this packet was captured.
+            active_flws = sum(
+                1 for first_time_us, last_time_us in flws_time_bounds
+                if first_time_us <= recv_time_cur_us <= last_time_us)
+            output[j]["active flows"] = active_flws
+            output[j]["bandwidth fair share b/s"] = bw_bps / active_flws
 
             if j > 0:
                 prev_min_rtt_us = output[j - 1]["min RTT us"]
@@ -232,7 +248,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                         # If we found a timestamp option match, then
                         # update the RTT estimate.
                         rtt_estimate_us = (
-                            recv_time_cur - recv_ack_pkts[ack_idx][1])
+                            recv_time_cur_us - recv_ack_pkts[ack_idx][1])
                     else:
                         # Otherwise, use the previous RTT estimate and
                         # reset ack_idx to search again for the next
@@ -247,7 +263,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
                 # Calculate the inter-arrival time.
                 recv_time_prev = output[j - 1]["arrival time us"]
-                interarr_time_us = recv_time_cur - recv_time_prev
+                interarr_time_us = recv_time_cur_us - recv_time_prev
             else:
                 rtt_estimate_us = -1
                 rtt_estimate_ratio = -1
@@ -362,14 +378,14 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 win_size_us = win * min_rtt_us
 
                 # Move the start of the window forward.
-                while ((recv_time_cur -
+                while ((recv_time_cur_us -
                         recv_data_pkts[win_state[win]["window_start_idx"]][1]) >
                        win_size_us):
                     win_state[win]["window_start_idx"] += 1
                 win_start_idx = win_state[win]["window_start_idx"]
 
                 if "average interarrival time us" in metric:
-                    new = ((recv_time_cur - recv_data_pkts[win_start_idx][1]) /
+                    new = ((recv_time_cur_us - recv_data_pkts[win_start_idx][1]) /
                            (j - win_start_idx + 1))
                 elif "inverse average interarrival time 1/us" in metric:
                     # Divide by 1e6 to convert from microseconds to
@@ -392,6 +408,9 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                         utils.safe_mul(total_bytes, 8),
                         utils.safe_div(
                             utils.safe_sub(end_time, start_time), 1e6))
+                elif "throughput share" in metric:
+                    # This is calculated at the end.
+                    continue
                 elif "average RTT estimate us" in metric:
                     new = utils.safe_mean(
                         output[features.make_ewma_metric(
@@ -440,7 +459,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                             # The average time between when packets
                             # should have arrived, since we received
                             # the last packet.
-                            loss_interval = ((recv_time_cur - recv_time_prev) /
+                            loss_interval = ((recv_time_cur_us - recv_time_prev) /
                                              (pkt_loss_cur_estimate + 1))
 
                             # Look at each lost packet...
@@ -512,7 +531,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     # skip the case where j == 0.
                     win_state[win]["loss_queue_estimate"], new = loss_rate(
                         win_state[win]["loss_queue_estimate"], win_start_idx,
-                        pkt_loss_cur_estimate, recv_time_cur, recv_time_prev,
+                        pkt_loss_cur_estimate, recv_time_cur_us, recv_time_prev,
                         win_size_us, j)
                 elif "mathis model throughput b/s" in metric:
                     # Use the loss event rate to compute the Mathis
@@ -616,47 +635,41 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     del recv_data_pkts
     del recv_ack_pkts
 
-    # Sum the total throughput of all flows, and then compute the flow
-    # percentage used by each flow
-    # extra_time = 20  # Flows could end later than start_time + duration
-    # ground_truth_throughput = "throughput p/s-ewma-alpha0.003"
-    # arrival_time_key = "arrival time us"
-    # x_vals = np.arange((exp.dur_s + extra_time) * 1000, dtype=float) / 1000
-    # total_throughput = [0] * ((exp.dur_s + extra_time) * 1000)
-    # interp_list = []
-    # for flw_dat in flws:
-    #     per_flow_throughput = flw_dat[ground_truth_throughput]
-    #     interpolated = np.interp(
-    #         x_vals,
-    #         # Convert from us to s.
-    #         xp=flw_dat[arrival_time_key] / 1e6,
-    #         fp=per_flow_throughput)
-    #     interp_list.append(interpolated)
-    #     total_throughput = np.add(total_throughput, interpolated)
-
-    # for k, flw_dat in enumerate(flws):
-    #     per_flow_fraction = np.divide(
-    #         interp_list[k],
-    #         total_throughput)
-    #     # Sometimes np.divide could yield weird fraction greater than 1
-    #     percentage = list(map(
-    #         lambda x: min(1.0, per_flow_fraction[int(x / 1000)]),
-    #         flw_dat[arrival_time_key]))
-    #     flw_dat["flow share percentage"] = percentage
-
-
-    # We cannot simply add up the throughput of all flows because we cannot line
-    # up the flow results because no two packets arrive at the same time.
-    # Therefore, we must fall back to using the configured bandwidth as a proxy
-    # for the total throughput.
     if not skip_smoothed:
-        total_throughput_bps = exp.bw_Mbps * 1e6
-        # Use index variables to make sure that no data is being copied.
-        for flw_idx in range(len(flws)):
-            flws[flw_idx]["flow share percentage"] = utils.safe_np_div(
-                flws[flw_idx][
-                    features.make_win_metric("average throughput b/s", 2**3)],
-                total_throughput_bps)
+        # Create a unified timeline.
+        num_flws = len(flws)
+        xs = np.arange(
+            # Find the latest arrival time amongst all packets.
+            max(flws[flw_idx][features.ARRIVAL_TIME_FET][-1]
+                for flw_idx in range(num_flws)) *
+            1000000,
+            dtype=float) / 1e6
+
+        for win in features.WINDOWS:
+            tput_fet = features.make_win_metric("average throughput b/s", win)
+            tput_share_fet = features.make_win_metric("throughput share", win)
+            # Interpolated throughput for each flow, on the unified
+            # timeline. Each flow is a column.
+            tputs_interp = np.full((xs.shape[0], num_flws), -1, dtype=float)
+            # Interpolate each flow's throughput in the unified timeline.
+            for flw_idx in range(num_flws):
+                tputs_interp[:,flw_idx] = np.interp(
+                    xs,
+                    # Convert from us to s.
+                    xp=flws[flw_idx][features.ARRIVAL_TIME_FET] / 1e6,
+                    fp=flws[flw_idx][tput_fet])
+            # Calculate the total throughput at each point in the unified
+            # timeline.
+            tputs_total = np.sum(tputs_interp, axis=1)
+            # For each flow, convert the throughput fraction in the unified
+            # timeline back to the flow's timeline.
+            for flw_idx in range(num_flws):
+                flws[flw_idx][tput_share_fet] = np.interp(
+                    # Convert from us to s.
+                    flws[flw_idx][tput_share_fet] / 1e6,
+                    xp=xs,
+                    # The throughput fraction, based on the interpolated timeline.
+                    fp=tputs_interp[:,flw_idx] / tputs_total)
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the

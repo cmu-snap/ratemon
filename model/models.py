@@ -153,12 +153,15 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # Map a conversion function across all entries. Note that
         # here an entry is an entire row, since each row is a
         # single tuple value.
+
+        # TODO: Need to update this to use "flows active" feature
+
         clss = np.vectorize(
             functools.partial(
                 # Compare each queue occupancy percent with the fair
                 # percent. prc[0] assumes a single column.
                 lambda prc, fair: prc[0] > fair,
-                fair=1. / (exp.cca_1_flws + exp.cca_2_flws)),
+                fair=1. / exp.tot_flws),
             # Convert to integers.
             otypes=[int])(dat_out)
         clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])

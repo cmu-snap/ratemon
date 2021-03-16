@@ -28,14 +28,16 @@ REGULAR = [
     ("min RTT us", "int32"),
     ("flow share percentage", "float64"),
     ("interarrival time us", "int32"),
-    ("inverse interarrival time 1/us", "float32"),
+    ("inverse interarrival time 1/us", "float64"),
     ("packets lost since last packet estimate", "int32"),
     ("drop rate at bottleneck queue", "float64"),
     ("retransmission rate", "float64"),
     ("payload B", "int32"),
     ("wire len B", "int32"),
     ("total so far B", "int32"),
-    ("RTT estimate us", "int32")
+    ("RTT estimate us", "int32"),
+    ("active flows", "int32"),
+    ("bandwidth fair share b/s", "float64")
 ]
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
@@ -53,6 +55,7 @@ WINDOWED = [
     ("average interarrival time us", "float64"),
     ("inverse average interarrival time 1/us", "float64"),
     ("average throughput b/s", "float64"),
+    ("throughput share", "float64"),
     ("average RTT estimate us", "float64"),
     ("average RTT estimate ratio", "float64"),
     ("loss event rate", "float64"),
@@ -94,5 +97,7 @@ MATHIS_MODEL_FET = "mathis model label-ewma-alpha0.01"
 RTT_ESTIMATE_FET = "RTT estimate us-ewma-alpha0.01"
 ARRIVAL_TIME_FET = "arrival time us"
 THR_ESTIMATE_FET = "throughput p/s-ewma-alpha0.007"
+ACTIVE_FLOWS_FET = "active flows"
 EXTRA_FETS = [
-    ARRIVAL_TIME_FET, MATHIS_MODEL_FET, RTT_ESTIMATE_FET, THR_ESTIMATE_FET]
+    ARRIVAL_TIME_FET, MATHIS_MODEL_FET, RTT_ESTIMATE_FET, THR_ESTIMATE_FET,
+    ACTIVE_FLOWS_FET]
