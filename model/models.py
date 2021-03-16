@@ -827,66 +827,6 @@ class SvmSklearnWrapper(SvmWrapper):
             (-1, ((dat_extra["raw"] - fair) / fair).max().item())
             if sort_by_unfairness else (0, graph_prms["dur_s"]))
 
-        if graph_prms["analyze_features"]:
-            # Analyze feature coefficients. The underlying model's .coef_
-            # attribute may not exist.
-            print("Analyzing feature importances...")
-            try:
-                if isinstance(
-                        self.net,
-                        (sklearn.feature_selection.RFE,
-                         sklearn.feature_selection.RFECV)):
-                    # Since the model was trained using RFE, display all
-                    # features. Sort the features alphabetically.
-                    best_fets = sorted(
-                        zip(
-                            np.array(fets)[np.where(self.net.ranking_ == 1)],
-                            self.net.estimator_.coef_[0]),
-                        key=lambda p: p[0])
-                    print(f"Number of features selected: {len(best_fets)}")
-                    qualifier = "All"
-                else:
-                    if isinstance(
-                            self.net, ensemble.HistGradientBoostingClassifier):
-                        imps = inspection.permutation_importance(
-                            self.net, dat_in, dat_out_classes, n_repeats=10,
-                            random_state=0).importances_mean
-                    else:
-                        imps = self.net.coef_[0]
-
-                    # First, sort the features by the absolute value of the
-                    # importance and pick the top 20. Then, sort the features
-                    # alphabetically.
-                    best_fets = sorted(
-                        sorted(
-                            zip(fets, imps),
-                            key=lambda p: abs(p[1]))[-20:],
-                        key=lambda p: p[0])
-                    qualifier = "Best"
-                print(
-                    f"----------\n{qualifier} features ({len(best_fets)}):\n" +
-                    "\n".join([f"{fet}: {coef}" for fet, coef in best_fets]) +
-                    "\n----------")
-
-                # Graph feature coefficients.
-                if self.graph:
-                    names, coefs = zip(*best_fets)
-                    num_fets = len(names)
-                    y_vals = list(range(num_fets))
-                    pyplot.figure(figsize=(7, 0.2 * num_fets))
-                    pyplot.barh(y_vals, coefs, align="center")
-                    pyplot.yticks(y_vals, names)
-                    pyplot.ylim((-1, num_fets))
-                    pyplot.xlabel("Feature coefficient")
-                    pyplot.ylabel("Feature name")
-                    pyplot.tight_layout()
-                    pyplot.savefig(
-                        path.join(out_dir, f"features_{self.name}.pdf"))
-                    pyplot.close()
-            except AttributeError:
-                # Coefficients are only available with a linear kernel.
-                print("Warning: Unable to extract coefficients!")
-
         if self.graph:
             # Analyze, for each number of flows, accuracy vs. unfairness.
             flws_accs = []

@@ -847,14 +847,14 @@ def load_split(split_dir, name):
 
 def get_feature_analysis_flp(out_dir):
     """
-
+    Returns the path to the feature analysis log file in the provided directory.
     """
     return path.join(out_dir, "feature_analysis.txt")
 
 
 def log_feature_analysis(out_dir, msg):
     """
-
+    Prints a feature analysis log statement while also writing it to a file.
     """
     print(msg)
     with open(get_feature_analysis_flp(out_dir), "a+") as fil:
@@ -862,9 +862,7 @@ def log_feature_analysis(out_dir, msg):
 
 
 def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
-    """
-    Creates a
-    """
+    """ Analyzes correlation among features of a net. """
     # Feature analysis.
     fets = np.asarray(net.in_spc)
     corr = stats.spearmanr(dat_in).correlation
@@ -909,9 +907,7 @@ def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
 
 
 def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
-    """
-
-    """
+    """ Analyzes the importance of features to a trained net. """
     # Analyze feature coefficients. The underlying model's .coef_
     # attribute may not exist.
     print("Analyzing feature importances...")
@@ -941,16 +937,16 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
             else:
                 imps = net.net.coef_[0]
 
-                # First, sort the features by the absolute value of the
-                # importance and pick the top 20. Then, sort the features
-                # alphabetically.
-                # best_fets = sorted(
-                #     sorted(
-                #         zip(fets, imps),
-                #         key=lambda p: abs(p[1]))[-20:],
-                #     key=lambda p: p[0])
-                best_fets = list(reversed(sorted(
-                    zip(fets, imps), key=lambda p: abs(p[1]))[-20:]))
+            # First, sort the features by the absolute value of the
+            # importance and pick the top 20. Then, sort the features
+            # alphabetically.
+            # best_fets = sorted(
+            #     sorted(
+            #         zip(fets, imps),
+            #         key=lambda p: abs(p[1]))[-20:],
+            #     key=lambda p: p[0])
+            best_fets = list(reversed(
+                sorted(zip(fets, imps), key=lambda p: abs(p[1]))[-20:]))
         log_feature_analysis(
             out_dir,
             f"----------\n{qualifier} features ({len(best_fets)}):\n" +
@@ -983,7 +979,11 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
 
 def check_fets(fets, in_spc):
     """
-
+    Verifies that the processed features that emerge from the data processing
+    pipeline are the same as a net's in_spc. fets is intended to come from the
+    data processing pipeline (i.e., the actual features after all data
+    processing). in_spc is intended to come from a net (i.e., the net's original
+    feature specification).
     """
     assert fets == in_spc, \
         ("Provided features do not agreed with in_spc."
