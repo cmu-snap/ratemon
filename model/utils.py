@@ -1,5 +1,6 @@
 """ Utility functions. """
 
+import collections
 import json
 import math
 import os
@@ -7,13 +8,20 @@ from os import path
 import pickle
 import random
 import sys
+import time
 import zipfile
 
+from matplotlib import pyplot as plt
 import numpy as np
 import scapy
 import scapy.layers.l2
 import scapy.layers.inet
 import scapy.utils
+from scipy import stats
+from scipy import cluster
+from sklearn import ensemble
+from sklearn import feature_selection
+from sklearn import inspection
 import torch
 
 import defaults
@@ -835,3 +843,149 @@ def load_split(split_dir, name):
     return np.memmap(
         get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
         shape=(num_pkts,))
+
+
+def get_feature_analysis_flp(out_dir):
+    """
+
+    """
+    return path.join(out_dir, "feature_analysis.txt")
+
+
+def log_feature_analysis(out_dir, msg):
+    """
+
+    """
+    print(msg)
+    with open(get_feature_analysis_flp(out_dir), "a+") as fil:
+        fil.write(msg)
+
+
+def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
+    """
+    Creates a
+    """
+    # Feature analysis.
+    fets = np.asarray(net.in_spc)
+    corr = stats.spearmanr(dat_in).correlation
+    # corr = stats.pearsonr(dat_in_cleaned, dat_out_cleaned).correlation
+    # corr = np.corrcoef(dat_in_cleaned, dat_out_cleaned, rowvar=False)
+    corr_linkage = cluster.hierarchy.ward(corr)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 12))
+    # Dendrogram.
+    dendro = cluster.hierarchy.dendrogram(
+        corr_linkage, labels=fets, ax=ax1, leaf_rotation=90)
+    # Heatmap.
+    dendro_idx = np.arange(0, len(dendro['ivl']))
+    heatmap = ax2.imshow(corr[dendro['leaves'], :][:, dendro['leaves']])
+    ax2.set_xticks(dendro_idx)
+    ax2.set_yticks(dendro_idx)
+    ax2.set_xticklabels(dendro['ivl'], rotation='vertical', fontsize=5)
+    ax2.set_yticklabels(dendro['ivl'], fontsize=5)
+    # Create colorbar.
+    ax2.figure.colorbar(heatmap, ax=ax2)
+    fig.tight_layout()
+    plt.savefig(path.join(out_dir, f"dendrogram_{net.name}.pdf"))
+
+    # Determine which cluster each feature belongs to.
+    #
+    # Maps cluster index to a list of the indices of features in that cluster.
+    cluster_to_fets = collections.defaultdict(list)
+    for feature_idx, cluster_idx in enumerate(cluster.hierarchy.fcluster(
+            corr_linkage, 0.2, criterion='distance')):
+        cluster_to_fets[cluster_idx].append(fets[feature_idx])
+    # Print the clusters.
+    log_feature_analysis(
+        out_dir,
+        "Feature clusters:\n" + "\n".join(
+            (f"\t{cluster_id}:\n\t\t" + "\n\t\t".join(fets))
+            for cluster_id, fets in sorted(cluster_to_fets.items())))
+    # Print the first feature in every cluster.
+    log_feature_analysis(
+        out_dir,
+        "Naively-selected features:" +
+        ", ".join(cluster_fets[0] for cluster_fets in cluster_to_fets.values()))
+
+
+def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
+    """
+
+    """
+    # Analyze feature coefficients. The underlying model's .coef_
+    # attribute may not exist.
+    print("Analyzing feature importances...")
+    tim_srt_s = time.time()
+    fets = net.in_spc
+    try:
+        if isinstance(
+                net.net,
+                (feature_selection.RFE,
+                 feature_selection.RFECV)):
+            # Since the model was trained using RFE, display all
+            # features. Sort the features alphabetically.
+            best_fets = sorted(
+                zip(np.array(fets)[np.where(net.net.ranking_ == 1)],
+                    net.net.estimator_.coef_[0]),
+                key=lambda p: p[0])
+            log_feature_analysis(
+                out_dir, f"Number of features selected: {len(best_fets)}")
+            qualifier = "All"
+        else:
+            qualifier = "Best"
+            if isinstance(
+                    net.net, ensemble.HistGradientBoostingClassifier):
+                imps = inspection.permutation_importance(
+                    net.net, dat_in, dat_out_classes, n_repeats=10,
+                    random_state=0).importances_mean
+            else:
+                imps = net.net.coef_[0]
+
+                # First, sort the features by the absolute value of the
+                # importance and pick the top 20. Then, sort the features
+                # alphabetically.
+                # best_fets = sorted(
+                #     sorted(
+                #         zip(fets, imps),
+                #         key=lambda p: abs(p[1]))[-20:],
+                #     key=lambda p: p[0])
+                best_fets = list(reversed(sorted(
+                    zip(fets, imps), key=lambda p: abs(p[1]))[-20:]))
+        log_feature_analysis(
+            out_dir,
+            f"----------\n{qualifier} features ({len(best_fets)}):\n" +
+            "\n".join(f"\t{fet}: {coef:.4f}" for fet, coef in best_fets) +
+            "\n----------")
+
+        # Graph feature coefficients.
+        if net.graph:
+            names, coefs = zip(*best_fets)
+            num_fets = len(names)
+            y_vals = list(range(num_fets))
+            plt.figure(figsize=(7, 0.2 * num_fets))
+            plt.barh(y_vals, coefs, align="center")
+            plt.yticks(y_vals, names)
+            plt.ylim((-1, num_fets))
+            plt.xlabel("Feature coefficient")
+            plt.ylabel("Feature name")
+            plt.tight_layout()
+            plt.savefig(path.join(out_dir, f"features_{net.name}.pdf"))
+            plt.close()
+    except AttributeError:
+        # Coefficients are only available with a linear kernel.
+        log_feature_analysis(
+            out_dir, "Warning: Unable to extract coefficients!")
+    log_feature_analysis(
+        out_dir,
+        ("Finished analyzing feature importance - time: "
+         f"{time.time()- tim_srt_s:.2f} seconds"))
+
+
+def check_fets(fets, in_spc):
+    """
+
+    """
+    assert fets == in_spc, \
+        ("Provided features do not agreed with in_spc."
+        f"\n\tProvided fets ({len(fets)}): {fets}"
+         f"\n\tin_spc ({len(in_spc)}): {in_spc}")

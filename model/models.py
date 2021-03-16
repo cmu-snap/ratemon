@@ -7,12 +7,10 @@ import os
 from os import path
 import random
 
-from matplotlib import pyplot
+from matplotlib import pyplot as plt
 import numpy as np
 import sklearn
 from sklearn import ensemble
-from sklearn import feature_selection
-from sklearn import inspection
 from sklearn import linear_model
 from sklearn import metrics
 from sklearn import svm
@@ -490,8 +488,11 @@ class SvmSklearnWrapper(SvmWrapper):
                 verbose=1, max_iter=max_iter))
         return self.net
 
-    def train(self, dat_in, dat_out):
+    def train(self, fets, dat_in, dat_out):
         """ Fits this model to the provided dataset. """
+        utils.assert_tensor(dat_in=dat_in, dat_out=dat_out)
+        utils.check_fets(fets, self.in_spc)
+
         self.net.fit(dat_in, dat_out)
         # Oftentimes, the training log statements do not end with a newline.
         print()
@@ -623,21 +624,21 @@ class SvmSklearnWrapper(SvmWrapper):
                     for i in range(0, num_samples, num_per_bucket)]]
 
             # Plot each bucket's accuracy.
-            pyplot.plot(
+            plt.plot(
                 ([x for x, _, _ in buckets]
                  if sort_by_unfairness else list(range(len(buckets)))),
                 [c / t for _, c, t in buckets], "bo-")
-            pyplot.ylim((-0.1, 1.1))
+            plt.ylim((-0.1, 1.1))
             x_lim = graph_prms["x_lim"]
             if x_lim is not None:
-                pyplot.xlim(x_lim)
-            pyplot.xlabel(
+                plt.xlim(x_lim)
+            plt.xlabel(
                 "Unfairness (fraction of fair)"
                 if sort_by_unfairness else "Time")
-            pyplot.ylabel("Classification accuracy")
-            pyplot.tight_layout()
-            pyplot.savefig(graph_prms["flp"])
-            pyplot.close()
+            plt.ylabel("Classification accuracy")
+            plt.tight_layout()
+            plt.savefig(graph_prms["flp"])
+            plt.close()
         return acc
 
     def __evaluate_sliding_window(self, preds, raw, fair, arr_times,
@@ -725,7 +726,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
             x_axis = list(range(len(buckets)))
 
-            fig, ax1 = pyplot.subplots()
+            fig, ax1 = plt.subplots()
             ax1.set_xlabel("Time")
             ax1.set_ylabel("Throughput")
             ax1.plot(x_axis, throughput_list, "b-")
@@ -737,10 +738,10 @@ class SvmSklearnWrapper(SvmWrapper):
             ax2.plot(x_axis, accuracy_list, "r-")
 
             if x_lim is not None:
-                pyplot.xlim(x_lim)
+                plt.xlim(x_lim)
             fig.tight_layout()
-            pyplot.savefig(flp)
-            pyplot.close()
+            plt.savefig(flp)
+            plt.close()
 
     def __plot_queue_occ(self, raw, fair, flp, x_lim=None):
         """
@@ -768,16 +769,16 @@ class SvmSklearnWrapper(SvmWrapper):
                 for i in range(0, num_samples, num_per_bucket)]
             queue_occupancy_list, fair_list = zip(*buckets)
             x_axis = list(range(len(buckets)))
-            pyplot.plot(x_axis, queue_occupancy_list, "b-")
-            pyplot.plot(x_axis, fair_list, "g--")
+            plt.plot(x_axis, queue_occupancy_list, "b-")
+            plt.plot(x_axis, fair_list, "g--")
 
             if x_lim is not None:
-                pyplot.xlim(x_lim)
-            pyplot.xlabel("Time")
-            pyplot.ylabel("Queue occupancy vs Fair queue occupancy")
-            pyplot.tight_layout()
-            pyplot.savefig(flp)
-            pyplot.close()
+                plt.xlim(x_lim)
+            plt.xlabel("Time")
+            plt.ylabel("Queue occupancy vs Fair queue occupancy")
+            plt.tight_layout()
+            plt.savefig(flp)
+            plt.close()
 
     def test(self, fets, dat_in, dat_out_classes, dat_extra,
              graph_prms=copy.copy({
@@ -796,6 +797,8 @@ class SvmSklearnWrapper(SvmWrapper):
         graph_prms: Graphing parameters. Used only if self.graph == True.
         """
         utils.assert_tensor(dat_in=dat_in, dat_out_classes=dat_out_classes)
+        utils.check_fets(fets, self.in_spc)
+
         sort_by_unfairness = graph_prms["sort_by_unfairness"]
         dur_s = graph_prms["dur_s"]
         assert sort_by_unfairness or dur_s is not None, \
@@ -813,6 +816,10 @@ class SvmSklearnWrapper(SvmWrapper):
         out_dir = path.join(graph_prms["out_dir"], self.name)
         if not path.exists(out_dir):
             os.makedirs(out_dir)
+
+        if graph_prms["analyze_features"]:
+            utils.analyze_feature_importance(
+                self, out_dir, dat_in, dat_out_classes)
 
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
@@ -903,15 +910,15 @@ class SvmSklearnWrapper(SvmWrapper):
 
             # Analyze accuracy vs. number of flows.
             x_vals = list(range(len(flws_accs)))
-            pyplot.bar(x_vals, flws_accs, align="center")
-            pyplot.xticks(x_vals, nums_flws)
-            pyplot.ylim((0, 1.1))
-            pyplot.xlabel("Total flows (1 unfair)")
-            pyplot.ylabel("Classification accuracy")
-            pyplot.tight_layout()
-            pyplot.savefig(
+            plt.bar(x_vals, flws_accs, align="center")
+            plt.xticks(x_vals, nums_flws)
+            plt.ylim((0, 1.1))
+            plt.xlabel("Total flows (1 unfair)")
+            plt.ylabel("Classification accuracy")
+            plt.tight_layout()
+            plt.savefig(
                 path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
-            pyplot.close()
+            plt.close()
 
             # Plot queue occupancy.
             # self.__plot_queue_occ(

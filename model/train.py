@@ -325,89 +325,89 @@ def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
     return dat_in, dat_out, dat_extra
 
 
-# def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-#                use_val=False, balance=False, drop_popular=True):
-#     """
-#     Divides the input and output data into training, validation, and
-#     testing sets and constructs data loaders.
-#     """
-#     print("Creating train/val/test data...")
+def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
+               use_val=False, balance=False, drop_popular=True):
+    """
+    Divides the input and output data into training, validation, and
+    testing sets and constructs data loaders.
+    """
+    print("Creating train/val/test data...")
 
-#     fets = dat_in.dtype.names
-#     # Keep track of the dtype of dat_extra so that we can recreate it
-#     # as a structured array.
-#     extra_dtype = dat_extra.dtype.descr
-#     # Destroy columns names to make merging the matrices easier. I.e.,
-#     # convert from structured to regular numpy arrays.
-#     dat_in = utils.clean(dat_in)
-#     dat_out = utils.clean(dat_out)
-#     dat_extra = utils.clean(dat_extra)
-#     # Shuffle the data to ensure that the training, validation, and
-#     # test sets are uniformly sampled. To shuffle all of the arrays
-#     # together, we must first merge them into a combined matrix.
-#     num_cols_in = dat_in.shape[1]
-#     merged = np.concatenate(
-#         (dat_in, dat_out, dat_extra), axis=1)
-#     np.random.shuffle(merged)
-#     dat_in = merged[:, :num_cols_in]
-#     dat_out = merged[:, num_cols_in]
-#     # Rebuilding dat_extra is more complicated because we need it to
-#     # be a structed array (for ease of use).
-#     num_exps = dat_in.shape[0]
-#     dat_extra = np.empty((num_exps,), dtype=extra_dtype)
-#     num_cols = merged.shape[1]
-#     num_cols_extra = num_cols - (num_cols_in + 1)
-#     extra_names = dat_extra.dtype.names
-#     num_cols_extra_expected = len(extra_names)
-#     assert num_cols_extra == num_cols_extra_expected, \
-#         (f"Error while reassembling \"dat_extra\". {num_cols_extra} columns "
-#          f"does not match {num_cols_extra_expected} expected columns: "
-#          f"{extra_names}")
-#     for name, merged_idx in zip(extra_names, range(num_cols_in + 1, num_cols)):
-#         dat_extra[name] = merged[:, merged_idx]
+    fets = list(dat_in.dtype.names)
+    # Keep track of the dtype of dat_extra so that we can recreate it
+    # as a structured array.
+    extra_dtype = dat_extra.dtype.descr
+    # Destroy columns names to make merging the matrices easier. I.e.,
+    # convert from structured to regular numpy arrays.
+    dat_in = utils.clean(dat_in)
+    dat_out = utils.clean(dat_out)
+    dat_extra = utils.clean(dat_extra)
+    # Shuffle the data to ensure that the training, validation, and
+    # test sets are uniformly sampled. To shuffle all of the arrays
+    # together, we must first merge them into a combined matrix.
+    num_cols_in = dat_in.shape[1]
+    merged = np.concatenate(
+        (dat_in, dat_out, dat_extra), axis=1)
+    np.random.shuffle(merged)
+    dat_in = merged[:, :num_cols_in]
+    dat_out = merged[:, num_cols_in]
+    # Rebuilding dat_extra is more complicated because we need it to
+    # be a structed array (for ease of use).
+    num_exps = dat_in.shape[0]
+    dat_extra = np.empty((num_exps,), dtype=extra_dtype)
+    num_cols = merged.shape[1]
+    num_cols_extra = num_cols - (num_cols_in + 1)
+    extra_names = dat_extra.dtype.names
+    num_cols_extra_expected = len(extra_names)
+    assert num_cols_extra == num_cols_extra_expected, \
+        (f"Error while reassembling \"dat_extra\". {num_cols_extra} columns "
+         f"does not match {num_cols_extra_expected} expected columns: "
+         f"{extra_names}")
+    for name, merged_idx in zip(extra_names, range(num_cols_in + 1, num_cols)):
+        dat_extra[name] = merged[:, merged_idx]
 
-#     # 50% for training, 20% for validation, 30% for testing.
-#     num_val = int(round(num_exps * 0.2)) if use_val else 0
-#     num_tst = int(round(num_exps * 0.3))
-#     print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
-#            f"test: {num_tst}"))
-#     # Validation.
-#     dat_val_in = dat_in[:num_val]
-#     dat_val_out = dat_out[:num_val]
-#     dat_val_extra = dat_extra[:num_val]
-#     # Testing.
-#     dat_tst_in = dat_in[num_val:num_val + num_tst]
-#     dat_tst_out = dat_out[num_val:num_val + num_tst]
-#     dat_tst_extra = dat_extra[num_val:num_val + num_tst]
-#     # Training.
-#     dat_trn_in = dat_in[num_val + num_tst:]
-#     dat_trn_out = dat_out[num_val + num_tst:]
-#     dat_trn_extra = dat_extra[num_val + num_tst:]
+    # 50% for training, 20% for validation, 30% for testing.
+    num_val = int(round(num_exps * 0.2)) if use_val else 0
+    num_tst = int(round(num_exps * 0.3))
+    print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
+           f"test: {num_tst}"))
+    # Validation.
+    dat_val_in = dat_in[:num_val]
+    dat_val_out = dat_out[:num_val]
+    dat_val_extra = dat_extra[:num_val]
+    # Testing.
+    dat_tst_in = dat_in[num_val:num_val + num_tst]
+    dat_tst_out = dat_out[num_val:num_val + num_tst]
+    dat_tst_extra = dat_extra[num_val:num_val + num_tst]
+    # Training.
+    dat_trn_in = dat_in[num_val + num_tst:]
+    dat_trn_out = dat_out[num_val + num_tst:]
+    dat_trn_extra = dat_extra[num_val + num_tst:]
 
-#     print("Training data:")
-#     utils.visualize_classes(net, dat_trn_out)
+    print("Training data:")
+    utils.visualize_classes(net, dat_trn_out)
 
-#     # Create the dataloaders.
-#     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
-#     ldr_trn = (
-#         torch.utils.data.DataLoader(
-#             dataset_trn,
-#             batch_sampler=utils.BalancedSampler(
-#                 dataset_trn, bch_trn, drop_last=False,
-#                 drop_popular=drop_popular))
-#         if balance
-#         else torch.utils.data.DataLoader(
-#             dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
+    # Create the dataloaders.
+    dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
+    ldr_trn = (
+        torch.utils.data.DataLoader(
+            dataset_trn,
+            batch_sampler=utils.BalancedSampler(
+                dataset_trn, bch_trn, drop_last=False,
+                drop_popular=drop_popular))
+        if balance
+        else torch.utils.data.DataLoader(
+            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
 
-#     ldr_val = (
-#         torch.utils.data.DataLoader(
-#             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
-#             batch_size=bch_tst, shuffle=False, drop_last=False)
-#         if use_val else None)
-#     ldr_tst = torch.utils.data.DataLoader(
-#         utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
-#         batch_size=bch_tst, shuffle=False, drop_last=False)
-#     return ldr_trn, ldr_val, ldr_tst
+    ldr_val = (
+        torch.utils.data.DataLoader(
+            utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
+            batch_size=bch_tst, shuffle=False, drop_last=False)
+        if use_val else None)
+    ldr_tst = torch.utils.data.DataLoader(
+        utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
+        batch_size=bch_tst, shuffle=False, drop_last=False)
+    return ldr_trn, ldr_val, ldr_tst
 
 
 def init_hidden(net, bch, dev):
@@ -622,10 +622,14 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     #     print("Balanced training data:")
     #     utils.visualize_classes(net, dat_out)
 
+    if args["analyze_features"]:
+        utils.analyze_feature_correlation(
+            net, out_dir, dat_in, dat_out, dat_extra)
+
     # Training.
     print("Training...")
     tim_srt_s = time.time()
-    net.train(dat_in, dat_out)
+    net.train(ldr_trn.dataset.fets, dat_in, dat_out)
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
     # Explicitly delete the training dataloader to save memory.
