@@ -118,15 +118,10 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                  for flw in params["flowsets"]
                  for client_port in flw[3]]
 
-    client_ip = params["client"][3]
-    server_ip = params["server"][3]
-
     flw_to_pkts_client = utils.parse_packets(
-        path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"),
-        client_ip, server_ip, flws_ports)
+        path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"), flws_ports)
     flw_to_pkts_server = utils.parse_packets(
-        path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"),
-        client_ip, server_ip, flws_ports)
+        path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"), flws_ports)
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
@@ -232,7 +227,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     ack_idx_old = ack_idx
                     while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
                         ack_idx += 1
-                        tsval = recv_ack_pkts[ack_idx][2][0]
+                        tsval = recv_ack_pkts[ack_idx][2]
                     if tsval == tsecr:
                         # If we found a timestamp option match, then
                         # update the RTT estimate.
@@ -525,7 +520,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     loss_rate_estimate = (
                         pkt_loss_total_estimate / j if j > 0 else -1)
                     new = utils.safe_mul(
-                        output[j]["wirelen B"],
+                        output[j]["wire len B"],
                         utils.safe_div(
                             MATHIS_C,
                             utils.safe_div(
@@ -658,7 +653,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         total_throughput_bps = exp.bw_Mbps * 1e6
         # Use index variables to make sure that no data is being copied.
         for flw_idx in range(len(flws)):
-            flws[flw_idx]["flow share percentage"] = utils.safe_div(
+            flws[flw_idx]["flow share percentage"] = utils.safe_np_div(
                 flws[flw_idx][
                     features.make_win_metric("average throughput b/s", 2**3)],
                 total_throughput_bps)
@@ -723,9 +718,6 @@ def main():
         (path.join(exp_dir, exp), untar_dir, out_dir, skip_smoothed)
         for exp in sorted(os.listdir(exp_dir)) if exp.endswith(".tar.gz")]
     if args.random_order:
-        # Set the random seed so that multiple instances of this
-        # script see the same random order.
-        utils.set_rand_seed(int(time.time()))
         random.shuffle(pcaps)
 
     print(f"Num files: {len(pcaps)}")

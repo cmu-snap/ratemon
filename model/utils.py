@@ -295,28 +295,31 @@ def parse_packets(flp, flws_ports):
         }
 
     Each packet is a tuple of the form:
-         (sequence number, timestamp (us), TCP timestamp option,
+         (sequence number, timestamp (us),
+          TCP timestamp option TSval, TCP timestamp option TSecr,
           TCP payload size (B), total packet size (B))
     """
     # Use list() to read the pcap file all at once (minimize seeks).
-    pkts = list(scapy.utils.RawPcapReader(flp))
+    pkts = list(enumerate(scapy.utils.RawPcapReader(flp)))
+    num_pkts = len(pkts)
 
     def make_empty():
         """ Make an empty numpy array to store the packets. """
-        arr = np.empty((len(pkts), 6), dtype=int)
-        arr.fill(-1)
-        return arr
+        return np.full((num_pkts, 6), -1, dtype=int)
 
     def remove_unused_rows(arr):
-        """ Returns a filtered array with all rows containing -1 removed. """
-        filt_fnc = lambda row: (row != -1).all()
-        return arr[np.array([filt_fnc(row) for row in arr])]
+        """
+        Returns a filtered array with unused rows removed. A row is unused if
+        all of its entries are -1. As an optimization, we check the first entry
+        in each row only because we always set a full row at once.
+        """
+        return arr[arr[:,0] != -1]
 
     # Format described above. In this form, the arrays will be sparse. Unused
     # rows will be removed later.
     flw_to_pkts = {
         flw_ports: (make_empty(), make_empty()) for flw_ports in flws_ports}
-    for idx, (pkt_dat, pkt_mdat) in enumerate(pkts):
+    for idx, (pkt_dat, pkt_mdat) in pkts:
         ether = scapy.layers.l2.Ether(pkt_dat)
         # Assume that this is a TCP/IP packet.
         ip = ether[scapy.layers.inet.IP]
@@ -365,6 +368,19 @@ def parse_packets(flp, flws_ports):
     for flw in flw_to_pkts.keys():
         data, ack = flw_to_pkts[flw]
         flw_to_pkts[flw] = (remove_unused_rows(data), remove_unused_rows(ack))
+
+    # Verify packet count.
+    tot_pkts = sum(sum(
+        ((dat_pkts.shape[0], ack_pkts.shape[0])
+         for dat_pkts, ack_pkts in flw_to_pkts.values()),
+        ()))
+    assert tot_pkts <= num_pkts, \
+        f"Found more packets than exist ({tot_pkts} > {num_pkts}): {flp}"
+    discarded_pkts = num_pkts - tot_pkts
+    print(
+        f"\tDiscarded packets: {discarded_pkts} "
+        f"({discarded_pkts / tot_pkts * 100:.2f}%)")
+
     return flw_to_pkts
 
 
@@ -560,6 +576,24 @@ def safe_div(num, den):
     then the result is -1 (unknown).
     """
     return -1 if num == -1 or den in {-1, 0} else num / den
+
+
+def safe_np_div(num_arr, den):
+    """
+    Safely divides a 1D numpy array by a scalar. If an entry in the numerator
+    array is -1 (unknown), then that entry in the output array is -1. If the
+    denominator scalar is -1, then all entries in the output array are -1.
+    """
+    assert np.product(num_arr.shape) == num_arr.shape[0], \
+        f"Array is not 1D: {num_arr.shape}"
+
+    out = np.full_like(num_arr, -1)
+    if den == -1:
+        return out
+    # Popular known entries.
+    mask = num_arr == -1
+    out[mask] = num_arr[mask] / den
+    return out
 
 
 def safe_sqrt(val):
