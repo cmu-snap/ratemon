@@ -114,7 +114,7 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
         [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
     dat_extra = np.empty(shape=dat.shape, dtype=dtype_extra)
     dat_extra["raw"] = dat_out
-    dat_extra["num_flws"].fill(exp.cca_1_flws + exp.cca_2_flws)
+    dat_extra["num_flws"].fill(exp.tot_flws)
     dat_extra["btk_throughput"].fill(exp.bw_Mbps)
     for typ in features.EXTRA_FETS:
         dat_extra[typ] = dat[typ]

@@ -86,7 +86,7 @@ def plot_f1c(flps, var, out_dir):
     with np.load(flp) as fil:
         tot_flws = len(fil.files)
         assert tot_flws == 17, \
-            ("This figure  supports simulations with 17 flows, but the "
+            ("This figure supports simulations with 17 flows, but the "
              f"provided simulation contains {tot_flws} flows!")
         tputs = []
         for flw in range(tot_flws):

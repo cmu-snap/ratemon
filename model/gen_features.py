@@ -3,6 +3,7 @@
 
 import argparse
 import collections
+from contextlib import contextmanager
 import itertools
 import math
 import multiprocessing
@@ -14,6 +15,7 @@ import shutil
 import time
 
 import json
+from matplotlib import pyplot as plt
 import numpy as np
 
 import cl_args
@@ -77,14 +79,70 @@ def loss_rate(loss_q, win_start_idx, pkt_loss_cur, recv_time_cur_us,
          if pkt_idx - win_start_idx > 0 else 0))
 
 
-def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
-    """ Parse a PCAP file. """
+def get_time_bounds(pkts, direction="data"):
+    """
+    Returns the earliest and latest times in a particular direction of each flow
+    in a trace. pkts is in the format produced by utils.parse_packets().
+
+    Returns a list of tuples of the form:
+        ( time of first packet, time of last packet )
+    """
+    # [0] selects the data packets (as opposed to the ACKs). [:,1] selects
+    # the column pertaining to arrival time. [[0, -1]] Selects the first and
+    # last arrival times.
+    dir_idx = 1 if direction == "ack" else 0
+    return [
+        tuple(pkts[flw][dir_idx][:,1][[0, -1]].tolist()) for flw in pkts.keys()]
+
+
+@contextmanager
+def open_exp(exp, exp_flp, untar_dir, out_dir):
+    """
+    Locks and untars an experiment. Cleans up the lock and untarred files
+    automatically.
+    """
+    lock_flp = path.join(out_dir, f"{exp.name}.lock")
+    exp_dir = path.join(untar_dir, exp.name)
+    # Keep track of what we do.
+    locked = False
+    untarred = False
+    try:
+        # Grab the lock file for this experiment.
+        if path.exists(lock_flp):
+            print(f"\tParsing already in progress: {exp_flp}")
+            yield False, exp_dir
+        locked = True
+        with open(lock_flp, "w"):
+            pass
+
+        # Create a temporary folder to untar experiments.
+        if not path.exists(untar_dir):
+            os.mkdir(untar_dir)
+        # If this experiment has already been untarred, then delete the old
+        # files.
+        if path.exists(exp_dir):
+            shutil.rmtree(exp_dir)
+        untarred = True
+        subprocess.check_call(["tar", "-xf", exp_flp, "-C", untar_dir])
+        yield True, exp_dir
+    finally:
+        # Remove an entity only if we created it.
+        #
+        # Remove untarred folder
+        if locked and path.exists(exp_dir):
+            shutil.rmtree(exp_dir)
+        # Remove lock file.
+        if untarred and path.exists(lock_flp):
+            os.remove(lock_flp)
+
+
+def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
+    """ Parses an experiment. """
     print(f"Parsing: {exp_flp}")
-    exp = utils.Exp(exp_flp)
     bw_bps = exp.bw_Mbps * 1e6
     tot_flws = exp.cca_1_flws + exp.cca_2_flws
     if tot_flws == 0:
-        print(f"\tNo flows to analyze: {exp_flp}")
+        print(f"\tNo flows to analyze in: {exp_flp}")
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{exp.name}.npz")
@@ -93,22 +151,15 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         print(f"\tAlready parsed: {exp_flp}")
         return
 
-    # Grab the lock file for this experiment.
-    lock_flp = path.join(out_dir, f"{exp.name}.lock")
-    if path.exists(lock_flp):
-        print(f"\tParsing already in progress: {exp_flp}")
-        return
-    with open(lock_flp, "w"):
-        pass
-
-    # Create a temporary folder to untar experiments.
-    if not path.exists(untar_dir):
-        os.mkdir(untar_dir)
-    exp_dir = path.join(untar_dir, exp.name)
-    # If this experiment already has been untarred, then delete the old files.
-    if path.exists(exp_dir):
-        shutil.rmtree(exp_dir)
-    subprocess.check_call(["tar", "-xf", exp_flp, "-C", untar_dir])
+    # Determine the path to the bottleneck queue log file.
+    toks = exp.name.split("-")
+    q_log_flp = path.join(
+        exp_dir,
+        "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
+        ".log")
+    q_log = None
+    if path.exists(q_log_flp):
+        q_log = list(enumerate(utils.parse_queue_log(q_log_flp)))
 
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
@@ -124,13 +175,30 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     flw_to_pkts_server = utils.parse_packets(
         path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"), flws_ports)
 
-    # List of tuples of the form: ( time of first packet, time of last packet )
-    flws_time_bounds = [
-        # [0] selects the data packets (as opposed to the ACKs). [:,1] selects
-        # the column pertaining to arrival time. [[0, -1]] Selects the first
-        # and last arrival times.
-        flw_to_pkts_client[flw][0][:,1][[0, -1]]
-        for flw in flws_ports]
+    # Transform absolute times into relative times to make life easier.
+    #
+    # Determine the absolute earliest time observed in the experiment.
+    earliest_time_us = min(
+        first_time_us
+        for bounds in [
+            get_time_bounds(flw_to_pkts_client, direction="data"),
+            get_time_bounds(flw_to_pkts_client, direction="ack"),
+            get_time_bounds(flw_to_pkts_server, direction="data"),
+            get_time_bounds(flw_to_pkts_server, direction="ack")]
+        for first_time_us, _ in bounds)
+    # Subtract the earliest time from all times.
+    for flw in flws_ports:
+        flw_to_pkts_client[flw][0][:,1] -= earliest_time_us
+        flw_to_pkts_client[flw][1][:,1] -= earliest_time_us
+        flw_to_pkts_server[flw][0][:,1] -= earliest_time_us
+        flw_to_pkts_server[flw][1][:,1] -= earliest_time_us
+
+        assert (flw_to_pkts_client[flw][0][:,1] >= 0).all()
+        assert (flw_to_pkts_client[flw][1][:,1] >= 0).all()
+        assert (flw_to_pkts_server[flw][0][:,1] >= 0).all()
+        assert (flw_to_pkts_server[flw][1][:,1] >= 0).all()
+
+    flws_time_bounds = get_time_bounds(flw_to_pkts_server, direction="data")
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
@@ -143,13 +211,11 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         ([] if skip_smoothed else features.make_smoothed_features()))
 
     for flw_idx, flw in enumerate(flws_ports):
-        client_port = flw[0]
         sent_pkts = flw_to_pkts_client[flw][0]
         recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
 
         # The final output. -1 implies that a value could not be calculated.
-        output = np.empty(len(recv_data_pkts), dtype=dtype)
-        output.fill(-1)
+        output = np.full(len(recv_data_pkts), -1, dtype=dtype)
 
         # If this flow does not have any packets, then skip it.
         skip = False
@@ -211,7 +277,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         for j, recv_pkt in enumerate(recv_data_pkts):
             if j % 1000 == 0:
                 print(
-                    f"Flow {flw_idx + 1}/{tot_flws}: "
+                    f"\tFlow {flw_idx + 1}/{tot_flws}: "
                     f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
@@ -224,6 +290,10 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             active_flws = sum(
                 1 for first_time_us, last_time_us in flws_time_bounds
                 if first_time_us <= recv_time_cur_us <= last_time_us)
+            assert active_flws > 0, \
+                (f"Error: No active flows detected for packet {j} of "
+                 f"flow {flw_idx} in: {exp_flp}")
+
             output[j]["active flows"] = active_flws
             output[j]["bandwidth fair share b/s"] = bw_bps / active_flws
 
@@ -317,13 +387,9 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 elif "inverse interarrival time 1/us" in metric:
                     # Do not use the interarrival time EWMA to calculate the
                     # inverse interarrival time. Instead, use the true
-                    # interarrival time so that the value used to update the
+                    # inverse interarrival time so that the value used to update the
                     # inverse interarrival time EWMA is not "EWMA-ified" twice.
-                    output[j][metric] = utils.safe_div(
-                        1,
-                        output[j][features.make_ewma_metric(
-                            "interarrival time us", alpha)])
-                    continue
+                    new = output[j]["inverse interarrival time 1/us"]
                 elif "RTT estimate us" in metric:
                     new = rtt_estimate_us
                 elif "RTT estimate ratio" in metric:
@@ -363,33 +429,37 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                 output[j][metric] = utils.safe_update_ewma(
                     -1 if j == 0 else output[j - 1][metric], new, alpha)
 
+            # If we cannot estimate the min RTT, then we cannot compute any
+            # windowed metrics.
+            if min_rtt_us != -1:
+                # Move the window start indices forward.
+                for win in features.WINDOWS:
+                    win_size_us = win * min_rtt_us
+                    while ((recv_time_cur_us -
+                            output[win_state[win]["window_start_idx"]][
+                                features.ARRIVAL_TIME_FET]) >
+                           win_size_us):
+                        win_state[win]["window_start_idx"] += 1
+
             # Windowed metrics.
             for (metric, _), win in itertools.product(
                     features.WINDOWED, features.WINDOWS):
-                if skip_smoothed:
+                # If we cannot estimate the min RTT, then we cannot compute any
+                # windowed metrics.
+                if skip_smoothed or min_rtt_us == -1:
+                    continue
+                win_start_idx = win_state[win]["window_start_idx"]
+                if win_start_idx == j:
                     continue
 
                 metric = features.make_win_metric(metric, win)
-                # If we have not been able to estimate the min RTT
-                # yet, then we cannot compute any of the windowed
-                # metrics.
-                if min_rtt_us == -1:
-                    continue
-                win_size_us = win * min_rtt_us
-
-                # Move the start of the window forward.
-                while ((recv_time_cur_us -
-                        recv_data_pkts[win_state[win]["window_start_idx"]][1]) >
-                       win_size_us):
-                    win_state[win]["window_start_idx"] += 1
-                win_start_idx = win_state[win]["window_start_idx"]
-
                 if "average interarrival time us" in metric:
-                    new = ((recv_time_cur_us - recv_data_pkts[win_start_idx][1]) /
-                           (j - win_start_idx + 1))
+                    new = utils.safe_div(
+                        utils.safe_sub(
+                            recv_time_cur_us,
+                            output[win_start_idx]["arrival time us"]),
+                        j - win_start_idx)
                 elif "inverse average interarrival time 1/us" in metric:
-                    # Divide by 1e6 to convert from microseconds to
-                    # seconds.
                     new = utils.safe_div(
                         1,
                         output[j][features.make_win_metric(
@@ -403,11 +473,17 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                         output[win_start_idx - 1]["arrival time us"]
                         if win_start_idx > 0 else -1)
                     end_time = output[j]["arrival time us"]
-
                     new = utils.safe_div(
                         utils.safe_mul(total_bytes, 8),
                         utils.safe_div(
                             utils.safe_sub(end_time, start_time), 1e6))
+
+                    # Make sure that the throughput does not exceed the bandwidth.
+                    tput_Mbps = utils.safe_div(new, 1e6)
+                    assert tput_Mbps == -1 or tput_Mbps <= exp.bw_Mbps, \
+                        (f"Error: Throughput of {tput_Mbps:.2f} Mbps is higher "
+                         f"than experiment bandwidth of {exp.bw_Mbps} Mbps for "
+                         f"flow {flw_idx} in: {exp_flp}")
                 elif "throughput share" in metric:
                     # This is calculated at the end.
                     continue
@@ -532,7 +608,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
                     win_state[win]["loss_queue_estimate"], new = loss_rate(
                         win_state[win]["loss_queue_estimate"], win_start_idx,
                         pkt_loss_cur_estimate, recv_time_cur_us, recv_time_prev,
-                        win_size_us, j)
+                        win * min_rtt_us, j)
                 elif "mathis model throughput b/s" in metric:
                     # Use the loss event rate to compute the Mathis
                     # model fair throughput.
@@ -579,50 +655,48 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         if sent_idx == 0:
             print(
                 "Warning: Did not find when the last received packet "
-                f"(seq: {last_seq}) was sent.")
+                f"(seq: {last_seq}) was sent for flow {flw_idx} in: {exp_flp}")
         else:
             output[-1]["retransmission rate"] = 1 - (len(sent_seqs) / sent_idx)
 
         # Calculate the drop rate at the bottleneck queue.
-        #
-        # Determine the path to the bottleneck queue log file.
-        toks = exp.name.split("-")
-        q_log_flp = path.join(
-            exp_dir,
-            "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
-            ".log")
-        # Calculate the raw drop rate at the bottleneck queue.
+        client_port = flw[0]
         deq_idx = None
         drop_rate = None
-        q_log = None
-        if path.exists(q_log_flp):
-            q_log = utils.parse_queue_log(q_log_flp)
+        if q_log is None:
+            print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
+        else:
             # Find the dequeue log corresponding to the last packet that was
             # received.
-            for record_idx, record in reversed(list(enumerate(q_log))):
+            for record_idx, record in reversed(q_log):
                 if (record[0] == "deq" and record[2] == client_port and
                         record[3] == last_seq):
                     deq_idx = record_idx
                     break
-        else:
-            print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
-        if q_log is None or deq_idx is None:
+        if deq_idx is None:
             print(
                 "Warning: Did not find when the last received packet "
-                f"(seq: {last_seq}) was dequeued.")
+                f"(seq: {last_seq}) was dequeued for flow {flw_idx} in: {exp_flp}")
         else:
             # Find the most recent stats log before the last received
             # packet was dequeued.
-            for record in reversed(list(q_log[:deq_idx])):
+            for _, record in reversed(q_log[:deq_idx]):
                 if record[0] == "stats" and record[1] == client_port:
                     drop_rate = record[4] / (record[2] + record[4])
                     break
         if drop_rate is None:
             print(
                 "Warning: Did not calculate the drop rate at the bottleneck "
-                f"queue for flow {flw_idx}.")
+                f"queue for flow {flw_idx} in: {exp_flp}")
         else:
             output[-1]["drop rate at bottleneck queue"] = drop_rate
+
+        # Make sure that all output rows were used.
+        used_rows = np.sum(output[features.ARRIVAL_TIME_FET] != -1)
+        total_rows = output.shape[0]
+        assert used_rows == total_rows, \
+            (f"Error: Used only {used_rows} of {total_rows} rows for flow {flw_idx} "
+             f"in: {exp_flp}")
 
         flws.append(output)
 
@@ -638,38 +712,106 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     if not skip_smoothed:
         # Create a unified timeline.
         num_flws = len(flws)
-        xs = np.arange(
-            # Find the latest arrival time amongst all packets.
-            max(flws[flw_idx][features.ARRIVAL_TIME_FET][-1]
-                for flw_idx in range(num_flws)) *
-            1000000,
-            dtype=float) / 1e6
+        first_times_us, last_times_us = zip(*flws_time_bounds)
+        xs = np.arange(min(first_times_us), max(last_times_us), dtype="int32")
+
+        print("xs", xs)
 
         for win in features.WINDOWS:
             tput_fet = features.make_win_metric("average throughput b/s", win)
             tput_share_fet = features.make_win_metric("throughput share", win)
+            # Determine the indices at which the throughput is known.
+            flw_to_known_idxs = [
+                flws[flw_idx][tput_fet] != -1 for flw_idx in range(num_flws)]
             # Interpolated throughput for each flow, on the unified
             # timeline. Each flow is a column.
-            tputs_interp = np.full((xs.shape[0], num_flws), -1, dtype=float)
+            tputs_bps_interp = np.empty((xs.shape[0], num_flws), dtype=float)
             # Interpolate each flow's throughput in the unified timeline.
             for flw_idx in range(num_flws):
-                tputs_interp[:,flw_idx] = np.interp(
+                tputs_bps_interp[:,flw_idx] = np.interp(
                     xs,
-                    # Convert from us to s.
-                    xp=flws[flw_idx][features.ARRIVAL_TIME_FET] / 1e6,
-                    fp=flws[flw_idx][tput_fet])
+                    xp=flws[flw_idx][features.ARRIVAL_TIME_FET][
+                        flw_to_known_idxs[flw_idx]],
+                    fp=flws[flw_idx][tput_fet][flw_to_known_idxs[flw_idx]],
+                    left=0,
+                    right=0)
             # Calculate the total throughput at each point in the unified
             # timeline.
-            tputs_total = np.sum(tputs_interp, axis=1)
+            tputs_bps_total = np.sum(tputs_bps_interp, axis=1)
+            # Verify that the total throughput does not exceed the
+            # bandwidth. Allow a floating point error buffer of 1%.
+            error_locs = (tputs_bps_total > (bw_bps * 1.01)).nonzero()[0]
+
+            print("bw_bps", bw_bps)
+            print("tput at error locs", tputs_bps_total[error_locs])
+
+            # print("xs_", xs_)
+            # print("ys_", ys_)
+
+            port_strs = [str(flw_ports) for flw_ports in flws_ports]
+
+            # Plot un-interpolated throughputs.
+            xs_ = [flws[flw_idx][flw_to_known_idxs[flw_idx]][features.ARRIVAL_TIME_FET] / 1e6
+                   for flw_idx in range(num_flws)]
+            ys_ = [flws[flw_idx][flw_to_known_idxs[flw_idx]][tput_fet] / 1e6
+                   for flw_idx in range(num_flws)]
+            for xs__, ys__ in zip(xs_, ys_):
+                plt.plot(xs__, ys__)
+            plt.legend(port_strs, loc="upper left", fontsize=5)
+            plt.title(tput_fet)
+            plt.xlabel("time (s)")
+            plt.ylabel("tput (Mb/s)")
+            plt.ylim(bottom=0, top=exp.bw_Mbps * 1.1)
+            plt.tight_layout()
+            plt.savefig(path.join(out_dir, "tput.pdf"))
+            plt.close()
+
+            del xs_
+            del ys_
+            del error_locs
+
+            # Plot interpolated throughputs and total throughput
+            ys_ = np.transpose(tputs_bps_interp) / 1e6
+            del tputs_bps_interp
+
+            xs = xs / 1e6
+            for idx in range(len(ys_)):  # ys__ in np.transpose(tputs_bps_interp):
+                plt.plot(xs, ys_[idx])
+                ys_[idx] = None
+            plt.plot(xs, tputs_bps_total / 1e6)
+            plt.legend(port_strs + ["total"], loc="upper left", fontsize=5)
+            plt.title(tput_fet)
+            plt.xlabel("time (s)")
+            plt.ylabel("interpolated tput (Mb/s)")
+            plt.ylim(bottom=0, top=exp.bw_Mbps * 1.1)
+            plt.tight_layout()
+            plt.savefig(path.join(out_dir, "tput_interp.pdf"))
+            plt.close()
+
+            exit()
+
+            #if error_locs.size > 0:
+            assert error_locs.size == 0, \
+                print("Error: Total throughput is higher than experiment bandwidth "
+                      f"in: {exp_flp}\n\tCheck interpolated times "
+                      f"({error_locs.size}/{xs.size}): {xs[error_locs]}")
+
             # For each flow, convert the throughput fraction in the unified
             # timeline back to the flow's timeline.
+
+            total_known_idxs = tputs_bps_total != 0
+
             for flw_idx in range(num_flws):
-                flws[flw_idx][tput_share_fet] = np.interp(
-                    # Convert from us to s.
-                    flws[flw_idx][tput_share_fet] / 1e6,
-                    xp=xs,
-                    # The throughput fraction, based on the interpolated timeline.
-                    fp=tputs_interp[:,flw_idx] / tputs_total)
+                flws[flw_idx][tput_share_fet][flw_to_known_idxs[flw_idx]] = (
+                    np.interp(
+                        flws[flw_idx][features.ARRIVAL_TIME_FET][
+                            flw_to_known_idxs[flw_idx]],
+                        xp=xs[total_known_idxs],
+                        # The throughput fraction, based on the interpolated timeline.
+                        fp=(tputs_bps_interp[total_known_idxs][:,flw_idx] /
+                            tputs_bps_total[total_known_idxs]),
+                        left=-1,
+                        right=-1))
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the
@@ -690,10 +832,13 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         np.savez_compressed(
             out_flp, **{str(k + 1): v for k, v in enumerate(flws)})
 
-    # Remove untarred folder
-    shutil.rmtree(exp_dir)
-    # Remove lock file.
-    os.remove(lock_flp)
+
+def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
+    """ Locks, untars, and parses an experiment. """
+    exp = utils.Exp(exp_flp)
+    with open_exp(exp, exp_flp, untar_dir, out_dir) as (locked, exp_dir):
+        if locked:
+            parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed)
 
 
 def main():

@@ -299,13 +299,14 @@ def parse_packets(flp, flws_ports):
           TCP timestamp option TSval, TCP timestamp option TSecr,
           TCP payload size (B), total packet size (B))
     """
+    print(f"\tParsing PCAP: {flp}")
     # Use list() to read the pcap file all at once (minimize seeks).
     pkts = list(enumerate(scapy.utils.RawPcapReader(flp)))
     num_pkts = len(pkts)
 
     def make_empty():
         """ Make an empty numpy array to store the packets. """
-        return np.full((num_pkts, 6), -1, dtype=int)
+        return np.full((num_pkts, 6), -1, dtype="int64")
 
     def remove_unused_rows(arr):
         """
@@ -379,7 +380,10 @@ def parse_packets(flp, flws_ports):
     discarded_pkts = num_pkts - tot_pkts
     print(
         f"\tDiscarded packets: {discarded_pkts} "
-        f"({discarded_pkts / tot_pkts * 100:.2f}%)")
+        f"({discarded_pkts / num_pkts * 100:.2f}%)")
+
+    for flw, (dat_pkts, ack_pkts) in flw_to_pkts.items():
+        print(flw, dat_pkts.shape, ack_pkts.shape)
 
     return flw_to_pkts
 
@@ -424,7 +428,7 @@ def parse_queue_log(flp):
     Parses the BESS queue log. Returns a list of tuples. See parse_q_stats() and
     parse_q_enq_deq() for details on the tuple format.
     """
-    print(f"Parsing queue log: {flp}")
+    print(f"\tParsing queue log: {flp}")
     with open(flp, "r") as fil:
         q_log = list(fil)
     return [
@@ -524,7 +528,7 @@ def visualize_classes(net, dat):
     print("\n".join(
         [f"\t{cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
-    tot_actual = np.prod(np.array(dat.shape))
+    tot_actual = dat.size
     assert tot == tot_actual, \
         f"Error visualizing ground truth! {tot} != {tot_actual}"
 
@@ -584,7 +588,7 @@ def safe_np_div(num_arr, den):
     array is -1 (unknown), then that entry in the output array is -1. If the
     denominator scalar is -1, then all entries in the output array are -1.
     """
-    assert np.product(num_arr.shape) == num_arr.shape[0], \
+    assert num_arr.size == num_arr.shape[0], \
         f"Array is not 1D: {num_arr.shape}"
 
     out = np.full_like(num_arr, -1)
@@ -955,7 +959,7 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
             # Since the model was trained using RFE, display all
             # features. Sort the features alphabetically.
             best_fets = sorted(
-                zip(np.array(fets)[np.where(net.net.ranking_ == 1)],
+                zip(np.array(fets)[(net.net.ranking_ == 1).nonzero()],
                     net.net.estimator_.coef_[0]),
                 key=lambda p: p[0])
             log_feature_analysis(

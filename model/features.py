@@ -26,7 +26,6 @@ REGULAR = [
     ("seq", "uint32"),
     ("arrival time us", "int32"),
     ("min RTT us", "int32"),
-    ("flow share percentage", "float64"),
     ("interarrival time us", "int32"),
     ("inverse interarrival time 1/us", "float64"),
     ("packets lost since last packet estimate", "int32"),

@@ -836,7 +836,7 @@ class SvmSklearnWrapper(SvmWrapper):
             nums_flws = list(set(dat_extra["num_flws"].tolist()))
             for num_flws_selected in nums_flws:
                 print(f"Evaluating model for {num_flws_selected} flows:")
-                valid = np.where(dat_extra["num_flws"] == num_flws_selected)
+                valid = (dat_extra["num_flws"] == num_flws_selected).nonzero()
                 flws_accs.append(self.__evaluate(
                     torch.tensor(self.net.predict(dat_in[valid])),
                     dat_out_classes[valid],
