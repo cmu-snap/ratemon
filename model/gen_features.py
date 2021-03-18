@@ -356,6 +356,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
 
             output[j][features.RTT_ESTIMATE_FET] = rtt_estimate_us
             output[j][features.MIN_RTT_FET] = min_rtt_us
+            output[j][features.RTT_RATIO_FET] = utils.safe_div(
+                rtt_estimate_us, min_rtt_us)
 
             # Receiver-side loss rate estimation. Estimate the losses
             # since the last packet.
@@ -484,7 +486,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     new = utils.safe_div(
                         1,
                         output[j][features.make_win_metric(
-                            features.INV_INTERARR_TIME_FET, win)])
+                            features.INTERARR_TIME_FET, win)])
                 elif features.TPUT_FET in metric:
                     # Treat the first packet in the window as the beginning of
                     # time. Calculate the average throughput over all but the

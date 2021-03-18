@@ -517,7 +517,7 @@ def visualize_classes(net, dat):
     # or numpy structured array containing a column named "class".
     dat = (
         dat if isinstance(dat, torch.Tensor) or dat.dtype.names is None
-        else dat["class"])
+        else dat[features.LABEL_FET])
     tots = [(dat == cls).sum() for cls in clss]
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
@@ -663,8 +663,10 @@ def safe_update_ewma(prev_ewma, new_val, alpha):
     the unweighted new value.
     """
     return (
-        new_val if prev_ewma == -1 else
-        alpha * new_val + (1 - alpha) * prev_ewma)
+        new_val if prev_ewma == -1
+        else (
+            -1 if new_val == -1
+            else alpha * new_val + (1 - alpha) * prev_ewma))
 
 
 def filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc):

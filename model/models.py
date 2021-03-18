@@ -164,22 +164,23 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 fair=1. / exp.tot_flws),
             # Convert to integers.
             otypes=[int])(dat_out)
-        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
-        clss_str["class"] = clss
+        clss_str = np.empty(
+            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
+        clss_str[features.LABEL_FET] = clss
         return clss_str
 
     @staticmethod
     def __bucketize(dat_in, dat_extra, dat_in_start_idx, dat_in_end_idx,
                     dat_in_new, dat_in_new_idx, dur_us, num_buckets):
         """
-        Uses dat_extra["arrival time us"] to divide the arriving packets from
-        the range [dat_in_start_idx, dat_in_end_idx] into num_buckets
-        intervals. Each interval has duration dur_us / num_buckets.
-        Stores the resulting histogram in dat_in_new, at the row
-        indicated by dat_in_new_idx. Returns nothing.
+        Uses dat_extra[features.ARRIVAL_TIME_FET] to divide the arriving packets
+        from the range [dat_in_start_idx, dat_in_end_idx] into num_buckets
+        intervals. Each interval has duration dur_us / num_buckets.  Stores the
+        resulting histogram in dat_in_new, at the row indicated by
+        dat_in_new_idx. Returns nothing.
         """
-        arr_times = dat_extra[
-            "arrival time us"][dat_in_start_idx:dat_in_end_idx + 1]
+        arr_times = dat_extra[features.ARRIVAL_TIME_FET][
+            dat_in_start_idx:dat_in_end_idx + 1]
         num_pkts = arr_times.shape[0]
         assert num_pkts > 0, "Need more than 0 packets!"
 
@@ -369,7 +370,7 @@ class BinaryDnnWrapper(BinaryModelWrapper):
 
     name = "BinaryDnn"
     in_spc = features.FEATURES
-    out_spc = ["flow share percentage"]
+    out_spc = [features.TPUT_SHARE_FET]
 
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
@@ -414,8 +415,10 @@ class SvmWrapper(BinaryModelWrapper):
     """ Wraps Svm. """
 
     name = "Svm"
-    in_spc = ["arrival time", "loss rate"]
-    out_spc = ["queue occupancy"]
+    in_spc = [
+        features.ARRIVAL_TIME_FET,
+        features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
+    out_spc = [features.TPUT_SHARE_FET]
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
     params = ["lr", "momentum"]
@@ -460,7 +463,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
     name = "SvmSklearn"
     in_spc = features.FEATURES
-    out_spc = ["flow share percentage"]
+    out_spc = [features.TPUT_SHARE_FET]
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
@@ -538,8 +541,9 @@ class SvmSklearnWrapper(SvmWrapper):
             functools.partial(
                 percent_to_class, fair=1. / exp.tot_flws),
             otypes=[int])(dat_out)
-        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
-        clss_str["class"] = clss
+        clss_str = np.empty(
+            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
+        clss_str[features.LABEL_FET] = clss
         return clss_str
 
     def __evaluate(self, preds, labels, raw, fair, out_dir,
@@ -697,7 +701,8 @@ class SvmSklearnWrapper(SvmWrapper):
         flp: File name of the saved graph.
         btk_throughput: Throughput of the bottleneck link
         throughput_ewma: Throughput ewma computed in parse_dumbbell
-        x_lim: Graph limit on the x axis."""
+        x_lim: Graph limit on the x axis.
+        """
 
         fair = fair * btk_throughput
         throughput_ewma = throughput_ewma * 1380 * 8 / 1000000
@@ -1013,11 +1018,11 @@ class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
     name = "Lstm"
-    # For now, we do not use RTT ratio because our method of estimating
-    # it cannot be performed by a general receiver.
-    # in_spc = ["inter-arrival time", "RTT ratio", "loss rate"]
-    in_spc = ["inter-arrival time", "loss rate"]
-    out_spc = ["queue occupancy"]
+    in_spc = [
+        features.INTERARR_TIME_FET,
+        features.RTT_RATIO_FET,
+        features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
+    out_spc = [features.TPUT_SHARE_FET]
     num_clss = 5
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss
@@ -1081,8 +1086,9 @@ class LstmWrapper(PytorchModelWrapper):
             functools.partial(
                 percent_to_class, fair=1. / (exp.cca_1_flws + exp.cca_2_flws)),
             otypes=[int])(dat_out)
-        clss_str = np.empty((clss.shape[0],), dtype=[("class", "int")])
-        clss_str["class"] = clss
+        clss_str = np.empty(
+            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
+        clss_str[features.LABEL_FET] = clss
         return clss_str
 
 

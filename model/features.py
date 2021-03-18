@@ -43,6 +43,7 @@ BW_FAIR_SHARE_FET = "bandwidth fair share b/s"
 TPUT_FET = "throughput b/s"
 TOTAL_TPUT_FET = "total throughput b/s"
 TPUT_SHARE_FET = "throughput share"
+LABEL_FET = "class"
 MATHIS_TPUT_FET = "mathis model throughput b/s"
 # 0 lower than or equal to fair throughput, 1 higher. This is not a windowed
 # metric itself, but is based on the "mathis model throughput b/s" metric.
@@ -52,8 +53,8 @@ MATHIS_LABEL_FET = "mathis model label"
 REGULAR = [
     (SEQ_FET, "uint32"),
     (ARRIVAL_TIME_FET, "int32"),
-    (MIN_RTT_FET, "int32"),
     (RTT_ESTIMATE_FET, "int32"),
+    (MIN_RTT_FET, "int32"),
     (RTT_RATIO_FET, "float64"),
     (INTERARR_TIME_FET, "int32"),
     (INV_INTERARR_TIME_FET, "float64"),

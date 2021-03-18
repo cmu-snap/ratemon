@@ -135,7 +135,7 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
     # Find the uniques classes in the output features and make sure
     # that they are properly formed. Assumes that dat_out is a
     # structured numpy array containing a column named "class".
-    for cls in set(dat_out["class"].tolist()):
+    for cls in set(dat_out[features.LABEL_FET].tolist()):
         assert 0 <= cls < net.num_clss, f"Invalid class: {cls}"
 
     # Transform the data as required by this specific model.
