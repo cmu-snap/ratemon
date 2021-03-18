@@ -873,7 +873,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                                     total_tput_bps))
 
                     # Check if this throughput is erroneous.
-                    if total_tput_bps > bw_bps:
+                    if total_tput_bps > bw_limit_bps:
                         bad_wins.add(win)
 
             # Move forward one packet.
@@ -887,7 +887,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
         print("Window durations:")
         for win in features.WINDOWS:
             print(
-                "\t", win,
+                f"\t{win}",
                 win * min(
                     [res[-1][features.MIN_RTT_FET]
                      for res in flw_results.values()]),
