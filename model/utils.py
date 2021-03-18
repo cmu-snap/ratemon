@@ -361,9 +361,8 @@ def parse_packets(flp, flws_ports):
                 # TCP payload. Length of the IP packet minus the length of the
                 # IP header minus the length of the TCP header.
                 ip.len - ip.ihl - (tcp.dataofs * 4),
-                # Total packet size. Length of the IP packet plus the size of
-                # the Ethernet header.
-                ip.len + 14)
+                # Total packet size.
+                pkt_mdat.wirelen)
 
     # Remove unused rows.
     for flw in flw_to_pkts.keys():
@@ -381,9 +380,6 @@ def parse_packets(flp, flws_ports):
     print(
         f"\tDiscarded packets: {discarded_pkts} "
         f"({discarded_pkts / num_pkts * 100:.2f}%)")
-
-    for flw, (dat_pkts, ack_pkts) in flw_to_pkts.items():
-        print(flw, dat_pkts.shape, ack_pkts.shape)
 
     return flw_to_pkts
 
@@ -558,12 +554,12 @@ def safe_min(val1, val2):
                     min(val1, val2)))))
 
 
-def safe_mul(val1, val2):
+def safe_add(val1, val2):
     """
-    Safely multiplies two values. If either value is -1, then the
+    Safely adds two values. If either value is -1, then the
     result is -1 (unknown).
     """
-    return -1 if val1 == -1 or val2 == -1 else val1 * val2
+    return -1 if val1 == -1 or val2 == -1 else val1 + val2
 
 
 def safe_sub(val1, val2):
@@ -572,6 +568,14 @@ def safe_sub(val1, val2):
     result is -1 (unknown).
     """
     return -1 if val1 == -1 or val2 == -1 else val1 - val2
+
+
+def safe_mul(val1, val2):
+    """
+    Safely multiplies two values. If either value is -1, then the
+    result is -1 (unknown).
+    """
+    return -1 if val1 == -1 or val2 == -1 else val1 * val2
 
 
 def safe_div(num, den):
@@ -1027,3 +1031,35 @@ def check_fets(fets, in_spc):
         ("Provided features do not agreed with in_spc."
         f"\n\tProvided fets ({len(fets)}): {fets}"
          f"\n\tin_spc ({len(in_spc)}): {in_spc}")
+
+
+def zip_timeseries(xs, ys):
+    """ Zips together multiple timeseries from the same timespace. """
+    assert len(xs) == len(ys)
+    assert xs
+    for idx in range(len(xs)):
+        assert xs[idx].shape[0] == ys[idx].shape[0]
+
+    idxs = [0] * len(xs)
+    tot_pkts = sum(xs_.shape[0] for xs_ in xs)
+    xs_o = np.full((tot_pkts,), -1, dtype=xs[0].dtype)
+    ys_o = np.full((tot_pkts,), -1, dtype=ys[0].dtype)
+    idx_o = 0
+
+    while idx_o < xs_o.shape[0]:
+        chosen = 0
+        earliest = sys.maxsize
+
+        for idx in range(len(xs)):
+            if idxs[idx] < xs[idx].shape[0]:
+                proposed_earliest = xs[idx][idxs[idx]]
+                if proposed_earliest < earliest:
+                    chosen = idx
+                    earliest = proposed_earliest
+
+        xs_o[idx_o] = xs[chosen][idxs[chosen]]
+        ys_o[idx_o] = ys[chosen][idxs[chosen]]
+        idx_o += 1
+        idxs[chosen] += 1
+
+    return xs_o, ys_o
