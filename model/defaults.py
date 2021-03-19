@@ -43,7 +43,10 @@ DEFAULTS = {
     "balance": False,
     "drop_popular": True,
     "analyze_features": False,
-    "l2_regularization": 0
+    "l2_regularization": 0,
+    "cluster_threshold": 1,
+    "fets_to_pick": 20,
+    "perm_imp_repeats": 10
 }
 # Arguments to ignore when converting an arguments dictionary to a
 # string.

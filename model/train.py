@@ -622,9 +622,10 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     #     print("Balanced training data:")
     #     utils.visualize_classes(net, dat_out)
 
+    cluster_to_fets = None
     if args["analyze_features"]:
-        utils.analyze_feature_correlation(
-            net, out_dir, dat_in, dat_out, dat_extra)
+        cluster_to_fets = utils.analyze_feature_correlation(
+            net, out_dir, dat_in, dat_out, dat_extra, args["cluster_threshold"])
 
     # Training.
     print("Training...")
@@ -646,9 +647,16 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     acc_tst = net.test(
         *ldr_tst.dataset.raw(),
         graph_prms={
-            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None,
-            "analyze_features": args["analyze_features"]})
+            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+
+    if args["analyze_features"] and cluster_to_fets is not None:
+        utils.select_fets(
+            cluster_to_fets,
+            utils.analyze_feature_importance(
+                net, out_dir, dat_in, dat_out_classes, args["fets_to_pick"],
+                args["perm_imp_repeats"]))
+
     # Explicitly delete the test dataloader to save memory.
     del ldr_tst
     return acc_tst, tim_trn_s
@@ -901,7 +909,23 @@ def main():
         required=False, type=float,
         help=("If the model is of type \"{models.HistGbdtSklearnWrapper().name}\", "
               "then use this as the L2 regularization parameter."))
-    psr, psr_verify = cl_args.add_training(psr)
+    psr.add_argument(
+        "--cluster-threshold", default=defaults.DEFAULTS["cluster_threshold"],
+        required=False, type=float,
+        help=("If \"--analyze-features\" is specified, then use this as the "
+              "clustering threshold."))
+    # TODO: Make comments specific to HistGbdt
+    psr.add_argument(
+        "--features-to-pick", default=defaults.DEFAULTS["fets_to_pick"],
+        required=False, type=int, dest="fets_to_pick",
+        help=("If \"--analyze-features\" is specified, then pick this many of "
+              "the top features."))
+    psr.add_argument(
+        "--permutation-importance-repeats", dest="perm_imp_repeats",
+        default=defaults.DEFAULTS["perm_imp_repeats"], required=False, type=int,
+        help=("If \"--analyze-features\" is specificed, then perform "
+              "permutation importance analysis with this many repeats."))
+    psr, psr_verify = cl_args.add_num_exps(*cl_args.add_training(psr))
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \
         "\"--drop-popular\" must be used with \"--balance\"."

@@ -25,6 +25,7 @@ from sklearn import inspection
 import torch
 
 import defaults
+import features
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -524,7 +525,7 @@ def visualize_classes(net, dat):
     print("\n".join(
         [f"\t{cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
-    tot_actual = dat.size
+    tot_actual = dat.size()[0] if isinstance(dat, torch.Tensor) else dat.size
     assert tot == tot_actual, \
         f"Error visualizing ground truth! {tot} != {tot_actual}"
 
@@ -905,7 +906,8 @@ def log_feature_analysis(out_dir, msg):
         fil.write(msg)
 
 
-def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
+def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra,
+                                cluster_thresh=1):
     """ Analyzes correlation among features of a net. """
     # Feature analysis.
     fets = np.asarray(net.in_spc)
@@ -935,7 +937,7 @@ def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
     # Maps cluster index to a list of the indices of features in that cluster.
     cluster_to_fets = collections.defaultdict(list)
     for feature_idx, cluster_idx in enumerate(cluster.hierarchy.fcluster(
-            corr_linkage, 0.2, criterion='distance')):
+            corr_linkage, cluster_thresh, criterion='distance')):
         cluster_to_fets[cluster_idx].append(fets[feature_idx])
     # Print the clusters.
     log_feature_analysis(
@@ -946,11 +948,14 @@ def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra):
     # Print the first feature in every cluster.
     log_feature_analysis(
         out_dir,
-        "Naively-selected features:" +
+        "Naively-selected features: " +
         ", ".join(cluster_fets[0] for cluster_fets in cluster_to_fets.values()))
 
+    return cluster_to_fets
 
-def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
+
+def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes,
+                               num_fets_to_pick, perm_imp_repeats):
     """ Analyzes the importance of features to a trained net. """
     # Analyze feature coefficients. The underlying model's .coef_
     # attribute may not exist.
@@ -964,19 +969,19 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
                  feature_selection.RFECV)):
             # Since the model was trained using RFE, display all
             # features. Sort the features alphabetically.
-            best_fets = sorted(
+            top_fets = sorted(
                 zip(np.array(fets)[(net.net.ranking_ == 1).nonzero()],
                     net.net.estimator_.coef_[0]),
                 key=lambda p: p[0])
             log_feature_analysis(
-                out_dir, f"Number of features selected: {len(best_fets)}")
+                out_dir, f"Number of features selected: {len(top_fets)}")
             qualifier = "All"
         else:
             qualifier = "Best"
             if isinstance(
                     net.net, ensemble.HistGradientBoostingClassifier):
                 imps = inspection.permutation_importance(
-                    net.net, dat_in, dat_out_classes, n_repeats=10,
+                    net.net, dat_in, dat_out_classes, n_repeats=perm_imp_repeats,
                     random_state=0).importances_mean
             else:
                 imps = net.net.coef_[0]
@@ -984,22 +989,22 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
             # First, sort the features by the absolute value of the
             # importance and pick the top 20. Then, sort the features
             # alphabetically.
-            # best_fets = sorted(
+            # top_fets = sorted(
             #     sorted(
             #         zip(fets, imps),
             #         key=lambda p: abs(p[1]))[-20:],
             #     key=lambda p: p[0])
-            best_fets = list(reversed(
-                sorted(zip(fets, imps), key=lambda p: abs(p[1]))[-20:]))
+            top_fets = list(reversed(sorted(
+                zip(fets, imps), key=lambda p: abs(p[1]))[-num_fets_to_pick:]))
         log_feature_analysis(
             out_dir,
-            f"----------\n{qualifier} features ({len(best_fets)}):\n" +
-            "\n".join(f"\t{fet}: {coef:.4f}" for fet, coef in best_fets) +
+            f"----------\n{qualifier} features ({len(top_fets)}):\n" +
+            "\n".join(f"\t{fet}: {coef:.4f}" for fet, coef in top_fets) +
             "\n----------")
 
         # Graph feature coefficients.
         if net.graph:
-            names, coefs = zip(*best_fets)
+            names, coefs = zip(*top_fets)
             num_fets = len(names)
             y_vals = list(range(num_fets))
             plt.figure(figsize=(7, 0.2 * num_fets))
@@ -1011,14 +1016,18 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes):
             plt.tight_layout()
             plt.savefig(path.join(out_dir, f"features_{net.name}.pdf"))
             plt.close()
+
+        return top_fets
     except AttributeError:
         # Coefficients are only available with a linear kernel.
         log_feature_analysis(
             out_dir, "Warning: Unable to extract coefficients!")
-    log_feature_analysis(
-        out_dir,
-        ("Finished analyzing feature importance - time: "
-         f"{time.time()- tim_srt_s:.2f} seconds"))
+    finally:
+        log_feature_analysis(
+            out_dir,
+            ("Finished analyzing feature importance - time: "
+             f"{time.time()- tim_srt_s:.2f} seconds"))
+    return None
 
 
 def check_fets(fets, in_spc):
@@ -1065,3 +1074,32 @@ def zip_timeseries(xs, ys):
         idxs[chosen] += 1
 
     return xs_o, ys_o
+
+def select_fets(cluster_to_fets, top_fets):
+    # Go backwards through top fets
+    # For each fet, find it's cluster
+    # If can't find cluster, drop fet
+    # If found cluster, drop cluster
+
+    get_keys = lambda x, d: [k for k, v in d.items() if x in v]
+    chosen_fets = []
+    # Examine the features from most important to least important.
+    for fet in reversed(sorted(top_fets, key=lambda p: p[1])):
+        fet_name = fet[0]
+        clusters = get_keys(fet_name, cluster_to_fets)
+        assert len(clusters) <= 1, \
+            ("A feature should be in either 0 or 1 clusters, but "
+             f"\"{fet_name}\" is in clusters: {clusters}")
+        if len(clusters) == 0:
+            # This feature's cluster has already been used.
+            continue
+        # This is the first features from this cluster to be used, so
+        # keep it.
+        chosen_fets.append(fet)
+        # Remove this cluster to invalidate its other features.
+        del cluster_to_fets[clusters[0]]
+    print(
+        f"Chosen features ({len(chosen_fets)}):\n\t" +
+        "\n\t".join(
+            f"{fet}: {coeff:.4f}" for fet, coeff in reversed(
+                sorted(chosen_fets, key=lambda p:p[1]))))

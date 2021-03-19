@@ -790,8 +790,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
     def test(self, fets, dat_in, dat_out_classes, dat_extra,
              graph_prms=copy.copy({
-                 "analyze_features": False, "out_dir": ".",
-                 "sort_by_unfairness": True, "dur_s": None})):
+                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
@@ -824,10 +823,6 @@ class SvmSklearnWrapper(SvmWrapper):
         out_dir = path.join(graph_prms["out_dir"], self.name)
         if not path.exists(out_dir):
             os.makedirs(out_dir)
-
-        if graph_prms["analyze_features"]:
-            utils.analyze_feature_importance(
-                self, out_dir, dat_in, dat_out_classes)
 
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
