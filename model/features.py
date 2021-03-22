@@ -1,3 +1,5 @@
+""" Defines features. """
+
 
 import itertools
 

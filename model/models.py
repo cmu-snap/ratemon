@@ -1000,6 +1000,52 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         "max_iter", "l2_regularization", "early_stop", "lr",
         "l2_regularization", "graph"]
 
+    # 10, all features: 99.33
+    
+    # 10, 30 clusters, pick 10: 99.32
+    # in_spc = [
+    #     "interarrival time us-ewma-alpha0.003",
+    #     "interarrival time us-ewma-alpha0.001",
+    #     "RTT estimate us-ewma-alpha0.001",
+    #     "average RTT estimate us-windowed-minRtt256",
+    #     "RTT estimate ratio-ewma-alpha0.001",
+    #     "loss rate estimate-windowed-minRtt256",
+    #     "loss event rate-windowed-minRtt8",
+    #     "RTT estimate ratio-ewma-alpha0.1",
+    #     "loss event rate-windowed-minRtt1",
+    #     "RTT estimate us-ewma-alpha0.1",
+    # ]
+
+    # # 10, 10 clusters, pick 10: 99.12
+    # in_spc = [
+    #     "interarrival time us-ewma-alpha0.003",
+    #     "RTT estimate us-ewma-alpha0.001",
+    #     "average RTT estimate ratio-windowed-minRtt256",
+    #     "loss event rate-windowed-minRtt8",
+    #     "loss rate estimate-windowed-minRtt256",
+    #     "loss rate estimate-ewma-alpha0.1",
+    #     "loss rate estimate-ewma-alpha0.001",
+    #     "1/sqrt loss event rate-windowed-minRtt8",
+    #     "loss rate estimate-windowed-minRtt1",
+    #     "loss rate estimate-ewma-alpha1.0"
+    # ]
+
+    # 1000, all features: 91.84
+    
+    # 1000, 30 clusters, pick 10:
+    in_spc = [
+        interarrival time us-ewma-alpha0.003: 0.1984
+        loss rate estimate-ewma-alpha0.001: 0.0240
+        RTT estimate us-ewma-alpha0.001: 0.0187
+        loss rate estimate-windowed-minRtt128: 0.0139
+        average RTT estimate us-windowed-minRtt256: 0.0118
+        average RTT estimate ratio-windowed-minRtt256: 0.0088
+        interarrival time us-ewma-alpha0.001: 0.0071
+        average interarrival time us-windowed-minRtt32: 0.0068
+        loss rate estimate-windowed-minRtt64: 0.0060
+        loss rate estimate-windowed-minRtt256: 0.0049
+    ]    
+
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
         self.net = ensemble.HistGradientBoostingClassifier(
