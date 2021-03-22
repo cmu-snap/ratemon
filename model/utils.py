@@ -514,12 +514,7 @@ def visualize_classes(net, dat):
     """ Prints statistics about the classes in dat. """
     # Visualaize the ground truth data.
     clss = net.get_classes()
-    # Handles the cases where dat is a torch tensor, numpy unstructured array,
-    # or numpy structured array containing a column named "class".
-    dat = (
-        dat if isinstance(dat, torch.Tensor) or dat.dtype.names is None
-        else dat[features.LABEL_FET])
-    tots = [(dat == cls).sum() for cls in clss]
+    tots = get_class_popularity(dat, clss)
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
     print("\n".join(
@@ -528,6 +523,16 @@ def visualize_classes(net, dat):
     tot_actual = dat.size()[0] if isinstance(dat, torch.Tensor) else dat.size
     assert tot == tot_actual, \
         f"Error visualizing ground truth! {tot} != {tot_actual}"
+
+
+def get_class_popularity(dat, classes):
+    """ Returns a list containing the number of examples in each class. """
+    # Handles the cases where dat is a torch tensor, numpy unstructured array,
+    # or numpy structured array containing a column named "class".
+    dat = (
+        dat if isinstance(dat, torch.Tensor) or dat.dtype.names is None
+        else dat[features.LABEL_FET])
+    return [(dat == cls).sum() for cls in classes]
 
 
 def safe_mathis_label(tput_true, tput_mathis):

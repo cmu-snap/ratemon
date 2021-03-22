@@ -1054,6 +1054,23 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             early_stopping=kwargs["early_stop"], validation_fraction=20/70)
         return self.net
 
+    def train(self, fets, dat_in, dat_out):
+        """ Fits this model to the provided dataset. """
+        utils.assert_tensor(dat_in=dat_in, dat_out=dat_out)
+        utils.check_fets(fets, self.in_spc)
+
+        # Each class's weight is 1 minus its popularity ratio. Note that the
+        # weights do not need to sum to 1. Avoid very large numbers to prevent
+        # overflow. Avoid very small numbers to prevent floating point errors.
+        tots = utils.get_class_popularity(dat_out, self.get_classes())
+        tot = sum(tots)
+        weights = torch.Tensor([1 - tot_cls / tot for tot_cls in tots])
+        sample_weights = torch.Tensor([weights[label] for label in dat_out])
+
+        self.net.fit(dat_in, dat_out, sample_weight=sample_weights)
+        # Oftentimes, the training log statements do not end with a newline.
+        print()
+
 
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
