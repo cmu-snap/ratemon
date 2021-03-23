@@ -1108,3 +1108,34 @@ def select_fets(cluster_to_fets, top_fets):
         "\n\t".join(
             f"{fet}: {coeff:.4f}" for fet, coeff in reversed(
                 sorted(chosen_fets, key=lambda p:p[1]))))
+
+
+def find_bound(times_us, target_us, min_idx, max_idx, which):
+    """
+    Returns the first index that is either before or after a particulr target
+    time.
+    """
+    assert min_idx >= 0
+    assert max_idx >= min_idx
+    assert which in {"before", "after"}
+    if min_idx == max_idx:
+        return min_idx
+
+    bound = min_idx
+    # Walk forward until the target time is in the past.
+    while bound < (max_idx if which == "before" else max_idx - 1):
+        time_us = times_us[bound]
+        if time_us == -1 or time_us < target_us:
+            bound += 1
+        else:
+            break
+
+    if which == "before":
+        # If we walked forward, then walk backward to the last valid time.
+        while bound > min_idx:
+            bound -= 1
+            if times_us[bound] != -1:
+                break
+
+    assert min_idx <= bound <= max_idx
+    return bound

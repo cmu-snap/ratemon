@@ -12,7 +12,6 @@ import os
 from os import path
 import random
 import shutil
-import sys
 import time
 
 import json
@@ -144,7 +143,6 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
     if exp.tot_flws == 0:
         print(f"\tNo flows to analyze in: {exp_flp}")
     bw_bps = exp.bw_Mbps * 1e6
-    bw_limit_bps = bw_bps * 1.01
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{exp.name}.npz")
@@ -440,23 +438,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                 # estimate will never increase, so we do not need to investigate
                 # whether the start of the window moved earlier in time.
                 for win in features.WINDOWS:
-                    win_size_us = win * min_rtt_us
-                    # Keep trying until the window's trailing edge catches up
-                    # with its leading edge.
-                    while win_state[win]["window_start_idx"] < j:
-                        # Look up the arrival time at the start of this window.
-                        arr_time_us = output[
-                            win_state[win]["window_start_idx"]][
-                                features.ARRIVAL_TIME_FET]
-                        # Skip this packet if the packet's arrival time is
-                        # either unknown or beyond the bounds of the window.
-                        if ((arr_time_us == -1) or
-                                # We have made sure that both operands in the
-                                # subtraction are known.
-                                (recv_time_cur_us - arr_time_us > win_size_us)):
-                            win_state[win]["window_start_idx"] += 1
-                        else:
-                            break
+                    win_state[win]["window_start_idx"] = utils.find_bound(
+                        output[features.ARRIVAL_TIME_FET],
+                        target_us=recv_time_cur_us - (win * min_rtt_us),
+                        min_idx=win_state[win]["window_start_idx"],
+                        max_idx=j,
+                        which="after")
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(
@@ -509,12 +496,21 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
 
                     # Report a warning if the throughput does not exceed the
                     # bandwidth.
-                    if new != -1 and new > bw_limit_bps:
+                    if new != -1 and new > bw_bps:
+                        # print(output[win_start_idx:j + 1][features.ARRIVAL_TIME_FET])
+                        # print(output[win_start_idx:j + 1][features.WIRELEN_FET])
+                        # print("inv interarr", output[j][features.INV_INTERARR_TIME_FET])
+                        # print("start_time_us", start_time_us)
+                        # print("end_time_us", end_time_us)
+                        # print("total_bytes", total_bytes)
+                        # print("win_size_us", win_size_us)
+                        # print("tput", new)
+                        # print("bw", bw_bps)
                         print(
                             f"Warning: Throughput of {new / 1e6:.2f} Mbps is "
                             "higher than experiment bandwidth of "
-                            f"{exp.bw_Mbps} Mbps for flow {flw_idx} in: "
-                            f"{exp_flp}")
+                            f"{exp.bw_Mbps} Mbps for packet {j} of flow "
+                            f"{flw_idx} in: {exp_flp}")
                 elif features.TOTAL_TPUT_FET in metric:
                     # This is calcualted at the end.
                     continue
@@ -748,76 +744,60 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
     del recv_ack_pkts
 
     if not skip_smoothed:
-        # Maps flows to the index of the next packet to process in that flow.
-        flw_to_idx = {flw: 0 for flw in flws}
-        # Maps window to flow to the index of the packet at the start of that
-        # window in that flow.
-        win_to_flw_to_start_idx = {
-            win: {flw: 0 for flw in flws}
-            for win in features.WINDOWS}
-        # From a dictionary mapping flows to packet indices, returns a list of
-        # flows that still have packets remaining.
-        get_remaining_flws = lambda flw_to_idx: [
-            flw for flw in flws
-            if flw_to_idx[flw] < flw_results[flw].shape[0]]
+        # Keep track of the number of erroneous throughputs (i.e., higher than
+        # the experiment bandwidth) for each window size.
+        win_to_errors = {win: 0 for win in features.WINDOWS}
 
-        # Keep track of the window sizes that results in erroneous throughput
-        # calculations (i.e., higher than the experiment bandwidth).
-        bad_wins = set()
+        for cur_flw in flws:
+            # Maps window to flow to the index of the packet at the start of that
+            # window in that flow.
+            win_to_flw_to_bounds = {
+                win: {flw: [0, 0] for flw in flws} for win in features.WINDOWS}
 
-        remaining_flws = get_remaining_flws(flw_to_idx)
-        while len(remaining_flws) > 0:
-            flw_to_arr_time_us = {
-                flw: flw_results[
-                    flw][flw_to_idx[flw]][features.ARRIVAL_TIME_FET]
-                for flw in remaining_flws}
-            # Pick the earliest packet that we have not processed yet.
-            cur_flw = min(flw_to_arr_time_us, key=flw_to_arr_time_us.get)
-            end_time_us = flw_to_arr_time_us[cur_flw]
-            min_rtt_us = flw_results[
-                cur_flw][flw_to_idx[cur_flw]][features.MIN_RTT_FET]
+            for j in range(flw_results[cur_flw].shape[0]):
+                end_time_us = flw_results[cur_flw][j][features.ARRIVAL_TIME_FET]
+                min_rtt_us = flw_results[cur_flw][j][features.MIN_RTT_FET]
 
-            # If we do not know the current packet's arrival time or min RTT,
-            # then we cannot compute any windowed metrics.
-            if end_time_us != -1 and min_rtt_us != -1:
+                # If we do not know the current packet's arrival time or min
+                # RTT, then we cannot compute any windowed metrics.
+                if end_time_us == -1 or min_rtt_us == -1:
+                    continue
+
                 for win in features.WINDOWS:
                     win_size_us = win * min_rtt_us
                     first_flw = None
                     start_time_us = -1
                     total_bytes = 0
-                    bytes_used = []
-                    # Consider flows that are still covered by the window only.
-                    for flw in get_remaining_flws(win_to_flw_to_start_idx[win]):
-                        # Maybe move the start of this window in this flow to be
-                        # later. Keep trying until the window's trailing edge
-                        # catches up with its leading edge.
-                        while (win_to_flw_to_start_idx[win][flw] <
-                               flw_to_idx[flw]):
-                            # Look up the arrival time at the start of this
-                            # window in this flow.
-                            arr_time_us = flw_results[flw][
-                                win_to_flw_to_start_idx[win][flw]][
-                                    features.ARRIVAL_TIME_FET]
-                            # Skip this packet if the packet's arrival time is
-                            # either unknown or beyond the bounds of the window.
-                            if ((arr_time_us == -1) or
-                                    # We have made sure that both operands in
-                                    # the subtraction are known.
-                                    (end_time_us - arr_time_us > win_size_us)):
-                                win_to_flw_to_start_idx[win][flw] += 1
-                            else:
-                                break
+                    # pkts_in_win_ = []
+
+                    for flw in flws:
+                        # The bounds should never go backwards, so start the
+                        # search at the current bound.
+                        win_to_flw_to_bounds[win][flw][0] = utils.find_bound(
+                            flw_results[flw][features.ARRIVAL_TIME_FET],
+                            target_us=end_time_us - win_size_us,
+                            min_idx=win_to_flw_to_bounds[win][flw][0],
+                            max_idx=flw_results[flw].shape[0],
+                            which="after")
+                        win_to_flw_to_bounds[win][flw][1] = (
+                            j if flw == cur_flw
+                            else utils.find_bound(
+                                flw_results[flw][features.ARRIVAL_TIME_FET],
+                                target_us=end_time_us,
+                                min_idx=win_to_flw_to_bounds[win][flw][1],
+                                max_idx=flw_results[flw].shape[0],
+                                which="before"))
 
                         # If the window's trailing edge caught up with its
                         # leading edge, then skip this flow.
-                        if (win_to_flw_to_start_idx[win][flw] >=
-                            flw_to_idx[flw]):
+                        if (win_to_flw_to_bounds[win][flw][0] >=
+                                win_to_flw_to_bounds[win][flw][1]):
                             continue
 
                         # Find the earliest time at which this window starts
                         # across all of the flows.
                         proposed_start_time_us = flw_results[
-                            flw][win_to_flw_to_start_idx[win][flw]][
+                            flw][win_to_flw_to_bounds[win][flw][0]][
                                 features.ARRIVAL_TIME_FET]
                         assert proposed_start_time_us != -1, \
                             "Error: Arrival time is unknown."
@@ -829,10 +809,15 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                             start_time_us = proposed_start_time_us
                             first_flw = flw
 
-                        bytes_used.extend(
-                            flw_results[flw][features.WIRELEN_FET][
-                                win_to_flw_to_start_idx[win][flw]:
-                                flw_to_idx[flw] + 1].tolist())
+                        # start_idx, end_idx = win_to_flw_to_bounds[win][flw]
+                        # arr_times_ = flw_results[flw][features.ARRIVAL_TIME_FET][start_idx:end_idx + 1].tolist()
+                        # pkts_in_win_.extend(zip(
+                        #     arr_times_,
+                        #     [flw] * len(arr_times_),
+                        #     [start_idx] * len(arr_times_),
+                        #     [end_idx] * len(arr_times_),
+                        #     flw_results[flw][features.INV_INTERARR_TIME_FET][start_idx:end_idx + 1].tolist(),
+                        #     flw_results[flw][features.WIRELEN_FET][start_idx:end_idx + 1].tolist()))
 
                         # Accumulate the bytes received by this flow during this
                         # window.
@@ -840,8 +825,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                             total_bytes,
                             utils.safe_sum(
                                 flw_results[flw][features.WIRELEN_FET],
-                                start_idx=win_to_flw_to_start_idx[win][flw],
-                                end_idx=flw_to_idx[flw]))
+                                start_idx=win_to_flw_to_bounds[win][flw][0],
+                                end_idx=win_to_flw_to_bounds[win][flw][1]))
 
                     # This window does not cover any flows.
                     if first_flw is None or start_time_us == -1:
@@ -849,7 +834,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     # When calculating the average throughput, we must exclude
                     # the first packet in the window.
                     first_pkt_size = flw_results[
-                        first_flw][win_to_flw_to_start_idx[win][first_flw]][
+                        first_flw][win_to_flw_to_bounds[win][first_flw][0]][
                             features.WIRELEN_FET]
                     total_bytes = utils.safe_sub(
                         total_bytes,
@@ -861,40 +846,62 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                             utils.safe_sub(end_time_us, start_time_us),
                             1e6))
 
-                    flw_results[cur_flw][flw_to_idx[cur_flw]][
-                        features.make_win_metric(
-                            features.TOTAL_TPUT_FET,
-                            win)] = total_tput_bps
+                    #     pkts_in_win_ = sorted(pkts_in_win_, key=lambda x: x[0])
+                    #     arr_times_, flws_, win_start_idxs_, win_end_idxs_, inv_interarrs_, wirelens_ = zip(*pkts_in_win_)
+                    #     assert len(arr_times_) == len(flws_)
+                    #     assert len(arr_times_) == len(win_start_idxs_)
+                    #     assert len(arr_times_) == len(win_end_idxs_)
+                    #     assert len(arr_times_) == len(inv_interarrs_)
+                    #     assert len(arr_times_) == len(wirelens_)
+
+                    #     print("arr_times", arr_times_)
+                    #     print("inv_interarrs", inv_interarrs_)
+                    #     print("wirelens", wirelens_)
+                    #     print("flws", flws_)
+                    #     print("win_start_idxs_", win_start_idxs_)
+                    #     print("win_end_idxs_", win_end_idxs_)
+
+                    #     print("total_tput_bps", total_tput_bps)
+                    #     print("first_pkt_size", first_pkt_size)
+                    #     print("start_time_us", start_time_us)
+                    #     print("end_time_us", end_time_us)
+
+                    #     print("win", win)
+                    #     print("win_size_us", win_size_us)
+
+                    #     #sys.exit()
+
+                    flw_results[cur_flw][j][features.make_win_metric(
+                        features.TOTAL_TPUT_FET, win)] = total_tput_bps
                     # Divide the flow's throughput by the total throughput.
-                    flw_results[cur_flw][flw_to_idx[cur_flw]][
+                    flw_results[cur_flw][j][
                         features.make_win_metric(
                             features.TPUT_SHARE_FET, win)] = (
                                 utils.safe_div(
-                                    flw_results[cur_flw][flw_to_idx[cur_flw]][
+                                    flw_results[cur_flw][j][
                                         features.make_win_metric(
                                             features.TPUT_FET, win)],
                                     total_tput_bps))
 
                     # Check if this throughput is erroneous.
-                    if total_tput_bps > bw_limit_bps:
-                        bad_wins.add(win)
+                    if total_tput_bps > bw_bps:
+                        win_to_errors[win] += 1
 
-            # Move forward one packet.
-            flw_to_idx[cur_flw] += 1
-            remaining_flws = get_remaining_flws(flw_to_idx)
-
-        for win in sorted(features.WINDOWS):
-            if win not in bad_wins:
-                print(f"Smallest safe window size: {win}")
-                break
-        print("Window durations:")
+        print("\tWindow durations:")
         for win in features.WINDOWS:
             print(
-                f"\t{win}",
+                f"\t\t{win}:",
                 win * min(
                     [res[-1][features.MIN_RTT_FET]
                      for res in flw_results.values()]),
                 "us")
+        print("\tWindow errors:")
+        for win in features.WINDOWS:
+            print(f"\t\t{win}:", win_to_errors[win])
+        for win in sorted(features.WINDOWS):
+            if win_to_errors[win] == 0:
+                print(f"\tSmallest safe window size: {win}")
+                break
 
         # for win in features.WINDOWS:
         #     flw_strs = [str(flw) for flw in flws]
