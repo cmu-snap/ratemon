@@ -509,7 +509,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         print(
                             f"Warning: Throughput of {new / 1e6:.2f} Mbps is "
                             "higher than experiment bandwidth of "
-                            f"{exp.bw_Mbps} Mbps for packet {j} of flow "
+                            f"{exp.bw_Mbps:.2f} Mbps for packet {j} of flow "
                             f"{flw_idx} in: {exp_flp}")
                 elif features.TOTAL_TPUT_FET in metric:
                     # This is calcualted at the end.
