@@ -282,6 +282,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             # Regular metrics.
             recv_pkt_seq = recv_pkt[0]
             recv_time_cur_us = recv_pkt[1]
+            payload_B = recv_pkt[4]
+            wirelen_B = recv_pkt[5]
 
             output[j][features.SEQ_FET] = recv_pkt_seq
             output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
@@ -342,11 +344,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                 interarr_time_us = -1
 
             output[j][features.INTERARR_TIME_FET] = interarr_time_us
-            output[j][features.INV_INTERARR_TIME_FET] = utils.safe_div(
-                1, interarr_time_us)
+            output[j][features.INV_INTERARR_TIME_FET] = utils.safe_mul(
+                8 * 1e6 * wirelen_B,
+                utils.safe_div(1, interarr_time_us, 1e6))
 
-            payload_B = recv_pkt[4]
-            wirelen_B = recv_pkt[5]
             output[j][features.PAYLOAD_FET] = payload_B
             output[j][features.WIRELEN_FET] = wirelen_B
             output[j][features.TOTAL_SO_FAR_FET] = (
@@ -471,10 +472,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                             output[win_start_idx][features.ARRIVAL_TIME_FET]),
                         j - win_start_idx)
                 elif features.INV_INTERARR_TIME_FET in metric:
-                    new = utils.safe_div(
-                        1,
-                        output[j][features.make_win_metric(
-                            features.INTERARR_TIME_FET, win)])
+                    new = utils.safe_mul(
+                        8 * 1e6 * wirelen_B,
+                        utils.safe_div(
+                            1,
+                            output[j][features.make_win_metric(
+                                features.INTERARR_TIME_FET, win)]))
                 elif features.TPUT_FET in metric:
                     # Treat the first packet in the window as the beginning of
                     # time. Calculate the average throughput over all but the
