@@ -1059,12 +1059,17 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         utils.assert_tensor(dat_in=dat_in, dat_out=dat_out)
         utils.check_fets(fets, self.in_spc)
 
-        # Each class's weight is 1 minus its popularity ratio. Note that the
-        # weights do not need to sum to 1. Avoid very large numbers to prevent
-        # overflow. Avoid very small numbers to prevent floating point errors.
+        # Calculate a weight for each class. Note that the weights do not need
+        # to sum to 1. Avoid very large numbers to prevent overflow. Avoid very
+        # small numbers to prevent floating point errors.
         tots = utils.get_class_popularity(dat_out, self.get_classes())
         tot = sum(tots)
-        weights = torch.Tensor([1 - tot_cls / tot for tot_cls in tots])
+        # Each class's weight is 1 minus its popularity ratio.
+        weights = torch.Tensor(
+            [1 - tot_cls / tot for tot_cls in tots])
+        # Average each weight with a weight of 1, which serves to smooth the
+        # weights.
+        weights = (weights + 1) / 2
         sample_weights = torch.Tensor([weights[label] for label in dat_out])
 
         self.net.fit(dat_in, dat_out, sample_weight=sample_weights)
