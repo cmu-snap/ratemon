@@ -15,7 +15,6 @@ import shutil
 import time
 
 import json
-from matplotlib import pyplot as plt
 import numpy as np
 
 import cl_args
@@ -249,16 +248,13 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             "loss_event_intervals": collections.deque(),
             "current_loss_event_start_idx": 0,
             "current_loss_event_start_time": 0,
-            # For "loss rate estimated".
-            "loss_queue_estimate": collections.deque()
         } for win in features.WINDOWS}
         # Total number of packet losses up to the current received
         # packet.
-        # pkt_loss_total_true = 0
         pkt_loss_total_estimate = 0
         # Loss rate estimation.
-        prev_pkt_seq = 0
-        highest_seq = 0
+        prev_seq = None
+        highest_seq = None
         # RTT estimation.
         ack_idx = 0
 
@@ -280,12 +276,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     f"\tFlow {flw_idx + 1}/{exp.tot_flws}: "
                     f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
-            recv_pkt_seq = recv_pkt[0]
+            recv_seq = recv_pkt[0]
             recv_time_cur_us = recv_pkt[1]
             payload_B = recv_pkt[4]
             wirelen_B = recv_pkt[5]
 
-            output[j][features.SEQ_FET] = recv_pkt_seq
+            output[j][features.SEQ_FET] = recv_seq
             output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
 
             # Count how many flows were active when this packet was captured.
@@ -301,8 +297,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
 
             if j > 0:
                 prev_min_rtt_us = output[j - 1][features.MIN_RTT_FET]
-                prev_rtt_estimate_us = output[j - 1][features.RTT_ESTIMATE_FET]
-                if recv_pkt_seq in retrans_pkts:
+                prev_rtt_estimate_us = output[j - 1][features.RTT_FET]
+                if recv_seq in retrans_pkts:
                     min_rtt_us = prev_min_rtt_us
                 else:
                     # Receiver-side RTT estimation using the TCP timestamp
@@ -346,7 +342,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             output[j][features.INTERARR_TIME_FET] = interarr_time_us
             output[j][features.INV_INTERARR_TIME_FET] = utils.safe_mul(
                 8 * 1e6 * wirelen_B,
-                utils.safe_div(1, interarr_time_us, 1e6))
+                utils.safe_div(1, interarr_time_us))
 
             output[j][features.PAYLOAD_FET] = payload_B
             output[j][features.WIRELEN_FET] = wirelen_B
@@ -354,29 +350,32 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                 (output[j - 1][features.TOTAL_SO_FAR_FET]
                  if j > 0 else 0) + wirelen_B)
 
-            output[j][features.RTT_ESTIMATE_FET] = rtt_estimate_us
+            output[j][features.RTT_FET] = rtt_estimate_us
             output[j][features.MIN_RTT_FET] = min_rtt_us
             output[j][features.RTT_RATIO_FET] = utils.safe_div(
                 rtt_estimate_us, min_rtt_us)
 
-            # Receiver-side loss rate estimation. Estimate the losses
-            # since the last packet.
-            pkt_loss_cur_estimate = math.ceil(
-                0
-                if recv_pkt_seq == prev_pkt_seq + payload_B
-                else (
-                    (recv_pkt_seq - highest_seq - payload_B) / payload_B
-                    if recv_pkt_seq > highest_seq + payload_B
-                    else (
-                        1
-                        if (recv_pkt_seq < prev_pkt_seq and
-                            prev_pkt_seq != highest_seq)
-                        else 0)))
-            pkt_loss_total_estimate += pkt_loss_cur_estimate
-            prev_pkt_seq = recv_pkt_seq
-            highest_seq = max(highest_seq, prev_pkt_seq)
+            # Receiver-side loss rate estimation. Estimate the losses since the
+            # last packet. Do not try anything complex and prone to edge
+            # cases. Consider only the simple case where the last packet was the
+            # highest sequence number and soem number of interim packets were
+            # dropped.
+            pkt_loss_cur_estimate = (
+                -1 if (
+                    prev_seq is None or
+                    highest_seq is None or
+                    payload_B == 0 or
+                    highest_seq != prev_seq or
+                    prev_seq + payload_B >= recv_seq)
+                else round((recv_seq - prev_seq - payload_B) / payload_B))
+            if pkt_loss_cur_estimate != -1:
+                pkt_loss_total_estimate += pkt_loss_cur_estimate
+            loss_rate_cur = utils.safe_div(
+                pkt_loss_cur_estimate,
+                utils.safe_add(pkt_loss_cur_estimate, 1))
 
             output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
+            output[j][features.LOSS_RATE_FET] = loss_rate_cur
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(
@@ -385,50 +384,33 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     continue
 
                 metric = features.make_ewma_metric(metric, alpha)
-                if features.INTERARR_TIME_FET in metric:
+                if metric.startswith(features.INTERARR_TIME_FET):
                     new = interarr_time_us
-                elif features.INV_INTERARR_TIME_FET in metric:
+                elif metric.startswith(features.INV_INTERARR_TIME_FET):
                     # Do not use the interarrival time EWMA to calculate the
                     # inverse interarrival time. Instead, use the true inverse
                     # interarrival time so that the value used to update the
                     # inverse interarrival time EWMA is not "EWMA-ified" twice.
                     new = output[j][features.INV_INTERARR_TIME_FET]
-                elif features.RTT_ESTIMATE_FET in metric:
+                elif metric.startswith(features.RTT_FET):
                     new = rtt_estimate_us
-                elif features.RTT_RATIO_FET in metric:
+                elif metric.startswith(features.RTT_RATIO_FET):
                     new = rtt_estimate_ratio
-                elif features.LOSS_RATE_FET in metric:
-                    # See comment in case for "loss rate true".
-                    new = pkt_loss_cur_estimate / (
-                        pkt_loss_cur_estimate + 1)
-                elif features.MATHIS_TPUT_FET in metric:
-                    # Use the estimated loss rate to compute the
-                    # Mathis model fair throughput. Contrary to the
-                    # decision for interarrival time, above, here we
-                    # use the value of another EWMA (loss rate
-                    # estimate) to compute the new value for the
-                    # Mathis model throughput EWMA. I believe that
-                    # this is desirable because we want to see how the
-                    # metric as a whole reacts to a certain degree of
-                    # memory.
-                    loss_rate_estimate = (
-                        pkt_loss_total_estimate / j if j > 0 else -1)
-                    # Use "safe" operations in case any of the
-                    # supporting values are -1 (unknown).
-                    new = (
-                        -1 if loss_rate_estimate <= 0 else
-                        utils.safe_mul(
-                            output[j][features.WIRELEN_FET],
-                            utils.safe_div(
-                                MATHIS_C,
-                                utils.safe_div(
-                                    utils.safe_mul(
-                                        min_rtt_us,
-                                        utils.safe_sqrt(loss_rate_estimate)),
-                                    1e6))))
+                elif metric.startswith(features.LOSS_RATE_FET):
+                    new = loss_rate_cur
+                elif metric.startswith(features.MATHIS_TPUT_FET):
+                    # tput = (MSS / RTT) * (C / sqrt(p))
+                    new = utils.safe_mul(
+                        utils.safe_div(
+                            utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
+                            utils.safe_div(min_rtt_us, 1e6)),
+                        utils.safe_div(
+                            MATHIS_C,
+                            utils.safe_sqrt(loss_rate_cur)))
                 else:
                     raise Exception(f"Unknown EWMA metric: {metric}")
-                # Update the EWMA.
+                # Update the EWMA. If this is the first value, then use 0 are
+                # the old value.
                 output[j][metric] = utils.safe_update_ewma(
                     -1 if j == 0 else output[j - 1][metric], new, alpha)
 
@@ -465,20 +447,20 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     continue
 
                 metric = features.make_win_metric(metric, win)
-                if features.INTERARR_TIME_FET in metric:
+                if metric.startswith(features.INTERARR_TIME_FET):
                     new = utils.safe_div(
                         utils.safe_sub(
                             recv_time_cur_us,
                             output[win_start_idx][features.ARRIVAL_TIME_FET]),
                         j - win_start_idx)
-                elif features.INV_INTERARR_TIME_FET in metric:
+                elif metric.startswith(features.INV_INTERARR_TIME_FET):
                     new = utils.safe_mul(
                         8 * 1e6 * wirelen_B,
                         utils.safe_div(
                             1,
                             output[j][features.make_win_metric(
                                 features.INTERARR_TIME_FET, win)]))
-                elif features.TPUT_FET in metric:
+                elif metric.startswith(features.TPUT_FET):
                     # Treat the first packet in the window as the beginning of
                     # time. Calculate the average throughput over all but the
                     # first packet.
@@ -500,40 +482,26 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     # Report a warning if the throughput does not exceed the
                     # bandwidth.
                     if new != -1 and new > bw_bps:
-                        # print(output[win_start_idx:j + 1][features.ARRIVAL_TIME_FET])
-                        # print(output[win_start_idx:j + 1][features.WIRELEN_FET])
-                        # print("inv interarr", output[j][features.INV_INTERARR_TIME_FET])
-                        # print("start_time_us", start_time_us)
-                        # print("end_time_us", end_time_us)
-                        # print("total_bytes", total_bytes)
-                        # print("win_size_us", win_size_us)
-                        # print("tput", new)
-                        # print("bw", bw_bps)
                         print(
                             f"Warning: Throughput of {new / 1e6:.2f} Mbps is "
                             "higher than experiment bandwidth of "
                             f"{exp.bw_Mbps:.2f} Mbps for packet {j} of flow "
                             f"{flw_idx} in: {exp_flp}")
-                elif features.TOTAL_TPUT_FET in metric:
+                elif metric.startswith(features.TOTAL_TPUT_FET):
                     # This is calcualted at the end.
                     continue
-                elif features.TPUT_SHARE_FET in metric:
+                elif metric.startswith(features.TPUT_SHARE_FET):
                     # This is calculated at the end.
                     continue
-                elif features.RTT_ESTIMATE_FET in metric:
+                elif metric.startswith(features.RTT_FET):
                     new = utils.safe_mean(
-                        output[features.make_ewma_metric(
-                            features.RTT_ESTIMATE_FET, alpha=1.)],
-                        win_start_idx, j)
-                elif features.RTT_RATIO_FET in metric:
+                        output[features.RTT_FET], win_start_idx, j)
+                elif metric.startswith(features.RTT_RATIO_FET):
                     new = utils.safe_mean(
-                        output[features.make_ewma_metric(
-                            features.RTT_RATIO_FET, alpha=1.)],
-                        win_start_idx, j)
-                elif (features.LOSS_EVENT_RATE_FET in metric and
-                      "1/sqrt" not in metric):
+                        output[features.RTT_RATIO_FET], win_start_idx, j)
+                elif metric.startswith(features.LOSS_EVENT_RATE_FET):
                     rtt_estimate_us = output[j][features.make_win_metric(
-                        features.RTT_ESTIMATE_FET, win)]
+                        features.RTT_FET, win)]
                     if rtt_estimate_us == -1:
                         # The RTT estimate is -1 (unknown), so we
                         # cannot compute the loss event rate.
@@ -629,7 +597,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         win]["current_loss_event_start_idx"] = cur_start_idx
                     win_state[
                         win]["current_loss_event_start_time"] = cur_start_time
-                elif features.SQRT_LOSS_EVENT_RATE_FET in metric:
+                elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
                     # Use the loss event rate to compute
                     # 1 / sqrt(loss event rate).
                     new = utils.safe_div(
@@ -637,39 +605,41 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         utils.safe_sqrt(output[j][
                             features.make_win_metric(
                                 features.LOSS_EVENT_RATE_FET, win)]))
-                elif features.LOSS_RATE_FET in metric:
-                    # We do not need to check whether recv_time_prev
-                    # is -1 (unknown) because the windowed metrics
-                    # skip the case where j == 0.
-                    win_state[win]["loss_queue_estimate"], new = loss_rate(
-                        win_state[win]["loss_queue_estimate"], win_start_idx,
-                        pkt_loss_cur_estimate, recv_time_cur_us, recv_time_prev,
-                        win_size_us, j)
-                elif features.MATHIS_TPUT_FET in metric:
-                    # Use the loss event rate to compute the Mathis
-                    # model fair throughput.
-                    loss_rate_estimate = (
-                        pkt_loss_total_estimate / j if j > 0 else -1)
+                elif metric.startswith(features.LOSS_RATE_FET):
+                    win_losses = utils.safe_sum(
+                        output[features.PACKETS_LOST_FET], win_start_idx + 1, j)
+                    new = utils.safe_div(
+                        win_losses, win_losses + (j - win_start_idx - 1))
+                elif metric.startswith(features.MATHIS_TPUT_FET):
+                    # tput = (MSS / RTT) * (C / sqrt(p))
                     new = utils.safe_mul(
-                        output[j][features.WIRELEN_FET],
+                        utils.safe_div(
+                            utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
+                            utils.safe_div(min_rtt_us, 1e6)),
                         utils.safe_div(
                             MATHIS_C,
-                            utils.safe_div(
-                                utils.safe_mul(
-                                    min_rtt_us,
-                                    utils.safe_sqrt(loss_rate_estimate)),
-                                1e6)))
-                elif features.MATHIS_LABEL_FET in metric:
-                    # Use the current throughput and Mathis model fair
-                    # throughput to compute the Mathis model label.
-                    new = utils.safe_mathis_label(
-                        output[j][features.make_win_metric(
-                            features.TPUT_FET, win)],
-                        output[j][features.make_win_metric(
-                            features.MATHIS_TPUT_FET, win)])
+                            utils.safe_sqrt(
+                                output[j][features.make_win_metric(
+                                    features.LOSS_EVENT_RATE_FET, win)])))
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
+
+            prev_seq = recv_seq
+            if highest_seq is None:
+                highest_seq = prev_seq
+            else:
+                highest_seq = max(highest_seq, prev_seq)
+            # In the event of sequence number wraparound, reset the sequence
+            # number tracking.
+            #
+            # TODO: Test sequence number wraparound logic.
+            if recv_seq + payload_B > 2**32:
+                print(
+                    "Warning: Sequence number wraparound detected for packet "
+                    f"{j} of flow {flw} in: {exp_flp}")
+                highest_seq = None
+                prev_seq = None
 
         # Calculate the number of retransmissions. Truncate the sent packets
         # at the last occurence of the last packet to be received.
@@ -750,145 +720,80 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
         # Keep track of the number of erroneous throughputs (i.e., higher than
         # the experiment bandwidth) for each window size.
         win_to_errors = {win: 0 for win in features.WINDOWS}
+        # Maps window the index of the packet at the start of that window.
+        win_to_start_idx = {win: 0 for win in features.WINDOWS}
 
-        for cur_flw in flws:
-            # Maps window to flow to the index of the packet at the start of that
-            # window in that flow.
-            win_to_flw_to_bounds = {
-                win: {flw: [0, 0] for flw in flws} for win in features.WINDOWS}
+        # Merge the flow data into a unified timeline.
+        combined = []
+        for flw in flws:
+            num_pkts = flw_results[flw].shape[0]
+            merged = np.empty(
+                (num_pkts,), dtype=[
+                    (features.WIRELEN_FET, "int32"),
+                    (features.MIN_RTT_FET, "int32"),
+                    ("client port", "int32"),
+                    ("server port", "int32"),
+                    ("index", "int32")])
+            merged[features.WIRELEN_FET] = flw_results[flw][features.WIRELEN_FET]
+            merged[features.MIN_RTT_FET] = flw_results[flw][features.MIN_RTT_FET]
+            merged["client port"].fill(flw[0])
+            merged["server port"].fill(flw[1])
+            merged["index"] = np.arange(num_pkts)
+            combined.append(merged)
+        zipped_arr_times, zipped_dat = utils.zip_timeseries(
+            [flw_results[flw][features.ARRIVAL_TIME_FET] for flw in flws],
+            combined)
 
-            for j in range(flw_results[cur_flw].shape[0]):
-                end_time_us = flw_results[cur_flw][j][features.ARRIVAL_TIME_FET]
-                min_rtt_us = flw_results[cur_flw][j][features.MIN_RTT_FET]
+        for j in range(zipped_arr_times.shape[0]):
+            min_rtt_us = zipped_dat[j][features.MIN_RTT_FET]
+            if min_rtt_us == -1:
+                continue
 
-                # If we do not know the current packet's arrival time or min
-                # RTT, then we cannot compute any windowed metrics.
-                if end_time_us == -1 or min_rtt_us == -1:
+            for win in features.WINDOWS:
+                # The bounds should never go backwards, so start the
+                # search at the current bound.
+                win_to_start_idx[win] = utils.find_bound(
+                        zipped_arr_times,
+                        target_us=(
+                            zipped_arr_times[j] -
+                            (win * zipped_dat[j][features.MIN_RTT_FET])),
+                        min_idx=win_to_start_idx[win],
+                        max_idx=j,
+                        which="after")
+                # If the window's trailing edge caught up with its
+                # leading edge, then skip this flow.
+                if win_to_start_idx[win] >= j:
                     continue
 
-                for win in features.WINDOWS:
-                    win_size_us = win * min_rtt_us
-                    first_flw = None
-                    start_time_us = -1
-                    total_bytes = 0
-                    # pkts_in_win_ = []
-
-                    for flw in flws:
-                        # The bounds should never go backwards, so start the
-                        # search at the current bound.
-                        win_to_flw_to_bounds[win][flw][0] = utils.find_bound(
-                            flw_results[flw][features.ARRIVAL_TIME_FET],
-                            target_us=end_time_us - win_size_us,
-                            min_idx=win_to_flw_to_bounds[win][flw][0],
-                            max_idx=flw_results[flw].shape[0],
-                            which="after")
-                        win_to_flw_to_bounds[win][flw][1] = (
-                            j if flw == cur_flw
-                            else utils.find_bound(
-                                flw_results[flw][features.ARRIVAL_TIME_FET],
-                                target_us=end_time_us,
-                                min_idx=win_to_flw_to_bounds[win][flw][1],
-                                max_idx=flw_results[flw].shape[0],
-                                which="before"))
-
-                        # If the window's trailing edge caught up with its
-                        # leading edge, then skip this flow.
-                        if (win_to_flw_to_bounds[win][flw][0] >=
-                                win_to_flw_to_bounds[win][flw][1]):
-                            continue
-
-                        # Find the earliest time at which this window starts
-                        # across all of the flows.
-                        proposed_start_time_us = flw_results[
-                            flw][win_to_flw_to_bounds[win][flw][0]][
-                                features.ARRIVAL_TIME_FET]
-                        assert proposed_start_time_us != -1, \
-                            "Error: Arrival time is unknown."
-
-                        # Determine the flow to which the earliest packet in the
-                        # window belongs.
-                        if (start_time_us == -1 or
-                                proposed_start_time_us < start_time_us):
-                            start_time_us = proposed_start_time_us
-                            first_flw = flw
-
-                        # start_idx, end_idx = win_to_flw_to_bounds[win][flw]
-                        # arr_times_ = flw_results[flw][features.ARRIVAL_TIME_FET][start_idx:end_idx + 1].tolist()
-                        # pkts_in_win_.extend(zip(
-                        #     arr_times_,
-                        #     [flw] * len(arr_times_),
-                        #     [start_idx] * len(arr_times_),
-                        #     [end_idx] * len(arr_times_),
-                        #     flw_results[flw][features.INV_INTERARR_TIME_FET][start_idx:end_idx + 1].tolist(),
-                        #     flw_results[flw][features.WIRELEN_FET][start_idx:end_idx + 1].tolist()))
-
+                total_tput_bps = utils.safe_div(
+                    utils.safe_mul(
                         # Accumulate the bytes received by this flow during this
-                        # window.
-                        total_bytes = utils.safe_add(
-                            total_bytes,
-                            utils.safe_sum(
-                                flw_results[flw][features.WIRELEN_FET],
-                                start_idx=win_to_flw_to_bounds[win][flw][0],
-                                end_idx=win_to_flw_to_bounds[win][flw][1]))
+                        # window. When calculating the average throughput, we
+                        # must exclude the first packet in the window.
+                        utils.safe_sum(
+                            zipped_dat[features.WIRELEN_FET],
+                            start_idx=win_to_start_idx[win] + 1,
+                            end_idx=j),
+                        8 * 1e6),
+                    utils.safe_sub(
+                        zipped_arr_times[j],
+                        zipped_arr_times[win_to_start_idx[win]]))
+                # Extract the flow to which this packet belongs, as well as its
+                # index in its flow.
+                flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
+                index = zipped_dat[j]["index"]
+                flw_results[flw][index][features.make_win_metric(
+                    features.TOTAL_TPUT_FET, win)] = total_tput_bps
+                # Divide the flow's throughput by the total throughput.
+                flw_results[flw][index][features.make_win_metric(
+                    features.TPUT_SHARE_FET, win)] = utils.safe_div(
+                        flw_results[flw][index][
+                            features.make_win_metric(features.TPUT_FET, win)],
+                        total_tput_bps)
 
-                    # This window does not cover any flows.
-                    if first_flw is None or start_time_us == -1:
-                        continue
-                    # When calculating the average throughput, we must exclude
-                    # the first packet in the window.
-                    first_pkt_size = flw_results[
-                        first_flw][win_to_flw_to_bounds[win][first_flw][0]][
-                            features.WIRELEN_FET]
-                    total_bytes = utils.safe_sub(
-                        total_bytes,
-                        0 if first_pkt_size == -1 else first_pkt_size)
-
-                    total_tput_bps = utils.safe_div(
-                        utils.safe_mul(total_bytes, 8),
-                        utils.safe_div(
-                            utils.safe_sub(end_time_us, start_time_us),
-                            1e6))
-
-                    #     pkts_in_win_ = sorted(pkts_in_win_, key=lambda x: x[0])
-                    #     arr_times_, flws_, win_start_idxs_, win_end_idxs_, inv_interarrs_, wirelens_ = zip(*pkts_in_win_)
-                    #     assert len(arr_times_) == len(flws_)
-                    #     assert len(arr_times_) == len(win_start_idxs_)
-                    #     assert len(arr_times_) == len(win_end_idxs_)
-                    #     assert len(arr_times_) == len(inv_interarrs_)
-                    #     assert len(arr_times_) == len(wirelens_)
-
-                    #     print("arr_times", arr_times_)
-                    #     print("inv_interarrs", inv_interarrs_)
-                    #     print("wirelens", wirelens_)
-                    #     print("flws", flws_)
-                    #     print("win_start_idxs_", win_start_idxs_)
-                    #     print("win_end_idxs_", win_end_idxs_)
-
-                    #     print("total_tput_bps", total_tput_bps)
-                    #     print("first_pkt_size", first_pkt_size)
-                    #     print("start_time_us", start_time_us)
-                    #     print("end_time_us", end_time_us)
-
-                    #     print("win", win)
-                    #     print("win_size_us", win_size_us)
-
-                    #     #sys.exit()
-
-                    flw_results[cur_flw][j][features.make_win_metric(
-                        features.TOTAL_TPUT_FET, win)] = total_tput_bps
-                    # Divide the flow's throughput by the total throughput.
-                    flw_results[cur_flw][j][
-                        features.make_win_metric(
-                            features.TPUT_SHARE_FET, win)] = (
-                                utils.safe_div(
-                                    flw_results[cur_flw][j][
-                                        features.make_win_metric(
-                                            features.TPUT_FET, win)],
-                                    total_tput_bps))
-
-                    # Check if this throughput is erroneous.
-                    if total_tput_bps > bw_bps:
-                        win_to_errors[win] += 1
+                # Check if this throughput is erroneous.
+                if total_tput_bps > bw_bps:
+                    win_to_errors[win] += 1
 
         print("\tWindow durations:")
         for win in features.WINDOWS:
@@ -905,47 +810,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             if win_to_errors[win] == 0:
                 print(f"\tSmallest safe window size: {win}")
                 break
-
-        # for win in features.WINDOWS:
-        #     flw_strs = [str(flw) for flw in flws]
-
-        #     tput_fet = features.make_win_metric(features.TPUT_FET, win)
-        #     flw_to_known_idxs = {
-        #         flw: (flw_results[flw][tput_fet] != -1).nonzero()
-        #         for flw in flws}
-        #     xs = [
-        #         flw_results[flw][flw_to_known_idxs[flw]][
-        #             features.ARRIVAL_TIME_FET] / 1e6
-        #         for flw in flws]
-        #     ys = [
-        #         flw_results[flw][flw_to_known_idxs[flw]][tput_fet] / 1e6
-        #         for flw in flws]
-        #     for xs_, ys_ in zip(xs, ys):
-        #         plt.plot(xs_, ys_, ".", markersize=0.5)
-
-        #     total_tput_fet = features.make_win_metric(
-        #         features.TOTAL_TPUT_FET, win)
-        #     flw_to_known_idxs = {
-        #         flw: (flw_results[flw][total_tput_fet] != -1).nonzero()
-        #         for flw in flws}
-        #     xs = [
-        #         flw_results[flw][flw_to_known_idxs[flw]][
-        #             features.ARRIVAL_TIME_FET] / 1e6
-        #         for flw in flws]
-        #     ys = [
-        #         flw_results[flw][flw_to_known_idxs[flw]][total_tput_fet] / 1e6
-        #         for flw in flws]
-        #     plt.plot(*utils.zip_timeseries(xs, ys))
-
-        #     plt.legend(flw_strs + ["total"], loc="upper left", fontsize=5)
-        #     plt.title(tput_fet)
-        #     plt.xlabel("time (s)")
-        #     plt.ylabel("throughput (Mb/s)")
-        #     plt.xlim(left=0)
-        #     plt.ylim(bottom=0, top=exp.bw_Mbps * 1.1)
-        #     plt.tight_layout()
-        #     plt.savefig(path.join(out_dir, f"tput_minRtt{win}.pdf"))
-        #     plt.close()
+        else:
+            print("Warning: No safe window sizes!")
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the

@@ -221,6 +221,7 @@ class Exp():
          cca_1_flws, cca_2_flws, end_time, _) = toks
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
+        self.bw_bps = self.bw_Mbps * 1e6
         # Bottleneck router delay (us).
         self.rtt_us = float(rtt_ms[:-3]) * 1000
         # Bandwidth-delay product (bits).
@@ -361,7 +362,7 @@ def parse_packets(flp, flws_ports):
                 ts[1],
                 # TCP payload. Length of the IP packet minus the length of the
                 # IP header minus the length of the TCP header.
-                ip.len - ip.ihl - (tcp.dataofs * 4),
+                ip.len - (ip.ihl * 4) - (tcp.dataofs * 4),
                 # Total packet size.
                 pkt_mdat.wirelen)
 
@@ -1051,19 +1052,20 @@ def check_fets(fets, in_spc):
 
 def zip_timeseries(xs, ys):
     """ Zips together multiple timeseries from the same timespace. """
-    assert len(xs) == len(ys)
     assert xs
+    assert ys
+    assert len(xs) == len(ys)
     for idx in range(len(xs)):
         assert xs[idx].shape[0] == ys[idx].shape[0]
 
     idxs = [0] * len(xs)
-    tot_pkts = sum(xs_.shape[0] for xs_ in xs)
-    xs_o = np.full((tot_pkts,), -1, dtype=xs[0].dtype)
-    ys_o = np.full((tot_pkts,), -1, dtype=ys[0].dtype)
+    tot = sum(xs_.shape[0] for xs_ in xs)
+    xs_o = np.full((tot,), -1, dtype=xs[0].dtype)
+    ys_o = np.full((tot,), -1, dtype=ys[0].dtype)
     idx_o = 0
 
     while idx_o < xs_o.shape[0]:
-        chosen = 0
+        chosen = None
         earliest = sys.maxsize
 
         for idx in range(len(xs)):
@@ -1072,12 +1074,12 @@ def zip_timeseries(xs, ys):
                 if proposed_earliest < earliest:
                     chosen = idx
                     earliest = proposed_earliest
+        assert chosen is not None, "Ran out of points."
 
         xs_o[idx_o] = xs[chosen][idxs[chosen]]
         ys_o[idx_o] = ys[chosen][idxs[chosen]]
         idx_o += 1
         idxs[chosen] += 1
-
     return xs_o, ys_o
 
 def select_fets(cluster_to_fets, top_fets):
