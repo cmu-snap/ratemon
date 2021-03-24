@@ -665,14 +665,14 @@ def safe_mean(dat, start_idx=None, end_idx=None):
 
 def safe_update_ewma(prev_ewma, new_val, alpha):
     """
-    Safely updates an exponentially weighted moving average. If the
-    previous EWMA is -1 (unknown), then the new EWMA is assumed to be
-    the unweighted new value.
+    Safely updates an exponentially weighted moving average. If the previous
+    EWMA is -1 (unknown), then the new EWMA is assumed to be the unweighted new
+    value. If the new value is unknown, then the EWMA does not change.
     """
     return (
         new_val if prev_ewma == -1
         else (
-            -1 if new_val == -1
+            prev_ewma if new_val == -1
             else alpha * new_val + (1 - alpha) * prev_ewma))
 
 

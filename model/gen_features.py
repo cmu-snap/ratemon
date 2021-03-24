@@ -254,6 +254,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
         pkt_loss_total_estimate = 0
         # Loss rate estimation.
         prev_seq = None
+        prev_payload_B = None
         highest_seq = None
         # RTT estimation.
         ack_idx = 0
@@ -355,19 +356,24 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             output[j][features.RTT_RATIO_FET] = utils.safe_div(
                 rtt_estimate_us, min_rtt_us)
 
-            # Receiver-side loss rate estimation. Estimate the losses since the
-            # last packet. Do not try anything complex and prone to edge
-            # cases. Consider only the simple case where the last packet was the
-            # highest sequence number and soem number of interim packets were
-            # dropped.
+            # Receiver-side loss rate estimation. Estimate the number of lost
+            # packets since the last packet. Do not try anything complex or
+            # prone to edge cases. Consider only the simple case where the last
+            # packet and current packet are in order and not retransmissions.
             pkt_loss_cur_estimate = (
                 -1 if (
                     prev_seq is None or
+                    prev_seq == -1 or
+                    prev_payload_B is None or
+                    prev_payload_B <= 0 or
+                    payload_B <= 0 or
                     highest_seq is None or
-                    payload_B == 0 or
+                    # The last packet was a retransmission.
                     highest_seq != prev_seq or
-                    prev_seq + payload_B >= recv_seq)
-                else round((recv_seq - prev_seq - payload_B) / payload_B))
+                    # The current packet is a retransmission.
+                    prev_seq + prev_payload_B > recv_seq)
+                else round((recv_seq - prev_payload_B - prev_seq) / payload_B))
+
             if pkt_loss_cur_estimate != -1:
                 pkt_loss_total_estimate += pkt_loss_cur_estimate
             loss_rate_cur = utils.safe_div(
@@ -609,7 +615,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     win_losses = utils.safe_sum(
                         output[features.PACKETS_LOST_FET], win_start_idx + 1, j)
                     new = utils.safe_div(
-                        win_losses, win_losses + (j - win_start_idx - 1))
+                        win_losses, win_losses + (j - win_start_idx))
                 elif metric.startswith(features.MATHIS_TPUT_FET):
                     # tput = (MSS / RTT) * (C / sqrt(p))
                     new = utils.safe_mul(
@@ -626,10 +632,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                 output[j][metric] = new
 
             prev_seq = recv_seq
-            if highest_seq is None:
-                highest_seq = prev_seq
-            else:
-                highest_seq = max(highest_seq, prev_seq)
+            prev_payload_B = payload_B
+            highest_seq = (
+                prev_seq if highest_seq is None else max(highest_seq, prev_seq))
             # In the event of sequence number wraparound, reset the sequence
             # number tracking.
             #
