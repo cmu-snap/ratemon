@@ -403,7 +403,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     new = utils.safe_mul(
                         utils.safe_div(
                             utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                            utils.safe_div(min_rtt_us, 1e6)),
+                            utils.safe_div(output[j][features.RTT_FET], 1e6)),
                         utils.safe_div(
                             MATHIS_C,
                             utils.safe_sqrt(loss_rate_cur)))
@@ -615,7 +615,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     new = utils.safe_mul(
                         utils.safe_div(
                             utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                            utils.safe_div(min_rtt_us, 1e6)),
+                            utils.safe_div(output[j][features.RTT_FET], 1e6)),
                         utils.safe_div(
                             MATHIS_C,
                             utils.safe_sqrt(
