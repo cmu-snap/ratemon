@@ -141,7 +141,6 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
     print(f"Parsing: {exp_flp}")
     if exp.tot_flws == 0:
         print(f"\tNo flows to analyze in: {exp_flp}")
-    bw_bps = exp.bw_Mbps * 1e6
 
     # Construct the output filepaths.
     out_flp = path.join(out_dir, f"{exp.name}.npz")
@@ -294,7 +293,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                  f"flow {flw_idx} in: {exp_flp}")
 
             output[j][features.ACTIVE_FLOWS_FET] = active_flws
-            output[j][features.BW_FAIR_SHARE_FET] = bw_bps / active_flws
+            output[j][features.BW_FAIR_SHARE_FET] = exp.bw_bps / active_flws
 
             if j > 0:
                 prev_min_rtt_us = output[j - 1][features.MIN_RTT_FET]
@@ -487,12 +486,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
 
                     # Report a warning if the throughput does not exceed the
                     # bandwidth.
-                    if new != -1 and new > bw_bps:
+                    if new != -1 and new > exp.bw_bps:
                         print(
                             f"Warning: Throughput of {new / 1e6:.2f} Mbps is "
                             "higher than experiment bandwidth of "
-                            f"{exp.bw_Mbps:.2f} Mbps for packet {j} of flow "
-                            f"{flw_idx} in: {exp_flp}")
+                            f"{exp.bw_Mbps:.2f} Mbps for window size {win} for "
+                            f"packet {j} of flow {flw_idx} in: {exp_flp}")
                 elif metric.startswith(features.TOTAL_TPUT_FET):
                     # This is calcualted at the end.
                     continue
@@ -797,7 +796,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         total_tput_bps)
 
                 # Check if this throughput is erroneous.
-                if total_tput_bps > bw_bps:
+                if total_tput_bps > exp.bw_bps:
                     win_to_errors[win] += 1
 
         print("\tWindow durations:")
