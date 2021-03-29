@@ -41,10 +41,8 @@ class Split:
         # Features values that cannot be computed are replaced
         # with -1. When reading the splits later, we can detect
         # incomplete feature values by looking for -1s.
-        self.dat = np.memmap(
-            flp,
-            dtype=(dtype.descr + [("num flows", "int32")]), mode="w+",
-            shape=(num_pkts,))
+        self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
+        self.dat.fill(-100)
         self.fets = self.dat.dtype.names
 
         # The next available index in self.dat. Used if self.shuffle == False.
@@ -91,7 +89,6 @@ class Split:
                  f"there are only {num_slots_remaining} packet slots "
                  "available!")
             dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
-            selected_rows = self.dat[dat_new_idxs]
         else:
             # Identify the indices in the merged array.
             start_idx = self.idx
@@ -99,19 +96,9 @@ class Split:
             assert self.idx <= self.dat.shape[0], \
                 (f"Index {self.idx} into \"{self.name}\" split does not fit "
                  f"within shape {self.dat.shape}")
-            dat_new_idxs = range(start_idx, self.idx)
-            selected_rows = self.dat[start_idx:self.idx]
+            dat_new_idxs = list(range(start_idx, self.idx))
 
-        # Assign the feature values.
-        for fet in self.fets:
-            #print("Setting fet:", fet)
-            if fet == "num flows":
-                selected_rows[fet].fill(exp.tot_flws)
-            else:
-                #print(exp_new_idxs)
-                #print(exp_dat[fet][exp_new_idxs])
-                selected_rows[fet][:] = exp_dat[fet][exp_new_idxs]
-
+        self.dat[dat_new_idxs] = exp_dat[exp_new_idxs]
         self.dat_available_idxs -= set(dat_new_idxs)
         return exp_available_idxs
 
@@ -122,6 +109,7 @@ class Split:
         self.finished = True
         # Mark any unused indices as invalid by filling their values with -1.
         self.dat[list(self.dat_available_idxs)].fill(-1)
+        self.dat.flush()
 
 
 def survey(exp_flps, warmup_frac):
@@ -172,7 +160,7 @@ def survey(exp_flps, warmup_frac):
     return num_pkts, dtype
 
 
-def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac, cca):
+def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     """
     Merges the provided experiments into training, validation, and
     test splits as defined by the percents in split_prcs. Stores the
@@ -196,19 +184,10 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac, cca):
             print(f"\tError loading {exp_flp}")
             continue
 
-        # Determine which flows to extract based on the specified CCA.
-        if cca == exp.cca_1_name:
-            flw_idxs = range(exp.cca_1_flws)
-        elif cca == exp.cca_2_name:
-            flw_idxs = range(exp.cca_1_flws, exp.tot_flws)
-        else:
-            print(f"\tCCA {cca} not found in {exp_flp}")
-            continue
-
         # Combine flows.
         dat_combined = None
-        for flw_idx in flw_idxs:
-            dat_flw = dat[flw_idx]
+        for flw in range(exp.tot_flws):
+            dat_flw = dat[flw]
             if warmup_frac != 0:
                 # Remove a percentage of packets from the beginning of the
                 # experiment.
@@ -257,9 +236,6 @@ def main():
         help="The path to a directory containing the experiment files.",
         required=True, type=str)
     psr.add_argument(
-        "--cca", default=defaults.DEFAULTS["cca"], help="The CCA to train on.",
-        required=False)
-    psr.add_argument(
         "--train-split", default=50, help="Training data fraction",
         required=False, type=float)
     psr.add_argument(
@@ -297,9 +273,7 @@ def main():
         "\n\t".join(sorted(dtype.names)))
 
     # Create the merged training, validation, and test files.
-    merge(
-        exp_flps, args.out_dir, num_pkts, dtype, split_prcs, warmup_frac,
-        args.cca)
+    merge(exp_flps, args.out_dir, num_pkts, dtype, split_prcs, warmup_frac)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 
