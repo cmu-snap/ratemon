@@ -279,35 +279,43 @@ def make_datasets(net, args, dat=None):
     dat_out_all = np.concatenate(dat_out_all, axis=0)
     dat_extra_all = np.concatenate(dat_extra_all, axis=0)
 
+    # HistGbdtSklearn models are processed differently.
+    is_dt = isinstance(net, models.HistGbdtSklearnWrapper)
+
+    if not is_dt:
+        # Verify that there are no NaNs or Infs in the data.
+        for fet in dat_in_all.dtype.names:
+            assert (not (
+                np.isnan(dat_in_all[fet]).any() or
+                np.isinf(dat_in_all[fet]).any())), \
+                f"Warning: NaNs or Infs in input feature: {fet}")
+        assert (not (
+            np.isnan(dat_out_all[features.LABEL_CLASS]).any() or
+            np.isinf(dat_out_all[features.LABEL_CLASS]).any())), \
+            f"Warning: NaNs or Infs in ground truth.")
+
     # Convert all instances of -1 (feature value unknown) to the mean
     # for that feature.
     bad_fets = []
     for fet in dat_in_all.dtype.names:
-        fet_values = dat_in_all[fet]
-        if (fet_values == -1).all():
+        if (dat_in_all[fet] == -1).all():
             bad_fets.append(fet)
             continue
-        dat_in_all[fet] = np.where(
-            fet_values == -1, np.mean(fet_values), fet_values)
+        invalid = dat_in_all[fet] == -1
+        dat_in_all[fet][invalid] = (
+            float("NaN") if is_dt
+            else np.mean(dat_in_all[fet][np.logical_not(invalid)]))
         assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
     assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
 
-    # Scale input features. Do this here instead of in process_exp()
-    # because all of the features must be scaled using the same
-    # parameters.
-    dat_in_all, prms_in = scale_fets(dat_in_all, scl_grps, args["standardize"])
-
-    # # Check if any of the data is malformed and discard features if
-    # # necessary.
-    # fets = []
-    # for fet in dat_in_all.dtype.names:
-    #     fet_values = dat_in_all[fet]
-    #     if ((not np.isnan(fet_values).any()) and
-    #             (not np.isinf(fet_values).any())):
-    #         fets.append(fet)
-    #     else:
-    #         print(f"Discarding: {fet}")
-    # dat_in_all = dat_in_all[fets]
+    if is_dt:
+        # The HistGbdtSklearn model does not require feature scaling because it
+        # is a decision tree.
+        prms_in = np.zeros((0,))
+    else:
+        # Scale input features. Do this here instead of in process_exp() because
+        # all of the features must be scaled using the same parameters.
+        dat_in_all, prms_in = data.scale_fets(dat_in_all, scl_grps, args["standardize"])
 
     return dat_in_all, dat_out_all, dat_extra_all, prms_in
 
