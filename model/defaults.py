@@ -44,8 +44,8 @@ DEFAULTS = {
     "drop_popular": True,
     "analyze_features": False,
     "l2_regularization": 0,
-    "cluster_threshold": 1,
-    "fets_to_pick": 20,
+    "clusters": 30,
+    "fets_to_pick": None,
     "perm_imp_repeats": 10
 }
 # Arguments to ignore when converting an arguments dictionary to a
@@ -59,3 +59,5 @@ SYNC = False
 SEED = 1337
 # Name to use for lock files.
 LOCK_FLN = "lock"
+# The maximum number of times to try finding a cluster threshold.
+CLUSTER_ATTEMPTS = 1000

@@ -910,10 +910,10 @@ def main():
         help=("If the model is of type \"{models.HistGbdtSklearnWrapper().name}\", "
               "then use this as the L2 regularization parameter."))
     psr.add_argument(
-        "--cluster-threshold", default=defaults.DEFAULTS["cluster_threshold"],
-        required=False, type=float,
-        help=("If \"--analyze-features\" is specified, then use this as the "
-              "clustering threshold."))
+        "--clusters", default=defaults.DEFAULTS["clusters"],
+        required=False, type=int,
+        help=("If \"--analyze-features\" is specified, then pick this many "
+              "clusters."))
     # TODO: Make comments specific to HistGbdt
     psr.add_argument(
         "--features-to-pick", default=defaults.DEFAULTS["fets_to_pick"],
@@ -926,9 +926,12 @@ def main():
         help=("If \"--analyze-features\" is specificed, then perform "
               "permutation importance analysis with this many repeats."))
     psr, psr_verify = cl_args.add_num_exps(*cl_args.add_training(psr))
+
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \
         "\"--drop-popular\" must be used with \"--balance\"."
+    assert args["clusters"] >= 1, \
+        f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
         assert arg in defaults.DEFAULTS, \

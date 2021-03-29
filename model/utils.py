@@ -913,8 +913,17 @@ def log_feature_analysis(out_dir, msg):
 
 
 def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra,
-                                cluster_thresh=1):
+                                clusters):
     """ Analyzes correlation among features of a net. """
+    assert_tensor(dat_in=dat_in)
+    # Convert all unknown values (-1) and NaNs to the mean of their column
+    # because calculating the correlation using unknown values does not make
+    # sense and stats.spearmanr() does not like NaNs, respectively.
+    for col in range(dat_in.size()[1]):
+        invalid = torch.logical_or(dat_in[:,col].isnan(), dat_in[:,col] == -1)
+        dat_in[:,col][torch.nonzero(invalid)] = torch.mean(
+            dat_in[:,col][torch.nonzero(torch.logical_not(invalid))])
+
     # Feature analysis.
     fets = np.asarray(net.in_spc)
     corr = stats.spearmanr(dat_in).correlation
@@ -938,17 +947,36 @@ def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra,
     fig.tight_layout()
     plt.savefig(path.join(out_dir, f"dendrogram_{net.name}.pdf"))
 
-    # Determine which cluster each feature belongs to.
-    #
-    # Maps cluster index to a list of the indices of features in that cluster.
-    cluster_to_fets = collections.defaultdict(list)
-    for feature_idx, cluster_idx in enumerate(cluster.hierarchy.fcluster(
-            corr_linkage, cluster_thresh, criterion='distance')):
-        cluster_to_fets[cluster_idx].append(fets[feature_idx])
+    # Determine which cluster each feature belongs to. Find a cluster threshold
+    # that yields the desired number of clusters.
+    cluster_thresh = 1
+    attempts = 0
+    while attempts < defaults.CLUSTER_ATTEMPTS:
+        attempts += 1
+        # Maps cluster index to a list of the indices of features in that cluster.
+        cluster_to_fets = collections.defaultdict(list)
+        for feature_idx, cluster_idx in enumerate(cluster.hierarchy.fcluster(
+                corr_linkage, cluster_thresh, criterion='distance')):
+            cluster_to_fets[cluster_idx].append(fets[feature_idx])
+        num_clusters = len(cluster_to_fets)
+        if num_clusters == clusters:
+            # Found the desired number of clusters.
+            break
+        if num_clusters > clusters:
+            # Too many clusters. Raise the threshold.
+            cluster_thresh *= 1.01
+        else:
+            # Too fwe clusters. Lower the threshold.
+            cluster_thresh -= 0.01
+    else:
+        raise Exception(
+            f"Unable to find a suitable cluster threshold for {clusters} "
+            f"clusters after {defaults.CLUSTER_ATTEMPTS} attempts.")
+
     # Print the clusters.
     log_feature_analysis(
         out_dir,
-        "Feature clusters:\n" + "\n".join(
+        f"Feature clusters ({len(cluster_to_fets)}):\n" + "\n".join(
             (f"\t{cluster_id}:\n\t\t" + "\n\t\t".join(fets))
             for cluster_id, fets in sorted(cluster_to_fets.items())))
     # Print the first feature in every cluster.
@@ -1001,7 +1029,10 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes,
             #         key=lambda p: abs(p[1]))[-20:],
             #     key=lambda p: p[0])
             top_fets = list(reversed(sorted(
-                zip(fets, imps), key=lambda p: abs(p[1]))[-num_fets_to_pick:]))
+                zip(fets, imps), key=lambda p: abs(p[1]))))
+            if num_fets_to_pick is not None:
+                top_fets = top_fets[:num_fets_to_pick]
+
         log_feature_analysis(
             out_dir,
             f"----------\n{qualifier} features ({len(top_fets)}):\n" +
