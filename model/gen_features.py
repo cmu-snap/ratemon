@@ -202,6 +202,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
     # The final output, with one entry per flow.
     flw_results = {}
 
+    # Keep track of the number of erroneous throughputs (i.e., higher than the
+    # experiment bandwidth) for each window size.
+    win_to_errors = {win: 0 for win in features.WINDOWS}
+
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
     dtype = (
@@ -437,10 +441,6 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         which="after")
 
             # Windowed metrics.
-            #
-            # Keep track of the number of erroneous throughputs (i.e., higher than
-            # the experiment bandwidth) for each window size.
-            win_to_errors = {win: 0 for win in features.WINDOWS}
             for (metric, _), win in itertools.product(
                     features.WINDOWED, features.WINDOWS):
                 # If we cannot estimate the min RTT, then we cannot compute any
@@ -817,8 +817,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     features.TPUT_TO_FAIR_SHARE_RATIO_FET, win)] = (
                         utils.safe_div(
                             tput_share,
-                            flw_results[flw][index][features.make_win_metric(
-                                features.BW_FAIR_SHARE_FRAC_FET, win)]))
+                            flw_results[flw][index][
+                                features.BW_FAIR_SHARE_FRAC_FET]))
                 # Check if this throughput is erroneous.
                 if total_tput_bps > exp.bw_bps:
                     win_to_errors[win] += 1

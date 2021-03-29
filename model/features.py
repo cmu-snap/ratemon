@@ -5,6 +5,8 @@ import itertools
 
 import numpy as np
 
+import defaults
+
 
 def make_ewma_metric(metric, alpha):
     """ Format the name of an EWMA metric. """
@@ -132,7 +134,7 @@ FEATURES = [
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(
-    features.TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
+    TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
 
 # Features to store as extra data for each sample.
 EXTRA_FETS = [

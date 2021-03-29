@@ -1,7 +1,6 @@
 """ Models. """
 
 import copy
-import functools
 import math
 import os
 from os import path
