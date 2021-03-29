@@ -121,7 +121,7 @@ def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
     dat_extra = recfunctions.repack_fields(dat_extra)
 
     # Convert output features to class labels.
-    dat_out = net.convert_to_class(exp, dat_out)
+    dat_out = net.convert_to_class(dat_out)
 
     # If the results contains NaNs or Infs, then discard this experiment.
     if (utils.has_non_finite(dat_in) or utils.has_non_finite(dat_out) or

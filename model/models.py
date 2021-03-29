@@ -17,6 +17,7 @@ from sklearn import svm
 from sklearn.experimental import enable_hist_gradient_boosting
 import torch
 
+import defaults
 import features
 import utils
 
@@ -68,7 +69,7 @@ class PytorchModelWrapper:
         return torch.zeros(()), torch.zeros(())
 
     @staticmethod
-    def convert_to_class(exp, dat_out):
+    def convert_to_class(dat_out):
         """ Converts real-valued feature values into classes. """
         return dat_out
 
@@ -147,27 +148,13 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 len(self.in_spc)))
 
     @staticmethod
-    def convert_to_class(exp, dat_out):
+    def convert_to_class(dat_out):
         # Verify that the output features consist of exactly one column.
         assert len(dat_out.dtype.names) == 1, "Should be only one column."
-        # Map a conversion function across all entries. Note that
-        # here an entry is an entire row, since each row is a
-        # single tuple value.
-
-        # TODO: Need to update this to use "flows active" feature
-
-        clss = np.vectorize(
-            functools.partial(
-                # Compare each queue occupancy percent with the fair
-                # percent. prc[0] assumes a single column.
-                lambda prc, fair: prc[0] > fair,
-                fair=1. / exp.tot_flws),
-            # Convert to integers.
-            otypes=[int])(dat_out)
-        clss_str = np.empty(
-            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
-        clss_str[features.LABEL_FET] = clss
-        return clss_str
+        clss = np.empty(
+            (dat_out.shape[0],), dtype=[(features.LABEL_FET, "int32")])
+        clss[features.LABEL_FET] = (dat_out[:,0] > 1).astype(int)
+        return clss
 
     @staticmethod
     def __bucketize(dat_in, dat_extra, dat_in_start_idx, dat_in_end_idx,
@@ -370,7 +357,7 @@ class BinaryDnnWrapper(BinaryModelWrapper):
 
     name = "BinaryDnn"
     in_spc = features.FEATURES
-    out_spc = [features.TPUT_SHARE_FET]
+    out_spc = [features.OUT_FET]
 
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
@@ -415,10 +402,11 @@ class SvmWrapper(BinaryModelWrapper):
     """ Wraps Svm. """
 
     name = "Svm"
-    in_spc = [
-        features.ARRIVAL_TIME_FET,
-        features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
-    out_spc = [features.TPUT_SHARE_FET]
+    #in_spc = [
+    #    features.ARRIVAL_TIME_FET,
+    #    features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
+    out_spc = [features.OUT_FET]
+
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
     params = ["lr", "momentum"]
@@ -463,7 +451,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
     name = "SvmSklearn"
     in_spc = features.FEATURES
-    out_spc = [features.TPUT_SHARE_FET]
+    out_spc = [features.OUT_FET]
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
@@ -504,45 +492,40 @@ class SvmSklearnWrapper(SvmWrapper):
         print()
 
     @staticmethod
-    def convert_to_class(exp, dat_out):
+    def convert_to_class(dat_out):
         if SvmSklearnWrapper.num_clss == 2:
-            return BinaryModelWrapper.convert_to_class(exp, dat_out)
+            return BinaryModelWrapper.convert_to_class(dat_out)
         assert SvmSklearnWrapper.num_clss == 3, \
             ("Only 2 or 3 classes are supported, not: "
              f"{SvmSklearnWrapper.num_clss}")
-        assert len(dat_out.dtype.names) == 1, "Should be only one column."
+        assert len(dat_out.dtype.names) == 1
 
-        def percent_to_class(prc, fair):
-            """ Convert a queue occupancy percent to a fairness class. """
-            assert len(prc) == 1, "Should be only one column."
-            prc = prc[0]
+        def ratio_to_class(ratio):
+            """
+            Converts a ratio of actual throughput to throughput fair share into
+            a fairness class.
+            """
+            assert len(ratio) == 1, "Should be only one column."
+            ratio = ratio[0]
 
-            # Threshold between fair and unfair.
-            tsh_fair = 0.1
-
-            dif = (fair - prc) / fair
-            if dif < -1 * tsh_fair:
-                # We are much higher than fair.
-                cls = 2
-            elif -1 * tsh_fair <= dif <= tsh_fair:
-                # We are fair.
-                cls = 1
-            elif tsh_fair < dif:
-                # We are much lower than fair.
+            if ratio < 1 - defaults.FAIR_THRESH:
                 cls = 0
+            elif ratio <= 1 + defaults.FAIR_THRESH:
+                cls = 1
+            elif ratio > 1 + defaults.FAIR_THRESH:
+                cls = 2
             else:
-                assert False, "This should never happen."
+                raise Exception("This case should never be reached.")
+
             return cls
 
         # Map a conversion function across all entries. Note that here
         # an entry is an entire row, since each row is a single tuple
         # value.
-        clss = np.vectorize(
-            functools.partial(
-                percent_to_class, fair=1. / exp.tot_flws),
-            otypes=[int])(dat_out)
+        clss = np.vectorize(ratio_to_class, otypes=[int])(dat_out)
+        # Convert the unstructured array into a structured array.
         clss_str = np.empty(
-            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
+            (clss.shape[0],), dtype=[(features.LABEL_FET, "int32")])
         clss_str[features.LABEL_FET] = clss
         return clss_str
 
@@ -871,14 +854,14 @@ class SvmSklearnWrapper(SvmWrapper):
             #         out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
             #     x_lim)
 
-            # Plot throughput
-            self.__plot_throughput(
-                dat_out_classes, torch.tensor(self.net.predict(dat_in)),
-                torch.tensor(fair),
-                path.join(out_dir, f"throughput_{self.name}.pdf"),
-                dat_extra["btk_throughput"],
-                torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
-                x_lim=None)
+            # # Plot throughput
+            # self.__plot_throughput(
+            #     dat_out_classes, torch.tensor(self.net.predict(dat_in)),
+            #     torch.tensor(fair),
+            #     path.join(out_dir, f"throughput_{self.name}.pdf"),
+            #     dat_extra["btk_throughput"],
+            #     torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
+            #     x_lim=None)
 
         # # Analyze overall accuracy for the Mathis Model.
         # print("Evaluting Mathis Model:")
@@ -1035,11 +1018,11 @@ class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
     name = "Lstm"
-    in_spc = [
-        features.INTERARR_TIME_FET,
-        features.RTT_RATIO_FET,
-        features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
-    out_spc = [features.TPUT_SHARE_FET]
+    # in_spc = [
+    #     features.INTERARR_TIME_FET,
+    #     features.RTT_RATIO_FET,
+    #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
+    out_spc = [features.OUT_FET]
     num_clss = 5
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss
@@ -1063,51 +1046,10 @@ class LstmWrapper(PytorchModelWrapper):
                 weight.new(self.num_lyrs, batch_size, self.hid_dim).zero_())
 
     @staticmethod
-    def convert_to_class(exp, dat_out):
-        assert len(dat_out.dtype.names) == 1, "Should be only one column."
-
-        def percent_to_class(prc, fair):
-            """ Convert a queue occupancy percent to a fairness class. """
-            assert len(prc) == 1, "Should be only one column."
-            prc = prc[0]
-
-            # Threshold between fair and unfair.
-            tsh_fair = 0.1
-            # Threshold between unfair and very unfair.
-            tsh_unfair = 0.4
-
-            dif = (fair - prc) / fair
-            if dif < -1 * tsh_unfair:
-                # We are much higher than fair.
-                cls = 4
-            elif -1 * tsh_unfair <= dif < -1 * tsh_fair:
-                # We are not that much higher than fair.
-                cls = 3
-            elif -1 * tsh_fair <= dif <= tsh_fair:
-                # We are fair.
-                cls = 2
-            elif tsh_fair < dif <= tsh_unfair:
-                # We are not that much lower than fair.
-                cls = 1
-            elif tsh_unfair < dif:
-                # We are much lower than fair.
-                cls = 0
-            else:
-                assert False, "This should never happen."
-            return cls
-
-        # Map a conversion function across all entries. Note that here
-        # an entry is an entire row, since each row is a single tuple
-        # value.
-        clss = np.vectorize(
-            functools.partial(
-                percent_to_class, fair=1. / (exp.cca_1_flws + exp.cca_2_flws)),
-            otypes=[int])(dat_out)
-        clss_str = np.empty(
-            (clss.shape[0],), dtype=[(features.LABEL_FET, "int")])
-        clss_str[features.LABEL_FET] = clss
-        return clss_str
-
+    def convert_to_class(dat_out):
+        # TODO: Implement.
+        assert False, "Not implemented."
+        return dat_out
 
 class Lstm(torch.nn.Module):
     """ An LSTM that classifies a flow into one of five fairness categories. """

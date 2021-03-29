@@ -61,3 +61,8 @@ SEED = 1337
 LOCK_FLN = "lock"
 # The maximum number of times to try finding a cluster threshold.
 CLUSTER_ATTEMPTS = 1000
+# Defines the region around fair in which a flow is considered fair. In the
+# range [0, 1].
+FAIR_THRESH = 0.1
+# The window size to use for the ground truth.
+CHOSEN_WIN = 8
