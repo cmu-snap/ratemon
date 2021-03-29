@@ -512,8 +512,13 @@ def clean(arr):
 
 
 def visualize_classes(net, dat):
-    """ Prints statistics about the classes in dat. """
-    # Visualaize the ground truth data.
+    """
+    Prints statistics about the classes in dat.
+
+    dat may be a torch Tensor, a numpy ndarray, or a list of dataloaders.
+    """
+    if isinstance(dat, list):
+        dat = torch.cat([ldr.dataset.dat_out for ldr in dat])
     clss = net.get_classes()
     tots = get_class_popularity(dat, clss)
     # The total number of class labels extracted in the previous line.
@@ -704,33 +709,37 @@ def filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc):
     return dat_in, dat_out, dat_extra, scl_grps
 
 
-def save(flp, dat_in, dat_out, dat_extra):
+def save_parsed_data(flp, trn, val, tst):
     """
     Saves parsed data. Each dat_* is a list where each entry is the results of
     one simulation.
     """
     print(f"Saving data: {flp}")
     np.savez_compressed(
-        flp, dat_in=dat_in, dat_out=dat_out, dat_extra=dat_extra)
+        flp,
+        train_in=trn[0],
+        train_out=trn[1],
+        train_extra=trn[2],
+        val_in=val[0],
+        val_out=val[1],
+        val_extra=val[2],
+        test_in=tst[0],
+        test_out=tst[1],
+        test_extra=tst[2])
 
 
 def load_parsed_data(flp):
     """ Loads parsed data. """
     print(f"Loading data: {flp}")
     with np.load(flp) as fil:
-        dat_in = fil["dat_in"]
-        dat_out = fil["dat_out"]
-        dat_extra = fil["dat_extra"]
-    dat_in_shape = dat_in.shape
-    dat_out_shape = dat_out.shape
-    dat_extra_shape = dat_extra.shape
-    assert dat_out_shape[0] == dat_in_shape[0], \
-        ("Data has invalid shapes (first dimension should agree)! "
-         f"in: {dat_in_shape}, out: {dat_out_shape}")
-    assert dat_extra_shape[0] == dat_in_shape[0], \
-        ("Data has invalid shapes (first dimension should agree)! "
-         f"in: {dat_in_shape}, extra: {dat_extra_shape}")
-    return dat_in, dat_out, dat_extra
+        splits = [
+            (fil[f"{split}_in"], fil[f"{split}_out"], fil[f"{split}_extra"])
+            for split in ["train", "val", "test"]]
+    # Make sure that each set of in, out, and extra matrices contains the same
+    # number of rows.
+    for num_lens in [{dat.shape[0] for dat in dats} for dats in splits]:
+        assert num_lens == 1, f"Mismatched in, out, and extra dimensions: {flp}"
+    return splits
 
 
 def save_tmp_file(flp, dat_in, dat_out, dat_extra, scl_grps):
@@ -912,8 +921,7 @@ def log_feature_analysis(out_dir, msg):
         fil.write(msg)
 
 
-def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra,
-                                clusters):
+def analyze_feature_correlation(net, out_dir, dat_in, clusters):
     """ Analyzes correlation among features of a net. """
     assert_tensor(dat_in=dat_in)
     # Convert all unknown values (-1) and NaNs to the mean of their column
@@ -988,7 +996,7 @@ def analyze_feature_correlation(net, out_dir, dat_in, dat_out, dat_extra,
     return cluster_to_fets
 
 
-def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes,
+def analyze_feature_importance(net, out_dir, dat_in, dat_out,
                                num_fets_to_pick, perm_imp_repeats):
     """ Analyzes the importance of features to a trained net. """
     # Analyze feature coefficients. The underlying model's .coef_
@@ -1015,7 +1023,7 @@ def analyze_feature_importance(net, out_dir, dat_in, dat_out_classes,
             if isinstance(
                     net.net, ensemble.HistGradientBoostingClassifier):
                 imps = inspection.permutation_importance(
-                    net.net, dat_in, dat_out_classes, n_repeats=perm_imp_repeats,
+                    net.net, dat_in, dat_out, n_repeats=perm_imp_repeats,
                     random_state=0).importances_mean
             else:
                 imps = net.net.coef_[0]

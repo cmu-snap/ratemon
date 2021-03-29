@@ -137,7 +137,4 @@ OUT_FET = make_win_metric(
     TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
 
 # Features to store as extra data for each sample.
-EXTRA_FETS = [
-    ARRIVAL_TIME_FET,
-    make_ewma_metric(RTT_FET, 0.01),
-    OUT_FET]
+EXTRA_FETS = [ARRIVAL_TIME_FET, make_ewma_metric(RTT_FET, 0.01)]

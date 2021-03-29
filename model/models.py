@@ -76,9 +76,10 @@ class PytorchModelWrapper:
         """ Returns a list of all possible class labels. """
         return list(range(self.num_clss))
 
-    def modify_data(self, exp, dat_in, dat_out):
-        """ Performs an arbitrary transformation on the data. """
-        return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
+    # TODO: Refactor this to be compatible with bulk data splits.
+    # def modify_data(self, exp, dat_in, dat_out):
+    #     """ Performs an arbitrary transformation on the data. """
+    #     return dat_in, dat_out, list(range(len(dat_in.dtype.names)))
 
     def check_output(self, out, target):
         """
@@ -334,21 +335,22 @@ class BinaryModelWrapper(PytorchModelWrapper):
         # becomes the ground truth for the entire window.
         return dat_in_new, np.take(dat_out, pkt_idxs), scl_grps
 
-    def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
-        """
-        Extracts from the set of experiments many separate intervals. Each
-        interval becomes a training example.
-        """
-        dat_in, dat_out, dat_extra, scl_grps = (
-            self.__create_buckets(
-                exp, dat_in, dat_out, dat_extra, sequential)
-            if self.rtt_buckets else (
-                self.__create_windows(dat_in, dat_out, sequential)
-                if self.windows else (
-                    dat_in, dat_out, dat_extra,
-                    # Each feature is part of its own scaling group.
-                    list(range(len(dat_in.dtype.names))))))
-        return dat_in, dat_out, dat_extra, scl_grps
+    # TODO: Refactor this to be compatible with bulk data splits.
+    # def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
+    #     """
+    #     Extracts from the set of experiments many separate intervals. Each
+    #     interval becomes a training example.
+    #     """
+    #     dat_in, dat_out, dat_extra, scl_grps = (
+    #         self.__create_buckets(
+    #             exp, dat_in, dat_out, dat_extra, sequential)
+    #         if self.rtt_buckets else (
+    #             self.__create_windows(dat_in, dat_out, sequential)
+    #             if self.windows else (
+    #                 dat_in, dat_out, dat_extra,
+    #                 # Each feature is part of its own scaling group.
+    #                 list(range(len(dat_in.dtype.names))))))
+    #     return dat_in, dat_out, dat_extra, scl_grps
 
 
 class BinaryDnnWrapper(BinaryModelWrapper):
@@ -401,11 +403,6 @@ class SvmWrapper(BinaryModelWrapper):
     """ Wraps Svm. """
 
     name = "Svm"
-    #in_spc = [
-    #    features.ARRIVAL_TIME_FET,
-    #    features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
-    out_spc = [features.OUT_FET]
-
     los_fnc = torch.nn.HingeEmbeddingLoss
     opt = torch.optim.SGD
     params = ["lr", "momentum"]
@@ -414,14 +411,15 @@ class SvmWrapper(BinaryModelWrapper):
         self.net = Svm(self.num_ins)
         return self.net
 
-    def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
-        dat_in, dat_out, dat_extra, scl_grps = (
-            super().modify_data(
-                exp, dat_in, dat_out, dat_extra, sequential))
-        # Map [0,1] to [-1, 1]
-        # fet = dat_out.dtype.names[0]
-        # dat_out[fet] = dat_out[fet] * 2 - 1
-        return dat_in, dat_out, dat_extra, scl_grps
+    # TODO: Refactor this to be compatible with bulk data splits.
+    # def modify_data(self, exp, dat_in, dat_out, dat_extra, sequential):
+    #     dat_in, dat_out, dat_extra, scl_grps = (
+    #         super().modify_data(
+    #             exp, dat_in, dat_out, dat_extra, sequential))
+    #     # Map [0,1] to [-1, 1]
+    #     # fet = dat_out.dtype.names[0]
+    #     # dat_out[fet] = dat_out[fet] * 2 - 1
+    #     return dat_in, dat_out, dat_extra, scl_grps
 
     def _check_output_helper(self, out):
         utils.assert_tensor(out=out)

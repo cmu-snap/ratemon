@@ -14,7 +14,6 @@ import random
 import numpy as np
 
 import cl_args
-import defaults
 import utils
 
 
@@ -42,27 +41,24 @@ class Split:
         # with -1. When reading the splits later, we can detect
         # incomplete feature values by looking for -1s.
         self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
-        self.dat.fill(-100)
         self.fets = self.dat.dtype.names
 
-        # The next available index in self.dat. Used if self.shuffle == False.
+        # The next available index in self.dat.
         self.idx = 0
-        # List of all available indices in this split. This set is
-        # reduced as the split is populated.
-        self.dat_available_idxs = set(range(num_pkts))
+        # # List of all available indices in this split. This set is
+        # # reduced as the split is populated.
+        # self.dat_available_idxs = set(range(num_pkts))
 
         # Save this Split's metadata so that its data file can be !read later.
         utils.save_split_metadata(
             out_dir, self.name, dat=(num_pkts, self.dat.dtype.descr))
 
-    def take(self, exp_dat, exp_available_idxs, exp):
+    def take(self, exp_dat, exp_available_idxs):
         """
         Takes this Split's specified fraction of data from exp_dat,
         choosing from exp_available_idxs. Removes the chosen indices from
         exp_available_idxs and returns the modified version.
         """
-        # Need to append a column for the number of flows
-
         assert not self.finished, "Trying to call a method on a finished Split."
         num_exp_pkts = exp_dat.shape[0]
         num_new = math.floor(num_exp_pkts * self.frac)
@@ -79,27 +75,28 @@ class Split:
         exp_new_idxs = random.sample(exp_available_idxs, num_new)
         exp_available_idxs -= set(exp_new_idxs)
 
-        if self.shuffle:
-            # Shuffle the destination indices to remove experiment locality.
-            # Note that shuffling the source indices only is insufficient, as
-            # that removes flow locality but not experiment locality.
-            num_slots_remaining = len(self.dat_available_idxs)
-            assert num_slots_remaining >= num_new, \
-                (f"Trying to find locations for {num_new} new packets when "
-                 f"there are only {num_slots_remaining} packet slots "
-                 "available!")
-            dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
-        else:
-            # Identify the indices in the merged array.
-            start_idx = self.idx
-            self.idx += num_new
-            assert self.idx <= self.dat.shape[0], \
-                (f"Index {self.idx} into \"{self.name}\" split does not fit "
-                 f"within shape {self.dat.shape}")
-            dat_new_idxs = list(range(start_idx, self.idx))
+        # if self.shuffle:
+        #     # Shuffle the destination indices to remove experiment locality.
+        #     # Note that shuffling the source indices only is insufficient, as
+        #     # that removes flow locality but not experiment locality.
+        #     num_slots_remaining = len(self.dat_available_idxs)
+        #     assert num_slots_remaining >= num_new, \
+        #         (f"Trying to find locations for {num_new} new packets when "
+        #          f"there are only {num_slots_remaining} packet slots "
+        #          "available!")
+        #     dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
+        # else:
 
-        self.dat[dat_new_idxs] = exp_dat[exp_new_idxs]
-        self.dat_available_idxs -= set(dat_new_idxs)
+        # Identify the indices in the merged array.
+        start_idx = self.idx
+        self.idx += num_new
+        assert self.idx <= self.dat.shape[0], \
+            (f"Index {self.idx} into \"{self.name}\" split does not fit "
+             f"within shape {self.dat.shape}")
+        # dat_new_idxs = list(range(start_idx, self.idx))
+
+        self.dat[start_idx:self.idx] = exp_dat[exp_new_idxs]
+        # self.dat_available_idxs -= set(dat_new_idxs)
         return exp_available_idxs
 
     def finish(self):
@@ -108,7 +105,14 @@ class Split:
         """
         self.finished = True
         # Mark any unused indices as invalid by filling their values with -1.
-        self.dat[list(self.dat_available_idxs)].fill(-1)
+        #self.dat[list(self.dat_available_idxs)].fill(-1)
+        self.dat[self.idx:].fill(-1)
+
+        # TODO: Shuffle in-place at the end
+        # This is only okay because I plan to always store the output in a tmpfs.
+        if self.shuffle:
+            np.random.default_rng().shuffle(self.dat)
+
         self.dat.flush()
 
 
@@ -171,7 +175,8 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
     splits = {
         name: Split(
             name, prc, out_dir, dtype, num_pkts,
-            shuffle=name == "train")
+            shuffle=False)
+            # shuffle=name == "train")
         for name, prc in split_prcs.items()}
     # Keep track of the number of packets that do not get selected for
     # any of the splits.
@@ -203,7 +208,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
         all_idxs = set(range(dat.shape[0]))
         # For each split, take a fraction of the experiment packets.
         for split in splits.values():
-            all_idxs = split.take(dat, all_idxs, exp)
+            all_idxs = split.take(dat, all_idxs)
         # Record how many packets are not being moved to one of the
         # merged files.
         pkts_forgotten += len(all_idxs)
@@ -244,6 +249,7 @@ def main():
     psr.add_argument(
         "--test-split", default=30, help="Test data fraction",
         required=False, type=float)
+    # TODO: Add keep_percent.
     psr, psr_verify = cl_args.add_out(
         *cl_args.add_warmup(*cl_args.add_num_exps(psr)))
     args = psr_verify(psr.parse_args())

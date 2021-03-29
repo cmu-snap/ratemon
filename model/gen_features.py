@@ -137,7 +137,7 @@ def open_exp(exp, exp_flp, untar_dir, out_dir):
 
 
 def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
-    """ Parses an experiment. """
+    """ Parses an experiment. Returns the smallest safe window size. """
     print(f"Parsing: {exp_flp}")
     if exp.tot_flws == 0:
         print(f"\tNo flows to analyze in: {exp_flp}")
@@ -823,23 +823,25 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                 if total_tput_bps > exp.bw_bps:
                     win_to_errors[win] += 1
 
-        print("\tWindow durations:")
-        for win in features.WINDOWS:
-            print(
-                f"\t\t{win}:",
-                win * min(
-                    [res[-1][features.MIN_RTT_FET]
-                     for res in flw_results.values()]),
-                "us")
-        print("\tWindow errors:")
-        for win in features.WINDOWS:
-            print(f"\t\t{win}:", win_to_errors[win])
-        for win in sorted(features.WINDOWS):
-            if win_to_errors[win] == 0:
-                print(f"\tSmallest safe window size: {win}")
-                break
-        else:
-            print("Warning: No safe window sizes!")
+    print("\tWindow durations:")
+    for win in features.WINDOWS:
+        print(
+            f"\t\t{win}:",
+            win * min(
+                [res[-1][features.MIN_RTT_FET]
+                 for res in flw_results.values()]),
+            "us")
+    print("\tWindow errors:")
+    for win in features.WINDOWS:
+        print(f"\t\t{win}:", win_to_errors[win])
+    smallest_safe_win = 0
+    for win in sorted(features.WINDOWS):
+        if win_to_errors[win] == 0:
+            print(f"\tSmallest safe window size: {win}")
+            smallest_safe_win = win
+            break
+    else:
+        print(f"Warning: No safe window sizes in: {exp_flp}")
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the
@@ -862,13 +864,16 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
             **{str(k + 1): v
                for k, v in enumerate(flw_results[flw] for flw in flws)})
 
+    return smallest_safe_win
+
 
 def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     """ Locks, untars, and parses an experiment. """
     exp = utils.Exp(exp_flp)
     with open_exp(exp, exp_flp, untar_dir, out_dir) as (locked, exp_dir):
         if locked:
-            parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed)
+            return parse_opened_exp(
+                exp, exp_flp, exp_dir, out_dir, skip_smoothed)
 
 
 def main():
@@ -911,13 +916,16 @@ def main():
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     if defaults.SYNC:
-        for pcap in pcaps:
-            parse_exp(*pcap)
+        smallest_safe_wins = {parse_exp(*pcap) for pcap in pcaps}
     else:
         # By default, use all available cores.
         with multiprocessing.Pool(processes=args.parallel) as pol:
-            pol.starmap(parse_exp, pcaps)
+            smallest_safe_wins = set(pol.starmap(parse_exp, pcaps))
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
+
+    if 0 in smallest_safe_wins:
+        print(f"Some experiments had no safe window sizes.")
+    print("Smallest globally-safe window size:", max(smallest_safe_wins))
 
 
 if __name__ == "__main__":

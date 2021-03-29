@@ -8,25 +8,19 @@ https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 import argparse
 import copy
 import functools
-import json
 import math
 import multiprocessing
 import os
 from os import path
 import pickle
-import random
-import shutil
 import sys
 import time
 
-import numpy as np
-from numpy.lib import recfunctions
 import torch
 
 import cl_args
 import data
 import defaults
-import features
 import models
 import utils
 
@@ -42,380 +36,6 @@ SHUFFLE = True
 LOGS_PER_EPC = 5
 # The number of validation passes per epoch.
 VALS_PER_EPC = 15
-
-
-def process_exp(idx, total, net, exp_flp, tmp_dir, warmup_prc, keep_prc,
-                cca, sequential=False):
-    """
-    Loads and processes data from a single experiment.
-
-    For logging purposes, "idx" is the index of this experiment amongst "total"
-    experiments total. Uses "net" to determine the relevant input and output
-    features. "exp_flp" is the path to the experiment file. The parsed results
-    are stored in "tmp_dir". Drops the first "warmup_prc" percent of packets.
-    Of the remaining packets, only "keep_prc" percent are kept. Flows using the
-    congestion control algorithm "cca" will be selected. See
-    utils.save_tmp_file() for the format of the results file.
-
-    Returns the path to the results file and a descriptive utils.Exp object.
-    """
-    exp, dat = utils.load_exp(
-        exp_flp, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
-    if dat is None:
-        print(f"\tError loading {exp_flp}")
-        return None
-
-    # Determine which flows to extract based on the specified CCA.
-    if cca == exp.cca_1_name:
-        flw_idxs = range(exp.cca_1_flws)
-    elif cca == exp.cca_2_name:
-        flw_idxs = range(exp.cca_1_flws, exp.tot_flws)
-    else:
-        print(f"\tCCA {cca} not found in {exp_flp}")
-        return None
-
-    # Combine flows.
-    dat_combined = None
-    for flw_idx in flw_idxs:
-        dat_flw = dat[flw_idx]
-        # Select a fraction of the data.
-        if keep_prc != 100:
-            num_rows = dat_flw.shape[0]
-            num_to_pick = math.ceil(num_rows * keep_prc / 100)
-            dat_flw = dat_flw[
-                np.random.random_integers(0, num_rows - 1, num_to_pick)]
-        if dat_combined is None:
-            dat_combined = dat_flw
-        else:
-            dat_combined = np.concatenate((dat_combined, dat_flw))
-    dat = dat_combined
-
-    # Drop the first few packets so that we consider steady-state behavior only.
-    dat = dat[math.floor(dat.shape[0] * warmup_prc / 100):]
-    # Split each data matrix into two separate matrices: one with the input
-    # features only and one with the output features only. The names of the
-    # columns correspond to the feature names in in_spc and out_spc.
-    assert net.in_spc, f"{net.name}: Empty in spec."
-    num_out_fets = len(net.out_spc)
-    # This is not a strict requirement from a modeling point of view,
-    # but is assumed to make data processing easier.
-    assert num_out_fets == 1, \
-        (f"{net.name}: Out spec must contain a single feature, but actually "
-         f"contains: {net.out_spc}")
-    dat_in = recfunctions.repack_fields(dat[net.in_spc])
-    dat_out = recfunctions.repack_fields(dat[net.out_spc])
-    # Create a structured array to hold extra data that will not be used as
-    # features but may be needed by the training/testing process.
-    dtype_extra = (
-        # The "raw" entry is the unconverted out_spc.
-        [("raw",
-          [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1]),
-         ("num_flws", "int32"), ("btk_throughput", "int32")] +
-        [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
-    dat_extra = np.empty(shape=dat.shape, dtype=dtype_extra)
-    dat_extra["raw"] = dat_out
-    dat_extra["num_flws"].fill(exp.tot_flws)
-    dat_extra["btk_throughput"].fill(exp.bw_Mbps)
-    for typ in features.EXTRA_FETS:
-        dat_extra[typ] = dat[typ]
-    dat_extra = recfunctions.repack_fields(dat_extra)
-
-    # Convert output features to class labels.
-    dat_out = net.convert_to_class(dat_out)
-
-    # If the results contains NaNs or Infs, then discard this experiment.
-    if (utils.has_non_finite(dat_in) or utils.has_non_finite(dat_out) or
-        utils.has_non_finite(dat_extra)):
-        print(f"\tExperiment {exp_flp} contains NaNs of Infs.")
-        return None
-
-    # Verify data.
-    assert dat_in.shape[0] == dat_out.shape[0], \
-        f"{exp_flp}: Input and output should have the same number of rows."
-    # Find the uniques classes in the output features and make sure
-    # that they are properly formed. Assumes that dat_out is a
-    # structured numpy array containing a column named "class".
-    for cls in set(dat_out[features.LABEL_FET].tolist()):
-        assert 0 <= cls < net.num_clss, f"Invalid class: {cls}"
-
-    # Transform the data as required by this specific model.
-    dat_in, dat_out, dat_extra, scl_grps = net.modify_data(
-        exp, dat_in, dat_out, dat_extra, sequential=sequential)
-
-    # To avoid errors with sending large matrices between processes,
-    # store the results in a temporary file.
-    dat_flp = path.join(tmp_dir, f"{path.basename(exp_flp)[:-4]}_tmp.npz")
-    utils.save_tmp_file(
-        dat_flp, dat_in, dat_out, dat_extra, scl_grps)
-    return dat_flp, exp
-
-
-def make_datasets(net, args, dat=None):
-    """
-    Parses the experiment files in data_dir and transforms them (e.g., by
-    scaling) into the correct format for the network.
-
-    If num_exps is not None, then this function selects the first num_exps
-    experiments only. If shuffle is True, then the experiments will be parsed in
-    sorted order. Use num_expss and shuffle=True together to simplify debugging.
-    """
-    if dat is None:
-        # Find experiments.
-        exps = args["exps"]
-        if not exps:
-            dat_dir = args["data_dir"]
-            exps = [
-                path.join(dat_dir, exp)
-                for exp in sorted(os.listdir(dat_dir))
-                if exp.endswith("npz")]
-        if SHUFFLE:
-            # Set the random seed so that multiple parallel instances of
-            # this script see the same random order.
-            utils.set_rand_seed()
-            random.shuffle(exps)
-        num_exps = args["num_exps"]
-        if num_exps is not None:
-            num_exps_actual = len(exps)
-            assert num_exps_actual >= num_exps, \
-                (f"Insufficient experiments. Requested {num_exps}, but only "
-                 f"{num_exps_actual} available.")
-            exps = exps[:num_exps]
-        tot_exps = len(exps)
-        print(f"Found {tot_exps} experiments.")
-
-        # Prepare temporary output directory. The output of parsing each
-        # experiment is written to disk instead of being transfered between
-        # processes because sometimes the data is too large for Python to send
-        # between processes.
-        tmp_dir = args["tmp_dir"]
-        if tmp_dir is None:
-            tmp_dir = args["out_dir"]
-        # To keep files organized, create a randomly-named subdirectory.
-        tmp_dir = path.join(
-            tmp_dir, f"train_{random.randrange(int(time.time()))}")
-        if path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        os.makedirs(tmp_dir)
-
-        # Parse experiments.
-        exps_args = [
-            (idx, tot_exps, net, exp, tmp_dir, args["warmup_percent"],
-             args["keep_percent"], args["cca"])
-            for idx, exp in enumerate(exps)]
-        if defaults.SYNC or args["sync"]:
-            dat_all = [process_exp(*exp_args) for exp_args in exps_args]
-        else:
-            with multiprocessing.Pool() as pol:
-                # Each element of dat_all corresponds to a single experiment.
-                dat_all = pol.starmap(process_exp, exps_args)
-        # Throw away results from experiments that could not be parsed.
-        dat_all = [dat for dat in dat_all if dat is not None]
-        print(f"Discarded {tot_exps - len(dat_all)} experiments!")
-        assert dat_all, "No valid experiments found!"
-        dat_all, exps = zip(*dat_all)
-        dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
-
-        # Remove the temporary subdirectory that we created (will fail if it's
-        # not empty).
-        os.rmdir(tmp_dir)
-    else:
-        dat_all, exps = dat
-
-    # Validate data.
-    dim_in = None
-    dtype_in = None
-    dim_out = None
-    dtype_out = None
-    dim_extra = None
-    dtype_extra = None
-    scl_grps = None
-    for dat_in, dat_out, dat_extra, scl_grps_cur in dat_all:
-        dim_in_cur = len(dat_in.dtype.names)
-        dim_out_cur = len(dat_out.dtype.names)
-        dim_extra_cur = len(dat_extra.dtype.names)
-        dtype_in_cur = dat_in.dtype
-        dtype_out_cur = dat_out.dtype
-        dtype_extra_cur = dat_extra.dtype
-        if dim_in is None:
-            dim_in = dim_in_cur
-        if dim_out is None:
-            dim_out = dim_out_cur
-        if dim_extra is None:
-            dim_extra = dim_extra_cur
-        if dtype_in is None:
-            dtype_in = dtype_in_cur
-        if dtype_out is None:
-            dtype_out = dtype_out_cur
-        if dtype_extra is None:
-            dtype_extra = dtype_extra_cur
-        if scl_grps is None:
-            scl_grps = scl_grps_cur
-        assert dim_in_cur == dim_in, \
-            f"Invalid input feature dim: {dim_in_cur} != {dim_in}"
-        assert dim_out_cur == dim_out, \
-            f"Invalid output feature dim: {dim_out_cur} != {dim_out}"
-        assert dim_extra_cur == dim_extra, \
-            f"Invalid extra data dim: {dim_extra_cur} != {dim_extra}"
-        assert dtype_in_cur == dtype_in, \
-            f"Invalud input dtype: {dtype_in_cur} != {dtype_in}"
-        assert dtype_out_cur == dtype_out, \
-            f"Invalid output dtype: {dtype_out_cur} != {dtype_out}"
-        assert dtype_extra_cur == dtype_extra, \
-            f"Invalid extra data dtype: {dtype_extra_cur} != {dtype_extra}"
-        assert (scl_grps_cur == scl_grps).all(), \
-            f"Invalid scaling groups: {scl_grps_cur} != {scl_grps}"
-    assert dim_in is not None, "Unable to compute input feature dim!"
-    assert dim_out is not None, "Unable to compute output feature dim!"
-    assert dim_extra is not None, "Unable to compute extra data dim!"
-    assert dtype_in is not None, "Unable to compute input dtype!"
-    assert dtype_out is not None, "Unable to compute output dtype!"
-    assert dtype_extra is not None, "Unable to compute extra data dtype!"
-    assert scl_grps is not None, "Unable to compte scaling groups!"
-
-    # Build combined feature lists.
-    dat_in_all, dat_out_all, dat_extra_all, _ = zip(*dat_all)
-    # Stack the arrays.
-    dat_in_all = np.concatenate(dat_in_all, axis=0)
-    dat_out_all = np.concatenate(dat_out_all, axis=0)
-    dat_extra_all = np.concatenate(dat_extra_all, axis=0)
-
-    # HistGbdtSklearn models are processed differently.
-    is_dt = isinstance(net, models.HistGbdtSklearnWrapper)
-
-    if not is_dt:
-        # Verify that there are no NaNs or Infs in the data.
-        for fet in dat_in_all.dtype.names:
-            assert (not (
-                np.isnan(dat_in_all[fet]).any() or
-                np.isinf(dat_in_all[fet]).any())), \
-                f"Warning: NaNs or Infs in input feature: {fet}")
-        assert (not (
-            np.isnan(dat_out_all[features.LABEL_CLASS]).any() or
-            np.isinf(dat_out_all[features.LABEL_CLASS]).any())), \
-            f"Warning: NaNs or Infs in ground truth.")
-
-    # Convert all instances of -1 (feature value unknown) to the mean
-    # for that feature.
-    bad_fets = []
-    for fet in dat_in_all.dtype.names:
-        if (dat_in_all[fet] == -1).all():
-            bad_fets.append(fet)
-            continue
-        invalid = dat_in_all[fet] == -1
-        dat_in_all[fet][invalid] = (
-            float("NaN") if is_dt
-            else np.mean(dat_in_all[fet][np.logical_not(invalid)]))
-        assert (dat_in_all[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
-    assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
-
-    if is_dt:
-        # The HistGbdtSklearn model does not require feature scaling because it
-        # is a decision tree.
-        prms_in = np.zeros((0,))
-    else:
-        # Scale input features. Do this here instead of in process_exp() because
-        # all of the features must be scaled using the same parameters.
-        dat_in_all, prms_in = data.scale_fets(dat_in_all, scl_grps, args["standardize"])
-
-    return dat_in_all, dat_out_all, dat_extra_all, prms_in
-
-
-def gen_data(net, args, dat_flp, scl_prms_flp, dat=None, save_data=True):
-    """ Generates training data and optionally saves it. """
-    dat_in, dat_out, dat_extra, scl_prms = make_datasets(net, args, dat)
-    # Save the processed data so that we do not need to process it again.
-    if save_data:
-        utils.save(dat_flp, dat_in, dat_out, dat_extra)
-    # Save scaling parameters.
-    print(f"Saving scaling parameters: {scl_prms_flp}")
-    with open(scl_prms_flp, "w") as fil:
-        json.dump(scl_prms.tolist(), fil)
-    return dat_in, dat_out, dat_extra
-
-
-def split_data(net, dat_in, dat_out, dat_extra, bch_trn, bch_tst,
-               use_val=False, balance=False, drop_popular=True):
-    """
-    Divides the input and output data into training, validation, and
-    testing sets and constructs data loaders.
-    """
-    print("Creating train/val/test data...")
-
-    fets = list(dat_in.dtype.names)
-    # Keep track of the dtype of dat_extra so that we can recreate it
-    # as a structured array.
-    extra_dtype = dat_extra.dtype.descr
-    # Destroy columns names to make merging the matrices easier. I.e.,
-    # convert from structured to regular numpy arrays.
-    dat_in = utils.clean(dat_in)
-    dat_out = utils.clean(dat_out)
-    dat_extra = utils.clean(dat_extra)
-    # Shuffle the data to ensure that the training, validation, and
-    # test sets are uniformly sampled. To shuffle all of the arrays
-    # together, we must first merge them into a combined matrix.
-    num_cols_in = dat_in.shape[1]
-    merged = np.concatenate(
-        (dat_in, dat_out, dat_extra), axis=1)
-    np.random.shuffle(merged)
-    dat_in = merged[:, :num_cols_in]
-    dat_out = merged[:, num_cols_in]
-    # Rebuilding dat_extra is more complicated because we need it to
-    # be a structed array (for ease of use).
-    num_exps = dat_in.shape[0]
-    dat_extra = np.empty((num_exps,), dtype=extra_dtype)
-    num_cols = merged.shape[1]
-    num_cols_extra = num_cols - (num_cols_in + 1)
-    extra_names = dat_extra.dtype.names
-    num_cols_extra_expected = len(extra_names)
-    assert num_cols_extra == num_cols_extra_expected, \
-        (f"Error while reassembling \"dat_extra\". {num_cols_extra} columns "
-         f"does not match {num_cols_extra_expected} expected columns: "
-         f"{extra_names}")
-    for name, merged_idx in zip(extra_names, range(num_cols_in + 1, num_cols)):
-        dat_extra[name] = merged[:, merged_idx]
-
-    # 50% for training, 20% for validation, 30% for testing.
-    num_val = int(round(num_exps * 0.2)) if use_val else 0
-    num_tst = int(round(num_exps * 0.3))
-    print((f"\tData - train: {num_exps - num_val - num_tst}, val: {num_val}, "
-           f"test: {num_tst}"))
-    # Validation.
-    dat_val_in = dat_in[:num_val]
-    dat_val_out = dat_out[:num_val]
-    dat_val_extra = dat_extra[:num_val]
-    # Testing.
-    dat_tst_in = dat_in[num_val:num_val + num_tst]
-    dat_tst_out = dat_out[num_val:num_val + num_tst]
-    dat_tst_extra = dat_extra[num_val:num_val + num_tst]
-    # Training.
-    dat_trn_in = dat_in[num_val + num_tst:]
-    dat_trn_out = dat_out[num_val + num_tst:]
-    dat_trn_extra = dat_extra[num_val + num_tst:]
-
-    print("Training data:")
-    utils.visualize_classes(net, dat_trn_out)
-
-    # Create the dataloaders.
-    dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
-    ldr_trn = (
-        torch.utils.data.DataLoader(
-            dataset_trn,
-            batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False,
-                drop_popular=drop_popular))
-        if balance
-        else torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_tst, shuffle=True, drop_last=False))
-
-    ldr_val = (
-        torch.utils.data.DataLoader(
-            utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
-            batch_size=bch_tst, shuffle=False, drop_last=False)
-        if use_val else None)
-    ldr_tst = torch.utils.data.DataLoader(
-        utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
-        batch_size=bch_tst, shuffle=False, drop_last=False)
-    return ldr_trn, ldr_val, ldr_tst
 
 
 def init_hidden(net, bch, dev):
@@ -618,22 +238,11 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     net = models.MODELS[args["model"]]()
     net.new(**{param: args[param] for param in net.params})
 
-    # # Split the data into training, validation, and test loaders.
-    # ldr_trn, _, ldr_tst = split_data(
-    #     net, dat_in, dat_out, dat_extra, args["train_batch"],
-    #     args["test_batch"], balance=args["balance"],
-    #     drop_popular=args["drop_popular"])
-
     # Extract the training data from the training dataloader.
     dat_in, dat_out = list(ldr_trn)[0]
-    # if args["balance"]:
-    #     print("Balanced training data:")
-    #     utils.visualize_classes(net, dat_out)
-
-    cluster_to_fets = None
-    if args["analyze_features"]:
-        cluster_to_fets = utils.analyze_feature_correlation(
-            net, out_dir, dat_in, dat_out, dat_extra, args["cluster_threshold"])
+    if args["balance"]:
+        print("Balanced training data:")
+        utils.visualize_classes(net, dat_out)
 
     # Training.
     print("Training...")
@@ -641,10 +250,6 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     net.train(ldr_trn.dataset.fets, dat_in, dat_out)
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
-    # Explicitly delete the training dataloader to save memory.
-    del ldr_trn
-    del dat_in
-    del dat_out
     # Save the model.
     print(f"Saving final model: {out_flp}")
     with open(out_flp, "wb") as fil:
@@ -658,15 +263,15 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
             "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 
-    if args["analyze_features"] and cluster_to_fets is not None:
+    # Optionally perform feature elimination.
+    if args["analyze_features"]:
         utils.select_fets(
-            cluster_to_fets,
+            utils.analyze_feature_correlation(
+                net, out_dir, dat_in, args["cluster_threshold"]),
             utils.analyze_feature_importance(
-                net, out_dir, dat_in, dat_out_classes, args["fets_to_pick"],
+                net, out_dir, dat_in, dat_out, args["fets_to_pick"],
                 args["perm_imp_repeats"]))
 
-    # Explicitly delete the test dataloader to save memory.
-    del ldr_tst
     return acc_tst, tim_trn_s
 
 
@@ -786,36 +391,9 @@ def run_trials(args):
     else:
         args["features"] = net_tmp.in_spc
 
-    # # Load or geenrate training data.
-    # dat_flp = path.join(out_dir, "data.npz")
-    # scl_prms_flp = path.join(out_dir, "scale_params.json")
-    # # Check for the presence of both the data and the scaling
-    # # parameters because the resulting model is useless without the
-    # # proper scaling parameters.
-    # if (not args["regen_data"] and path.exists(dat_flp) and
-    #         path.exists(scl_prms_flp)):
-    #     print("Found existing data!")
-    #     dat_in, dat_out, dat_extra = utils.load(dat_flp)
-    #     dat_in_shape = dat_in.shape
-    #     dat_out_shape = dat_out.shape
-    #     assert dat_in_shape[0] == dat_out_shape[0], \
-    #         f"Data has invalid shapes! in: {dat_in_shape}, out: {dat_out_shape}"
-    # else:
-    #     print("Regenerating data...")
-    #     dat_in, dat_out, dat_extra = gen_data(
-    #         net_tmp, args, dat_flp, scl_prms_flp)
-    # print(f"Number of input features: {len(dat_in.dtype.names)}")
-
-    # # Visualaize the ground truth data.
-    # print("All data:")
-    # utils.visualize_classes(net_tmp, dat_out)
-
     # Load the training, validation, and test data.
-    ldr_trn, ldr_val, ldr_tst = data.get_dataloaders(
-        args, net_tmp, save_data=True)
-
-    # Visualaize the ground truth data.
-    utils.visualize_classes(net_tmp, ldrs=(ldr_trn, ldr_val, ldr_tst))
+    ldrs = data.get_dataloaders(args, net_tmp)
+    utils.visualize_classes(net_tmp, ldrs)
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
@@ -827,8 +405,7 @@ def run_trials(args):
         res = (
             run_sklearn
             if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else run_torch)(
-                args, out_dir, out_flp, ldrs=(ldr_trn, ldr_val, ldr_tst))
+            else run_torch)(args, out_dir, out_flp, ldrs)
         if res[0] == 100:
             print(
                 (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
@@ -938,6 +515,10 @@ def main():
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \
         "\"--drop-popular\" must be used with \"--balance\"."
+    assert ((not args["analyze_features"]) or
+            (args["balance"] and args["drop_popular"])), \
+        ("Refusing to use \"--analyze-features\" with \"--balance\" but without "
+         "\"--drop-popular\".")
     assert args["clusters"] >= 1, \
         f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
     # Verify that all arguments are reflected in defaults.DEFAULTS.
