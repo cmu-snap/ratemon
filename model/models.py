@@ -540,8 +540,6 @@ class SvmSklearnWrapper(SvmWrapper):
             with open(path.join(out_dir, "results.txt"), "a+") as fil:
                 fil.write(msg + "\n")
 
-        print("Test labels:")
-        utils.visualize_classes(self, labels)
         print("Test predictions:")
         utils.visualize_classes(self, preds)
 

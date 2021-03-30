@@ -252,6 +252,15 @@ def create_dataloaders(args, trn, val, tst):
 
     # Create the dataloaders.
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
+
+    print(dataset_trn.raw()[1].size(), bch_trn)
+    bch_trn = 100
+
+    # TODO: Need to handle bch_trn and bch_tst correctly if they have default
+    # values.
+
+    # TODO: Load testing data from dataloader instead of using raw().
+    
     return (
         # Train dataloader.
         torch.utils.data.DataLoader(
@@ -261,7 +270,9 @@ def create_dataloaders(args, trn, val, tst):
                 drop_popular=args["drop_popular"]))
         if args["balance"]
         else torch.utils.data.DataLoader(
-            dataset_trn, batch_size=bch_trn, shuffle=True, drop_last=False),
+            # Ordinarilly, shuffle should be True. But we shuffle the training
+            # data in prepare_data.py, so we do not need to do so again here.
+            dataset_trn, batch_size=bch_trn, shuffle=False, drop_last=False),
         # Validation dataloader.
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),

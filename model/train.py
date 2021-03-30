@@ -239,10 +239,9 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     net.new(**{param: args[param] for param in net.params})
 
     # Extract the training data from the training dataloader.
-    dat_in, dat_out = list(ldr_trn)[0]
-    if args["balance"]:
-        print("Balanced training data:")
-        utils.visualize_classes(net, dat_out)
+    dat_in, dat_out = list(ldr_trn)[0]    
+    print("Training data:")
+    utils.visualize_classes(net, dat_out)
 
     # Training.
     print("Training...")
@@ -254,11 +253,16 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     print(f"Saving final model: {out_flp}")
     with open(out_flp, "wb") as fil:
         pickle.dump(net.net, fil)
+
     # Testing.
+    fets, dat_in, dat_out, dat_extra = ldr_tst.dataset.raw()
+    print("Test data:")
+    utils.visualize_classes(net, dat_out)
+
     print("Testing...")
     tim_srt_s = time.time()
     acc_tst = net.test(
-        *ldr_tst.dataset.raw(),
+        fets, dat_in, dat_out, dat_extra,
         graph_prms={
             "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
@@ -388,7 +392,6 @@ def run_trials(args):
 
     # Load the training, validation, and test data.
     ldrs = data.get_dataloaders(args, net_tmp)
-    utils.visualize_classes(net_tmp, ldrs)
 
     # TODO: Parallelize attempts.
     trls = args["conf_trials"]
@@ -503,7 +506,7 @@ def main():
     assert (not args["drop_popular"]) or args["balance"], \
         "\"--drop-popular\" must be used with \"--balance\"."
     assert ((not args["analyze_features"]) or
-            (args["balance"] and args["drop_popular"])), \
+            ((not args["balance"]) or args["drop_popular"])), \
         ("Refusing to use \"--analyze-features\" with \"--balance\" but without "
          "\"--drop-popular\".")
     assert args["clusters"] >= 1, \

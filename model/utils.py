@@ -107,12 +107,29 @@ class BalancedSampler:
         # Determine the unique classes.
         clss = set(dat_out.tolist())
         num_clss = len(clss)
+
+        if batch_size is None:
+            # If we do not specify a batch size, then prune the dataset so that
+            # the length of the dataset is a multiple of the number of classes.
+            num_samples = dat_out.size()[0]
+            to_drop = num_samples % num_clss
+            batch_size = num_samples - to_drop
+            dat_out = dat_out[:batch_size]
+            # Recalculate the classes, in case one of the classes was only
+            # represented in the tail of dat_out that we just removed. If that
+            # edge case occurs, then the assert statements below will still
+            # guarantee safety.
+            clss = set(dat_out.tolist())
+            num_clss = len(clss)
+            print(
+                f"Dropped {to_drop} samples to enable BalancedSampler with no "
+                "batch size.")
+
         assert batch_size >= num_clss, \
             (f"The batch size ({batch_size}) must be at least as large as the "
              f"number of classes ({num_clss})!")
-        # If we set the batch size, then it must be evenly divisible by the
-        # number of classes.
-        assert (batch_size == sys.maxsize) or (batch_size % num_clss == 0), \
+        # The batch size must be evenly divisible by the number of classes.
+        assert batch_size % num_clss == 0, \
             (f"The number of classes ({num_clss}) must evenly divide the batch "
              f"size ({batch_size})!")
 
