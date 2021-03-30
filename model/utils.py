@@ -517,9 +517,11 @@ def visualize_classes(net, dat):
 
     dat may be a torch Tensor, a numpy ndarray, or a list of dataloaders.
     """
-    if isinstance(dat, list):
+    if isinstance(dat, (tuple, list)):
         dat = torch.cat([ldr.dataset.dat_out for ldr in dat])
     clss = net.get_classes()
+    if isinstance(dat, tuple):
+        print(dat)
     tots = get_class_popularity(dat, clss)
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
@@ -735,10 +737,12 @@ def load_parsed_data(flp):
         splits = [
             (fil[f"{split}_in"], fil[f"{split}_out"], fil[f"{split}_extra"])
             for split in ["train", "val", "test"]]
+
     # Make sure that each set of in, out, and extra matrices contains the same
     # number of rows.
     for num_lens in [{dat.shape[0] for dat in dats} for dats in splits]:
-        assert num_lens == 1, f"Mismatched in, out, and extra dimensions: {flp}"
+        assert len(num_lens) == 1, \
+            f"Mismatched in, out, and extra dimensions: {flp}"
     return splits
 
 

@@ -1,21 +1,19 @@
 """ Default values. """
 
-import sys
-
 
 # Parameter defaults.
 DEFAULTS = {
     "data_dir": ".",
     "warmup_percent": 0,
     "sample_percent": 100,
-    "num_exps": sys.maxsize,
+    "num_exps": None,
     "exps": [],
     "model": "HistGbdtSklearn",
     "features": [],
     "epochs": 100,
     "num_gpus": 0,
-    "train_batch": sys.maxsize,
-    "test_batch": sys.maxsize,
+    "train_batch": None,
+    "test_batch": None,
     "lr": 0.001,
     "momentum": 0.09,
     "kernel": "linear",

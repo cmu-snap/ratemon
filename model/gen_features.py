@@ -147,7 +147,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
     # If the output file exists, then we do not need to parse this file.
     if path.exists(out_flp):
         print(f"\tAlready parsed: {exp_flp}")
-        return
+        return -1
 
     # Determine the path to the bottleneck queue log file.
     toks = exp.name.split("-")
@@ -923,8 +923,10 @@ def main():
             smallest_safe_wins = set(pol.starmap(parse_exp, pcaps))
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
+    # Remove return values from experiments that were not parsed.
+    smallest_safe_wins = [win for win in smallest_safe_wins if win != -1]
     if 0 in smallest_safe_wins:
-        print(f"Some experiments had no safe window sizes.")
+        print("Some experiments had no safe window sizes.")
     print("Smallest globally-safe window size:", max(smallest_safe_wins))
 
 

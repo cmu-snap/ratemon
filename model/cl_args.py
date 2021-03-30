@@ -117,9 +117,6 @@ def add_training(psr, psr_verify=lambda args: args):
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(
-        "--training-data-percent", default=defaults.DEFAULTS["train_prc"],
-        help="The percent of the total training data to use.", type=float)
-    psr.add_argument(
         "--no-rand", action="store_true", help="Use a fixed random seed.")
     psr.add_argument(
         "--model", choices=models.MODEL_NAMES,

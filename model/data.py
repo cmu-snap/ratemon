@@ -55,11 +55,11 @@ def get_bulk_data(args, net):
         extract_fets(utils.load_split(data_dir, name), net)
         for name in ["train", "val", "test"]]
     # Select a fraction of the training data.
-    num_pkts = math.ceil(trn[0].shape[0] * args["train_prc"] / 100)
-    trn = (dat[:num_pkts] for dat in trn)
+    num_pkts = math.ceil(trn[0].shape[0] * args["sample_percent"] / 100)
+    trn = [dat[:num_pkts] for dat in trn]
 
     # Validate scaling groups.
-    assert trn[3] == val[3]== tst[3], "Scaling groups do not agree."
+    assert trn[3] == val[3] == tst[3], "Scaling groups do not agree."
 
     if isinstance(net, models.HistGbdtSklearnWrapper):
         # The HistGbdtSklearn model does not require feature scaling because it
@@ -71,7 +71,7 @@ def get_bulk_data(args, net):
         # is the training input data. trn[3] is the scaling groups.
         trn[0], scl_prms = scale_fets(trn[0], trn[3], args["standardize"])
 
-    return trn, val, tst, scl_prms
+    return trn[:3], val[:3], tst[:3], scl_prms
 
 
 def extract_fets(dat, net):
@@ -85,8 +85,8 @@ def extract_fets(dat, net):
     assert num_out_fets == 1, \
         (f"{net.name}: Out spec must contain a single feature, but actually "
          f"contains: {net.out_spc}")
-    dat_in = recfunctions.repack_fields(dat[net.in_spc])
-    dat_out = recfunctions.repack_fields(dat[net.out_spc])
+    dat_in = recfunctions.repack_fields(dat[list(net.in_spc)])
+    dat_out = recfunctions.repack_fields(dat[list(net.out_spc)])
     # Create a structured array to hold extra data that will not be used as
     # features but may be needed by the training/testing process.
     dtype_extra = (
@@ -238,11 +238,15 @@ def create_dataloaders(args, trn, val, tst):
     trn, val, and test must be tuples of the form:
         (dat_in, dat_out, dat_extra)
     """
-    dat_trn_in, dat_trn_out, dat_trn_extra = trn
-    dat_val_in, dat_val_out, dat_val_extra = val
-    dat_tst_in, dat_tst_out, dat_tst_extra = tst
+    fets = trn[0].dtype.names
 
-    fets = dat_trn_in.dtype.names
+    dat_trn_in, dat_trn_out = [utils.clean(dat) for dat in trn[:2]]
+    dat_val_in, dat_val_out = [utils.clean(dat) for dat in val[:2]]
+    dat_tst_in, dat_tst_out = [utils.clean(dat) for dat in tst[:2]]
+    dat_trn_extra = trn[2]
+    dat_val_extra = val[2]
+    dat_tst_extra = tst[2]
+
     bch_trn = args["train_batch"]
     bch_tst = args["test_batch"]
 

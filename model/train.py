@@ -293,11 +293,6 @@ def run_torch(args, out_dir, out_flp, ldrs):
     dev = torch.device("cuda:0" if num_gpus >= num_gpus_to_use > 0 else "cpu")
     net.net.to(dev)
 
-    # # Split the data into training, validation, and test loaders.
-    # ldr_trn, ldr_val, ldr_tst = split_data(
-    #     net, dat_in, dat_out, dat_extra, args["train_batch"],
-    #     args["test_batch"])
-
     # Explicitly move the training (and maybe validation) data to the target
     # device.
     ldr_trn.dataset.to(dev)
@@ -387,7 +382,7 @@ def run_trials(args):
     # default features.
     fets = args["features"]
     if fets:
-        net_tmp.in_spc = fets
+        net_tmp.in_spc = tuple(fets)
     else:
         args["features"] = net_tmp.in_spc
 
@@ -473,13 +468,6 @@ def main():
         help=("If the model is an sklearn model, then analyze and graph the "
               "testing results."))
     psr.add_argument(
-        "--cca", default=defaults.DEFAULTS["cca"], help="The CCA to train on.",
-        required=False)
-    psr.add_argument(
-        "--tmp-dir", default=defaults.DEFAULTS["tmp_dir"],
-        help=("The directory in which to store temporary files. For best "
-              "performance, use an in-memory filesystem."))
-    psr.add_argument(
         "--balance", action="store_true",
         help="Balance the training data classes")
     psr.add_argument(
@@ -510,8 +498,7 @@ def main():
         default=defaults.DEFAULTS["perm_imp_repeats"], required=False, type=int,
         help=("If \"--analyze-features\" is specificed, then perform "
               "permutation importance analysis with this many repeats."))
-    psr, psr_verify = cl_args.add_num_exps(*cl_args.add_training(psr))
-
+    psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \
         "\"--drop-popular\" must be used with \"--balance\"."

@@ -31,9 +31,9 @@ class PytorchModelWrapper:
     # The name of this model.
     name = None
     # The specification of the input tensor format.
-    in_spc = []
+    in_spc = ()
     # The specification of the output tensor format.
-    out_spc = []
+    out_spc = ()
     # The number of output classes.
     num_clss = 0
     # The loss function to use during training.
@@ -358,7 +358,7 @@ class BinaryDnnWrapper(BinaryModelWrapper):
 
     name = "BinaryDnn"
     in_spc = features.FEATURES
-    out_spc = [features.OUT_FET]
+    out_spc = (features.OUT_FET,)
 
     los_fnc = torch.nn.CrossEntropyLoss
     opt = torch.optim.SGD
@@ -448,7 +448,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
     name = "SvmSklearn"
     in_spc = features.FEATURES
-    out_spc = [features.OUT_FET]
+    out_spc = (features.OUT_FET,)
     los_fnc = None
     opt = None
     params = ["kernel", "degree", "penalty", "max_iter", "graph"]
@@ -579,7 +579,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
             # Compute the distance from fair, then divide by fair to
             # compute the relative unfairness.
-            diffs = (raw - fair) / fair
+            diffs = 1 - raw
             if sort_by_unfairness:
                 # Sort based on unfairness.
                 diffs, indices = torch.sort(diffs)
@@ -797,7 +797,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # Compute the bandwidth fair share fraction. Convert from int to float
         # to avoid all values being rounded to 0.
-        fair = np.reciprocal(dat_extra["num_flws"].astype(float))
+        fair = dat_extra[features.BW_FAIR_SHARE_FRAC_FET]
 
         # Create the output directory.
         out_dir = path.join(graph_prms["out_dir"], self.name)
@@ -807,7 +807,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
             # Compute the maximum unfairness.
-            (-1, ((dat_extra["raw"] - fair) / fair).max().item())
+            (0, dat_extra["raw"].max().item())
             if sort_by_unfairness else (0, graph_prms["dur_s"]))
 
         if self.graph:
@@ -875,7 +875,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # Analyze overall accuracy for our model itself.
         print(f"Evaluating {self.name} model:")
         model_acc = self.__evaluate(
-            predictions, dat_out_classes, torch.tensor(raw), torch.tensor(fair),
+            predictions, dat_out_classes, torch.tensor(np.copy(raw)), torch.tensor(np.copy(fair)),
             out_dir, sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
@@ -1019,7 +1019,7 @@ class LstmWrapper(PytorchModelWrapper):
     #     features.INTERARR_TIME_FET,
     #     features.RTT_RATIO_FET,
     #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
-    out_spc = [features.OUT_FET]
+    out_spc = (features.OUT_FET,)
     num_clss = 5
     # Cross-entropy loss is designed for multi-class classification tasks.
     los_fnc = torch.nn.CrossEntropyLoss

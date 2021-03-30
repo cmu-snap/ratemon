@@ -30,7 +30,7 @@ def graph_fet(out_dir, dat, fet, bw_share_fair, bw_fair, x_min, x_max, labels):
 
     if features.TPUT_FET in fet and features.TOTAL_TPUT_FET not in fet:
         plt.hlines(bw_fair, 0, x_max, colors="k", linestyles="dashdot")
-    elif features.TPUT_SHARE_FET in fet:
+    elif features.TPUT_SHARE_FRAC_FET in fet:
         plt.hlines(
             bw_share_fair, 0, x_max, colors="k", linestyles="dashdot")
 

@@ -77,18 +77,6 @@ class Split:
         exp_new_idxs = random.sample(exp_available_idxs, num_new)
         exp_available_idxs -= set(exp_new_idxs)
 
-        # if self.shuffle:
-        #     # Shuffle the destination indices to remove experiment locality.
-        #     # Note that shuffling the source indices only is insufficient, as
-        #     # that removes flow locality but not experiment locality.
-        #     num_slots_remaining = len(self.dat_available_idxs)
-        #     assert num_slots_remaining >= num_new, \
-        #         (f"Trying to find locations for {num_new} new packets when "
-        #          f"there are only {num_slots_remaining} packet slots "
-        #          "available!")
-        #     dat_new_idxs = random.sample(self.dat_available_idxs, num_new)
-        # else:
-
         # Identify the indices in the merged array.
         start_idx = self.idx
         self.idx += num_new
@@ -113,6 +101,7 @@ class Split:
         # Shuffle in-place at the end. This is only okay because I plan to
         # always store the output in a tmpfs.
         if self.shuffle:
+            print(f"Shuffling split {self.name}...")
             np.random.default_rng().shuffle(self.dat)
 
         self.dat.flush()

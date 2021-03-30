@@ -126,15 +126,16 @@ UNKNOWABLE_FETS = [
 
 # Construct the list of all features that an isolated receiver may use. Do not
 # include any unknowable features.
-FEATURES = [
+FEATURES = tuple(
     fet for fet, _ in make_smoothed_features()
     if not np.asarray(
         [(unknowable_fet in fet)
-         for unknowable_fet in UNKNOWABLE_FETS]).any()]
+         for unknowable_fet in UNKNOWABLE_FETS]).any())
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(
     TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
 
 # Features to store as extra data for each sample.
-EXTRA_FETS = [ARRIVAL_TIME_FET, make_ewma_metric(RTT_FET, 0.01)]
+EXTRA_FETS = [
+    ARRIVAL_TIME_FET, RTT_FET, ACTIVE_FLOWS_FET, BW_FAIR_SHARE_FRAC_FET]
