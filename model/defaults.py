@@ -7,7 +7,7 @@ import sys
 DEFAULTS = {
     "data_dir": ".",
     "warmup_percent": 0,
-    "keep_percent": 100,
+    "sample_percent": 100,
     "num_exps": sys.maxsize,
     "exps": [],
     "model": "HistGbdtSklearn",

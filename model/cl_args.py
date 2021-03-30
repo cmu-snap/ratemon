@@ -72,6 +72,24 @@ def add_standardize(psr, psr_verify=lambda args: args):
     return psr, psr_verify
 
 
+def add_sample_percent(psr, psr_verify=lambda args: args):
+    """
+    Adds a "sample-kercent" argument to the provided ArgumentParser, and returns
+    it.
+    """
+    def verify(args):
+        sample_prc = args.sample_percent
+        assert 0 < sample_prc <= 100, \
+            ("\"sample-percent\" must be in the range (0, 100], but is: "
+             f"{sample_prc}")
+        return args
+
+    psr.add_argument(
+        "--sample-percent", default=defaults.DEFAULTS["sample_percent"],
+        required=False, type=float)
+    return psr, lambda args: verify(psr_verify(args))
+
+
 def add_training(psr, psr_verify=lambda args: args):
     """
     Adds training-related arguments to the provided ArgumentParser, and returns
@@ -89,13 +107,10 @@ def add_training(psr, psr_verify=lambda args: args):
             f"\"max-iter\" must be greater than 0, but is: {max_iter}"
         folds = args.folds
         assert folds >= 2, f"\"folds\" must be at least 2, but is: {folds}"
-        keep_prc = args.keep_percent
-        assert 0 < keep_prc <= 100, \
-            ("\"keep-percent\" must be in the range (0, 100], but is: "
-             f"{keep_prc}")
         return args
 
-    psr, psr_verify = add_out(*add_standardize(psr, psr_verify))
+    psr, psr_verify = add_sample_percent(
+        *add_out(*add_standardize(psr, psr_verify)))
     psr.add_argument(
         "--data-dir",
         help=("The path to a directory containing the"

@@ -20,15 +20,17 @@ import utils
 class Split:
     """ Represents either the training, validation, or test split. """
 
-    def __init__(self, name, prc, out_dir, dtype, num_pkts_tot, shuffle):
+    def __init__(self, name, split_frac, sample_frac, out_dir, dtype,
+                 num_pkts_tot, shuffle):
         self.name = name
-        self.frac = prc / 100
+        self.frac = split_frac * sample_frac
         self.shuffle = shuffle
 
         flp = utils.get_split_data_flp(out_dir, name)
         print(
             f"\tInitializing split \"{self.name}\" "
-            f"({prc}%{', shuffled' if self.shuffle else ''}) at {flp}")
+            f"({split_frac * 100}%, sampling {sample_frac * 100}%"
+            f"{', shuffled' if self.shuffle else ''}) at: {flp}")
 
         # Track where this Split has been finalized, in which case it
         # cannot have methods called on it.
@@ -108,8 +110,8 @@ class Split:
         #self.dat[list(self.dat_available_idxs)].fill(-1)
         self.dat[self.idx:].fill(-1)
 
-        # TODO: Shuffle in-place at the end
-        # This is only okay because I plan to always store the output in a tmpfs.
+        # Shuffle in-place at the end. This is only okay because I plan to
+        # always store the output in a tmpfs.
         if self.shuffle:
             np.random.default_rng().shuffle(self.dat)
 
@@ -164,20 +166,21 @@ def survey(exp_flps, warmup_frac):
     return num_pkts, dtype
 
 
-def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
+def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
+          sample_frac):
     """
     Merges the provided experiments into training, validation, and
-    test splits as defined by the percents in split_prcs. Stores the
+    test splits as defined by the percents in split_fracs. Stores the
     resulting files in out_dir. The experiments contain a total of
     num_pkts packets and have the provided dtype.
     """
     print("Preparing split files...")
     splits = {
         name: Split(
-            name, prc, out_dir, dtype, num_pkts,
+            name, split_frac, sample_frac, out_dir, dtype, num_pkts,
             shuffle=False)
             # shuffle=name == "train")
-        for name, prc in split_prcs.items()}
+        for name, split_frac in split_fracs.items()}
     # Keep track of the number of packets that do not get selected for
     # any of the splits.
     pkts_forgotten = 0
@@ -203,7 +206,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_prcs, warmup_frac):
                 dat_combined = np.concatenate((dat_combined, dat_flw))
         dat = dat_combined
 
-        # Start with the list of all indices. Each split select some
+        # Start with the list of all indices. Each split selects some
         # indices for itself, then removes them from this set.
         all_idxs = set(range(dat.shape[0]))
         # For each split, take a fraction of the experiment packets.
@@ -249,18 +252,17 @@ def main():
     psr.add_argument(
         "--test-split", default=30, help="Test data fraction",
         required=False, type=float)
-    # TODO: Add keep_percent.
-    psr, psr_verify = cl_args.add_out(
-        *cl_args.add_warmup(*cl_args.add_num_exps(psr)))
+    psr, psr_verify = cl_args.add_sample_percent(*cl_args.add_out(
+        *cl_args.add_warmup(*cl_args.add_num_exps(psr))))
     args = psr_verify(psr.parse_args())
 
-    split_prcs = {
-        "train": args.train_split, "val": args.val_split,
-        "test": args.test_split}
-    tot_split = sum(split_prcs.values())
-    assert tot_split == 100, \
+    split_fracs = {
+        "train": args.train_split / 100, "val": args.val_split / 100,
+        "test": args.test_split / 100}
+    tot_split = sum(split_fracs.values())
+    assert tot_split == 1, \
         ("The sum of the training, validation, and test splits must equal 100, "
-         f"not {tot_split}")
+         f"not {tot_split * 100}")
 
     tim_srt_s = time.time()
     # Determine the experiment filepaths.
@@ -273,13 +275,16 @@ def main():
     exp_flps = exp_flps[:num_exps]
     print(f"Selected {num_exps} experiments")
     warmup_frac = args.warmup_percent / 100
+    sample_frac = args.sample_percent / 100
     num_pkts, dtype = survey(exp_flps, warmup_frac)
     print(
         f"Total packets: {num_pkts}\nFeatures ({len(dtype.names)}):\n\t" +
         "\n\t".join(sorted(dtype.names)))
 
     # Create the merged training, validation, and test files.
-    merge(exp_flps, args.out_dir, num_pkts, dtype, split_prcs, warmup_frac)
+    merge(
+        exp_flps, args.out_dir, num_pkts, dtype, split_fracs, warmup_frac,
+        sample_frac)
     print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
     return 0
 
