@@ -486,20 +486,15 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                         output[win_start_idx][features.ARRIVAL_TIME_FET]
                         if win_start_idx >= 0 else -1)
                     end_time_us = output[j][features.ARRIVAL_TIME_FET]
-                    new = utils.safe_div(
+                    tput_bps = utils.safe_div(
                         utils.safe_mul(total_bytes, 8),
                         utils.safe_div(
                             utils.safe_sub(end_time_us, start_time_us), 1e6))
-
-                    # Report a warning if the throughput does not exceed the
-                    # bandwidth.
-                    if new != -1 and new > exp.bw_bps:
+                    # If the throughput exceeds the bandwidth, then record a
+                    # warning and do not record this throughput.
+                    if tput_bps != -1 and tput_bps > exp.bw_bps:
                         win_to_errors[win] += 1
-                        # print(
-                        #     f"Warning: Throughput of {new / 1e6:.2f} Mbps is "
-                        #     "higher than experiment bandwidth of "
-                        #     f"{exp.bw_Mbps:.2f} Mbps for window size {win} for "
-                        #     f"packet {j} of flow {flw_idx} in: {exp_flp}")
+                        continue
                 elif metric.startswith(features.TPUT_SHARE_FRAC_FET):
                     # This is calculated at the end.
                     continue
@@ -793,35 +788,39 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                     utils.safe_sub(
                         zipped_arr_times[j],
                         zipped_arr_times[win_to_start_idx[win]]))
-                # Extract the flow to which this packet belongs, as well as its
-                # index in its flow.
-                flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
-                index = zipped_dat[j]["index"]
-                flw_results[flw][index][features.make_win_metric(
-                    features.TOTAL_TPUT_FET, win)] = total_tput_bps
-                # Use the total throughput and the number of active flows to
-                # calculate the throughput fair share.
-                flw_results[flw][index][features.make_win_metric(
-                    features.TPUT_FAIR_SHARE_BPS_FET, win)] = utils.safe_div(
-                        total_tput_bps,
-                        flw_results[flw][index][features.ACTIVE_FLOWS_FET])
-                # Divide the flow's throughput by the total throughput.
-                tput_share = utils.safe_div(
-                    flw_results[flw][index][
-                        features.make_win_metric(features.TPUT_FET, win)],
-                    total_tput_bps)
-                flw_results[flw][index][features.make_win_metric(
-                    features.TPUT_SHARE_FRAC_FET, win)] = tput_share
-                # Calculate the ratio of tput share to bandwidth fair share.
-                flw_results[flw][index][features.make_win_metric(
-                    features.TPUT_TO_FAIR_SHARE_RATIO_FET, win)] = (
-                        utils.safe_div(
-                            tput_share,
-                            flw_results[flw][index][
-                                features.BW_FAIR_SHARE_FRAC_FET]))
                 # Check if this throughput is erroneous.
                 if total_tput_bps > exp.bw_bps:
                     win_to_errors[win] += 1
+                else:
+                    # Extract the flow to which this packet belongs, as well as
+                    # its index in its flow.
+                    flw = tuple(zipped_dat[j][[
+                        "client port", "server port"]].tolist())
+                    index = zipped_dat[j]["index"]
+                    flw_results[flw][index][features.make_win_metric(
+                        features.TOTAL_TPUT_FET, win)] = total_tput_bps
+                    # Use the total throughput and the number of active flows to
+                    # calculate the throughput fair share.
+                    flw_results[flw][index][features.make_win_metric(
+                        features.TPUT_FAIR_SHARE_BPS_FET, win)] = (
+                            utils.safe_div(
+                                total_tput_bps,
+                                flw_results[flw][index][
+                                    features.ACTIVE_FLOWS_FET]))
+                    # Divide the flow's throughput by the total throughput.
+                    tput_share = utils.safe_div(
+                        flw_results[flw][index][
+                            features.make_win_metric(features.TPUT_FET, win)],
+                        total_tput_bps)
+                    flw_results[flw][index][features.make_win_metric(
+                        features.TPUT_SHARE_FRAC_FET, win)] = tput_share
+                    # Calculate the ratio of tput share to bandwidth fair share.
+                    flw_results[flw][index][features.make_win_metric(
+                        features.TPUT_TO_FAIR_SHARE_RATIO_FET, win)] = (
+                            utils.safe_div(
+                                tput_share,
+                                flw_results[flw][index][
+                                    features.BW_FAIR_SHARE_FRAC_FET]))
 
     print("\tWindow durations:")
     for win in features.WINDOWS:
