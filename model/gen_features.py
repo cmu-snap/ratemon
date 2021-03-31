@@ -111,20 +111,21 @@ def open_exp(exp, exp_flp, untar_dir, out_dir):
         if path.exists(lock_flp):
             print(f"\tParsing already in progress: {exp_flp}")
             yield False, exp_dir
-        locked = True
-        with open(lock_flp, "w"):
-            pass
+        else:
+            locked = True
+            with open(lock_flp, "w"):
+                pass
 
-        # Create a temporary folder to untar experiments.
-        if not path.exists(untar_dir):
-            os.mkdir(untar_dir)
-        # If this experiment has already been untarred, then delete the old
-        # files.
-        if path.exists(exp_dir):
-            shutil.rmtree(exp_dir)
-        untarred = True
-        subprocess.check_call(["tar", "-xf", exp_flp, "-C", untar_dir])
-        yield True, exp_dir
+            # Create a temporary folder to untar experiments.
+            if not path.exists(untar_dir):
+                os.mkdir(untar_dir)
+            # If this experiment has already been untarred, then delete the old
+            # files.
+            if path.exists(exp_dir):
+                shutil.rmtree(exp_dir)
+            untarred = True
+            subprocess.check_call(["tar", "-xf", exp_flp, "-C", untar_dir])
+            yield True, exp_dir
     finally:
         # Remove an entity only if we created it.
         #
@@ -873,6 +874,7 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
         if locked:
             return parse_opened_exp(
                 exp, exp_flp, exp_dir, out_dir, skip_smoothed)
+    return -1
 
 
 def main():
