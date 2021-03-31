@@ -239,7 +239,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     net.new(**{param: args[param] for param in net.params})
 
     # Extract the training data from the training dataloader.
-    dat_in, dat_out = list(ldr_trn)[0]    
+    dat_in, dat_out = list(ldr_trn)[0]
     print("Training data:")
     utils.visualize_classes(net, dat_out)
 
@@ -255,6 +255,8 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         pickle.dump(net.net, fil)
 
     # Testing.
+    #
+    # Use .raw() instead of loading the dataloader because we need dat_extra.
     fets, dat_in, dat_out, dat_extra = ldr_tst.dataset.raw()
     print("Test data:")
     utils.visualize_classes(net, dat_out)
@@ -271,7 +273,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     if args["analyze_features"]:
         utils.select_fets(
             utils.analyze_feature_correlation(
-                net, out_dir, dat_in, args["cluster_threshold"]),
+                net, out_dir, dat_in, args["clusters"]),
             utils.analyze_feature_importance(
                 net, out_dir, dat_in, dat_out, args["fets_to_pick"],
                 args["perm_imp_repeats"]))

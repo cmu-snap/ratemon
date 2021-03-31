@@ -918,7 +918,6 @@ def main():
     if defaults.SYNC:
         smallest_safe_wins = {parse_exp(*pcap) for pcap in pcaps}
     else:
-        # By default, use all available cores.
         with multiprocessing.Pool(processes=args.parallel) as pol:
             smallest_safe_wins = set(pol.starmap(parse_exp, pcaps))
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
