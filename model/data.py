@@ -117,10 +117,10 @@ def extract_fets(dat, net):
     # that feature or NaN.
     bad_fets = []
     for fet in dat_in.dtype.names:
-        if (dat_in[fet] == -1).all():
+        invalid = dat_in[fet] == -1
+        if invalid.all():
             bad_fets.append(fet)
             continue
-        invalid = dat_in[fet] == -1
         dat_in[fet][invalid] = (
             float("NaN") if is_dt
             else np.mean(dat_in[fet][np.logical_not(invalid)]))
