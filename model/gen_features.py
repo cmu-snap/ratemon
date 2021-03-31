@@ -925,7 +925,10 @@ def main():
     smallest_safe_wins = [win for win in smallest_safe_wins if win != -1]
     if 0 in smallest_safe_wins:
         print("Some experiments had no safe window sizes.")
-    print("Smallest globally-safe window size:", max(smallest_safe_wins))
+    print(
+        "Smallest globally-safe window size:",
+        max(smallest_safe_wins) if smallest_safe_wins
+        else "No experiments parsed!")
 
 
 if __name__ == "__main__":
