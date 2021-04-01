@@ -16,9 +16,6 @@ def get_dataloaders(args, net):
     """
     Builds training, validation, and test sets, which are returned as
     dataloaders.
-
-    args: Dictionary of configuration info.
-    net: The model.
     """
     out_dir = args["out_dir"]
     dat_flp = path.join(out_dir, "data.npz")
@@ -47,8 +44,6 @@ def get_bulk_data(args, net):
     a tuple of the form:
         ( (training dataloader, validation dataloader, test dataloader),
           scaling parameters )
-
-    args: Dictionary of configuration info.
     """
     data_dir = args["data_dir"]
     trn, val, tst = [
@@ -75,6 +70,11 @@ def get_bulk_data(args, net):
 
 
 def extract_fets(dat, net):
+    """
+    Extracts net's the input and output features from dat. Returns a tuple of
+    the form:
+        (dat_in, dat_out, dat_extra, scaling groups).
+    """
     # Split each data matrix into two separate matrices: one with the input
     # features only and one with the output features only. The names of the
     # columns correspond to the feature names in in_spc and out_spc.

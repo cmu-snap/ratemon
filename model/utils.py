@@ -1143,11 +1143,12 @@ def zip_timeseries(xs, ys):
     return xs_o, ys_o
 
 def select_fets(cluster_to_fets, top_fets):
-    # Go backwards through top fets
-    # For each fet, find it's cluster
-    # If can't find cluster, drop fet
-    # If found cluster, drop cluster
-
+    """
+    Selects the most important feature from each cluster in cluster_to_fets,
+    using the importance information in top_fets. Each entry in top_fets is a
+    tuple of the form: (feature name, feature importance).
+    """
+    # Returns the dictionary keys whose values contain an item.
     get_keys = lambda x, d: [k for k, v in d.items() if x in v]
     chosen_fets = []
     # Examine the features from most important to least important.
@@ -1165,11 +1166,14 @@ def select_fets(cluster_to_fets, top_fets):
         chosen_fets.append(fet)
         # Remove this cluster to invalidate its other features.
         del cluster_to_fets[clusters[0]]
+    # Make sure that chosen features are sorted in decreasing order of
+    # importance (most important is first).
+    chosen_fets = list(reversed(sorted(chosen_fets, key=lambda p:p[1])))
     print(
         f"Chosen features ({len(chosen_fets)}):\n\t" +
         "\n\t".join(
-            f"{fet}: {coeff:.4f}" for fet, coeff in reversed(
-                sorted(chosen_fets, key=lambda p:p[1]))))
+            f"{fet}: {coeff:.4f}" for fet, coeff in chosen_fets))
+    return chosen_fets
 
 
 def find_bound(times_us, target_us, min_idx, max_idx, which):
