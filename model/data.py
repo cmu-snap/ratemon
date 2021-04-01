@@ -47,7 +47,7 @@ def get_bulk_data(args, net):
     """
     data_dir = args["data_dir"]
     trn, val, tst = [
-        extract_fets(utils.load_split(data_dir, name), net)
+        extract_fets(utils.load_split(data_dir, name), name, net)
         for name in ["train", "val", "test"]]
     # Select a fraction of the training data.
     num_pkts = math.ceil(trn[0].shape[0] * args["sample_percent"] / 100)
@@ -69,7 +69,7 @@ def get_bulk_data(args, net):
     return trn[:3], val[:3], tst[:3], scl_prms
 
 
-def extract_fets(dat, net):
+def extract_fets(dat, split_name, net):
     """
     Extracts net's the input and output features from dat. Returns a tuple of
     the form:
@@ -107,25 +107,30 @@ def extract_fets(dat, net):
             assert (not (
                 np.isnan(dat_in[fet]).any() or
                 np.isinf(dat_in[fet]).any())), \
-                f"Warning: NaNs or Infs in input feature: {fet}"
+                ("Warning: NaNs or Infs in input feature for split "
+                 f"\"{split_name}\": {fet}")
         assert (not (
             np.isnan(dat_out[features.LABEL_FET]).any() or
             np.isinf(dat_out[features.LABEL_FET]).any())), \
-            "Warning: NaNs or Infs in ground truth."
+            f"Warning: NaNs or Infs in ground truth for split \"{split_name}\"."
 
-    # Convert all instances of -1 (feature value unknown) to either the mean for
-    # that feature or NaN.
-    bad_fets = []
-    for fet in dat_in.dtype.names:
-        invalid = dat_in[fet] == -1
-        if invalid.all():
-            bad_fets.append(fet)
-            continue
-        dat_in[fet][invalid] = (
-            float("NaN") if is_dt
-            else np.mean(dat_in[fet][np.logical_not(invalid)]))
-        assert (dat_in[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
-    assert not bad_fets, f"Features contain only \"-1\": {bad_fets}"
+    if dat_in.shape[0] > 0:
+        # Convert all instances of -1 (feature value unknown) to either the mean for
+        # that feature or NaN.
+        bad_fets = []
+        for fet in dat_in.dtype.names:
+            invalid = dat_in[fet] == -1
+            if invalid.all():
+                bad_fets.append(fet)
+                continue
+            dat_in[fet][invalid] = (
+                float("NaN") if is_dt
+                else np.mean(dat_in[fet][np.logical_not(invalid)]))
+            assert (dat_in[fet] != -1).all(), \
+                f"Found \"-1\" in split \"{split_name}\" feature: {fet}"
+        assert not bad_fets, \
+            (f"Features in split \"{split_name}\" contain only \"-1\" "
+             f"({len(bad_fets)}): {bad_fets}")
 
     # Convert output features to class labels.
     dat_out = net.convert_to_class(dat_out)

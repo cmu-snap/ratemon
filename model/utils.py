@@ -921,9 +921,16 @@ def load_split(split_dir, name):
     tuple of (training, validation, test) data.
     """
     num_pkts, dtype = load_split_metadata(split_dir, name)
-    return np.memmap(
-        get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
-        shape=(num_pkts,))
+    if num_pkts == 0:
+        # If the number of packets in this split is 0, then we will not find the
+        # split on disk (because it is impossible to create a memory-mapped
+        # numpy ndarray of size 0). Therefore, just return a new empty numpy
+        # ndarray.
+        return np.zeros((num_pkts,), dtype=dtype)
+    else:
+        return np.memmap(
+            get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
+            shape=(num_pkts,))
 
 
 def get_feature_analysis_flp(out_dir):
