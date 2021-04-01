@@ -468,8 +468,8 @@ def main():
         description="Train a model on the output of gen_features.py.")
     psr.add_argument(
         "--graph", action="store_true",
-        help=("If the model is an sklearn model, then analyze and graph the "
-              "testing results."))
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
+              "then analyze and graph the testing results."))
     psr.add_argument(
         "--balance", action="store_true",
         help="Balance the training data classes")
@@ -489,18 +489,20 @@ def main():
     psr.add_argument(
         "--clusters", default=defaults.DEFAULTS["clusters"],
         required=False, type=int,
-        help=("If \"--analyze-features\" is specified, then pick this many "
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
+              "and \"--analyze-features\" is specified, then pick this many "
               "clusters."))
-    # TODO: Make comments specific to HistGbdt
     psr.add_argument(
         "--features-to-pick", default=defaults.DEFAULTS["fets_to_pick"],
         required=False, type=int, dest="fets_to_pick",
-        help=("If \"--analyze-features\" is specified, then pick this many of "
+        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\" "
+              "and \"--analyze-features\" is specified, then pick this many of "
               "the top features."))
     psr.add_argument(
         "--permutation-importance-repeats", dest="perm_imp_repeats",
         default=defaults.DEFAULTS["perm_imp_repeats"], required=False, type=int,
-        help=("If \"--analyze-features\" is specificed, then perform "
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
+              "and \"--analyze-features\" is specificed, then perform "
               "permutation importance analysis with this many repeats."))
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
