@@ -142,12 +142,12 @@ def add_training(psr, psr_verify=lambda args: args):
     psr.add_argument(
         "--kernel", default=defaults.DEFAULTS["kernel"],
         choices=["linear", "poly", "rbf", "sigmoid"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\", "
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
               "then use this type kernel. Ignored otherwise."),
         type=str)
     psr.add_argument(
         "--degree", default=defaults.DEFAULTS["degree"],
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name()}\" "
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
               "and \"--kernel=poly\", then this is the degree of the "
               "polynomial that will be fit. Ignored otherwise."),
         type=int)

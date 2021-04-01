@@ -485,8 +485,9 @@ def main():
     psr.add_argument(
         "--l2-regularization", default=defaults.DEFAULTS["l2_regularization"],
         required=False, type=float,
-        help=("If the model is of type \"{models.HistGbdtSklearnWrapper().name}\", "
-              "then use this as the L2 regularization parameter."))
+        help=("If the model is of type "
+              f"\"{models.HistGbdtSklearnWrapper().name}\", then use this as "
+              "the L2 regularization parameter."))
     psr.add_argument(
         "--clusters", default=defaults.DEFAULTS["clusters"],
         required=False, type=int,
