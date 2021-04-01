@@ -21,8 +21,8 @@ def get_dataloaders(args, net):
     out_dir = args["out_dir"]
     dat_flp = path.join(
         out_dir,
-        utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys())) +
-        "_data.npz")
+        "data_" + utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys())) +
+        ".npz")
     scl_prms_flp = path.join(out_dir, "scale_params.json")
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the

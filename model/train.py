@@ -374,10 +374,9 @@ def run_trials(args):
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        (utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()))
-         ) + (
-            # Determine the proper extension based on the type of
-            # model.
+        "model_" +
+        utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys())) + (
+            # Determine the proper extension based on the type of model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
             else ".pth"))
     # If a trained model file already exists, then delete it.
