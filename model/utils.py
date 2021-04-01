@@ -927,10 +927,9 @@ def load_split(split_dir, name):
         # numpy ndarray of size 0). Therefore, just return a new empty numpy
         # ndarray.
         return np.zeros((num_pkts,), dtype=dtype)
-    else:
-        return np.memmap(
-            get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
-            shape=(num_pkts,))
+    return np.memmap(
+        get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
+        shape=(num_pkts,))
 
 
 def get_feature_analysis_flp(out_dir):

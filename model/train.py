@@ -277,7 +277,6 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
             utils.analyze_feature_importance(
                 net, out_dir, dat_in, dat_out, args["fets_to_pick"],
                 args["perm_imp_repeats"]))
-
     return acc_tst, tim_trn_s
 
 
