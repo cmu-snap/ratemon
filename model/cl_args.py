@@ -49,7 +49,7 @@ def add_num_exps(psr, psr_verify=lambda args: args):
     """
     def verify(args):
         num_exps = args.num_exps
-        assert num_exps >= 0, \
+        assert num_exps is None or num_exps >= 0, \
             f"\"num-exps\" cannot be negative, but is: {num_exps}"
         return args
 
