@@ -25,6 +25,7 @@ class Split:
         self.name = name
         self.frac = split_frac * sample_frac
         self.shuffle = shuffle
+        self.fets = dtype.names
 
         flp = utils.get_split_data_flp(out_dir, name)
         print(
@@ -37,13 +38,13 @@ class Split:
         self.finished = False
 
         num_pkts = math.ceil(num_pkts_tot * self.frac)
-        # Create an empty file for each split, and set all entries
-        # to -1. This matches the behavior of parse_dumbbell.py:
-        # Features values that cannot be computed are replaced
-        # with -1. When reading the splits later, we can detect
-        # incomplete feature values by looking for -1s.
-        self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
-        self.fets = self.dat.dtype.names
+        if num_pkts == 0:
+            self.dat = None
+        else:
+            # Create an empty file for each split. Features values that cannot
+            # be computed are replaced with -1. When reading the splits later,
+            # we can detect incomplete feature values by looking for -1s.
+            self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
 
         # The next available index in self.dat.
         self.idx = 0
@@ -51,9 +52,9 @@ class Split:
         # # reduced as the split is populated.
         # self.dat_available_idxs = set(range(num_pkts))
 
-        # Save this Split's metadata so that its data file can be !read later.
+        # Save this Split's metadata so that its data file can be read later.
         utils.save_split_metadata(
-            out_dir, self.name, dat=(num_pkts, self.dat.dtype.descr))
+            out_dir, self.name, dat=(num_pkts, dtype.descr))
 
     def take(self, exp_dat, exp_available_idxs):
         """
@@ -62,6 +63,10 @@ class Split:
         exp_available_idxs and returns the modified version.
         """
         assert not self.finished, "Trying to call a method on a finished Split."
+        if self.dat is None:
+            # This split is not supposed to select any packets.
+            return exp_available_idxs
+
         num_exp_pkts = exp_dat.shape[0]
         num_new = math.floor(num_exp_pkts * self.frac)
         # Verify that if a split fraction was nonzero, then at least
@@ -94,6 +99,10 @@ class Split:
         Finalize this split. A finalized Split cannot have methods called on it.
         """
         self.finished = True
+        if self.dat is None:
+            # This split does not contain any packets.
+            return
+
         # Mark any unused indices as invalid by filling their values with -1.
         #self.dat[list(self.dat_available_idxs)].fill(-1)
         self.dat[self.idx:].fill(-1)
