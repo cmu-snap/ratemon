@@ -96,7 +96,7 @@ def get_time_bounds(pkts, direction="data"):
 
 
 @contextmanager
-def open_exp(exp, exp_flp, untar_dir, out_dir):
+def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
     """
     Locks and untars an experiment. Cleans up the lock and untarred files
     automatically.
@@ -107,10 +107,14 @@ def open_exp(exp, exp_flp, untar_dir, out_dir):
     locked = False
     untarred = False
     try:
-        # Grab the lock file for this experiment.
+        # Check the lock file for this experiment.
         if path.exists(lock_flp):
-            print(f"\tParsing already in progress: {exp_flp}")
-            yield False, exp_dir
+            print(f"Parsing already in progress: {exp_flp}")
+            yield False, None
+        # If the output file exists, then we do not need to parse this file.
+        elif path.exists(out_flp):
+            print(f"Already parsed: {exp_flp}")
+            yield False, None
         else:
             locked = True
             with open(lock_flp, "w"):
@@ -137,28 +141,11 @@ def open_exp(exp, exp_flp, untar_dir, out_dir):
             os.remove(lock_flp)
 
 
-def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
+def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     """ Parses an experiment. Returns the smallest safe window size. """
     print(f"Parsing: {exp_flp}")
     if exp.tot_flws == 0:
         print(f"\tNo flows to analyze in: {exp_flp}")
-
-    # Construct the output filepaths.
-    out_flp = path.join(out_dir, f"{exp.name}.npz")
-    # If the output file exists, then we do not need to parse this file.
-    if path.exists(out_flp):
-        print(f"\tAlready parsed: {exp_flp}")
-        return -1
-
-    # Determine the path to the bottleneck queue log file.
-    toks = exp.name.split("-")
-    q_log_flp = path.join(
-        exp_dir,
-        "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
-        ".log")
-    q_log = None
-    if path.exists(q_log_flp):
-        q_log = list(enumerate(utils.parse_queue_log(q_log_flp)))
 
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
@@ -169,10 +156,23 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
                  for flw in params["flowsets"]
                  for client_port in flw[3]]
 
-    flw_to_pkts_client = utils.parse_packets(
-        path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap"), flws)
-    flw_to_pkts_server = utils.parse_packets(
-        path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap"), flws)
+    client_pcap = path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap")
+    server_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
+    if not (path.exists(client_pcap) and path.exists(server_pcap)):
+        print(f"Warning: Missing pcap file in: {exp_flp}")
+        return -1
+    flw_to_pkts_client = utils.parse_packets(client_pcap, flws)
+    flw_to_pkts_server = utils.parse_packets(server_pcap, flws)
+
+    # Determine the path to the bottleneck queue log file.
+    toks = exp.name.split("-")
+    q_log_flp = path.join(
+        exp_dir,
+        "-".join(toks[:-1]) + "-forward-bottleneckqueue-" + toks[-1] +
+        ".log")
+    q_log = None
+    if path.exists(q_log_flp):
+        q_log = list(enumerate(utils.parse_queue_log(q_log_flp)))
 
     # Transform absolute times into relative times to make life easier.
     #
@@ -870,10 +870,11 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_dir, skip_smoothed):
 def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     """ Locks, untars, and parses an experiment. """
     exp = utils.Exp(exp_flp)
-    with open_exp(exp, exp_flp, untar_dir, out_dir) as (locked, exp_dir):
-        if locked:
+    out_flp = path.join(out_dir, f"{exp.name}.npz")
+    with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
+        if locked and exp_dir is not None:
             return parse_opened_exp(
-                exp, exp_flp, exp_dir, out_dir, skip_smoothed)
+                exp, exp_flp, exp_dir, out_flp, skip_smoothed)
     return -1
 
 
