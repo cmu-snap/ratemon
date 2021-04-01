@@ -7,6 +7,7 @@ import numpy as np
 from numpy.lib import recfunctions
 import torch
 
+import defaults
 import features
 import models
 import utils
@@ -18,7 +19,10 @@ def get_dataloaders(args, net):
     dataloaders.
     """
     out_dir = args["out_dir"]
-    dat_flp = path.join(out_dir, "data.npz")
+    dat_flp = path.join(
+        out_dir,
+        utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys())) +
+        "_data.npz")
     scl_prms_flp = path.join(out_dir, "scale_params.json")
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the
