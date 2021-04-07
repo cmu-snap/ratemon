@@ -35,7 +35,6 @@ DEFAULTS = {
     "tmp_dir": None,
     "regen_data": False,
     "sync": False,
-    "cca": "bbr",
     "n_estimators": 100,
     "max_depth": 10,
     "balance": False,
