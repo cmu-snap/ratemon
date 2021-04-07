@@ -180,8 +180,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
     splits = {
         name: Split(
             name, split_frac, sample_frac, out_dir, dtype, num_pkts,
-            shuffle=False)
-            # shuffle=name == "train")
+            shuffle=name == "train")
         for name, split_frac in split_fracs.items()}
     # Keep track of the number of packets that do not get selected for
     # any of the splits.
