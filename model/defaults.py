@@ -45,9 +45,11 @@ DEFAULTS = {
     "fets_to_pick": None,
     "perm_imp_repeats": 10
 }
-# Arguments to ignore when converting an arguments dictionary to a
-# string.
-ARGS_TO_IGNORE = ["data_dir", "out_dir", "tmp_dir", "sims", "features", "exps"]
+# When converting an arguments dictionary to a string, ignore arguments that do
+# not impact model training.
+ARGS_TO_IGNORE = [
+    "data_dir", "out_dir", "tmp_dir", "sims", "features", "exps",
+    "analyze_features", "sync", "graph", "test_batch", "regen_data"]
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
