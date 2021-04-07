@@ -236,13 +236,19 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     # Construct the model.
     print("Building model...")
     net = models.MODELS[args["model"]]()
-    net.new(**{param: args[param] for param in net.params})
 
     if path.exists(out_flp):
+        # The output file already exists with these parameters, so do not
+        # retrain the model.
         print(
             "Skipping training because a trained model already exists with "
             f"these parameters: {out_flp}")
+        print(f"Loading model: {out_flp}")
+        with open(out_flp, "rb") as fil:
+            net.net = pickle.load(fil)
+        tim_trn_s = 0
     else:
+        net.new(**{param: args[param] for param in net.params})
         # Extract the training data from the training dataloader.
         print("Extracting training data...")
         dat_in, dat_out = list(ldr_trn)[0]
@@ -385,9 +391,6 @@ def run_trials(args):
             # Determine the proper extension based on the type of model.
             ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
             else ".pth"))
-    # If a trained model file already exists, then delete it.
-    if path.exists(out_flp):
-        os.remove(out_flp)
     # If custom features are specified, then overwrite the model's
     # default features.
     fets = args["features"]
