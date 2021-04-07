@@ -1180,9 +1180,9 @@ def select_fets(cluster_to_fets, top_fets):
         "\n\t".join(
             f"{fet}: {coeff:.4f}" for fet, coeff in chosen_fets))
     print(
-        "New in_spc:", "\tin_spc = [",
+        "New in_spc:", "\tin_spc = (",
         "\t\t" + "\n\t\t".join(f"\"{fet}\"," for fet, _ in chosen_fets[:10]),
-        "\t]", sep="\n")
+        "\t)", sep="\n")
     return chosen_fets
 
 
