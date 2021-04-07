@@ -238,21 +238,27 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     net = models.MODELS[args["model"]]()
     net.new(**{param: args[param] for param in net.params})
 
-    # Extract the training data from the training dataloader.
-    dat_in, dat_out = list(ldr_trn)[0]
-    print("Training data:")
-    utils.visualize_classes(net, dat_out)
+    if path.exists(out_flp):
+        print(
+            "Skipping training because a trained model already exists with "
+            f"these parameters: {out_flp}")
+    else:
+        # Extract the training data from the training dataloader.
+        print("Extracting training data...")
+        dat_in, dat_out = list(ldr_trn)[0]
+        print("Training data:")
+        utils.visualize_classes(net, dat_out)
 
-    # Training.
-    print("Training...")
-    tim_srt_s = time.time()
-    net.train(ldr_trn.dataset.fets, dat_in, dat_out)
-    tim_trn_s = time.time() - tim_srt_s
-    print(f"Finished training - time: {tim_trn_s:.2f} seconds")
-    # Save the model.
-    print(f"Saving final model: {out_flp}")
-    with open(out_flp, "wb") as fil:
-        pickle.dump(net.net, fil)
+        # Training.
+        print("Training...")
+        tim_srt_s = time.time()
+        net.train(ldr_trn.dataset.fets, dat_in, dat_out)
+        tim_trn_s = time.time() - tim_srt_s
+        print(f"Finished training - time: {tim_trn_s:.2f} seconds")
+        # Save the model.
+        print(f"Saving final model: {out_flp}")
+        with open(out_flp, "wb") as fil:
+            pickle.dump(net.net, fil)
 
     # Testing.
     #
