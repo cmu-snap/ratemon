@@ -111,7 +111,11 @@ class Split:
         # always store the output in a tmpfs.
         if self.shuffle:
             print(f"Shuffling split {self.name}...")
+            tim_srt_s = time.time()
             np.random.default_rng().shuffle(self.dat)
+            print(
+                f"Done shuffling split {self.name} "
+                f"(took {time.time() - tim_srt_s:.2f} seconds)")
 
         self.dat.flush()
 
