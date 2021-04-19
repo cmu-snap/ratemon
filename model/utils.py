@@ -7,6 +7,7 @@ import os
 from os import path
 import pickle
 import random
+import struct
 import sys
 import time
 import zipfile
@@ -301,7 +302,7 @@ def str_to_args(args_str, order):
     return parsed
 
 
-def parse_packets(flp, flws_ports):
+def parse_packets(flp, flw_to_cca):
     """
     Parses a PCAP file. Considers packets between a specified client and server
     using specified ports only.
@@ -323,63 +324,104 @@ def parse_packets(flp, flws_ports):
     pkts = list(enumerate(scapy.utils.RawPcapReader(flp)))
     num_pkts = len(pkts)
 
+    copa_header_fmt = "iiidd"
+    # "iiidd" is ordinarily 28 bytes. However, when in a C struct, it is padded
+    # to enforce memory alignment. Therefore, it somehow ends up being 32 bytes.
+    copa_header_struct_size = struct.calcsize(copa_header_fmt)
+
     def make_empty():
         """ Make an empty numpy array to store the packets. """
-        return np.full((num_pkts, 6), -1, dtype="int64")
+        return np.full((num_pkts,), -1, dtype=features.PARSE_PACKETS_FETS)
 
     def remove_unused_rows(arr):
         """
         Returns a filtered array with unused rows removed. A row is unused if
-        all of its entries are -1. As an optimization, we check the first entry
-        in each row only because we always set a full row at once.
+        all of its columns are -1. As an optimization, we check the second
+        column (timestamp) in each row only because the timestamp should never
+        be unknown because it comes from PCAP.
         """
-        return arr[arr[:,0] != -1]
+        return arr[arr[features.ARRIVAL_TIME_FET] != -1]
 
     # Format described above. In this form, the arrays will be sparse. Unused
     # rows will be removed later.
     flw_to_pkts = {
-        flw_ports: (make_empty(), make_empty()) for flw_ports in flws_ports}
+        flw_ports: (make_empty(), make_empty())
+        for flw_ports in flw_to_cca.keys()}
     for idx, (pkt_dat, pkt_mdat) in pkts:
         ether = scapy.layers.l2.Ether(pkt_dat)
         # Assume that this is a TCP/IP packet.
         ip = ether[scapy.layers.inet.IP]
-        tcp = ether[scapy.layers.inet.TCP]
+        is_tcp = scapy.layers.inet.TCP in ether
+        trans = ether[
+            scapy.layers.inet.TCP if is_tcp else scapy.layers.inet.UDP]
         # Determine this packet's direction. Assume that the client IP address
         # if 192.0.0.4 and the server IP address is 192.0.0.2. Assume that all
         # packets are between the client and server.
         if ip.src[-1] == "4":
             dir_idx = 0
-            flw = (tcp.sport, tcp.dport)
+            flw = (trans.sport, trans.dport)
         else:
             dir_idx = 1
-            flw = (tcp.dport, tcp.sport)
+            flw = (trans.dport, trans.sport)
         # Assume that the packets are between the relevent machines. Only check
         # the ports.
         if flw in flw_to_pkts:
-            # Decode the TCP Timestamp option.
-            if len(tcp.options) >= 3 and tcp.options[2][0] == "Timestamp":
-                # Fast path: it is usually the third option.
-                ts = tcp.options[2][1]
-            else:
-                # Slow path: check all of the options.
-                for option_name, option in tcp.options:
-                    if option_name == "Timestamp":
-                        ts = option
-                        break
+            # Decode the sequence number and timestamp info.
+            seq = -1
+            ts = (-1, -1)
+            if is_tcp:
+                seq = trans.seq
+                trans_header_len = trans.dataofs << 2
+                # Decode the TCP Timestamp option.
+                if (len(trans.options) >= 3 and
+                        trans.options[2][0] == "Timestamp"):
+                    # Fast path: it is usually the third option.
+                    ts = trans.options[2][1]
                 else:
-                    ts = (-1, -1)
+                    # Slow path: check all of the options.
+                    for option_name, option in trans.options:
+                        if option_name == "Timestamp":
+                            ts = option
+                            break
+            else:
+                # Start with the UDP header size.
+                trans_header_len = 8
+                cca = flw_to_cca[flw]
+                if cca == "copa":
+                    # Add the Copa header size to the UDP header size.
+                    trans_header_len += copa_header_struct_size
+                    # The Copa header is the first part of the UDP payload.
+                    #     int seq_num;
+	                #     int flow_id;
+	                #     int src_id;
+	                #     double sender_timestamp;  // milliseconds
+	                #     double receiver_timestamp;  // milliseconds
+                    seq, _, _, sender_ts, receiver_ts = struct.unpack(
+                        copa_header_fmt,
+                        # Convert the transport payload to bytes and then select
+                        # the Copa header only.
+                        bytes(trans.payload)[:copa_header_struct_size])
+                    # Convert from milliseconds to microsecods and then convert
+                    # from a double to an int.
+                    ts = (
+                        int(round(sender_ts * 1000)),
+                        int(round(receiver_ts * 1000)))
+                elif cca == "vivace":
+                    # TODO: Parse the PCC Vivace header.
+                    pass
+
             flw_to_pkts[flw][dir_idx][idx] = (
                 # Sequence number.
-                tcp.seq,
+                seq,
                 # Timestamp. Not using parse_time_us for efficiency purpose. Use
                 # 1000000 instead of 1e6 to avoid converting floats.
                 pkt_mdat.sec * 1000000 + pkt_mdat.usec,
                 # Timestamp option.
                 ts[0],
                 ts[1],
-                # TCP payload. Length of the IP packet minus the length of the
-                # IP header minus the length of the TCP header.
-                ip.len - (ip.ihl * 4) - (tcp.dataofs * 4),
+                # Transport payload. Length of the IP packet minus the length of
+                # the IP header minus the length of the transport header.
+                ip.len - (ip.ihl << 2) - trans_header_len,
                 # Total packet size.
                 pkt_mdat.wirelen)
 

@@ -52,9 +52,17 @@ TPUT_TO_FAIR_SHARE_RATIO_FET = "throughput to fair share ratio"
 LABEL_FET = "class"
 MATHIS_TPUT_FET = "mathis model throughput b/s"
 
+# Additional features used when parking packets.
+TS_1_FET = "timestamp 1 us"
+TS_2_FET = "timestamp 2 us"
+
 # These metrics do not change.
 REGULAR = [
-    (SEQ_FET, "uint32"),
+    # Use int64 even though sequence numbers are actually uint32 because we need
+    # to be able to support our special value for unknown values, which is
+    # negative (-1). However, int32 is too small, because sequence numbers can
+    # be as large as 2**32 - 1. Therefore, we use int64.
+    (SEQ_FET, "int64"),
     (ARRIVAL_TIME_FET, "int32"),
     (RTT_FET, "int32"),
     (MIN_RTT_FET, "int32"),
@@ -139,3 +147,14 @@ OUT_FET = make_win_metric(
 # Features to store as extra data for each sample.
 EXTRA_FETS = [
     ARRIVAL_TIME_FET, RTT_FET, ACTIVE_FLOWS_FET, BW_FAIR_SHARE_FRAC_FET]
+
+# Features used when parsing packets.
+PARSE_PACKETS_FETS = [
+    # See REGULAR for details.
+    (SEQ_FET, "int64"),
+    (ARRIVAL_TIME_FET, "int32"),
+    (TS_1_FET, "int64"),
+    (TS_2_FET, "int64"),
+    (PAYLOAD_FET, "int32"),
+    (WIRELEN_FET, "int32")
+]

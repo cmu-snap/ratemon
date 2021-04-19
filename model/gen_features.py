@@ -12,6 +12,7 @@ import os
 from os import path
 import random
 import shutil
+import sys
 import time
 
 import json
@@ -92,7 +93,8 @@ def get_time_bounds(pkts, direction="data"):
     # last arrival times.
     dir_idx = 1 if direction == "ack" else 0
     return [
-        tuple(pkts[flw][dir_idx][:,1][[0, -1]].tolist()) for flw in pkts.keys()]
+        tuple(pkts[flw][dir_idx][features.ARRIVAL_TIME_FET][[0, -1]].tolist())
+        for flw in pkts.keys()]
 
 
 @contextmanager
@@ -151,18 +153,22 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     params_flp = path.join(exp_dir, f"{exp.name}.json")
     with open(params_flp, "r") as fil:
         params = json.load(fil)
-    # List of tuples of the form: (client port, server port)
-    flws = [(client_port, flw[4])
-                 for flw in params["flowsets"]
-                 for client_port in flw[3]]
+    # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
+    # form: (client port, server port)
+    #
+    # { (client port, server port): CCA }
+    flw_to_cca = {
+        (client_port, flw[4]): flw[0]
+        for flw in params["flowsets"] for client_port in flw[3]}
+    flws = list(flw_to_cca.keys())
 
     client_pcap = path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap")
     server_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
     if not (path.exists(client_pcap) and path.exists(server_pcap)):
         print(f"Warning: Missing pcap file in: {exp_flp}")
         return -1
-    flw_to_pkts_client = utils.parse_packets(client_pcap, flws)
-    flw_to_pkts_server = utils.parse_packets(server_pcap, flws)
+    flw_to_pkts_client = utils.parse_packets(client_pcap, flw_to_cca)
+    flw_to_pkts_server = utils.parse_packets(server_pcap, flw_to_cca)
 
     # Determine the path to the bottleneck queue log file.
     toks = exp.name.split("-")
@@ -187,15 +193,23 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         for first_time_us, _ in bounds)
     # Subtract the earliest time from all times.
     for flw in flws:
-        flw_to_pkts_client[flw][0][:,1] -= earliest_time_us
-        flw_to_pkts_client[flw][1][:,1] -= earliest_time_us
-        flw_to_pkts_server[flw][0][:,1] -= earliest_time_us
-        flw_to_pkts_server[flw][1][:,1] -= earliest_time_us
+        flw_to_pkts_client[
+            flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        flw_to_pkts_client[
+            flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        flw_to_pkts_server[
+            flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        flw_to_pkts_server[
+            flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
 
-        assert (flw_to_pkts_client[flw][0][:,1] >= 0).all()
-        assert (flw_to_pkts_client[flw][1][:,1] >= 0).all()
-        assert (flw_to_pkts_server[flw][0][:,1] >= 0).all()
-        assert (flw_to_pkts_server[flw][1][:,1] >= 0).all()
+        assert (
+            flw_to_pkts_client[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
+        assert (
+            flw_to_pkts_client[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
+        assert (
+            flw_to_pkts_server[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
+        assert (
+            flw_to_pkts_server[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
 
     flws_time_bounds = get_time_bounds(flw_to_pkts_server, direction="data")
 
@@ -214,17 +228,17 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         ([] if skip_smoothed else features.make_smoothed_features()))
 
     for flw_idx, flw in enumerate(flws):
-        sent_pkts = flw_to_pkts_client[flw][0]
+        sent_data_pkts = flw_to_pkts_client[flw][0]
         recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
 
-        first_data_time_us = recv_data_pkts[0][1]
+        first_data_time_us = recv_data_pkts[0][features.ARRIVAL_TIME_FET]
 
         # The final output. -1 implies that a value could not be calculated.
         output = np.full(len(recv_data_pkts), -1, dtype=dtype)
 
         # If this flow does not have any packets, then skip it.
         skip = False
-        if sent_pkts.shape[0] == 0:
+        if sent_data_pkts.shape[0] == 0:
             skip = True
             print(
                 f"Warning: No data packets sent for flow {flw_idx} in: "
@@ -270,8 +284,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         unique_pkts = set()
         # Sequence numbers that have been sent multiple times.
         retrans_pkts = set()
-        for sent_pkt in sent_pkts:
-            sent_pkt_seq = sent_pkt[0]
+        for sent_pkt in sent_data_pkts:
+            sent_pkt_seq = sent_pkt[features.SEQ_FET]
             (retrans_pkts
              if sent_pkt_seq in unique_pkts else unique_pkts).add(sent_pkt_seq)
 
@@ -281,10 +295,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     f"\tFlow {flw_idx + 1}/{exp.tot_flws}: "
                     f"{j}/{len(recv_data_pkts)} packets")
             # Regular metrics.
-            recv_seq = recv_pkt[0]
-            recv_time_cur_us = recv_pkt[1]
-            payload_B = recv_pkt[4]
-            wirelen_B = recv_pkt[5]
+            recv_seq = recv_pkt[features.SEQ_FET]
+            recv_time_cur_us = recv_pkt[features.ARRIVAL_TIME_FET]
+            payload_B = recv_pkt[features.PAYLOAD_FET]
+            wirelen_B = recv_pkt[features.WIRELEN_FET]
 
             output[j][features.SEQ_FET] = recv_seq
             output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
@@ -303,49 +317,77 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             output[j][features.BW_FAIR_SHARE_BPS_FET] = utils.safe_div(
                 exp.bw_bps, active_flws)
 
+            recv_time_prev = -1
+            interarr_time_us = -1
+            rtt_estimate_us = -1
             if j > 0:
-                prev_min_rtt_us = output[j - 1][features.MIN_RTT_FET]
-                prev_rtt_estimate_us = output[j - 1][features.RTT_FET]
-                if recv_seq in retrans_pkts:
-                    min_rtt_us = prev_min_rtt_us
-                else:
-                    # Receiver-side RTT estimation using the TCP timestamp
-                    # option. Attempt to find a new RTT estimate. Move
-                    # ack_idx to the first occurance of the timestamp
-                    # option TSval corresponding to the current packet's
-                    # TSecr.
-                    tsval = recv_ack_pkts[ack_idx][2]
-                    tsecr = recv_pkt[3]
-                    ack_idx_old = ack_idx
-                    while tsval != tsecr and ack_idx < len(recv_ack_pkts) - 1:
-                        ack_idx += 1
-                        tsval = recv_ack_pkts[ack_idx][2]
-                    if tsval == tsecr:
-                        # If we found a timestamp option match, then
-                        # update the RTT estimate.
-                        rtt_estimate_us = (
-                            recv_time_cur_us - recv_ack_pkts[ack_idx][1])
-                    else:
-                        # Otherwise, use the previous RTT estimate and
-                        # reset ack_idx to search again for the next
-                        # packet.
-                        rtt_estimate_us = prev_rtt_estimate_us
-                        ack_idx = ack_idx_old
-                    # Update the min RTT estimate.
-                    min_rtt_us = utils.safe_min(
-                        prev_min_rtt_us, rtt_estimate_us)
-
-                # Compute the new RTT ratio.
-                rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
                 # Calculate the inter-arrival time.
                 recv_time_prev = output[j - 1][features.ARRIVAL_TIME_FET]
                 interarr_time_us = recv_time_cur_us - recv_time_prev
-            else:
-                rtt_estimate_us = -1
-                rtt_estimate_ratio = -1
-                min_rtt_us = -1
-                recv_time_prev = -1
-                interarr_time_us = -1
+                # Calculate RTT-related metrics.
+                if recv_seq != -1 and recv_seq not in retrans_pkts:
+                    cca = flw_to_cca[flw]
+                    if cca == "copa":
+                        # In a Copa ACK, the sender timestamp is the time at
+                        # which the corresponding data packet was sent. The
+                        # receiver timestamp is the time that the data
+                        # packet was received and the ACK was sent. This
+                        # enables sender-side RTT estimation. However,
+                        # because the sender does not echo a value back to
+                        # the receiver, this cannot be used for
+                        # receiver-size RTT estimation.
+                        #
+                        # TODO: Add Copa receiver-side RTT estimation.
+
+                        # sender_ts = recv_pkt[features.TS_1_FET]
+                        # ack_sender_ts = recv_ack_pkts[ack_idx][features.TS_1_FET]
+                        # ack_seq = recv_ack_pkts[ack_idx][features.SEQ_FET]
+                        # ack_idx_old = ack_idx
+                        # while ((sender_ts != ack_sender_ts or
+                        #         recv_seq != ack_seq) and
+                        #        ack_idx <len(recv_ack_pkts) - 1):
+                        #     ack_idx += 1
+                        #     ack_sender_ts = recv_ack_pkts[ack_idx][features.TS_1_FET]
+                        #     ack_seq = recv_ack_pkts[ack_idx][features.SEQ_FET]
+                        # if (sender_ts == ack_sender_ts and
+                        #         recv_seq == ack_seq:)
+                        #     rtt_estimate = (
+                        #         recv_ack_pkts[ack_idx][features.ARRIVAL_TIME_FET] -
+                        #         recv_time_cur_us)
+                        # else:
+                        #     rtt_estimate_us = prev_rtt_estimate_us
+                        #     ack_idx = ack_idx_old
+                        pass
+                    elif cca == "vivace":
+                        # TODO: Add PCC Vivace receiver-side RTT estimation.
+                        pass
+                    else:
+                        # This is a TCP flow. Do receiver-side RTT estimation
+                        # using the TCP timestamp option. Attempt to find a new
+                        # RTT estimate. Move ack_idx to the first occurance of
+                        # the timestamp option TSval corresponding to the
+                        # current packet's TSecr.
+                        tsval = recv_ack_pkts[ack_idx][features.TS_1_FET]
+                        tsecr = recv_pkt[features.TS_2_FET]
+                        ack_idx_old = ack_idx
+                        while (tsval != tsecr and
+                               ack_idx < len(recv_ack_pkts) - 1):
+                            ack_idx += 1
+                            tsval = recv_ack_pkts[ack_idx][features.TS_1_FET]
+                        if tsval == tsecr:
+                            # If we found a timestamp option match, then
+                            # update the RTT estimate.
+                            rtt_estimate_us = (
+                                recv_time_cur_us -
+                                recv_ack_pkts[
+                                    ack_idx][features.ARRIVAL_TIME_FET])
+                        else:
+                            # Otherwise, use the previous RTT estimate and
+                            # reset ack_idx to search again for the next
+                            # packet.
+                            rtt_estimate_us = output[
+                                j - 1][features.RTT_FET]
+                            ack_idx = ack_idx_old
 
             output[j][features.INTERARR_TIME_FET] = interarr_time_us
             output[j][features.INV_INTERARR_TIME_FET] = utils.safe_mul(
@@ -359,9 +401,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                  if j > 0 else 0) + wirelen_B)
 
             output[j][features.RTT_FET] = rtt_estimate_us
+            min_rtt_us = utils.safe_min(
+                output[j - 1][features.MIN_RTT_FET] if j > 0 else sys.maxsize,
+                rtt_estimate_us)
             output[j][features.MIN_RTT_FET] = min_rtt_us
-            output[j][features.RTT_RATIO_FET] = utils.safe_div(
-                rtt_estimate_us, min_rtt_us)
+            rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
+            output[j][features.RTT_RATIO_FET] = rtt_estimate_ratio
 
             # Receiver-side loss rate estimation. Estimate the number of lost
             # packets since the last packet. Do not try anything complex or
@@ -369,6 +414,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             # packet and current packet are in order and not retransmissions.
             pkt_loss_cur_estimate = (
                 -1 if (
+                    recv_seq == -1 or
                     prev_seq is None or
                     prev_seq == -1 or
                     prev_payload_B is None or
@@ -455,6 +501,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 if recv_time_cur_us - first_data_time_us < win_size_us:
                     continue
 
+                # A window requires at least two packets. Note that this means
+                # the the first packet will always be skipped.
                 win_start_idx = win_state[win]["window_start_idx"]
                 if win_start_idx == j:
                     continue
@@ -648,7 +696,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             # number tracking.
             #
             # TODO: Test sequence number wraparound logic.
-            if recv_seq + payload_B > 2**32:
+            if recv_seq != -1 and recv_seq + payload_B > 2**32:
+                print(recv_seq, payload_B)
                 print(
                     "Warning: Sequence number wraparound detected for packet "
                     f"{j} of flow {flw} in: {exp_flp}")
@@ -660,57 +709,64 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         #
         # Get the sequence number of the last received packet.
         last_seq = output[-1][features.SEQ_FET]
-        # Find when this packet was sent. Assume that if this packet was
-        # retransmitted, then the last retransmission is the one that arrived at
-        # the receiver (which may be an incorrect assumption).
-        sent_idx = len(sent_pkts) - 1
-        while sent_idx >= 0 and sent_pkts[sent_idx][0] != last_seq:
-            sent_idx -= 1
-        # Convert from index to packet count.
-        sent_idx += 1
-        sent_seqs = set()
-        for sent_pkt in sent_pkts[:sent_idx]:
-            sent_seqs.add(sent_pkt[0])
-        if sent_idx == 0:
+        if last_seq == -1:
             print(
-                "Warning: Did not find when the last received packet "
-                f"(seq: {last_seq}) was sent for flow {flw_idx} in: {exp_flp}")
+                "Warning: Unable to calculate retransmission or bottleneck "
+                "queue drop rates due to unknown last sequence number for "
+                f"(UDP?) flow {flw_idx} in: {exp_flp}")
         else:
-            output[-1][features.RETRANS_RATE_FET] = (
-                1 - (len(sent_seqs) / sent_idx))
+            # Find when this packet was sent. Assume that if this packet was
+            # retransmitted, then the last retransmission is the one that arrived at
+            # the receiver (which may be an incorrect assumption).
+            sent_idx = len(sent_data_pkts) - 1
+            while (sent_idx >= 0 and
+                   sent_data_pkts[sent_idx][features.SEQ_FET] != last_seq):
+                sent_idx -= 1
+            # Convert from index to packet count.
+            sent_idx += 1
+            sent_seqs = set()
+            for sent_pkt in sent_data_pkts[:sent_idx]:
+                sent_seqs.add(sent_pkt[features.SEQ_FET])
+            if sent_idx == 0:
+                print(
+                    "Warning: Did not find when the last received packet "
+                    f"(seq: {last_seq}) was sent for flow {flw_idx} in: {exp_flp}")
+            else:
+                output[-1][features.RETRANS_RATE_FET] = (
+                    1 - (len(sent_seqs) / sent_idx))
 
-        # Calculate the drop rate at the bottleneck queue.
-        client_port = flw[0]
-        deq_idx = None
-        drop_rate = None
-        if q_log is None:
-            print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
-        else:
-            # Find the dequeue log corresponding to the last packet that was
-            # received.
-            for record_idx, record in reversed(q_log):
-                if (record[0] == "deq" and record[2] == client_port and
+            # Calculate the drop rate at the bottleneck queue.
+            client_port = flw[0]
+            deq_idx = None
+            drop_rate = None
+            if q_log is None:
+                print(f"Warning: Unable to find bottleneck queue log: {q_log_flp}")
+            else:
+                # Find the dequeue log corresponding to the last packet that was
+                # received.
+                for record_idx, record in reversed(q_log):
+                    if (record[0] == "deq" and record[2] == client_port and
                         record[3] == last_seq):
-                    deq_idx = record_idx
-                    break
-        if deq_idx is None:
-            print(
-                "Warning: Did not find when the last received packet "
-                f"(seq: {last_seq}) was dequeued for flow {flw_idx} in: "
-                f"{exp_flp}")
-        else:
-            # Find the most recent stats log before the last received
-            # packet was dequeued.
-            for _, record in reversed(q_log[:deq_idx]):
-                if record[0] == "stats" and record[1] == client_port:
-                    drop_rate = record[4] / (record[2] + record[4])
-                    break
-        if drop_rate is None:
-            print(
-                "Warning: Did not calculate the drop rate at the bottleneck "
-                f"queue for flow {flw_idx} in: {exp_flp}")
-        else:
-            output[-1][features.DROP_RATE_FET] = drop_rate
+                        deq_idx = record_idx
+                        break
+            if deq_idx is None:
+                print(
+                    "Warning: Did not find when the last received packet "
+                    f"(seq: {last_seq}) was dequeued for flow {flw_idx} in: "
+                    f"{exp_flp}")
+            else:
+                # Find the most recent stats log before the last received
+                # packet was dequeued.
+                for _, record in reversed(q_log[:deq_idx]):
+                    if record[0] == "stats" and record[1] == client_port:
+                        drop_rate = record[4] / (record[2] + record[4])
+                        break
+            if drop_rate is None:
+                print(
+                    "Warning: Did not calculate the drop rate at the bottleneck "
+                    f"queue for flow {flw_idx} in: {exp_flp}")
+            else:
+                output[-1][features.DROP_RATE_FET] = drop_rate
 
         # Make sure that all output rows were used.
         used_rows = np.sum(output[features.ARRIVAL_TIME_FET] != -1)
@@ -726,7 +782,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     # for-loop because only the last iteration's packets are not
     # automatically cleaned up by now (they go out of scope when the
     # *_pkts variables are overwritten by the next loop).
-    del sent_pkts
+    del sent_data_pkts
     del recv_data_pkts
     del recv_ack_pkts
 
