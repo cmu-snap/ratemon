@@ -106,7 +106,7 @@ class BalancedSampler:
         assert_tensor(dat_out=dat_out)
 
         # Determine the unique classes.
-        clss = set(dat_out.tolist())
+        clss = set(np.unique(dat_out))
         num_clss = len(clss)
 
         if batch_size is None:
@@ -120,7 +120,7 @@ class BalancedSampler:
             # represented in the tail of dat_out that we just removed. If that
             # edge case occurs, then the assert statements below will still
             # guarantee safety.
-            clss = set(dat_out.tolist())
+            clss = set(np.unique(dat_out))
             num_clss = len(clss)
             print(
                 f"Dropped {to_drop} samples to enable BalancedSampler with no "
@@ -324,11 +324,6 @@ def parse_packets(flp, flw_to_cca):
     pkts = list(enumerate(scapy.utils.RawPcapReader(flp)))
     num_pkts = len(pkts)
 
-    copa_header_fmt = "iiidd"
-    # "iiidd" is ordinarily 28 bytes. However, when in a C struct, it is padded
-    # to enforce memory alignment. Therefore, it somehow ends up being 32 bytes.
-    copa_header_struct_size = struct.calcsize(copa_header_fmt)
-
     def make_empty():
         """ Make an empty numpy array to store the packets. """
         return np.full((num_pkts,), -1, dtype=features.PARSE_PACKETS_FETS)
@@ -389,7 +384,7 @@ def parse_packets(flp, flw_to_cca):
                 cca = flw_to_cca[flw]
                 if cca == "copa":
                     # Add the Copa header size to the UDP header size.
-                    trans_header_len += copa_header_struct_size
+                    trans_header_len += defaults.COPA_HEADER_SIZE_B
                     # The Copa header is the first part of the UDP payload.
                     #     int seq_num;
 	                #     int flow_id;
@@ -397,15 +392,23 @@ def parse_packets(flp, flw_to_cca):
 	                #     double sender_timestamp;  // milliseconds
 	                #     double receiver_timestamp;  // milliseconds
                     seq, _, _, sender_ts, receiver_ts = struct.unpack(
-                        copa_header_fmt,
+                        defaults.COPA_HEADER_FMT,
                         # Convert the transport payload to bytes and then select
                         # the Copa header only.
-                        bytes(trans.payload)[:copa_header_struct_size])
+                        bytes(trans.payload)[:defaults.COPA_HEADER_SIZE_B])
                     # Convert from milliseconds to microsecods and then convert
                     # from a double to an int.
                     ts = (
                         int(round(sender_ts * 1000)),
                         int(round(receiver_ts * 1000)))
+
+                    # Furthermore, the Copa packet data includes:
+                    #     Time sent_time;
+                    #     Time intersend_time;
+                    #     Time intersend_time_vel;
+                    #     Time rtt;
+                    #     double prev_avg_sending_rate;
+                    # These may be of use.
                 elif cca == "vivace":
                     # TODO: Parse the PCC Vivace header.
                     pass
@@ -1228,10 +1231,10 @@ def select_fets(cluster_to_fets, top_fets):
     return chosen_fets
 
 
-def find_bound(times_us, target_us, min_idx, max_idx, which):
+def find_bound(vals, target, min_idx, max_idx, which):
     """
-    Returns the first index that is either before or after a particulr target
-    time.
+    Returns the first index that is either before or after a particular target.
+    vals must be monotonically increasing.
     """
     assert min_idx >= 0
     assert max_idx >= min_idx
@@ -1242,8 +1245,8 @@ def find_bound(times_us, target_us, min_idx, max_idx, which):
     bound = min_idx
     # Walk forward until the target time is in the past.
     while bound < (max_idx if which == "before" else max_idx - 1):
-        time_us = times_us[bound]
-        if time_us == -1 or time_us < target_us:
+        time_us = vals[bound]
+        if time_us == -1 or time_us < target:
             bound += 1
         else:
             break
@@ -1252,7 +1255,7 @@ def find_bound(times_us, target_us, min_idx, max_idx, which):
         # If we walked forward, then walk backward to the last valid time.
         while bound > min_idx:
             bound -= 1
-            if times_us[bound] != -1:
+            if vals[bound] != -1:
                 break
 
     assert min_idx <= bound <= max_idx

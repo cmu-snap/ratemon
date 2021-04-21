@@ -1,5 +1,7 @@
 """ Default values. """
 
+import struct
+
 
 # Parameter defaults.
 DEFAULTS = {
@@ -65,3 +67,14 @@ CLUSTER_ATTEMPTS = 1000
 FAIR_THRESH = 0.1
 # The window size to use for the ground truth.
 CHOSEN_WIN = 8
+# The type format of the Copa header, which is the beginning of the UDP payload.
+# See https://github.com/venkatarun95/genericCC/blob/master/tcp-header.hh
+#     int seq_num;
+#     int flow_id;
+#     int src_id;
+#     double sender_timestamp;  // milliseconds
+#     double receiver_timestamp;  // milliseconds
+COPA_HEADER_FMT = "iiidd"
+# "iiidd" is ordinarily 28 bytes. However, when in a C struct, it is padded
+# to enforce memory alignment. Therefore, it somehow ends up being 32 bytes.
+COPA_HEADER_SIZE_B = struct.calcsize(COPA_HEADER_FMT)

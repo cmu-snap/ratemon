@@ -145,7 +145,7 @@ def extract_fets(dat, split_name, net):
     # Find the uniques classes in the output features and make sure that they
     # are properly formed. Assumes that dat_out is a structured numpy array
     # containing a single column specified by features.LABEL_FET.
-    for cls in set(dat_out[features.LABEL_FET].tolist()):
+    for cls in np.unique(dat_out[features.LABEL_FET]).tolist():
         assert 0 <= cls < net.num_clss, f"Invalid class: {cls}"
 
     # Transform the data as required by this specific model.

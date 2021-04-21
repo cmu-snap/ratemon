@@ -811,7 +811,7 @@ class SvmSklearnWrapper(SvmWrapper):
         if self.graph:
             # Analyze, for each number of flows, accuracy vs. unfairness.
             flws_accs = []
-            nums_flws = list(set(dat_extra["num_flws"].tolist()))
+            nums_flws = np.unique(dat_extra["num_flws"]).tolist()
             for num_flws_selected in nums_flws:
                 print(f"Evaluating model for {num_flws_selected} flows:")
                 valid = (dat_extra["num_flws"] == num_flws_selected).nonzero()
