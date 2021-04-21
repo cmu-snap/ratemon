@@ -300,10 +300,11 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             # Note that Copa uses packet-level sequence numbers instead of TCP's
             # byte-level sequence numbers.
             recv_seq = recv_pkt[features.SEQ_FET]
+            output[j][features.SEQ_FET] = recv_seq
             retrans = (
                 recv_seq in unique_pkts or
                 (prev_seq is not None and prev_payload_B is not None and
-                 prev_seq + prev_payload_B > recv_seq))
+                 prev_seq + (1 if cca == "copa" else prev_payload_B) > recv_seq))
             if retrans:
                 # If this packet is a multiple retransmission, then this line
                 # has no effect.
@@ -313,11 +314,18 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             unique_pkts.add(recv_seq)
 
             recv_time_cur_us = recv_pkt[features.ARRIVAL_TIME_FET]
+            output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
+
             payload_B = recv_pkt[features.PAYLOAD_FET]
             wirelen_B = recv_pkt[features.WIRELEN_FET]
-
-            output[j][features.SEQ_FET] = recv_seq
-            output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
+            output[j][features.PAYLOAD_FET] = payload_B
+            output[j][features.WIRELEN_FET] = wirelen_B
+            output[j][features.TOTAL_SO_FAR_FET] = (
+                (0 if first else output[j - 1][features.TOTAL_SO_FAR_FET]) +
+                wirelen_B)
+            output[j][features.PAYLOAD_SO_FAR_FET] = (
+                (0 if first else output[j - 1][features.PAYLOAD_SO_FAR_FET]) +
+                payload_B)
 
             # Count how many flows were active when this packet was captured.
             active_flws = sum(
@@ -334,7 +342,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 exp.bw_bps, active_flws)
 
             # Calculate RTT-related metrics.
-            rtt_estimate_us = -1
+            rtt_us = -1
             if not first and recv_seq != -1 and not retrans:
                 if cca == "copa":
                     # In a Copa ACK, the sender timestamp is the time at which
@@ -356,24 +364,27 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     # First, find the index of the ACK that was received soonest
                     # before packet j was sent.
                     snd_ack_idx = utils.find_bound(
-                        snd_ack_pkts[features.SEQ_FET], recv_seq,
-                        snd_ack_idx, snd_ack_pkts.shape[0] - 1,
-                        which="before")
-                    snd_ack_seq = snd_ack_pkts[features.SEQ_FET][snd_ack_idx]
+                        snd_ack_pkts[features.SEQ_FET], recv_seq, snd_ack_idx,
+                        snd_ack_pkts.shape[0] - 1, which="before")
+                    snd_ack_seq = snd_ack_pkts[snd_ack_idx][features.SEQ_FET]
                     # Then, find this ACK's data packet.
-                    snd_data_seq = snd_ack_pkts[snd_ack_idx][features.SEQ_FET]
+                    snd_data_seq = snd_data_pkts[snd_data_idx][features.SEQ_FET]
                     while snd_data_idx < snd_data_pkts.shape[0]:
-                        snd_data_seq = snd_ack_pkts[snd_ack_idx][
+                        snd_data_seq = snd_data_pkts[snd_data_idx][
                             features.SEQ_FET]
                         if snd_data_seq == snd_ack_seq:
                             # Third, the RTT is the difference between the
                             # sending time of the data packet and the arrival
                             # time of its ACK.
-                            rtt_estimate_us = (
+                            rtt_us = (
                                 snd_ack_pkts[snd_ack_idx][
                                     features.ARRIVAL_TIME_FET] -
                                 snd_data_pkts[snd_data_idx][
                                     features.ARRIVAL_TIME_FET])
+                            assert rtt_us >= 0, \
+                                (f"Error: Calculated negative RTT ({rtt_us} "
+                                 f"us) for packet {j} of flow {flw} in: "
+                                 f"{exp_flp}")
                             break
                         snd_data_idx += 1
                 elif cca == "vivace":
@@ -393,7 +404,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                         if tsval == tsecr:
                             # If we found a timestamp option match, then update
                             # the RTT estimate.
-                            rtt_estimate_us = (
+                            rtt_us = (
                                 recv_time_cur_us -
                                 recv_ack_pkts[recv_ack_idx][
                                     features.ARRIVAL_TIME_FET])
@@ -403,7 +414,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                         # If we never found a matching tsval, then use the
                         # previous RTT estimate and reset recv_ack_idx to search
                         # again on the next packet.
-                        rtt_estimate_us = output[j - 1][features.RTT_FET]
+                        rtt_us = output[j - 1][features.RTT_FET]
                         recv_ack_idx = recv_ack_idx_old
 
             recv_time_prev_us = (
@@ -415,18 +426,12 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 8 * 1e6 * wirelen_B,
                 utils.safe_div(1, interarr_time_us))
 
-            output[j][features.PAYLOAD_FET] = payload_B
-            output[j][features.WIRELEN_FET] = wirelen_B
-            output[j][features.TOTAL_SO_FAR_FET] = (
-                (0 if first else output[j - 1][features.TOTAL_SO_FAR_FET]) +
-                wirelen_B)
-
-            output[j][features.RTT_FET] = rtt_estimate_us
+            output[j][features.RTT_FET] = rtt_us
             min_rtt_us = utils.safe_min(
                 sys.maxsize if first else output[j - 1][features.MIN_RTT_FET],
-                rtt_estimate_us)
+                rtt_us)
             output[j][features.MIN_RTT_FET] = min_rtt_us
-            rtt_estimate_ratio = utils.safe_div(rtt_estimate_us, min_rtt_us)
+            rtt_estimate_ratio = utils.safe_div(rtt_us, min_rtt_us)
             output[j][features.RTT_RATIO_FET] = rtt_estimate_ratio
 
             # Receiver-side loss rate estimation. Estimate the number of lost
@@ -476,7 +481,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     # inverse interarrival time EWMA is not "EWMA-ified" twice.
                     new = output[j][features.INV_INTERARR_TIME_FET]
                 elif metric.startswith(features.RTT_FET):
-                    new = rtt_estimate_us
+                    new = rtt_us
                 elif metric.startswith(features.RTT_RATIO_FET):
                     new = rtt_estimate_ratio
                 elif metric.startswith(features.LOSS_RATE_FET):
@@ -587,9 +592,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     new = utils.safe_mean(
                         output[features.RTT_RATIO_FET], win_start_idx, j)
                 elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-                    rtt_estimate_us = output[j][features.make_win_metric(
+                    rtt_us = output[j][features.make_win_metric(
                         features.RTT_FET, win)]
-                    if rtt_estimate_us == -1:
+                    if rtt_us == -1:
                         # The RTT estimate is -1 (unknown), so we
                         # cannot compute the loss event rate.
                         continue
@@ -640,8 +645,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                                 # than one RTT from the time of the
                                 # start of the current loss event,
                                 # then this is a new loss event.
-                                if (loss_time - cur_start_time >=
-                                        rtt_estimate_us):
+                                if loss_time - cur_start_time >= rtt_us:
                                     # Record the number of packets
                                     # between the start of the new
                                     # loss event and the start of the
@@ -746,24 +750,39 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             # packet was retransmitted, then the last retransmission is the one
             # that arrived at the receiver (which may be an incorrect
             # assumption).
-            sent_idx = len(snd_data_pkts) - 1
-            while (sent_idx >= 0 and
-                   snd_data_pkts[sent_idx][features.SEQ_FET] != last_seq):
-                sent_idx -= 1
-            if sent_idx == -1:
+            snd_idx = len(snd_data_pkts) - 1
+            while snd_idx >= 0:
+                if snd_data_pkts[snd_idx][features.SEQ_FET] == last_seq:
+                    # unique_snd_pkts, counts = np.unique(
+                    #     snd_data_pkts[:snd_idx + 1][features.SEQ_FET],
+                    #     return_counts=True)
+                    # unique_snd_pkts = unique_snd_pkts.tolist()
+                    # counts = counts.tolist()
+                    # all_retrans = [
+                    #     (seq, counts)
+                    #     for seq, counts in zip(unique_snd_pkts, counts)
+                    #     if counts > 1]
+
+                    # tot_pkts = snd_idx + 1
+
+                    # The retransmission rate is:
+                    #     1 - unique packets / total packets.
+                    output[-1][features.RETRANS_RATE_FET] = (
+                        1 -
+                        # Find the number of unique sequence numbers, from the
+                        # beginning up until when the last received packet was
+                        # sent.
+                        np.unique(snd_data_pkts[
+                            :snd_idx + 1][features.SEQ_FET]).shape[0] /
+                        # Convert from index to packet count.
+                        (snd_idx + 1))
+                    break
+                snd_idx -= 1
+            else:
                 print(
                     "Warning: Did not find when the last received packet "
-                    f"(seq: {last_seq}) was sent for flow {flw_idx} in: {exp_flp}")
-            else:
-                # The retransmission rate is 1 - unique packets / total packets.
-                output[-1][features.RETRANS_RATE_FET] = (
-                    1 -
-                    # Find the number of unique sequence numbers, from the
-                    # beginning up until when the last received packet was sent.
-                    np.unique(snd_data_pkts[
-                        :sent_idx + 1][features.SEQ_FET]).shape[0] /
-                    # Convert from index to packet count.
-                    (sent_idx + 1))
+                    f"(seq: {last_seq}) was sent for flow {flw_idx} in: "
+                    f"{exp_flp}")
 
             # Calculate the true drop rate at the bottleneck queue using the
             # bottleneck queue logs.

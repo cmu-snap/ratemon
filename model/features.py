@@ -39,6 +39,7 @@ SQRT_LOSS_EVENT_RATE_FET = "1/sqrt loss event rate"
 PAYLOAD_FET = "payload B"
 WIRELEN_FET = "wire len B"
 TOTAL_SO_FAR_FET = "total so far B"
+PAYLOAD_SO_FAR_FET = "payload so far B"
 RTT_FET = "RTT us"
 RTT_RATIO_FET = "RTT ratio us"
 ACTIVE_FLOWS_FET = "active flows"
@@ -76,6 +77,7 @@ REGULAR = [
     (PAYLOAD_FET, "int32"),
     (WIRELEN_FET, "int32"),
     (TOTAL_SO_FAR_FET, "int32"),
+    (PAYLOAD_SO_FAR_FET, "int32"),
     (ACTIVE_FLOWS_FET, "int32"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
     (BW_FAIR_SHARE_BPS_FET, "float64")

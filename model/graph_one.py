@@ -63,7 +63,7 @@ def main():
     if not path.exists(out_dir):
         os.makedirs(out_dir)
     with np.load(dat_flp) as fil:
-        dat = [fil[flw] for flw in sorted(fil.files, key=lambda x: int(x))]
+        dat = [fil[flw] for flw in sorted(fil.files, key=int)]
 
     exp = utils.Exp(dat_flp)
     num_flws = exp.tot_flws
@@ -80,12 +80,14 @@ def main():
     labels = [f"Flow {flw}" for flw in range(num_flws)]
     x_min = min(flw_dat[0][features.ARRIVAL_TIME_FET] for flw_dat in dat)
     x_max = max(flw_dat[-1][features.ARRIVAL_TIME_FET] for flw_dat in dat)
+    fets = dat[0].dtype.names
 
+    print(f"Plotting {len(fets)} features...")
     with multiprocessing.Pool() as pol:
         pol.starmap(
             graph_fet,
             ((out_dir, dat, fet, bw_share_fair, bw_fair, x_min, x_max, labels)
-             for fet in dat[0].dtype.names))
+             for fet in fets))
 
 
 if __name__ == "__main__":

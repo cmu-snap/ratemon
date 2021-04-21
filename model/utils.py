@@ -396,6 +396,9 @@ def parse_packets(flp, flw_to_cca):
                         # Convert the transport payload to bytes and then select
                         # the Copa header only.
                         bytes(trans.payload)[:defaults.COPA_HEADER_SIZE_B])
+                    if seq == -1:
+                        # This is a connection-establishment packet. Skip it.
+                        continue
                     # Convert from milliseconds to microsecods and then convert
                     # from a double to an int.
                     ts = (
