@@ -110,11 +110,11 @@ class Split:
         # Shuffle in-place at the end. This is only okay because I plan to
         # always store the output in a tmpfs.
         if self.shuffle:
-            print(f"Shuffling split {self.name}...")
+            print(f"Shuffling split \"{self.name}\"...")
             tim_srt_s = time.time()
             np.random.default_rng().shuffle(self.dat)
             print(
-                f"Done shuffling split {self.name} "
+                f"Done shuffling split \"{self.name}\" "
                 f"(took {time.time() - tim_srt_s:.2f} seconds)")
 
         self.dat.flush()
@@ -218,7 +218,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
         pkts_forgotten += len(all_idxs)
     print(
         f"Forgot {pkts_forgotten}/{num_pkts} packets "
-        f"({pkts_forgotten / num_pkts:.2f}%)")
+        f"({pkts_forgotten / num_pkts * 100:.2f}%)")
 
     for split in splits.values():
         split.finish()
