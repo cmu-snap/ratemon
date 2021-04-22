@@ -413,8 +413,27 @@ def parse_packets(flp, flw_to_cca):
                     #     double prev_avg_sending_rate;
                     # These may be of use.
                 elif cca == "vivace":
-                    # TODO: Parse the PCC Vivace header.
-                    pass
+                    # PCC Vivace is based on UDT: UDP-based Data Transfer
+                    # Protocol.
+                    #
+                    # See https://tools.ietf.org/pdf/draft-gg-udt-03.pdf
+                    payload = bytes(trans.payload)
+                    first = int.from_bytes(payload[:4], byteorder="big")
+                    typ = (first & 0x80000000) >> 31
+                    if typ == 1:
+                        # UDT control packet.
+                        if dir_idx == 0:
+                            # Client -> server control packet. Skip it.
+                            continue
+                        if (first & 0x7fff0000) >> 16 == 2:
+                            # ACK.
+                            seq = int.from_bytes(payload[16:20], byteorder="big")
+                            #print("control", "ack", seq)
+                    else:
+                        # UDT data packet.
+                        seq = first & 0x7fffffff
+                        #if dir_idx == 0:
+                            #print("data", seq)
 
             flw_to_pkts[flw][dir_idx][idx] = (
                 # Sequence number.

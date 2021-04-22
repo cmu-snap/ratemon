@@ -229,6 +229,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
     for flw_idx, flw in enumerate(flws):
         cca = flw_to_cca[flw]
+        # Copa and PCC Vivace use packet-based sequence numbers as opposed to
+        # TCP's byte-based sequence numbers.
+        packet_seq = cca in {"copa", "vivace"}
         snd_data_pkts, snd_ack_pkts = flw_to_pkts_client[flw]
         recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
 
@@ -304,7 +307,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             retrans = (
                 recv_seq in unique_pkts or
                 (prev_seq is not None and prev_payload_B is not None and
-                 prev_seq + (1 if cca == "copa" else prev_payload_B) > recv_seq))
+                 (prev_seq + (1 if packet_seq else prev_payload_B)) > recv_seq))
             if retrans:
                 # If this packet is a multiple retransmission, then this line
                 # has no effect.
@@ -452,9 +455,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     # The current packet is a retransmission.
                     retrans)
                 else round(
-                    (recv_seq - (1 if cca == "copa" else prev_payload_B) -
+                    (recv_seq - (1 if packet_seq else prev_payload_B) -
                      prev_seq) /
-                    (1 if cca == "copa" else payload_B)))
+                    (1 if packet_seq else payload_B)))
 
             if pkt_loss_cur_estimate != -1:
                 pkt_loss_total_estimate += pkt_loss_cur_estimate
@@ -725,7 +728,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             #
             # TODO: Test sequence number wraparound logic.
             if (recv_seq != -1 and
-                    recv_seq + (1 if cca == "copa" else payload_B) > 2**32):
+                    recv_seq + (1 if packet_seq else payload_B) > 2**32):
                 print(
                     "Warning: Sequence number wraparound detected for packet "
                     f"{j} of flow {flw} in: {exp_flp}")
