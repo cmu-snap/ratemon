@@ -417,23 +417,33 @@ def parse_packets(flp, flw_to_cca):
                     # Protocol.
                     #
                     # See https://tools.ietf.org/pdf/draft-gg-udt-03.pdf
+                    trans_header_len += 16
                     payload = bytes(trans.payload)
                     first = int.from_bytes(payload[:4], byteorder="big")
-                    typ = (first & 0x80000000) >> 31
-                    if typ == 1:
-                        # UDT control packet.
+                    if (first & 0x80000000) >> 31:
+                        # Type code of 1 = UDT control packet.
                         if dir_idx == 0:
                             # Client -> server control packet. Skip it.
                             continue
                         if (first & 0x7fff0000) >> 16 == 2:
                             # ACK.
-                            seq = int.from_bytes(payload[16:20], byteorder="big")
-                            #print("control", "ack", seq)
+                            trans_header_len += 24
+                            seq = int.from_bytes(
+                                payload[16:20], byteorder="big")
+                            ts = (
+                                # UDT ACKs contain the RTT, so extract that as
+                                # the first ts value.
+                                int.from_bytes(
+                                    payload[20:24], byteorder="big"),
+                                # The second ts field is unused.
+                                -1)
+                        else:
+                            # One of the other seven types of control
+                            # packets. Skip it.
+                            continue
                     else:
-                        # UDT data packet.
+                        # Type code of 0 = UDT data packet.
                         seq = first & 0x7fffffff
-                        #if dir_idx == 0:
-                            #print("data", seq)
 
             flw_to_pkts[flw][dir_idx][idx] = (
                 # Sequence number.

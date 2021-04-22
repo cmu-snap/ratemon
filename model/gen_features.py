@@ -281,7 +281,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         # Use for Copa RTT estimation.
         snd_ack_idx = 0
         snd_data_idx = 0
-        # Use for TCP RTT estimation.
+        # Use for TCP and PCC Vivace RTT estimation.
         recv_ack_idx = 0
 
         # Track which packets are definitely retransmissions. Ignore these
@@ -299,9 +299,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 print(
                     f"\tFlow {flw_idx + 1}/{exp.tot_flws}: "
                     f"{j}/{len(recv_data_pkts)} packets")
+            # Whether this is the first packet.
             first = j == 0
-            # Note that Copa uses packet-level sequence numbers instead of TCP's
-            # byte-level sequence numbers.
+            # Note that Copa and Vivace use packet-level sequence numbers
+            # instead of TCP's byte-level sequence numbers.
             recv_seq = recv_pkt[features.SEQ_FET]
             output[j][features.SEQ_FET] = recv_seq
             retrans = (
@@ -391,8 +392,18 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                             break
                         snd_data_idx += 1
                 elif cca == "vivace":
-                    # TODO: Add PCC Vivace receiver-side RTT estimation.
-                    pass
+                    # UDT ACKs may contain the RTT. Find the last ACK to be sent
+                    # by the receiver before packet j was received.
+                    recv_ack_idx = utils.find_bound(
+                        recv_ack_pkts[features.ARRIVAL_TIME_FET],
+                        recv_time_cur_us, recv_ack_idx,
+                        recv_ack_pkts.shape[0] - 1, which="before")
+                    udt_rtt_us = recv_ack_pkts[recv_ack_idx][features.TS_1_FET]
+                    if udt_rtt_us > 0:
+                        # The RTT is an optional field in UDT ACK packets. I
+                        # assume that this means that if the RTT is not
+                        # included, then the field will be 0.
+                        rtt_us = udt_rtt_us
                 else:
                     # This is a TCP flow. Do receiver-side RTT estimation using
                     # the TCP timestamp option. Attempt to find a new RTT
