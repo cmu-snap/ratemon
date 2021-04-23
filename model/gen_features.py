@@ -146,8 +146,12 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
 def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     """ Parses an experiment. Returns the smallest safe window size. """
     print(f"Parsing: {exp_flp}")
+    if exp.name.startswith("FAILED"):
+        print(f"Error: Experimant failed: {exp_flp}")
+        return -1
     if exp.tot_flws == 0:
-        print(f"\tNo flows to analyze in: {exp_flp}")
+        print(f"Error: No flows to analyze in: {exp_flp}")
+        return -1
 
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
@@ -979,7 +983,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
     if bad_fets:
         print(
-            f"\tExperiment {exp_flp} has NaNs of Infs in features: {bad_fets}")
+            f"Warning: Experiment {exp_flp} has NaNs of Infs in features: "
+            f"{bad_fets}")
 
     # Save the results.
     if path.exists(out_flp):
@@ -1003,8 +1008,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             try:
                 return parse_opened_exp(
                     exp, exp_flp, exp_dir, out_flp, skip_smoothed)
-            except AssertionError:
-                print("Error:", sys.exc_info()[0])
+            except AssertionError as exc:
+                print("Error:", exc)
                 return -1
 
     return -1
