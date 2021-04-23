@@ -151,6 +151,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
+    if not path.exists(params_flp):
+        print(f"Error: Cannot find params file ({params_flp}) in: {exp_flp}")
+        return -1
     with open(params_flp, "r") as fil:
         params = json.load(fil)
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
