@@ -387,10 +387,11 @@ def run_trials(args):
     out_flp = path.join(
         args["out_dir"],
         "model_" +
-        utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys())) + (
-            # Determine the proper extension based on the type of model.
-            ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else ".pth"))
+        utils.args_to_str(
+            args, order=sorted(defaults.DEFAULTS.keys()), which="model") + (
+                # Determine the proper extension based on the type of model.
+                ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
+                else ".pth"))
     # If custom features are specified, then overwrite the model's
     # default features.
     fets = args["features"]

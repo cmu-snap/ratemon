@@ -264,29 +264,37 @@ class Exp():
             self.bw_Mbps / (self.cca_1_flws + self.cca_2_flws))
 
 
-def args_to_str(args, order):
+def args_to_str(args, order, which):
     """
     Converts the provided arguments dictionary to a string, using the
     keys in order to determine the order of arguments in the
     string.
     """
+    assert which in {"model", "data"}
     for key in order:
         assert key in args, f"Key {key} not in args: {args}"
     return "-".join(
-        [str(args[key]) for key in order if key not in defaults.ARGS_TO_IGNORE])
+        [str(args[key]) for key in order
+         if key not in (
+            defaults.ARGS_TO_IGNORE_MODEL if which == "model" else
+            defaults.ARGS_TO_IGNORE_DATA)])
 
 
-def str_to_args(args_str, order):
+def str_to_args(args_str, order, which):
     """
     Converts the provided string of arguments to a dictionary, using
     the keys in order to determine the identity of each argument in the
     string.
     """
+    assert which in {"model", "data"}
     # Remove extension and split on "-".
     toks = ".".join(args_str.split(".")[:-1]).split("-")
     # Remove elements of order that args_to_str() does not use when
     # encoding strings.
-    order = [key for key in order if key not in defaults.ARGS_TO_IGNORE]
+    order = [
+        key for key in order if key not in (
+            defaults.ARGS_TO_IGNORE_MODEL if which == "model" else
+            defaults.ARGS_TO_IGNORE_DATA)]
     num_toks = len(toks)
     num_order = len(order)
     assert num_toks == num_order, \
