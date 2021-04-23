@@ -504,7 +504,7 @@ def main():
     psr.add_argument(
         "--features-to-pick", default=defaults.DEFAULTS["fets_to_pick"],
         required=False, type=int, dest="fets_to_pick",
-        help=("If the model is of type \"{models.SvmSklearnWrapper().name}\" "
+        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
               "and \"--analyze-features\" is specified, then pick this many of "
               "the top features."))
     psr.add_argument(
