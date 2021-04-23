@@ -997,8 +997,13 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
     out_flp = path.join(out_dir, f"{exp.name}.npz")
     with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
         if locked and exp_dir is not None:
-            return parse_opened_exp(
-                exp, exp_flp, exp_dir, out_flp, skip_smoothed)
+            try:
+                return parse_opened_exp(
+                    exp, exp_flp, exp_dir, out_flp, skip_smoothed)
+            except AssertionError:
+                print("Error:", sys.exc_info()[0])
+                return -1
+
     return -1
 
 
