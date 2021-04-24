@@ -14,6 +14,7 @@ import random
 import shutil
 import sys
 import time
+import traceback
 
 import json
 import numpy as np
@@ -1008,8 +1009,8 @@ def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
             try:
                 return parse_opened_exp(
                     exp, exp_flp, exp_dir, out_flp, skip_smoothed)
-            except AssertionError as exc:
-                print("Error:", exc)
+            except AssertionError:
+                traceback.print_exc()
                 return -1
 
     return -1
