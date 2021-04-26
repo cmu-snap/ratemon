@@ -51,7 +51,8 @@ DEFAULTS = {
 # not impact model training.
 ARGS_TO_IGNORE_MODEL = [
     "data_dir", "out_dir", "tmp_dir", "sims", "features", "exps",
-    "analyze_features", "sync", "graph", "test_batch", "regen_data"]
+    "analyze_features", "sync", "graph", "test_batch", "regen_data",
+    "clusters", "fets_to_pick", "perm_imp_repeats"]
 ARGS_TO_IGNORE_DATA = ARGS_TO_IGNORE_MODEL + ["max_iter"]
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
