@@ -1002,8 +1002,8 @@ def load_scl_prms(out_dir):
 
 def load_split(split_dir, name):
     """
-    Loads training, validation, and test split raw data from disk. Returns a
-    tuple of (training, validation, test) data.
+    Loads a training, validation, and test split's raw data from disk and
+    returns it.
     """
     num_pkts, dtype = load_split_metadata(split_dir, name)
     if num_pkts == 0:
@@ -1015,6 +1015,14 @@ def load_split(split_dir, name):
     return np.memmap(
         get_split_data_flp(split_dir, name), dtype=dtype, mode="r",
         shape=(num_pkts,))
+
+
+def load_splits(split_dir, prefix):
+    """ Loads and returns splits that begin with prefix. """
+    return (
+        load_split(split_dir, fil.split(".")[0])
+        for fil in os.listdir(split_dir)
+        if fil.startswith(prefix) and fil.endswith(".npy"))
 
 
 def get_feature_analysis_flp(out_dir):

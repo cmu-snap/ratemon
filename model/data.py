@@ -51,12 +51,31 @@ def get_bulk_data(args, net):
           scaling parameters )
     """
     data_dir = args["data_dir"]
-    trn, val, tst = [
-        extract_fets(utils.load_split(data_dir, name), name, net)
-        for name in ["train", "val", "test"]]
-    # Select a fraction of the training data.
-    num_pkts = math.ceil(trn[0].shape[0] * args["sample_percent"] / 100)
-    trn = [dat[:num_pkts] for dat in trn]
+    sample_frac = args["sample_percent"] / 100
+
+    (trn, trn_count), (val, _), (tst, _) = [
+        # Finally, concatenate the subsplits to create a split.
+        (np.concatenate(
+            # Third, extract features from the (potentially pruned) subsplit.
+            [extract_fets(
+                # Second, if this is the train split and we are not supposed to
+                # use all of the data, then select some samples from the
+                # beginning.
+                (subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
+                 if name == "train" and sample_frac < 1 else subsplit),
+                name, net)
+             for subsplit in subsplits]),
+         # Record the number of subsplits for each split.
+         len(subsplits))
+        # First, load all of the splits (i.e., all of their subsplits).
+        for subsplits, name in (
+            (utils.load_splits(data_dir, name), name)
+            for name in {"train", "val", "test"})]
+
+    # If the train split contained more than one subsplit, then we need to
+    # shuffle it again.
+    if trn_count > 1:
+        np.random.default_rng().shuffle(trn)
 
     # Validate scaling groups.
     assert trn[3] == val[3] == tst[3], "Scaling groups do not agree."
