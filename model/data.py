@@ -52,30 +52,9 @@ def get_bulk_data(args, net):
     """
     data_dir = args["data_dir"]
     sample_frac = args["sample_percent"] / 100
-
-    (trn, trn_count), (val, _), (tst, _) = [
-        # Finally, concatenate the subsplits to create a split.
-        (np.concatenate(
-            # Third, extract features from the (potentially pruned) subsplit.
-            [extract_fets(
-                # Second, if this is the train split and we are not supposed to
-                # use all of the data, then select some samples from the
-                # beginning.
-                (subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
-                 if name == "train" and sample_frac < 1 else subsplit),
-                name, net)
-             for subsplit in subsplits]),
-         # Record the number of subsplits for each split.
-         len(subsplits))
-        # First, load all of the splits (i.e., all of their subsplits).
-        for subsplits, name in (
-            (utils.load_splits(data_dir, name), name)
-            for name in {"train", "val", "test"})]
-
-    # If the train split contained more than one subsplit, then we need to
-    # shuffle it again.
-    if trn_count > 1:
-        np.random.default_rng().shuffle(trn)
+    trn, val, tst = [
+        get_split(data_dir, name, sample_frac, net)
+        for name in {"train", "val", "test"}]
 
     # Validate scaling groups.
     assert trn[3] == val[3] == tst[3], "Scaling groups do not agree."
@@ -91,6 +70,24 @@ def get_bulk_data(args, net):
         trn[0], scl_prms = scale_fets(trn[0], trn[3], args["standardize"])
 
     return trn[:3], val[:3], tst[:3], scl_prms
+
+
+def get_split(data_dir, name, sample_frac, net):
+    """ Constructs a split from many subsplits on disk. """
+    # Load the split's subsplits.
+    subsplits = utils.load_subsplits(data_dir, name)
+    # Optionally select a fraction of each subsplit.
+    if name in {"train", "val"} and sample_frac < 1:
+        subsplits = [
+            subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
+            for subsplit in subsplits]
+    # Merge the subsplits into a split.
+    split = np.concatenate(subsplits)
+    # Optionally shuffle the split.
+    if name == "train" and len(subsplits) > 1:
+        np.random.default_rng().shuffle(split)
+    # Extract features from the split.
+    return extract_fets(split, name, net)
 
 
 def extract_fets(dat, split_name, net):

@@ -1017,12 +1017,15 @@ def load_split(split_dir, name):
         shape=(num_pkts,))
 
 
-def load_splits(split_dir, prefix):
+def load_subsplits(split_dir, prefix):
     """ Loads and returns splits that begin with prefix. """
-    return (
-        load_split(split_dir, fil.split(".")[0])
+    subsplits = [
+        load_split(split_dir, fil.split("_metadata.")[0])
         for fil in os.listdir(split_dir)
-        if fil.startswith(prefix) and fil.endswith(".npy"))
+        if fil.startswith(prefix) and fil.endswith(".pickle")]
+    assert subsplits, \
+        f"No subsplits found with prefix \"{prefix}\" in: {split_dir}"
+    return subsplits
 
 
 def get_feature_analysis_flp(out_dir):
