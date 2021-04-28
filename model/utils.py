@@ -622,12 +622,10 @@ def visualize_classes(net, dat):
     if isinstance(dat, (tuple, list)):
         dat = torch.cat([ldr.dataset.dat_out for ldr in dat])
     clss = net.get_classes()
-    if isinstance(dat, tuple):
-        print(dat)
     tots = get_class_popularity(dat, clss)
     # The total number of class labels extracted in the previous line.
     tot = sum(tots)
-    print("\n".join(
+    net.log("\n".join(
         [f"\t{cls}: {tot_cls} examples ({tot_cls / tot * 100:.2f}%)"
          for cls, tot_cls in zip(clss, tots)]))
     tot_actual = dat.size()[0] if isinstance(dat, torch.Tensor) else dat.size

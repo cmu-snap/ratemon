@@ -148,7 +148,9 @@ OUT_FET = make_win_metric(
 
 # Features to store as extra data for each sample.
 EXTRA_FETS = [
-    ARRIVAL_TIME_FET, RTT_FET, ACTIVE_FLOWS_FET, BW_FAIR_SHARE_FRAC_FET]
+    ARRIVAL_TIME_FET, RTT_FET, ACTIVE_FLOWS_FET,
+    make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
+    make_win_metric(MATHIS_TPUT_FET, defaults.CHOSEN_WIN)]
 
 # Features used when parsing packets.
 PARSE_PACKETS_FETS = [

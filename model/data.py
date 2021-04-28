@@ -35,11 +35,11 @@ def get_dataloaders(args, net):
     else:
         print("Regenerating data...")
         trn, val, tst, scl_prms = get_bulk_data(args, net)
-        # Save the processed data so that we do not need to process it again.
-        utils.save_parsed_data(dat_flp, trn, val, tst)
-        # Save scaling parameters. We always need to save the scaling parameters,
-        # because the trained model cannot be used without them.
-        utils.save_scl_prms(args["out_dir"], scl_prms)
+        # # Save the processed data so that we do not need to process it again.
+        # utils.save_parsed_data(dat_flp, trn, val, tst)
+        # # Save scaling parameters. We always need to save the scaling parameters,
+        # # because the trained model cannot be used without them.
+        # utils.save_scl_prms(args["out_dir"], scl_prms)
     return create_dataloaders(args, trn, val, tst)
 
 
@@ -54,7 +54,7 @@ def get_bulk_data(args, net):
     sample_frac = args["sample_percent"] / 100
     trn, val, tst = [
         get_split(data_dir, name, sample_frac, net)
-        for name in {"train", "val", "test"}]
+        for name in ["train", "val", "test"]]
 
     # Validate scaling groups.
     assert trn[3] == val[3] == tst[3], "Scaling groups do not agree."
@@ -76,17 +76,28 @@ def get_split(data_dir, name, sample_frac, net):
     """ Constructs a split from many subsplits on disk. """
     # Load the split's subsplits.
     subsplits = utils.load_subsplits(data_dir, name)
-    # Optionally select a fraction of each subsplit.
-    if name in {"train", "val"} and sample_frac < 1:
-        subsplits = [
-            subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
-            for subsplit in subsplits]
+    # Optionally select a fraction of each subsplit. We always use all of the
+    # test split.
+    #if name in {"train", "val"} and sample_frac < 1:
+    if True:
+        sample_frac = 0.0001
+        subsplits_2 = []
+        for subsplit in subsplits:
+            num_samples = math.ceil(subsplit.shape[0] * sample_frac)
+            print(f"Selecting {num_samples} samples for subsplit in split \"{name}\".")
+            subsplits_2.append(subsplit[:num_samples])
+        subsplits = subsplits_2
+        # subsplits = [
+        #     subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
+        #     for subsplit in subsplits]
     # Merge the subsplits into a split.
     split = np.concatenate(subsplits)
+    # assert split.shape[0] > 0, f"No data in split \"{name}\"."
     # Optionally shuffle the split.
     if name == "train" and len(subsplits) > 1:
         np.random.default_rng().shuffle(split)
     # Extract features from the split.
+    print(name, split.shape[0])
     return extract_fets(split, name, net)
 
 
@@ -275,8 +286,16 @@ def create_dataloaders(args, trn, val, tst):
 
     bch_trn = args["train_batch"]
     bch_tst = args["test_batch"]
+    if bch_trn is None:
+        bch_trn = dat_trn_in.shape[0]
     if bch_tst is None:
         bch_tst = dat_tst_in.shape[0]
+
+    print("dat_trn_in.shape[0]", dat_trn_in.shape[0])
+    print("dat_tst_in.shape[0]", dat_tst_in.shape[0])
+    print("balance", args["balance"])
+    print("bch_trn", bch_trn)
+    print("bch_tst", bch_tst)
 
     # Create the dataloaders.
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)

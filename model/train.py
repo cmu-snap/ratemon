@@ -235,7 +235,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     ldr_trn, _, ldr_tst = ldrs
     # Construct the model.
     print("Building model...")
-    net = models.MODELS[args["model"]]()
+    net = models.MODELS[args["model"]](out_dir)
 
     if path.exists(out_flp):
         # The output file already exists with these parameters, so do not
@@ -301,7 +301,7 @@ def run_torch(args, out_dir, out_flp, ldrs):
     ldr_trn, ldr_val, ldr_tst = ldrs
 
     # Instantiate and configure the network. Move it to the proper device.
-    net = models.MODELS[args["model"]]()
+    net = models.MODELS[args["model"]](out_dir)
     net.new()
     num_gpus = torch.cuda.device_count()
     num_gpus_to_use = args["num_gpus"]

@@ -43,10 +43,19 @@ class PytorchModelWrapper:
     # Model-specific parameters. Each model may use these differently.
     params = []
 
-    def __init__(self):
+    def __init__(self, out_dir=None):
         self.net = None
         self.graph = False
+        # Create the output directory.
+        self.out_dir = out_dir
+        if self.out_dir is not None and self.name is not None:
+            self.out_dir = path.join(self.out_dir, self.name)
+            if not path.exists(self.out_dir):
+                os.makedirs(self.out_dir)
+
         self.__check()
+
+
 
     def __check(self):
         """
@@ -124,14 +133,21 @@ class PytorchModelWrapper:
             ("Attempting to call \"new()\" on the PytorchModelWrapper base "
              "class itself."))
 
+    def log(self, msg):
+        print(msg)
+        if self.out_dir is not None and path.exists(self.out_dir):
+            with open(path.join(self.out_dir, "results.txt"), "a+") as fil:
+                print(msg, file=fil)
+
+
 
 class BinaryModelWrapper(PytorchModelWrapper):
     """ A base class for binary classification models. """
 
     num_clss = 2
 
-    def __init__(self, win=100, rtt_buckets=False, windows=False):
-        super().__init__()
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir)
 
         self.win = win
         self.rtt_buckets = rtt_buckets
@@ -180,7 +196,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         for interval_idx in np.floor(
                 (arr_times - start_time_us) / interval_us).astype(int):
             if interval_idx == num_buckets:
-                print(f"Warning: Interval is {interval_idx} when it should be "
+                self.log(f"Warning: Interval is {interval_idx} when it should be "
                       f"in the range [0, {num_buckets}]. Fixing interval...")
                 interval_idx -= 1
             assert 0 <= interval_idx < num_buckets, \
@@ -206,7 +222,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         interval. The output value for each window is the output of
         the last packet in the window.
         """
-        print("Creating arrival time buckets...")
+        self.log("Creating arrival time buckets...")
         # 100x the min RTT (as determined by the experiment parameters).
         dur_us = 100 * 2 * (exp.edge_delays[0] * 2 + exp.btl_delay_us)
         # Determine the safe starting index. Do not pick indices
@@ -295,7 +311,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         features of the packets in a window. The output value for each
         window is the output of the last packet in the window.
         """
-        print("Creating windows...")
+        self.log("Creating windows...")
         num_pkts = dat_in.shape[0]
         num_wins = math.ceil(num_pkts / self.win)
         fets = [(name, typ) for name, typ in dat_in.dtype.descr if name != ""]
@@ -385,7 +401,7 @@ class BinaryDnn(torch.nn.Module):
         self.fc2 = torch.nn.Linear(dim_2, dim_3)
         self.fc3 = torch.nn.Linear(dim_3, num_outs)
         self.sg = torch.nn.Sigmoid()
-        print("BinaryDnn:\n    " +
+        self.log("BinaryDnn:\n    " +
               "\n    ".join(
                   [f"Linear: {lay.in_features}x{lay.out_features}"
                    for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
@@ -437,7 +453,7 @@ class Svm(torch.nn.Module):
     def __init__(self, num_ins):
         super().__init__()
         self.fc = torch.nn.Linear(num_ins, 1)
-        print(f"SVM:\n    Linear: {self.fc.in_features}x{self.fc.out_features}")
+        self.log(f"SVM:\n    Linear: {self.fc.in_features}x{self.fc.out_features}")
 
     def forward(self, x):
         return self.fc(x)
@@ -495,15 +511,20 @@ class SvmSklearnWrapper(SvmWrapper):
         assert SvmSklearnWrapper.num_clss == 3, \
             ("Only 2 or 3 classes are supported, not: "
              f"{SvmSklearnWrapper.num_clss}")
-        assert len(dat_out.dtype.names) == 1
+        assert dat_out.dtype.names is None or len(dat_out.dtype.names) == 1, \
+            ("Can only convert 1D arrays to classes, but dat_out has "
+             f"{len(dat_out.dtype.names)} columns.")
 
         def ratio_to_class(ratio):
             """
             Converts a ratio of actual throughput to throughput fair share into
             a fairness class.
             """
-            assert len(ratio) == 1, "Should be only one column."
-            ratio = ratio[0]
+            # An entry may be either a tuple containing a single value or a
+            # single value.
+            if isinstance(ratio, tuple):
+                assert len(ratio) == 1, "Should be only one column."
+                ratio = ratio[0]
 
             if ratio < 1 - defaults.FAIR_THRESH:
                 cls = 0
@@ -513,21 +534,19 @@ class SvmSklearnWrapper(SvmWrapper):
                 cls = 2
             else:
                 raise Exception("This case should never be reached.")
-
             return cls
 
-        # Map a conversion function across all entries. Note that here
-        # an entry is an entire row, since each row is a single tuple
-        # value.
-        clss = np.vectorize(ratio_to_class, otypes=[int])(dat_out)
-        # Convert the unstructured array into a structured array.
-        clss_str = np.empty(
-            (clss.shape[0],), dtype=[(features.LABEL_FET, "int32")])
-        clss_str[features.LABEL_FET] = clss
-        return clss_str
+        # Create a structured array to hold the result.
+        clss = np.empty(
+            (dat_out.shape[0],), dtype=[(features.LABEL_FET, "int32")])
+        # Map a conversion function across all entries. Note that here an entry
+        # is an entire row, which may be a tuple.
+        clss[features.LABEL_FET] = np.vectorize(
+            ratio_to_class, otypes=[int])(dat_out)
+        return clss
 
-    def __evaluate(self, preds, labels, raw, fair, out_dir,
-                   sort_by_unfairness=False, graph_prms=None):
+    def __evaluate(self, preds, labels, raw, fair, sort_by_unfairness=False,
+                   graph_prms=None):
         """
         Returns the accuracy of predictions compared to ground truth
         labels. If self.graph == True, then this function also graphs
@@ -535,17 +554,12 @@ class SvmSklearnWrapper(SvmWrapper):
         """
         utils.assert_tensor(preds=preds, labels=labels, raw=raw, fair=fair)
 
-        def log(msg):
-            print(msg)
-            with open(path.join(out_dir, "results.txt"), "a+") as fil:
-                fil.write(msg + "\n")
-
-        print("Test predictions:")
+        self.log("Test predictions:")
         utils.visualize_classes(self, preds)
 
         # Overall accuracy.
         acc = torch.sum(preds == labels) / preds.size()[0]
-        log(
+        self.log(
             f"Test accuracy: {acc * 100:.2f}%\n" +
             "Classification report:\n" +
             metrics.classification_report(labels, preds, digits=4))
@@ -563,11 +577,12 @@ class SvmSklearnWrapper(SvmWrapper):
                 torch.sum(torch.logical_and(preds_neg, labels_pos)) /
                 torch.sum(labels_pos))
 
-            log(f"Class {cls}:\n"
+            self.log(
+                f"Class {cls}:\n"
                 f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
                 f"\tFalse positive rate: {false_pos_rate * 100:.2f}%")
 
-        print("Graph:", self.graph)
+        self.log(f"Graph: {self.graph}")
 
         if self.graph:
             assert graph_prms is not None, \
@@ -767,8 +782,7 @@ class SvmSklearnWrapper(SvmWrapper):
             plt.close()
 
     def test(self, fets, dat_in, dat_out_classes, dat_extra,
-             graph_prms=copy.copy({
-                 "out_dir": ".", "sort_by_unfairness": True, "dur_s": None})):
+             graph_prms=copy.copy({"sort_by_unfairness": True, "dur_s": None})):
         """
         Tests this model on the provided dataset and returns the test accuracy
         (higher is better). Also, analyzes the model's feature coefficients and
@@ -795,12 +809,8 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # Compute the bandwidth fair share fraction. Convert from int to float
         # to avoid all values being rounded to 0.
-        fair = dat_extra[features.BW_FAIR_SHARE_FRAC_FET]
-
-        # Create the output directory.
-        out_dir = path.join(graph_prms["out_dir"], self.name)
-        if not path.exists(out_dir):
-            os.makedirs(out_dir)
+        fair = dat_extra[features.make_win_metric(
+            features.TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN)]
 
         # Calculate the x limits. Determine the maximum unfairness.
         x_lim = (
@@ -813,18 +823,17 @@ class SvmSklearnWrapper(SvmWrapper):
             flws_accs = []
             nums_flws = np.unique(dat_extra["num_flws"]).tolist()
             for num_flws_selected in nums_flws:
-                print(f"Evaluating model for {num_flws_selected} flows:")
+                self.log(f"Evaluating model for {num_flws_selected} flows:")
                 valid = (dat_extra["num_flws"] == num_flws_selected).nonzero()
                 flws_accs.append(self.__evaluate(
                     torch.tensor(self.net.predict(dat_in[valid])),
                     dat_out_classes[valid],
                     torch.tensor(dat_extra["raw"][valid]),
                     torch.tensor(fair[valid]),
-                    out_dir,
                     sort_by_unfairness,
                     graph_prms={
                         "flp": path.join(
-                            out_dir,
+                            self.out_dir,
                             (f"accuracy_vs_unfairness_{num_flws_selected}flows_"
                              f"{self.name}.pdf")),
                         "x_lim": x_lim}))
@@ -838,7 +847,7 @@ class SvmSklearnWrapper(SvmWrapper):
             plt.ylabel("Classification accuracy")
             plt.tight_layout()
             plt.savefig(
-                path.join(out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
+                path.join(self.out_dir, f"accuracy_vs_num-flows_{self.name}.pdf"))
             plt.close()
 
             # Plot queue occupancy.
@@ -846,38 +855,47 @@ class SvmSklearnWrapper(SvmWrapper):
             #     torch.tensor(dat_extra["raw"]),
             #     torch.tensor(fair),
             #     path.join(
-            #         out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
+            #         self.out_dir, f"queue_occ_vs_fair_queue_occ_{self.name}.pdf"),
             #     x_lim)
 
             # # Plot throughput
             # self.__plot_throughput(
             #     dat_out_classes, torch.tensor(self.net.predict(dat_in)),
             #     torch.tensor(fair),
-            #     path.join(out_dir, f"throughput_{self.name}.pdf"),
+            #     path.join(self.out_dir, f"throughput_{self.name}.pdf"),
             #     dat_extra["btk_throughput"],
             #     torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
             #     x_lim=None)
 
         # # Analyze overall accuracy for the Mathis Model.
-        # print("Evaluting Mathis Model:")
-        raw = dat_extra["raw"].copy()
-        # self.__evaluate(
-        #     torch.tensor(dat_extra[features.MATHIS_MODEL_FET].copy()),
-        #     dat_out_classes, torch.tensor(raw), torch.tensor(fair),
-        #     out_dir, sort_by_unfairness,
-        #     graph_prms={
-        #         "flp": path.join(
-        #             out_dir, "accuracy_vs_unfairness_mathis.pdf"),
-        #         "x_lim": x_lim})
+        self.log("Evaluting Mathis Model:")
+        # raw = dat_extra["raw"].copy()
+        raw = np.copy(dat_extra["raw"])
+        fair = np.copy(fair)
 
-        # Analyze overall accuracy for our model itself.
-        print(f"Evaluating {self.name} model:")
-        model_acc = self.__evaluate(
-            predictions, dat_out_classes, torch.tensor(np.copy(raw)), torch.tensor(np.copy(fair)),
-            out_dir, sort_by_unfairness,
+        # Evaluate Mathis model.
+        mathis_raw = (
+            dat_extra[features.make_win_metric(
+                features.MATHIS_TPUT_FET, defaults.CHOSEN_WIN)] / fair)
+        mathis_preds = self.convert_to_class(mathis_raw)[features.LABEL_FET]
+
+        self.__evaluate(
+            torch.tensor(mathis_preds),
+            dat_out_classes, torch.tensor(mathis_raw), torch.tensor(fair),
+            sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
-                    out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
+                    self.out_dir, "accuracy_vs_unfairness_mathis.pdf"),
+                "x_lim": x_lim})
+
+        # Analyze overall accuracy for our model itself.
+        self.log(f"Evaluating {self.name} model:")
+        model_acc = self.__evaluate(
+            predictions, dat_out_classes, torch.tensor(raw),
+            torch.tensor(fair), sort_by_unfairness,
+            graph_prms={
+                "flp": path.join(
+                    self.out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
                 "x_lim": x_lim})
 
         # # Analyze accuracy of a sliding window method
@@ -900,13 +918,13 @@ class LrSklearnWrapper(SvmSklearnWrapper):
         """ Apply recursive feature elimination to the provided net. """
         final_net = net
         if rfe_type == "None":
-            print("Not using recursive feature elimination.")
+            self.log("Not using recursive feature elimination.")
         elif rfe_type == "rfe":
-            print("Using recursive feature elimination.")
+            self.log("Using recursive feature elimination.")
             final_net = sklearn.feature_selection.RFE(
                 estimator=net, n_features_to_select=10, step=10)
         elif rfe_type == "rfecv":
-            print("Using recursive feature elimination with cross-validation.")
+            self.log("Using recursive feature elimination with cross-validation.")
             final_net = sklearn.feature_selection.RFECV(
                 estimator=net, step=1,
                 cv=sklearn.model_selection.StratifiedKFold(10),
@@ -1024,8 +1042,8 @@ class LstmWrapper(PytorchModelWrapper):
     opt = torch.optim.Adam
     params = ["lr"]
 
-    def __init__(self, hid_dim=32, num_lyrs=1, out_dim=5):
-        super().__init__()
+    def __init__(self, out_dir=None, hid_dim=32, num_lyrs=1, out_dim=5):
+        super().__init__(out_dir)
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
         self.num_lyrs = num_lyrs
@@ -1055,7 +1073,7 @@ class Lstm(torch.nn.Module):
         self.lstm = torch.nn.LSTM(in_dim, self.hid_dim)
         self.fc = torch.nn.Linear(self.hid_dim, out_dim)
         self.sg = torch.nn.Sigmoid()
-        print(f"Lstm - in_dim: {in_dim}, hid_dim: {self.hid_dim}, "
+        self.log(f"Lstm - in_dim: {in_dim}, hid_dim: {self.hid_dim}, "
               f"num_lyrs: {num_lyrs}, out_dim: {out_dim}")
 
     def forward(self, x, hidden):
