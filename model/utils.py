@@ -29,6 +29,10 @@ import defaults
 import features
 
 
+# Values considered unsafe for division and min().
+UNSAFE = {-1, 0}
+
+
 class Dataset(torch.utils.data.Dataset):
     """ A simple Dataset that wraps arrays of input and output features. """
 
@@ -660,11 +664,10 @@ def safe_min(val1, val2):
     then that value is discarded and the other value becomes the
     min. If both values are discarded, then the min is -1 (unknown).
     """
-    unsafe = {-1, 0}
     return (
-        -1 if val1 in unsafe and val2 in unsafe else (
-            val2 if val1 in unsafe else (
-                val1 if val2 in unsafe else (
+        -1 if val1 in UNSAFE and val2 in UNSAFE else (
+            val2 if val1 in UNSAFE else (
+                val1 if val2 in UNSAFE else (
                     min(val1, val2)))))
 
 
@@ -697,7 +700,7 @@ def safe_div(num, den):
     Safely divides two values. If either value is -1 or the denominator is 0,
     then the result is -1 (unknown).
     """
-    return -1 if num == -1 or den in {-1, 0} else num / den
+    return -1 if num == -1 or den in UNSAFE else num / den
 
 
 def safe_np_div(num_arr, den):

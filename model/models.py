@@ -52,10 +52,7 @@ class PytorchModelWrapper:
             self.out_dir = path.join(self.out_dir, self.name)
             if not path.exists(self.out_dir):
                 os.makedirs(self.out_dir)
-
         self.__check()
-
-
 
     def __check(self):
         """
@@ -134,6 +131,7 @@ class PytorchModelWrapper:
              "class itself."))
 
     def log(self, msg):
+        """ Print a log message and write it to a model-specific log file. """
         print(msg)
         if self.out_dir is not None and path.exists(self.out_dir):
             with open(path.join(self.out_dir, "results.txt"), "a+") as fil:
@@ -172,8 +170,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         clss[features.LABEL_FET] = (dat_out[:,0] > 1).astype(int)
         return clss
 
-    @staticmethod
-    def __bucketize(dat_in, dat_extra, dat_in_start_idx, dat_in_end_idx,
+    def __bucketize(self, dat_in, dat_extra, dat_in_start_idx, dat_in_end_idx,
                     dat_in_new, dat_in_new_idx, dur_us, num_buckets):
         """
         Uses dat_extra[features.ARRIVAL_TIME_FET] to divide the arriving packets
@@ -582,8 +579,6 @@ class SvmSklearnWrapper(SvmWrapper):
                 f"\tFalse negative rate: {false_neg_rate * 100:.2f}%\n"
                 f"\tFalse positive rate: {false_pos_rate * 100:.2f}%")
 
-        self.log(f"Graph: {self.graph}")
-
         if self.graph:
             assert graph_prms is not None, \
                 "\"graph_prms\" must be a dict(), not None."
@@ -867,21 +862,30 @@ class SvmSklearnWrapper(SvmWrapper):
             #     torch.tensor(dat_extra[features.THR_ESTIMATE_FET].copy()),
             #     x_lim=None)
 
-        # # Analyze overall accuracy for the Mathis Model.
-        self.log("Evaluting Mathis Model:")
-        # raw = dat_extra["raw"].copy()
-        raw = np.copy(dat_extra["raw"])
-        fair = np.copy(fair)
-
         # Evaluate Mathis model.
-        mathis_raw = (
-            dat_extra[features.make_win_metric(
-                features.MATHIS_TPUT_FET, defaults.CHOSEN_WIN)] / fair)
+        self.log("Evaluting Mathis Model:")
+        # Compute Mathis model predictions by dividing the Mathis model
+        # throughput, computed at the same granularity as the ground truth, by
+        # the fair throughput. Then convert these fairness ratios into labels.
+        mathis_tput = dat_extra[features.make_win_metric(
+            features.MATHIS_TPUT_FET, defaults.CHOSEN_WIN)]
+        mathis_raw = mathis_tput / fair
         mathis_preds = self.convert_to_class(mathis_raw)[features.LABEL_FET]
+        # Select only rows for which a prediction can be made (i.e., discard
+        # rows with unknown predictions). Convert to tensors.
+        mathis_valid = np.logical_and(mathis_tput != -1, fair != -1)
+        mathis_raw = torch.tensor(mathis_raw[mathis_valid])
+        mathis_preds = torch.tensor(mathis_preds[mathis_valid])
+        mathis_dat_out_classes = dat_out_classes[mathis_valid]
+        mathis_fair = torch.tensor(fair[mathis_valid])
+        mathis_skipped = dat_out_classes.size()[0] - mathis_preds.size()[0]
+        self.log(
+            f"Warning: Mathis model could not be evaluated on {mathis_skipped} "
+            f"({mathis_skipped / fair.shape[0] * 100:.2f}%) samples due to "
+            "unknown values.")
 
         self.__evaluate(
-            torch.tensor(mathis_preds),
-            dat_out_classes, torch.tensor(mathis_raw), torch.tensor(fair),
+            mathis_preds, mathis_dat_out_classes, mathis_raw, mathis_fair,
             sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
@@ -890,9 +894,10 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # Analyze overall accuracy for our model itself.
         self.log(f"Evaluating {self.name} model:")
+        raw = torch.tensor(np.copy(dat_extra["raw"]))
+        fair = torch.tensor(np.copy(fair))
         model_acc = self.__evaluate(
-            predictions, dat_out_classes, torch.tensor(raw),
-            torch.tensor(fair), sort_by_unfairness,
+            predictions, dat_out_classes, raw, fair, sort_by_unfairness,
             graph_prms={
                 "flp": path.join(
                     self.out_dir, f"accuracy_vs_unfairness_{self.name}.pdf"),
@@ -913,8 +918,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
     name = "LrSklearn"
     params = ["max_iter", "rfe", "graph"]
 
-    @staticmethod
-    def rfe(net, rfe_type):
+    def rfe(self, net, rfe_type):
         """ Apply recursive feature elimination to the provided net. """
         final_net = net
         if rfe_type == "None":

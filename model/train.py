@@ -386,7 +386,7 @@ def run_trials(args):
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        "model_" +
+        defaults.MODEL_PREFIX +
         utils.args_to_str(
             args, order=sorted(defaults.DEFAULTS.keys()), which="model") + (
                 # Determine the proper extension based on the type of model.

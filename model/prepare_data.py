@@ -270,7 +270,7 @@ def main():
     exps_dir = args.data_dir
     exp_flps = [
         path.join(exps_dir, fln) for fln in os.listdir(exps_dir)
-        if not fln.startswith("data_") and fln.endswith(".npz")]
+        if not fln.startswith(defaults.DATA_PREFIX) and fln.endswith(".npz")]
     random.shuffle(exp_flps)
     num_exps = len(exp_flps) if args.num_exps is None else args.num_exps
     exp_flps = exp_flps[:num_exps]
