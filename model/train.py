@@ -236,6 +236,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     # Construct the model.
     print("Building model...")
     net = models.MODELS[args["model"]](out_dir)
+    net.log(f"\n\nArguments: {args}")
 
     if path.exists(out_flp):
         # The output file already exists with these parameters, so do not
