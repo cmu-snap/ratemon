@@ -910,10 +910,14 @@ def get_npz_headers(flp):
         shape, _, dtype = np.lib.format._read_array_header(npy, version)
         return [name[:-4], shape, dtype]
 
-    with zipfile.ZipFile(flp) as archive:
-        return [
-            decode_header(archive, name) for name in archive.namelist()
-            if name.endswith(".npy")]
+    try:
+        with zipfile.ZipFile(flp) as archive:
+            return [
+                decode_header(archive, name) for name in archive.namelist()
+                if name.endswith(".npy")]
+    except zipfile.BadZipFile:
+        print(f"Warning: Not a valid zip file: {flp}")
+        return []
 
 
 def set_rand_seed(seed=defaults.SEED):

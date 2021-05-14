@@ -124,7 +124,8 @@ class Split:
 def survey(exp_flps, warmup_frac):
     """
     Surveys the provided experiments to determine their total packets and dtype,
-    which are returned.
+    which are returned. Also returns the list of experiment filepaths filtered
+    to remove those whose output file is invalid.
     """
     num_exps = len(exp_flps)
     print(f"Surveying {num_exps} experiments...")
@@ -139,8 +140,19 @@ def survey(exp_flps, warmup_frac):
     #             ]
     #         )
     #     ]
+    num_exps_original = len(exp_flps)
     exp_headers = [
         (exp_flp, utils.get_npz_headers(exp_flp)) for exp_flp in exp_flps]
+    # Remove experiments whose headers could not be read.
+    exp_headers = [
+        (exp_flp, headers) for exp_flp, headers in exp_headers if headers]
+    # Extract the filepaths of the experiments whose headers could be read. This
+    # list will be returned.
+    exp_flps = list(zip(*exp_headers))[0]
+    num_exps_invalid = num_exps_original - len(exp_flps)
+    if num_exps_invalid:
+        print(f"Warning: Removed {num_exps_invalid} invalid experiments!")
+    assert exp_headers, "Error: No valid experiments!"
 
     # Drop experiments that do not contain any flows.
     to_drop = set()
@@ -166,7 +178,7 @@ def survey(exp_flps, warmup_frac):
         math.ceil(flw_shape[0] * save_frac)
         for _, flw_headers in exp_headers for _, flw_shape, _ in flw_headers)
 
-    return num_pkts, dtype
+    return exp_flps, num_pkts, dtype
 
 
 def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
@@ -278,7 +290,7 @@ def main():
     print(f"Selected {num_exps} experiments")
     warmup_frac = args.warmup_percent / 100
     sample_frac = args.sample_percent / 100
-    num_pkts, dtype = survey(exp_flps, warmup_frac)
+    exp_flps, num_pkts, dtype = survey(exp_flps, warmup_frac)
     print(
         f"Total packets: {num_pkts}\nFeatures ({len(dtype.names)}):\n\t" +
         "\n\t".join(sorted(dtype.names)))
