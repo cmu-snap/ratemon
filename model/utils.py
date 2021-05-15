@@ -11,6 +11,7 @@ import struct
 import sys
 import time
 import zipfile
+import zlib
 
 from matplotlib import pyplot as plt
 import numpy as np
@@ -915,7 +916,7 @@ def get_npz_headers(flp):
             return [
                 decode_header(archive, name) for name in archive.namelist()
                 if name.endswith(".npy")]
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, zlib.error):
         print(f"Warning: Not a valid zip file: {flp}")
         return []
 
