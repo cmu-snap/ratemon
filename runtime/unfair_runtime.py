@@ -89,7 +89,8 @@ def main():
     for flow, pkts in sorted(FLOWS.items()):
         print("\t", flow_to_str(flow), sum(pkts))
 
-    # Are saddr and daddr getting reversed? I except to see packets from neptun5 to my local machine.
+    # Are saddr and daddr getting reversed? I except to see packets from neptune5 to my local machine.
+    # This is supposed to be the receive path, but the saddr is always showing up as the local IP...must be reversed
 
     return 0
 
