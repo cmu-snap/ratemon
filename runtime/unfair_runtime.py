@@ -34,6 +34,14 @@ def flow_to_str(flw):
     return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
 
 
+def flow_data_to_str(dat):
+    seq, srtt_us, tsval, tsecr, total_b, ihl_b, thl_b, payload_b = dat
+    return (
+        f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
+        f"total: {total_b} B, IP header: {ihl_b} B, TCP header: {thl_b} B, "
+        f"payload: {payload_b} B")
+
+
 def main():
     parser = ArgumentParser(description="Squelch unfair flows.")
     parser.add_argument(
@@ -71,8 +79,11 @@ def main():
             return
 
         flw = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-        FLOWS[flw].append(1)
-        print(flow_to_str(flw))
+        dat = (
+            pkt.seq, pkt.srtt_us, pkt.tsval, pkt.tsecr, pkt.total_b, 
+            pkt.ihl_b, pkt.thl_b, pkt.payload_b)
+        FLOWS[flw].append(dat)
+        print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
 
     print("Running...press Control-C to end")
 
@@ -87,7 +98,7 @@ def main():
 
     print("\nFlows:")
     for flow, pkts in sorted(FLOWS.items()):
-        print("\t", flow_to_str(flow), sum(pkts))
+        print("\t", flow_to_str(flow), len(pkts))
 
     # Are saddr and daddr getting reversed? I except to see packets from neptune5 to my local machine.
     # This is supposed to be the receive path, but the saddr is always showing up as the local IP...must be reversed
