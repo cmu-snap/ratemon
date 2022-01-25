@@ -35,11 +35,11 @@ def flow_to_str(flw):
 
 
 def flow_data_to_str(dat):
-    seq, srtt_us, tsval, tsecr, total_b, ihl_b, thl_b, payload_b = dat
+    seq, srtt_us, tsval, tsecr, total_b, ihl_b, thl_b, payload_b, time_us = dat
     return (
         f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
         f"total: {total_b} B, IP header: {ihl_b} B, TCP header: {thl_b} B, "
-        f"payload: {payload_b} B")
+        f"payload: {payload_b} B, time: {time_us} us")
 
 
 def main():
@@ -81,7 +81,7 @@ def main():
         flw = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
         dat = (
             pkt.seq, pkt.srtt_us, pkt.tsval, pkt.tsecr, pkt.total_b, 
-            pkt.ihl_b, pkt.thl_b, pkt.payload_b)
+            pkt.ihl_b, pkt.thl_b, pkt.payload_b, pkt.time_us)
         FLOWS[flw].append(dat)
         print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
 
