@@ -2,14 +2,16 @@
 #
 # Monitors incoming TCP flows to detect unfairness.
 
-from bcc import BPF
-from collections import defaultdict
-
-from time import sleep
 from argparse import ArgumentParser
 from os import path
-import struct
 import socket
+import struct
+import time
+
+from collections import defaultdict
+
+from bcc import BPF
+
 
 # Maps each flow (four-tuple) to a list of packets for that flow. New packets
 # are appended to the ends of these lists. Periodically, a flow's packets are
@@ -25,30 +27,47 @@ LOCALHOST = ip_str_to_int("127.0.0.1")
 
 
 def int_to_ip_str(ip):
-    # Use "<" (little endian) instead of "!" (network / big endian) because the IP addresses are already stored in little endian.
+    """ Converts an int storing an IP address into a dotted-quad string. """
+    # Use "<" (little endian) instead of "!" (network / big endian) because the
+    # IP addresses are already stored in little endian.
     return socket.inet_ntoa(struct.pack("<L", ip))
 
 
 def flow_to_str(flw):
+    """ Converts a flow four-tuple into a string. """
     saddr, daddr, sport, dport = flw
     return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
 
 
 def flow_data_to_str(dat):
-    seq, srtt_us, tsval, tsecr, total_b, ihl_b, thl_b, payload_b, time_us = dat
+    """ Converts a flow data tuple into a string. """
+    seq, srtt_us, tsval, tsecr, total_B, ihl_B, thl_B, payload_B, time_us = dat
     return (
         f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
-        f"total: {total_b} B, IP header: {ihl_b} B, TCP header: {thl_b} B, "
-        f"payload: {payload_b} B, time: {time_us} us")
+        f"total: {total_B} B, IP header: {ihl_B} B, TCP header: {thl_B} B, "
+        f"payload: {payload_B} B, time: {time.ctime(time_us / 1e3)}")
+
+
+def receive_packet(pkt):
+    # Skip packets on the loopback interface.
+    if pkt.saddr == LOCALHOST or pkt.daddr == LOCALHOST:
+        return
+
+    flw = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+    dat = (
+        pkt.seq, pkt.srtt_us, pkt.tsval, pkt.tsecr, pkt.total_B,
+        pkt.ihl_B, pkt.thl_B, pkt.payload_B, pkt.time_us)
+    FLOWS[flw].append(dat)
+    print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
 
 
 def main():
     parser = ArgumentParser(description="Squelch unfair flows.")
     parser.add_argument(
-        "-i", "--interval", default=1, help="summary interval, seconds", type=int
+        "-i", "--interval-ms", help="Poll interval (ms)", type=float
     )
     parser.add_argument(
-        "-d", "--debug", action="store_true", help="print debugging info"
+        "-d", "--debug", action="store_true", help="Print debugging info"
     )
     args = parser.parse_args()
 
@@ -61,37 +80,24 @@ def main():
     print(f"Loading BPF program: {bpf_flp}")
     with open(bpf_flp, "r") as fil:
         bpf_text = fil.read()
-
-    # debug/dump ebpf enable or not
     if args.debug:
         print(bpf_text)
 
-    # load BPF program
+    # Load BPF program.
     b = BPF(text=bpf_text)
     b.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
 
-    # process event
-    def print_event(cpu, data, size):
-        pkt = b["pkts"].event(data)
-
-        # Skip packets on the loopback interface.
-        if pkt.saddr == LOCALHOST or pkt.daddr == LOCALHOST:
-            return
-
-        flw = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-        dat = (
-            pkt.seq, pkt.srtt_us, pkt.tsval, pkt.tsecr, pkt.total_b, 
-            pkt.ihl_b, pkt.thl_b, pkt.payload_b, pkt.time_us)
-        FLOWS[flw].append(dat)
-        print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
+    # This function will be called to process an event.
+    def process_event(cpu, data, size):
+        receive_packet(b["pkts"].event(data))
 
     print("Running...press Control-C to end")
-
-    # loop with callback to print_event
-    b["pkts"].open_perf_buffer(print_event)
+    # Loop with callback to process_event().
+    b["pkts"].open_perf_buffer(process_event)
     while 1:
         try:
-            sleep(args.interval)
+            if args.interval_ms is not None:
+                time.sleep(args.interval_ms * 1000)
             b.perf_buffer_poll()
         except KeyboardInterrupt:
             break
@@ -99,10 +105,6 @@ def main():
     print("\nFlows:")
     for flow, pkts in sorted(FLOWS.items()):
         print("\t", flow_to_str(flow), len(pkts))
-
-    # Are saddr and daddr getting reversed? I except to see packets from neptune5 to my local machine.
-    # This is supposed to be the receive path, but the saddr is always showing up as the local IP...must be reversed
-
     return 0
 
 
