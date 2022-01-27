@@ -1001,38 +1001,19 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(flw, recv_pkts):
+def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
     """
     This function performs feature generation for the inference runtime. In
     contrast to parse_opened_exp(), this function only has access to receiver
     information, and only processes a single flow. Features that cannot be
     calculated are set to -1.
 
-    (?) Returns the smallest safe window size.
+    Returns a structured numpy array with the resulting features.
     """
-
     # Transform absolute times into relative times to make life easier.
-    #
-    # Determine the absolute earliest time observed in the experiment.
-    earliest_time_us = min(
-        first_time_us
-        for bounds in [
-            get_time_bounds(flw_to_pkts_client, direction="data"),
-            get_time_bounds(flw_to_pkts_client, direction="ack")
-        for first_time_us, _ in bounds)
-    # Subtract the earliest time from all times.
-    for flw in flws:
-        flw_to_pkts_server[
-            flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
-        flw_to_pkts_server[
-            flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
-
-        assert (
-            flw_to_pkts_server[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
-        assert (
-            flw_to_pkts_server[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
-
-    flws_time_bounds = get_time_bounds(flw_to_pkts_server, direction="data")
+    recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
+    assert (recv_pkts[features.ARRIVAL_TIME_FET] >= 0).all(), "Packets not processed in order!"
+    first_data_time_us = recv_pkts[0][features.ARRIVAL_TIME_FET]
 
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
@@ -1040,27 +1021,14 @@ def parse_received_acks(flw, recv_pkts):
         features.REGULAR +
         ([] if skip_smoothed else features.make_smoothed_features()))
 
-    recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
-    first_data_time_us = recv_data_pkts[0][features.ARRIVAL_TIME_FET]
+    # The final fets. -1 implies that a value could not be calculated.
+    num_pkts = len(recv_pkts)
+    fets = np.full(len(recv_pkts), -1, dtype=dtype)
 
-    # The final output. -1 implies that a value could not be calculated.
-    output = np.full(len(recv_data_pkts), -1, dtype=dtype)
-
-    # If this flow does not have any packets, then skip it.
-    skip = False
-    if recv_data_pkts.shape[0] == 0:
-        skip = True
-        print(
-            f"Warning: No data packets received for flow {flw_idx} in: "
-            f"{exp_flp}")
-    if recv_ack_pkts.shape[0] == 0:
-        skip = True
-        print(
-            f"Warning: No ACK packets sent for flow {flw_idx} in: "
-            f"{exp_flp}")
-    if skip:
-        flw_results[flw] = output
-        continue
+    # If this flow does not have any packets, then return immediately.
+    if not num_pkts:
+        print(f"Warning: No packets received for flow {flw}")
+        return features
 
     # State that the windowed metrics need to track across packets.
     win_state = {win: {
@@ -1079,11 +1047,6 @@ def parse_received_acks(flw, recv_pkts):
     prev_seq = None
     prev_payload_B = None
     highest_seq = None
-    # Use for Copa RTT estimation.
-    snd_ack_idx = 0
-    snd_data_idx = 0
-    # Use for TCP and PCC Vivace RTT estimation.
-    recv_ack_idx = 0
 
     # Track which packets are definitely retransmissions. Ignore these
     # packets when estimating the RTT. Note that because we are doing
@@ -1095,17 +1058,19 @@ def parse_received_acks(flw, recv_pkts):
     # Sequence numbers that have been received multiple times.
     retrans_pkts = set()
 
-    for j, recv_pkt in enumerate(recv_data_pkts):
-        if j % 1000 == 0:
-            print(
-                f"\tFlow {flw_idx + 1}/{exp.tot_flws}: "
-                f"{j}/{len(recv_data_pkts)} packets")
+
+    # TODO: Update with support for Copa and Vivace's packet-based sequence numbers.
+    packet_seq = False  # cca in {"copa", "vivace"}
+
+    for j, recv_pkt in enumerate(recv_pkts):
+        if j % 100 == 0:
+            print(f"\tFlow {flw}: {j}/{num_pkts} packets")
         # Whether this is the first packet.
         first = j == 0
         # Note that Copa and Vivace use packet-level sequence numbers
         # instead of TCP's byte-level sequence numbers.
         recv_seq = recv_pkt[features.SEQ_FET]
-        output[j][features.SEQ_FET] = recv_seq
+        fets[j][features.SEQ_FET] = recv_seq
         retrans = (
             recv_seq in unique_pkts or
             (prev_seq is not None and prev_payload_B is not None and
@@ -1119,64 +1084,38 @@ def parse_received_acks(flw, recv_pkts):
         unique_pkts.add(recv_seq)
 
         recv_time_cur_us = recv_pkt[features.ARRIVAL_TIME_FET]
-        output[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
+        fets[j][features.ARRIVAL_TIME_FET] = recv_time_cur_us
 
         payload_B = recv_pkt[features.PAYLOAD_FET]
         wirelen_B = recv_pkt[features.WIRELEN_FET]
-        output[j][features.PAYLOAD_FET] = payload_B
-        output[j][features.WIRELEN_FET] = wirelen_B
-        output[j][features.TOTAL_SO_FAR_FET] = (
-            (0 if first else output[j - 1][features.TOTAL_SO_FAR_FET]) +
+        fets[j][features.PAYLOAD_FET] = payload_B
+        fets[j][features.WIRELEN_FET] = wirelen_B
+        fets[j][features.TOTAL_SO_FAR_FET] = (
+            (0 if first else fets[j - 1][features.TOTAL_SO_FAR_FET]) +
             wirelen_B)
-        output[j][features.PAYLOAD_SO_FAR_FET] = (
-            (0 if first else output[j - 1][features.PAYLOAD_SO_FAR_FET]) +
+        fets[j][features.PAYLOAD_SO_FAR_FET] = (
+            (0 if first else fets[j - 1][features.PAYLOAD_SO_FAR_FET]) +
             payload_B)
 
-        # Calculate RTT-related metrics.
-        rtt_us = -1
-        if not first and recv_seq != -1 and not retrans:
-            # This is a TCP flow. Do receiver-side RTT estimation using
-            # the TCP timestamp option. Attempt to find a new RTT
-            # estimate. Move recv_ack_idx to the first occurance of the
-            # timestamp option TSval corresponding to the current
-            # packet's TSecr.
-            recv_ack_idx_old = recv_ack_idx
-            tsval = recv_ack_pkts[recv_ack_idx][features.TS_1_FET]
-            tsecr = recv_pkt[features.TS_2_FET]
-            while recv_ack_idx < recv_ack_pkts.shape[0]:
-                tsval = recv_ack_pkts[recv_ack_idx][features.TS_1_FET]
-                if tsval == tsecr:
-                    # If we found a timestamp option match, then update
-                    # the RTT estimate.
-                    rtt_us = (
-                        recv_time_cur_us -
-                        recv_ack_pkts[recv_ack_idx][
-                            features.ARRIVAL_TIME_FET])
-                    break
-                recv_ack_idx += 1
-            else:
-                # If we never found a matching tsval, then use the
-                # previous RTT estimate and reset recv_ack_idx to search
-                # again on the next packet.
-                rtt_us = output[j - 1][features.RTT_FET]
-                recv_ack_idx = recv_ack_idx_old
-
         recv_time_prev_us = (
-            -1 if first else output[j - 1][features.ARRIVAL_TIME_FET])
+            -1 if first else fets[j - 1][features.ARRIVAL_TIME_FET])
         interarr_time_us = utils.safe_sub(
             recv_time_cur_us, recv_time_prev_us)
-        output[j][features.INTERARR_TIME_FET] = interarr_time_us
-        output[j][features.INV_INTERARR_TIME_FET] = utils.safe_mul(
+        fets[j][features.INTERARR_TIME_FET] = interarr_time_us
+        fets[j][features.INV_INTERARR_TIME_FET] = utils.safe_mul(
             8 * 1e6 * wirelen_B,
             utils.safe_div(1, interarr_time_us))
 
-        output[j][features.RTT_FET] = rtt_us
+        # Calculate RTT-related metrics.
+        # TODO: Use TCP timestamp option (requires intercepting outgoing packets as well).
+        rtt_us = recv_pkt[features.SRTT_FET]
+        fets[j][features.RTT_FET] = rtt_us
         min_rtt_us = utils.safe_min(
-            sys.maxsize if first else output[j - 1][features.MIN_RTT_FET],
+            sys.maxsize if first else fets[j - 1][features.MIN_RTT_FET],
             rtt_us)
-        output[j][features.MIN_RTT_FET] = min_rtt_us
+        fets[j][features.MIN_RTT_FET] = min_rtt_us
         rtt_estimate_ratio = utils.safe_div(rtt_us, min_rtt_us)
-        output[j][features.RTT_RATIO_FET] = rtt_estimate_ratio
+        fets[j][features.RTT_RATIO_FET] = rtt_estimate_ratio
 
         # Receiver-side loss rate estimation. Estimate the number of lost
         # packets since the last packet. Do not try anything complex or
@@ -1206,8 +1145,8 @@ def parse_received_acks(flw, recv_pkts):
             pkt_loss_cur_estimate,
             utils.safe_add(pkt_loss_cur_estimate, 1))
 
-        output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
-        output[j][features.LOSS_RATE_FET] = loss_rate_cur
+        fets[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
+        fets[j][features.LOSS_RATE_FET] = loss_rate_cur
 
         # EWMA metrics.
         for (metric, _), alpha in itertools.product(
@@ -1223,7 +1162,7 @@ def parse_received_acks(flw, recv_pkts):
                 # inverse interarrival time. Instead, use the true inverse
                 # interarrival time so that the value used to update the
                 # inverse interarrival time EWMA is not "EWMA-ified" twice.
-                new = output[j][features.INV_INTERARR_TIME_FET]
+                new = fets[j][features.INV_INTERARR_TIME_FET]
             elif metric.startswith(features.RTT_FET):
                 new = rtt_us
             elif metric.startswith(features.RTT_RATIO_FET):
@@ -1234,8 +1173,8 @@ def parse_received_acks(flw, recv_pkts):
                 # tput = (MSS / RTT) * (C / sqrt(p))
                 new = utils.safe_mul(
                     utils.safe_div(
-                        utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                        utils.safe_div(output[j][features.RTT_FET], 1e6)),
+                        utils.safe_mul(8, fets[j][features.PAYLOAD_FET]),
+                        utils.safe_div(fets[j][features.RTT_FET], 1e6)),
                     utils.safe_div(
                         MATHIS_C,
                         utils.safe_sqrt(loss_rate_cur)))
@@ -1243,8 +1182,8 @@ def parse_received_acks(flw, recv_pkts):
                 raise Exception(f"Unknown EWMA metric: {metric}")
             # Update the EWMA. If this is the first value, then use 0 are
             # the old value.
-            output[j][metric] = utils.safe_update_ewma(
-                -1 if first else output[j - 1][metric], new, alpha)
+            fets[j][metric] = utils.safe_update_ewma(
+                -1 if first else fets[j - 1][metric], new, alpha)
 
         # If we cannot estimate the min RTT, then we cannot compute any
         # windowed metrics.
@@ -1254,7 +1193,7 @@ def parse_received_acks(flw, recv_pkts):
             # whether the start of the window moved earlier in time.
             for win in features.WINDOWS:
                 win_state[win]["window_start_idx"] = utils.find_bound(
-                    output[features.ARRIVAL_TIME_FET],
+                    fets[features.ARRIVAL_TIME_FET],
                     target=recv_time_cur_us - (win * min_rtt_us),
                     min_idx=win_state[win]["window_start_idx"],
                     max_idx=j,
@@ -1285,14 +1224,14 @@ def parse_received_acks(flw, recv_pkts):
                 new = utils.safe_div(
                     utils.safe_sub(
                         recv_time_cur_us,
-                        output[win_start_idx][features.ARRIVAL_TIME_FET]),
+                        fets[win_start_idx][features.ARRIVAL_TIME_FET]),
                     j - win_start_idx)
             elif metric.startswith(features.INV_INTERARR_TIME_FET):
                 new = utils.safe_mul(
                     8 * 1e6 * wirelen_B,
                     utils.safe_div(
                         1,
-                        output[j][features.make_win_metric(
+                        fets[j][features.make_win_metric(
                             features.INTERARR_TIME_FET, win)]))
             elif metric.startswith(features.TPUT_FET):
                 # Treat the first packet in the window as the beginning of
@@ -1301,37 +1240,25 @@ def parse_received_acks(flw, recv_pkts):
                 #
                 # Sum up the payloads of the packets in the window.
                 total_bytes = utils.safe_sum(
-                    output[features.WIRELEN_FET],
+                    fets[features.WIRELEN_FET],
                     start_idx=win_start_idx + 1, end_idx=j)
                 # Divide by the duration of the window.
                 start_time_us = (
-                    output[win_start_idx][features.ARRIVAL_TIME_FET]
+                    fets[win_start_idx][features.ARRIVAL_TIME_FET]
                     if win_start_idx >= 0 else -1)
-                end_time_us = output[j][features.ARRIVAL_TIME_FET]
+                end_time_us = fets[j][features.ARRIVAL_TIME_FET]
                 new = utils.safe_div(
                     utils.safe_mul(total_bytes, 8),
                     utils.safe_div(
                         utils.safe_sub(end_time_us, start_time_us), 1e6))
-            elif metric.startswith(features.TPUT_SHARE_FRAC_FET):
-                # This is calculated at the end.
-                continue
-            elif metric.startswith(features.TOTAL_TPUT_FET):
-                # This is calcualted at the end.
-                continue
-            elif metric.startswith(features.TPUT_FAIR_SHARE_BPS_FET):
-                # This is calculated at the end.
-                continue
-            elif metric.startswith(features.TPUT_TO_FAIR_SHARE_RATIO_FET):
-                # This is calculated at the end.
-                continue
             elif metric.startswith(features.RTT_FET):
                 new = utils.safe_mean(
-                    output[features.RTT_FET], win_start_idx, j)
+                    fets[features.RTT_FET], win_start_idx, j)
             elif metric.startswith(features.RTT_RATIO_FET):
                 new = utils.safe_mean(
-                    output[features.RTT_RATIO_FET], win_start_idx, j)
+                    fets[features.RTT_RATIO_FET], win_start_idx, j)
             elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-                rtt_us = output[j][features.make_win_metric(
+                rtt_us = fets[j][features.make_win_metric(
                     features.RTT_FET, win)]
                 if rtt_us == -1:
                     # The RTT estimate is -1 (unknown), so we
@@ -1432,28 +1359,30 @@ def parse_received_acks(flw, recv_pkts):
                 # 1 / sqrt(loss event rate).
                 new = utils.safe_div(
                     1,
-                    utils.safe_sqrt(output[j][
+                    utils.safe_sqrt(fets[j][
                         features.make_win_metric(
                             features.LOSS_EVENT_RATE_FET, win)]))
             elif metric.startswith(features.LOSS_RATE_FET):
                 win_losses = utils.safe_sum(
-                    output[features.PACKETS_LOST_FET], win_start_idx + 1, j)
+                    fets[features.PACKETS_LOST_FET], win_start_idx + 1, j)
                 new = utils.safe_div(
                     win_losses, win_losses + (j - win_start_idx))
             elif metric.startswith(features.MATHIS_TPUT_FET):
                 # tput = (MSS / RTT) * (C / sqrt(p))
                 new = utils.safe_mul(
                     utils.safe_div(
-                        utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                        utils.safe_div(output[j][features.RTT_FET], 1e6)),
+                        utils.safe_mul(8, fets[j][features.PAYLOAD_FET]),
+                        utils.safe_div(fets[j][features.RTT_FET], 1e6)),
                     utils.safe_div(
                         MATHIS_C,
                         utils.safe_sqrt(
-                            output[j][features.make_win_metric(
+                            fets[j][features.make_win_metric(
                                 features.LOSS_EVENT_RATE_FET, win)])))
+            elif features.is_unknowable(metric):
+                continue
             else:
                 raise Exception(f"Unknown windowed metric: {metric}")
-            output[j][metric] = new
+            fets[j][metric] = new
 
         prev_seq = recv_seq
         prev_payload_B = payload_B
@@ -1465,66 +1394,33 @@ def parse_received_acks(flw, recv_pkts):
         # TODO: Test sequence number wraparound logic.
         if (recv_seq != -1 and
                 recv_seq + (1 if packet_seq else payload_B) > 2**32):
-            print(
-                "Warning: Sequence number wraparound detected for packet "
-                f"{j} of flow {flw} in: {exp_flp}")
+            print(f"Warning: Sequence number wraparound detected for flow {flw}")
             highest_seq = None
             prev_seq = None
 
-    # Make sure that all output rows were used.
-    used_rows = np.sum(output[features.ARRIVAL_TIME_FET] != -1)
-    total_rows = output.shape[0]
+    # Make sure that all fets rows were used.
+    used_rows = np.sum(fets[features.ARRIVAL_TIME_FET] != -1)
+    total_rows = fets.shape[0]
     assert used_rows == total_rows, \
-        (f"Error: Used only {used_rows} of {total_rows} rows for flow "
-            f"{flw_idx} in: {exp_flp}")
+        f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
-    print(f"\tFinal window durations in: {exp_flp}:")
+    print(f"\tFinal window durations in flow: {flw}:")
+    final_min_rtt_us = fets[-1][features.MIN_RTT_FET]
     for win in features.WINDOWS:
         print(
-            f"\t\t{win}:",
-            ", ".join(
-                f"{dur_us} us" if dur_us > 0 else "unknown" for dur_us in (
-                    win * np.asarray(
-                        [res[-1][features.MIN_RTT_FET]
-                         for res in flw_results.values()])
-                ).tolist()
-            )
-        )
-    print(f"\tWindow errors in: {exp_flp}")
-    for win in features.WINDOWS:
-        print(f"\t\t{win}:", win_to_errors[win])
-    smallest_safe_win = 0
-    for win in sorted(features.WINDOWS):
-        if win_to_errors[win] == 0:
-            print(f"\tSmallest safe window size is {win} in: {exp_flp}")
-            smallest_safe_win = win
-            break
-    else:
-        print(f"Warning: No safe window sizes in: {exp_flp}")
+            f"\t\t{win}: {win * final_min_rtt_us} us" if final_min_rtt_us > 0 else "unknown")
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the
     # features that bad values. Flatten these lists of feature names, using a
     # set comprehension to remove duplicates.
     bad_fets = {
-        fet for flw_dat in flw_results.values()
-        for fet in flw_dat.dtype.names if not np.isfinite(flw_dat[fet]).all()}
+        fet for fet in fets.dtype.names if not np.isfinite(fets[fet]).all()}
     if bad_fets:
         print(
-            f"Warning: Experiment {exp_flp} has NaNs of Infs in features: "
-            f"{bad_fets}")
+            f"Warning: Flow {flw} has NaNs of Infs in features: {bad_fets}")
 
-    # Save the results.
-    if path.exists(out_flp):
-        print(f"\tOutput already exists: {out_flp}")
-    else:
-        print(f"\tSaving: {out_flp}")
-        np.savez_compressed(
-            out_flp,
-            **{str(k + 1): v
-               for k, v in enumerate(flw_results[flw] for flw in flws)})
-
-    return smallest_safe_win
+    return fets
 
 
 def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):

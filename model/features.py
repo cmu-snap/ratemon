@@ -163,3 +163,10 @@ PARSE_PACKETS_FETS = [
     (PAYLOAD_FET, "int32"),
     (WIRELEN_FET, "int32")
 ]
+
+def is_unknowable(metric):
+    """ Returns whether a metric is unknowable by a receiver. """
+    for fet in UNKNOWABLE_FETS:
+        if metric.startswith(fet):
+            return True
+    return False
