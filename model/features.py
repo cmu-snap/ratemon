@@ -28,6 +28,7 @@ def make_smoothed_features():
 SEQ_FET = "seq"
 ARRIVAL_TIME_FET = "arrival time us"
 MIN_RTT_FET = "min RTT us"
+SRTT_FET = "srtt us"
 INTERARR_TIME_FET = "interarrival time us"
 INV_INTERARR_TIME_FET = "inverse interarrival time b/s"
 PACKETS_LOST_FET = "packets lost since last packet"

@@ -6,11 +6,17 @@ from argparse import ArgumentParser
 from os import path
 import socket
 import struct
+import sys
 import time
 
 from collections import defaultdict
 
 from bcc import BPF
+
+sys.path.insert(0, path.join(path.dirname(path.realpath(__file__)), "..", "model"))
+import features
+import gen_features
+import utils
 
 
 # Maps each flow (four-tuple) to a list of packets for that flow. New packets
@@ -24,6 +30,8 @@ def ip_str_to_int(ip):
 
 
 LOCALHOST = ip_str_to_int("127.0.0.1")
+
+LIMIT = 100
 
 
 def int_to_ip_str(ip):
@@ -60,6 +68,25 @@ def receive_packet(pkt):
     FLOWS[flw].append(dat)
     print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
 
+    if len(FLOWS[flw]) > LIMIT:
+        trigger_inference(flw)
+
+
+def trigger_inference(flw):
+    # Reorganize list of packet metrics into a structured numpy array.
+    seqs, srtts_us, tsvals, tsecrs, totals_B, _, _, payloads_B, times_us = zip(*FLOWS[flw])
+    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
+    pkts[features.SEQ_FET] = seqs
+    pkts[features.ARRIVAL_TIME_FET] = times_us
+    pkts[features.TS_1_FET] = tsvals
+    pkts[features.TS_2_FET] = tsecrs
+    pkts[features.PAYLOAD_FET] = payloads_B
+    pkts[features.WIRELEN_FET] = totals_B
+    pkts[features.SRTT_FET] = srtts_us
+
+    fets = gen_features.parse_received_acks(flw, pkts)
+
+
 
 def main():
     parser = ArgumentParser(description="Squelch unfair flows.")
@@ -69,7 +96,11 @@ def main():
     parser.add_argument(
         "-d", "--debug", action="store_true", help="Print debugging info"
     )
+    parser.add_argument(
+        "-l", "--limit", default=LIMIT, help="The number of packets to accumulate for a flow between inference runs.", type=int)
     args = parser.parse_args()
+
+    assert args.limit > 0, f"\"--limit\" must be greater than 0 but is: {args.limit}"
 
     # Load BPF text.
     bpf_flp = path.join(path.abspath(path.dirname(__file__)),
