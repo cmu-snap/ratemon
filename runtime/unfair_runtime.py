@@ -5,6 +5,7 @@ Monitors incoming TCP flows to detect unfairness.
 
 from argparse import ArgumentParser
 from os import path
+import pickle
 import socket
 import struct
 import sys
@@ -17,9 +18,10 @@ from bcc import BPF
 
 sys.path.insert(0, path.join(path.dirname(
     path.realpath(__file__)), "..", "model"))
-import utils
-import gen_features
 import features
+import gen_features
+import models
+import utils
 
 
 def ip_str_to_int(ip):
@@ -67,16 +69,17 @@ def receive_packet(lock_i, flows, pkt):
     print(f"{flow_to_str(flw)} --- {flow_data_to_str(dat)}")
 
 
-def inference_loop(lock_i, lock_f, flows, fairness_db, limit,
+def inference_loop(lock_i, lock_f, flows, fairness_db, limit, net,
                    disable_inference):
     try:
         check_and_run_inference(
-            lock_i, lock_f, flows, fairness_db, limit, disable_inference)
+            lock_i, lock_f, flows, fairness_db, limit, net, disable_inference)
     except KeyboardInterrupt:
         return
 
 
-def check_and_run_inference(lock_i, lock_f, flows, fairness_db, limit, disable_inference):
+def check_and_run_inference(lock_i, lock_f, flows, fairness_db, limit, net,
+                            disable_inference):
     while not DONE:
         to_remove = []
         to_inf = []
@@ -110,11 +113,11 @@ def check_and_run_inference(lock_i, lock_f, flows, fairness_db, limit, disable_i
             print(f"Checking flow {flw}")
             # Do not hold lock while running inference.
             if not disable_inference:
-                monitor_flow(lock_f, fairness_db, flw, dat)
+                monitor_flow(lock_f, fairness_db, net, flw, dat)
         time.sleep(1)
 
 
-def monitor_flow(lock_f, fairness_db, flw, dat):
+def monitor_flow(lock_f, fairness_db, net, flw, dat):
     """
     Runs inference for the provided list of packets.
 
@@ -123,7 +126,7 @@ def monitor_flow(lock_f, fairness_db, flw, dat):
     Updates the flow's fairness record.
     """
     fets = featurize(flw, dat)
-    label = inference(flw, fets)
+    label = inference(net, flw, fets)
 
     lock_f.acquire()
     prev_decision = fairness_db[flw]
@@ -134,13 +137,16 @@ def monitor_flow(lock_f, fairness_db, flw, dat):
     print(f"Report for flow {flw}: {label}, {new_decision}")
 
 
-def inference(flw, fets):
+def inference(net, flw, fets):
     """
     Runs inference on a flow.
 
     Returns a label: below fair, approximately fair, above fair.
     """
-    return -1
+    # Can we skip the dataloader stuff because we aren't doing rebalancing or scaling?
+
+
+    return net.predict(dat_in, torch=False)
 
 
 def make_decision(flw, label, prev_decision):
@@ -191,9 +197,19 @@ def main():
         "-s", "--disable-inference", action="store_true",
         help="Disable periodic inference."
     )
+    parser.add_argument(
+        "--model", choices=models.MODEL_NAMES, help="The model to use.", required=True, type=str)
+    parser.add_argument(
+        "-f", "--model-file", help="The trained model to use.", required=True, type=str
+    )
     args = parser.parse_args()
 
     assert args.limit > 0, f"\"--limit\" must be greater than 0 but is: {args.limit}"
+    assert path.isfile(args.model_file), f"Model does not exist: {args.model_file}"
+
+    net = models.MODELS[args["model"]]()
+    with open(args.model_file, "rb") as fil:
+        net.net = pickle.load(fil)
 
     # Maps each flow (four-tuple) to a list of packets for that flow. New
     # packets are appended to the ends of these lists. Periodically, a flow's
@@ -216,7 +232,7 @@ def main():
     gen = threading.Thread(
         target=inference_loop,
         args=(lock_i, lock_f, flows, fairness_db, args.limit,
-              args.disable_inference))
+              net, args.disable_inference))
     gen.start()
 
     # Load BPF text.
