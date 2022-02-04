@@ -24,10 +24,10 @@ struct pkt_t
     u32 srtt_us;
     u32 tsval;
     u32 tsecr;
-    u32 total_B;
-    u32 ihl_B;
-    u32 thl_B;
-    u32 payload_B;
+    u32 total_bytes;
+    u32 ihl_bytes;
+    u32 thl_bytes;
+    u32 payload_bytes;
     // Required for time_us to be 64 bits.
     u32 padding;
     u64 time_us;

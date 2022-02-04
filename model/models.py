@@ -777,9 +777,8 @@ class SvmSklearnWrapper(SvmWrapper):
             plt.close()
 
 
-    def predict(self, dat_in, torch=True):
-        predictions = self.net.predict(dat_in)
-        return torch.tensor(predictions) if torch else predictions
+    def predict(self, dat_in):
+        return self.net.predict(dat_in)
 
 
     def test(self, fets, dat_in, dat_out_classes, dat_extra,
@@ -806,7 +805,7 @@ class SvmSklearnWrapper(SvmWrapper):
              "None.")
 
         # Run inference. Everything after the following line is just analysis.
-        predictions = self.predict(dat_in)
+        predictions = torch.tensor(self.predict(dat_in))
 
         # Compute the bandwidth fair share fraction. Convert from int to float
         # to avoid all values being rounded to 0.

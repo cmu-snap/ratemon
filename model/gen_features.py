@@ -1001,7 +1001,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
+def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
     """
     This function performs feature generation for the inference runtime. In
     contrast to parse_opened_exp(), this function only has access to receiver
@@ -1010,25 +1010,35 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
 
     Returns a structured numpy array with the resulting features.
     """
+    # Verify that the packets have been received in order (i.e., their
+    # arrival times are monotonically increasing). Calculate the time
+    # difference between subsequent packets and make sure that it is never
+    # negative.
+    assert ((
+        recv_pkts[features.ARRIVAL_TIME_FET][1:] -
+        recv_pkts[features.ARRIVAL_TIME_FET][:-1]) >= 0).all(), \
+            "Packet arrival times are not monotonically increasing!"
+
     # Transform absolute times into relative times to make life easier.
     recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
     assert (recv_pkts[features.ARRIVAL_TIME_FET] >= 0).all(), "Packets not processed in order!"
-    first_data_time_us = recv_pkts[0][features.ARRIVAL_TIME_FET]
 
-    # Create the (super-complicated) dtype. The dtype combines each metric at
-    # multiple granularities.
-    dtype = (
-        features.REGULAR +
-        ([] if skip_smoothed else features.make_smoothed_features()))
-
-    # The final fets. -1 implies that a value could not be calculated.
+    in_spc_fet_names = set(dtype.names)
     num_pkts = len(recv_pkts)
-    fets = np.full(len(recv_pkts), -1, dtype=dtype)
+    # The final fets. -1 implies that a value could not be calculated. Extend
+    # the provided dtype with the regular features, which may be required to
+    # compute the EWMA and windowed features.
+    #
+    # TODO: Add only the those regular features that are in fact required for
+    #       the specific EWMA and windowed features that we need.
+    fets = np.full(
+        num_pkts, -1,
+        dtype=tuple(set(dtype) + set(features.RECEIVER_KNOWABLE_FETS)))
 
     # If this flow does not have any packets, then return immediately.
     if not num_pkts:
         print(f"Warning: No packets received for flow {flw}")
-        return features
+        return fets
 
     # State that the windowed metrics need to track across packets.
     win_state = {win: {
@@ -1057,8 +1067,6 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
     unique_pkts = set()
     # Sequence numbers that have been received multiple times.
     retrans_pkts = set()
-
-
     # TODO: Update with support for Copa and Vivace's packet-based sequence numbers.
     packet_seq = False  # cca in {"copa", "vivace"}
 
@@ -1153,8 +1161,11 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
                 features.EWMAS, features.ALPHAS):
             if skip_smoothed:
                 continue
-
             metric = features.make_ewma_metric(metric, alpha)
+            # If this is not a desired feature, then skip it.
+            if metric not in in_spc_fet_names:
+                continue
+
             if metric.startswith(features.INTERARR_TIME_FET):
                 new = interarr_time_us
             elif metric.startswith(features.INV_INTERARR_TIME_FET):
@@ -1206,11 +1217,16 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
             # windowed metrics.
             if skip_smoothed or min_rtt_us == -1:
                 continue
+            metric = features.make_win_metric(metric, win)
+            # If this is not a desired feature, then skip it.
+            if metric not in in_spc_fet_names:
+                continue
 
             # Calculate windowed metrics only if an entire window has
-            # elapsed since the start of the flow.
+            # elapsed since the start of the flow. Recall that the timestamps
+            # have been adjusted so that the first packet starts at time 0.
             win_size_us = win * min_rtt_us
-            if recv_time_cur_us - first_data_time_us < win_size_us:
+            if recv_time_cur_us < win_size_us:
                 continue
 
             # A window requires at least two packets. Note that this means
@@ -1219,7 +1235,6 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
             if win_start_idx == j:
                 continue
 
-            metric = features.make_win_metric(metric, win)
             if metric.startswith(features.INTERARR_TIME_FET):
                 new = utils.safe_div(
                     utils.safe_sub(
@@ -1409,6 +1424,10 @@ def parse_received_acks(flw, recv_pkts, skip_smoothed=False):
     for win in features.WINDOWS:
         print(
             f"\t\t{win}: {win * final_min_rtt_us} us" if final_min_rtt_us > 0 else "unknown")
+
+    # Remove unneeded features, which were temporarily-tracked dependencies for
+    # the requested features.
+    fets = fets[in_spc_fet_names]
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the

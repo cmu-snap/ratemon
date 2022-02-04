@@ -24,6 +24,15 @@ def make_smoothed_features():
         [(make_win_metric(metric, win), typ)
          for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
 
+def is_unknowable(metric):
+    """ Returns whether a metric is unknowable by a receiver. """
+    for fet in UNKNOWABLE_FETS:
+        if metric.startswith(fet):
+            return True
+    return False
+
+def is_knowable(metric):
+    return not is_unknowable(metric)
 
 SEQ_FET = "seq"
 ARRIVAL_TIME_FET = "arrival time us"
@@ -139,9 +148,7 @@ UNKNOWABLE_FETS = [
 # include any unknowable features.
 FEATURES = tuple(
     fet for fet, _ in make_smoothed_features()
-    if not np.asarray(
-        [(unknowable_fet in fet)
-         for unknowable_fet in UNKNOWABLE_FETS]).any())
+    if is_knowable(fet))
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(
@@ -164,9 +171,4 @@ PARSE_PACKETS_FETS = [
     (WIRELEN_FET, "int32")
 ]
 
-def is_unknowable(metric):
-    """ Returns whether a metric is unknowable by a receiver. """
-    for fet in UNKNOWABLE_FETS:
-        if metric.startswith(fet):
-            return True
-    return False
+REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]

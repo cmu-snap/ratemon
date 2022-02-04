@@ -91,6 +91,29 @@ def get_split(data_dir, name, sample_frac, net):
     return extract_fets(split, name, net)
 
 
+def replace_unknowns(dat, is_dt):
+    """
+    Convert all instances of -1 (feature value unknown) to either the mean for
+    that feature or, if is_dt ("is decision tree?") is True, then NaN.
+
+    Modifies the provided numpy array.
+    """
+    if not dat.shape[0]:
+        return
+    bad_fets = []
+    for fet in dat.dtype.names:
+        invalid = dat[fet] == -1
+        if invalid.all():
+            bad_fets.append(fet)
+            continue
+        dat[fet][invalid] = (
+            float("NaN") if is_dt
+            else np.mean(dat[fet][np.logical_not(invalid)]))
+        assert (dat[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
+    assert not bad_fets, \
+        f"Features contain only \"-1\" ({len(bad_fets)}): {bad_fets}"
+
+
 def extract_fets(dat, split_name, net):
     """
     Extracts net's the input and output features from dat. Returns a tuple of
@@ -146,23 +169,7 @@ def extract_fets(dat, split_name, net):
             np.isinf(dat_out[features.LABEL_FET]).any())), \
             f"Warning: NaNs or Infs in ground truth for split \"{split_name}\"."
 
-    if dat_in.shape[0] > 0:
-        # Convert all instances of -1 (feature value unknown) to either the mean for
-        # that feature or NaN.
-        bad_fets = []
-        for fet in dat_in.dtype.names:
-            invalid = dat_in[fet] == -1
-            if invalid.all():
-                bad_fets.append(fet)
-                continue
-            dat_in[fet][invalid] = (
-                float("NaN") if is_dt
-                else np.mean(dat_in[fet][np.logical_not(invalid)]))
-            assert (dat_in[fet] != -1).all(), \
-                f"Found \"-1\" in split \"{split_name}\" feature: {fet}"
-        assert not bad_fets, \
-            (f"Features in split \"{split_name}\" contain only \"-1\" "
-             f"({len(bad_fets)}): {bad_fets}")
+    replace_unknowns(dat_in, is_dt)
 
     # Convert output features to class labels.
     dat_out = net.convert_to_class(dat_out)
