@@ -18,11 +18,7 @@ import time
 
 import torch
 
-import cl_args
-import data
-import defaults
-import models
-import utils
+from unfair.model import cl_args, data, defaults, models, utils
 
 
 # The threshold of the new throughout to the old throughput above which a

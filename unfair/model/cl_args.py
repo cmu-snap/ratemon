@@ -3,8 +3,7 @@
 import os
 from os import path
 
-import defaults
-import models
+from unfair.model import defaults, models
 
 
 def add_out(psr, psr_verify=lambda args: args):

@@ -7,10 +7,7 @@ import numpy as np
 from numpy.lib import recfunctions
 import torch
 
-import defaults
-import features
-import models
-import utils
+from unfair.model import defaults, features, models, utils
 
 
 def get_dataloaders(args, net):

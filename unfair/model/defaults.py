@@ -1,4 +1,4 @@
-""" Default values. """
+"""Default values."""
 
 import struct
 

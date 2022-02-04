@@ -97,7 +97,7 @@ def receive_packet(lock_i, flows, pkt):
 def check_loop(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
     """Periodically evaluate flow fairness.
 
-    Designed to be run as the target function of a separate thread.
+    Intended to be run as the target function of a thread.
     """
     try:
         while not DONE:
@@ -110,9 +110,9 @@ def check_loop(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference
 
 
 def check_flows(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
-    """Identify flows that have are ready to be checked, and check them.
+    """Identify flows that are ready to be checked, and check them.
 
-    Removes old and empty flows.
+    Remove old and empty flows.
     """
     print("Finding flows to check...")
     to_remove = []

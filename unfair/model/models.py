@@ -16,9 +16,7 @@ from sklearn import svm
 from sklearn.experimental import enable_hist_gradient_boosting
 import torch
 
-import defaults
-import features
-import utils
+from unfair.model import defaults, features, utils
 
 
 SMOOTHING_THRESHOLD = 0.4

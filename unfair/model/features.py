@@ -1,38 +1,44 @@
-""" Defines features. """
+"""Defines features."""
 
 
 import itertools
 
-import numpy as np
-
-import defaults
+from unfair.model import defaults
 
 
 def make_ewma_metric(metric, alpha):
-    """ Format the name of an EWMA metric. """
+    """Format the name of an EWMA metric."""
     return f"{metric}-ewma-alpha{alpha}"
 
+
 def make_win_metric(metric, win):
-    """ Format the name of a windowed metric. """
+    """Format the name of a windowed metric."""
     return f"{metric}-windowed-minRtt{win}"
 
+
 def make_smoothed_features():
-    """ Return a dtype for all EWMA and windowed metrics. """
-    return (
-        [(make_ewma_metric(metric, alpha), typ)
-         for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)] +
-        [(make_win_metric(metric, win), typ)
-         for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)])
+    """Return a dtype for all EWMA and windowed metrics."""
+    return [
+        (make_ewma_metric(metric, alpha), typ)
+        for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)
+    ] + [
+        (make_win_metric(metric, win), typ)
+        for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)
+    ]
+
 
 def is_unknowable(metric):
-    """ Returns whether a metric is unknowable by a receiver. """
+    """Return whether a metric is unknowable by a receiver."""
     for fet in UNKNOWABLE_FETS:
         if metric.startswith(fet):
             return True
     return False
 
+
 def is_knowable(metric):
+    """Return whether a metric is knowable by a receiver."""
     return not is_unknowable(metric)
+
 
 SEQ_FET = "seq"
 ARRIVAL_TIME_FET = "arrival time us"
@@ -90,7 +96,7 @@ REGULAR = [
     (PAYLOAD_SO_FAR_FET, "int32"),
     (ACTIVE_FLOWS_FET, "int32"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
-    (BW_FAIR_SHARE_BPS_FET, "float64")
+    (BW_FAIR_SHARE_BPS_FET, "float64"),
 ]
 
 # These metrics are exponentially-weighted moving averages (EWMAs),
@@ -101,7 +107,7 @@ EWMAS = [
     (RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
-    (MATHIS_TPUT_FET, "float64")
+    (MATHIS_TPUT_FET, "float64"),
 ]
 
 # These metrics are calculated over an window of packets, for varies
@@ -119,7 +125,7 @@ WINDOWED = [
     (LOSS_EVENT_RATE_FET, "float64"),
     (SQRT_LOSS_EVENT_RATE_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
-    (MATHIS_TPUT_FET, "float64")
+    (MATHIS_TPUT_FET, "float64"),
 ]
 
 # The alpha values at which to evaluate the EWMA metrics.
@@ -127,7 +133,7 @@ ALPHAS = [i / 1000 for i in range(1, 11)] + [i / 10 for i in range(1, 11)]
 
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
-WINDOWS = [2**i for i in range(11)]
+WINDOWS = [2 ** i for i in range(11)]
 
 # These features cannot be calculated by an isolated receiver and therefore
 # should not be used as training inputs (i.e., should never be in "in_spc").
@@ -141,24 +147,24 @@ UNKNOWABLE_FETS = [
     TOTAL_TPUT_FET,
     TPUT_FAIR_SHARE_BPS_FET,
     TPUT_TO_FAIR_SHARE_RATIO_FET,
-    LABEL_FET
+    LABEL_FET,
 ]
 
 # Construct the list of all features that an isolated receiver may use. Do not
 # include any unknowable features.
-FEATURES = tuple(
-    fet for fet, _ in make_smoothed_features()
-    if is_knowable(fet))
+FEATURES = tuple(fet for fet, _ in make_smoothed_features() if is_knowable(fet))
 
 # The feature to use as the ground truth.
-OUT_FET = make_win_metric(
-    TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
+OUT_FET = make_win_metric(TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
 
 # Features to store as extra data for each sample.
 EXTRA_FETS = [
-    ARRIVAL_TIME_FET, RTT_FET, ACTIVE_FLOWS_FET,
+    ARRIVAL_TIME_FET,
+    RTT_FET,
+    ACTIVE_FLOWS_FET,
     make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
-    make_win_metric(MATHIS_TPUT_FET, defaults.CHOSEN_WIN)]
+    make_win_metric(MATHIS_TPUT_FET, defaults.CHOSEN_WIN),
+]
 
 # Features used when parsing packets.
 PARSE_PACKETS_FETS = [
@@ -168,7 +174,7 @@ PARSE_PACKETS_FETS = [
     (TS_1_FET, "int64"),
     (TS_2_FET, "int64"),
     (PAYLOAD_FET, "int32"),
-    (WIRELEN_FET, "int32")
+    (WIRELEN_FET, "int32"),
 ]
 
 REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]

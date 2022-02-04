@@ -1030,7 +1030,7 @@ def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
     #       the specific EWMA and windowed features that we need.
     fets = np.full(
         num_pkts, -1,
-        dtype=tuple(set(dtype) + set(features.RECEIVER_KNOWABLE_FETS)))
+        dtype=tuple(set(dtype) + set(features.REGULAR_KNOWABLE_FETS)))
 
     # If this flow does not have any packets, then return immediately.
     if not num_pkts:
