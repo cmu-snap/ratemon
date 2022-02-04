@@ -19,10 +19,7 @@ import traceback
 import json
 import numpy as np
 
-import cl_args
-import defaults
-import features
-import utils
+from unfair.model import cl_args, defaults, features, utils
 
 
 # Mathis model constant.

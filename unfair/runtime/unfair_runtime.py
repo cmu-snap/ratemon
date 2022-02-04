@@ -14,13 +14,7 @@ from collections import defaultdict
 
 from bcc import BPF
 
-sys.path.insert(0, path.join(path.dirname(
-    path.realpath(__file__)), "..", "model"))
-import data
-import features
-import gen_features
-import models
-import utils
+from unfair.model import data, features, gen_features, models, utils
 
 
 def ip_str_to_int(ip_str):
@@ -50,13 +44,23 @@ def flow_to_str(flow):
 
 def flow_data_to_str(dat):
     """Convert a flow data tuple into a string."""
-    (seq, srtt_us, tsval, tsecr, total_bytes, ihl_bytes, thl_bytes,
-     payload_bytes, time_us) = dat
+    (
+        seq,
+        srtt_us,
+        tsval,
+        tsecr,
+        total_bytes,
+        ihl_bytes,
+        thl_bytes,
+        payload_bytes,
+        time_us,
+    ) = dat
     return (
         f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
         f"total: {total_bytes} B, IP header: {ihl_bytes} B, "
         f"TCP header: {thl_bytes} B, payload: {payload_bytes} B, "
-        f"time: {time.ctime(time_us / 1e3)}")
+        f"time: {time.ctime(time_us / 1e3)}"
+    )
 
 
 def receive_packet(lock_i, flows, pkt):
@@ -65,23 +69,32 @@ def receive_packet(lock_i, flows, pkt):
     lock_i protects flows.
     """
     # Skip packets on the loopback interface.
-    if (pkt.saddr == LOCALHOST or
-            pkt.daddr == LOCALHOST or
-            pkt.saddr == ip_str_to_int("23.40.28.82")):
+    if (
+        pkt.saddr == LOCALHOST
+        or pkt.daddr == LOCALHOST
+        or pkt.saddr == ip_str_to_int("23.40.28.82")
+    ):
         return
 
     flow = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
     dat = (
-        pkt.seq, pkt.srtt_us, pkt.tsval, pkt.tsecr, pkt.total_bytes,
-        pkt.ihl_bytes, pkt.thl_bytes, pkt.payload_bytes, pkt.time_us)
+        pkt.seq,
+        pkt.srtt_us,
+        pkt.tsval,
+        pkt.tsecr,
+        pkt.total_bytes,
+        pkt.ihl_bytes,
+        pkt.thl_bytes,
+        pkt.payload_bytes,
+        pkt.time_us,
+    )
     lock_i.acquire()
     flows[flow].append(dat)
     lock_i.release()
     print(f"{flow_to_str(flow)} --- {flow_data_to_str(dat)}")
 
 
-def check_loop(lock_i, lock_f, flows, fairness_db, limit, net,
-               disable_inference):
+def check_loop(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
     """Periodically evaluate flow fairness.
 
     Designed to be run as the target function of a separate thread.
@@ -89,15 +102,14 @@ def check_loop(lock_i, lock_f, flows, fairness_db, limit, net,
     try:
         while not DONE:
             check_flows(
-                lock_i, lock_f, flows, fairness_db, limit, net,
-                disable_inference)
+                lock_i, lock_f, flows, fairness_db, limit, net, disable_inference
+            )
             time.sleep(1)
     except KeyboardInterrupt:
         return
 
 
-def check_flows(lock_i, lock_f, flows, fairness_db, limit, net,
-                disable_inference):
+def check_flows(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
     """Identify flows that have are ready to be checked, and check them.
 
     Removes old and empty flows.
@@ -109,14 +121,13 @@ def check_flows(lock_i, lock_f, flows, fairness_db, limit, net,
     print(f"Found {len(flows)} flows")
     for flow, pkts in flows.items():
         print(f"{flow} - {len(pkts)}")
-        if (not pkts or
-                (time.time() * 1e6 - pkts[-1][-1]) > (OLD_THRESH_SEC * 1e6)):
+        if not pkts or (time.time() * 1e6 - pkts[-1][-1]) > (OLD_THRESH_SEC * 1e6):
             # Remove flows with no packets and flows that have not received
             # a new packet in five seconds.
             to_remove.append(flow)
         elif len(pkts) >= limit:
             # Plan to run inference on "full" flows.
-            to_check.append(flow)    # Garbage collection.
+            to_check.append(flow)  # Garbage collection.
     # Garbage collection.
     for flow in to_remove:
         del flows[flow]
@@ -141,10 +152,18 @@ def featurize(net, flow, pkts):
     Returns a structured numpy array.
     """
     # Reorganize list of packet metrics into a structured numpy array.
-    (seqs, srtts_us, tsvals, tsecrs, totals_bytes, _, _, payloads_bytes,
-     times_us) = zip(*pkts)
-    pkts = utils.make_empty(len(seqs), additional_dtype=[
-                            (features.SRTT_FET, "int32")])
+    (
+        seqs,
+        srtts_us,
+        tsvals,
+        tsecrs,
+        totals_bytes,
+        _,
+        _,
+        payloads_bytes,
+        times_us,
+    ) = zip(*pkts)
+    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
     pkts[features.SEQ_FET] = seqs
     pkts[features.ARRIVAL_TIME_FET] = times_us
     pkts[features.TS_1_FET] = tsvals
@@ -193,35 +212,39 @@ def inference(net, flow, pkts):
 
 def main():
     parser = ArgumentParser(description="Squelch unfair flows.")
-    parser.add_argument(
-        "-i", "--interval-ms", help="Poll interval (ms)", type=float
-    )
+    parser.add_argument("-i", "--interval-ms", help="Poll interval (ms)", type=float)
     parser.add_argument(
         "-d", "--debug", action="store_true", help="Print debugging info"
     )
     parser.add_argument(
-        "-l", "--limit", default=100,
-        help=("The number of packets to accumulate for a flow between "
-              "inference runs."),
-        type=int
+        "-l",
+        "--limit",
+        default=100,
+        help=(
+            "The number of packets to accumulate for a flow between " "inference runs."
+        ),
+        type=int,
     )
     parser.add_argument(
-        "-s", "--disable-inference", action="store_true",
-        help="Disable periodic inference."
+        "-s",
+        "--disable-inference",
+        action="store_true",
+        help="Disable periodic inference.",
     )
     parser.add_argument(
-        "--model", choices=models.MODEL_NAMES, help="The model to use.",
-        required=True, type=str)
+        "--model",
+        choices=models.MODEL_NAMES,
+        help="The model to use.",
+        required=True,
+        type=str,
+    )
     parser.add_argument(
-        "-f", "--model-file", help="The trained model to use.", required=True,
-        type=str
+        "-f", "--model-file", help="The trained model to use.", required=True, type=str
     )
     args = parser.parse_args()
 
-    assert args.limit > 0, \
-        f"\"--limit\" must be greater than 0 but is: {args.limit}"
-    assert path.isfile(args.model_file), \
-        f"Model does not exist: {args.model_file}"
+    assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
+    assert path.isfile(args.model_file), f"Model does not exist: {args.model_file}"
 
     net = models.MODELS[args["model"]]()
     with open(args.model_file, "rb") as fil:
@@ -247,13 +270,23 @@ def main():
     # Set up the inference thread.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(lock_i, lock_f, flows, fairness_db, args.limit,
-              net, args.disable_inference))
+        args=(
+            lock_i,
+            lock_f,
+            flows,
+            fairness_db,
+            args.limit,
+            net,
+            args.disable_inference,
+        ),
+    )
     check_thread.start()
 
     # Load BPF text.
-    bpf_flp = path.join(path.abspath(path.dirname(__file__)),
-                        path.basename(__file__).strip().split(".")[0] + ".c")
+    bpf_flp = path.join(
+        path.abspath(path.dirname(__file__)),
+        path.basename(__file__).strip().split(".")[0] + ".c",
+    )
     if not path.isfile(bpf_flp):
         print(f"Could not find BPF program: {bpf_flp}")
         return 1
