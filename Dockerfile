@@ -25,19 +25,23 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Need to set up an SSH key in order to clone with SSH.
+# # Need to set up an SSH key in order to clone with SSH.
+# RUN mkdir "/.ssh" && ssh-keygen -t rsa -N '' -f "/.ssh/id_rsa"
+# RUN ls /.ssh
+# RUN git config --global core.sshCommand "ssh -i /.ssh/id_rsa -F /dev/null"
 
-RUN git clone https://github.com/cmu-snap/unfair.git -b bpf-dev
-WORKDIR /unfair
-RUN git submodule update --init
+# RUN git submodule update --init
+
+COPY requirements.txt /requirements.txt
 
 # Prepare python virtualenv
 RUN python3 -m venv .venv && \
-    source .venv/bin/activate && \
+    . /.venv/bin/activate && \
     pip install -r requirements.txt
 
 # Install bcc
-WORKDIR /unfair/bcc
+RUN git clone https://github.com/iovisor/bcc.git && git checkout v0.24.0
+WORKDIR /bcc
 RUN mkdir build && cd build && \
     cmake .. && \
     make -j "$(nproc)" && \
