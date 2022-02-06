@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
             // "console": "integratedTerminal",
-            "console": "internalConsole",
+            "console": "integratedTerminal",
             "args": ["-h"],
             "autoReload": {
                 "enable": false
@@ -18,7 +18,8 @@
             "redirectOutput": true,
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
-            }
+            },
+            "sudo": true
         },
         {
             "name": "Run unfair_runtime.py",
@@ -26,7 +27,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
             // "console": "integratedTerminal",
-            "console": "internalConsole",
+            "console": "integratedTerminal",
             "args": ["--interval-ms=100", "--limit=100", "--disable-inference", "--model=HistGbdtSklearn", "--model-file=${workspaceFolder}/data/models/gbdt.pickle"],
             "autoReload": {
                 "enable": false
@@ -34,7 +35,8 @@
             "redirectOutput": true,
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
-            }
+            },
+            "sudo": true
         }
     ]
 }
