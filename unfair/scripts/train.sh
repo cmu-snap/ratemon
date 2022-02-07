@@ -34,12 +34,13 @@ python "$unfair_dir/model/train.py" \
     --out-dir="$out_dir" \
     --data-dir="$out_dir" \
     --model=HistGbdtSklearn \
+    --sample-percent=100 \
     --no-rand \
     --conf-trials=1 \
-    --balance \
-    --drop-popular \
     --analyze-features \
     --clusters=20 \
     --features-to-pick=10 \
-    --permutation-importance-repeats=2 \
-    --sample-percent=100
+    --permutation-importance-repeats=2
+
+    # --balance \
+    # --drop-popular \

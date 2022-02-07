@@ -1,4 +1,4 @@
-""" Common command line arguments. """
+"""Common command line arguments."""
 
 import os
 from os import path
@@ -7,8 +7,9 @@ from unfair.model import defaults, models
 
 
 def add_out(psr, psr_verify=lambda args: args):
-    """
-    Adds an "out-dir" argument to the provided ArgumentParser, and returns it.
+    """Add an "out-dir" argument to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         out_dir = args.out_dir
@@ -23,9 +24,9 @@ def add_out(psr, psr_verify=lambda args: args):
 
 
 def add_warmup(psr, psr_verify=lambda args: args):
-    """
-    Adds a "warmup-percent" argument to the provided ArgumentParser, and returns
-    it.
+    """Add a "warmup-percent" argument to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         warmup_prc = args.warmup_percent
@@ -43,8 +44,9 @@ def add_warmup(psr, psr_verify=lambda args: args):
 
 
 def add_num_exps(psr, psr_verify=lambda args: args):
-    """
-    Adds a "num-exps" argument to the provided ArgumentParser, and returns it.
+    """Add a "num-exps" argument to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         num_exps = args.num_exps
@@ -59,9 +61,9 @@ def add_num_exps(psr, psr_verify=lambda args: args):
 
 
 def add_standardize(psr, psr_verify=lambda args: args):
-    """
-    Adds a "standardize" argument to the provided ArgumentParser, and returns
-    it.
+    """Add a "standardize" argument to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     psr.add_argument(
         "--standardize", action="store_true",
@@ -72,9 +74,9 @@ def add_standardize(psr, psr_verify=lambda args: args):
 
 
 def add_sample_percent(psr, psr_verify=lambda args: args):
-    """
-    Adds a "sample-kercent" argument to the provided ArgumentParser, and returns
-    it.
+    """Add a "sample-kercent" argument to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         sample_prc = args.sample_percent
@@ -90,9 +92,9 @@ def add_sample_percent(psr, psr_verify=lambda args: args):
 
 
 def add_training(psr, psr_verify=lambda args: args):
-    """
-    Adds training-related arguments to the provided ArgumentParser, and returns
-    it.
+    """Add training-related arguments to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         if args.early_stop:
@@ -199,9 +201,9 @@ def add_training(psr, psr_verify=lambda args: args):
 
 
 def add_running(psr, psr_verify=lambda args: args):
-    """
-    Adds model execution--related arguments to the provided ArgumentParser, and
-    returns it.
+    """Add model execution--related arguments to the provided ArgumentParser.
+
+    Returns the provided parser, as well as a lambda to verify existing arguments.
     """
     def verify(args):
         scl_prms_flp = args.scale_params
