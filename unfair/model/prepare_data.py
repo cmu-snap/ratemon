@@ -11,6 +11,7 @@ import os
 from os import path
 import time
 import random
+import sys
 
 import numpy as np
 
@@ -28,6 +29,8 @@ class Split:
         self.fets = dtype.names
 
         flp = utils.get_split_data_flp(out_dir, name)
+        if path.exists(flp):
+            raise Exception(f"Split already exists: {flp}")
         print(
             f"\tInitializing split \"{self.name}\" "
             f"({split_frac * 100}%, sampling {sample_frac * 100}%"
@@ -247,6 +250,14 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
     del splits
 
 
+def splits_exist(out_dir):
+    """Check if all splits exist in out_dir."""
+    for name in ["train", "val", "test"]:
+        if not path.exists(utils.get_split_data_flp(out_dir, name)):
+            return False
+    return True
+
+
 def _main():
     utils.set_rand_seed()
 
@@ -279,6 +290,10 @@ def _main():
         ("The sum of the training, validation, and test splits must equal 100, "
          f"not {tot_split * 100}")
 
+    if splits_exist(args.out_dir):
+        print(f"Not regenerating splits because they already exist in: {args.out_dir}")
+        return 0
+
     tim_srt_s = time.time()
     # Determine the experiment filepaths.
     exps_dir = args.data_dir
@@ -305,4 +320,4 @@ def _main():
 
 
 if __name__ == "__main__":
-    _main()
+    sys.exit(_main())
