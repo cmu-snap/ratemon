@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""Trains an unfairness model.
+
 Based on:
 https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
 https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
@@ -35,11 +36,11 @@ VALS_PER_EPC = 15
 
 
 def init_hidden(net, bch, dev):
-    """
-    Initialize the hidden state. The hidden state is what gets built
-    up over time as the LSTM processes a sequence. It is specific to a
-    sequence, and is different than the network's weights. It needs to
-    be reset for every new sequence.
+    """Initialize the hidden state.
+
+    The hidden state is what gets built up over time as an LSTM processes a sequence.
+    It is specific to a sequence, and is different than the network's weights. It needs
+    to be reset for every new sequence.
     """
     hidden = net.init_hidden(bch)
     hidden[0].to(dev)
@@ -49,9 +50,9 @@ def init_hidden(net, bch, dev):
 
 def inference_torch(ins, labs, net_raw, dev,
                     hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
-    """
-    Runs a single inference pass. Returns the output of net, or the
-    loss if los_fnc is not None.
+    """Run a single pytorch inference pass.
+
+    Returns the output of net, or the loss if los_fnc is not None.
     """
     # Move input and output data to the proper device.
     ins = ins.to(dev)
@@ -79,7 +80,7 @@ def inference_torch(ins, labs, net_raw, dev,
 
 def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
                 out_flp, val_imp_thresh, tim_out_s, opt_params):
-    """ Trains a model. """
+    """Train a pytorch model."""
     print("Training...")
     los_fnc = net.los_fnc()
     opt = net.opt(net.net.parameters(), **opt_params)
@@ -190,7 +191,7 @@ def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
 
 
 def test_torch(net, ldr_tst, dev):
-    """ Tests a model. """
+    """Test a pytorch model."""
     print("Testing...")
     # The number of testing samples that were predicted correctly.
     num_correct = 0
@@ -223,9 +224,9 @@ def test_torch(net, ldr_tst, dev):
 
 
 def run_sklearn(args, out_dir, out_flp, ldrs):
-    """
-    Trains an sklearn model according to the supplied parameters. Returns the
-    test error (lower is better).
+    """Train an sklearn model.
+
+    Returns the test error (lower is better).
     """
     # Unpack the dataloaders.
     ldr_trn, _, ldr_tst = ldrs
@@ -290,9 +291,9 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
 
 
 def run_torch(args, out_dir, out_flp, ldrs):
-    """
-    Trains a PyTorch model according to the supplied parameters. Returns the
-    test error (lower is better).
+    """Train a PyTorch model.
+
+    Returns the test error (lower is better).
     """
     # Unpack the dataloaders.
     ldr_trn, ldr_val, ldr_tst = ldrs
@@ -350,7 +351,7 @@ def run_torch(args, out_dir, out_flp, ldrs):
 
 
 def prepare_args(args_):
-    """ Updates the default arguments with the specified values. """
+    """Update the default arguments with the specified values."""
     # Initially, accept all default values. Then, override the defaults with
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
@@ -361,10 +362,7 @@ def prepare_args(args_):
 
 
 def run_trials(args):
-    """
-    Runs args["conf_trials"] trials and survives args["max_attempts"] failed
-    attempts.
-    """
+    """Run many trials and survive many failed training attempts."""
     print(f"Arguments: {args}")
 
     if args["no_rand"]:
@@ -429,9 +427,9 @@ def run_trials(args):
 
 
 def run_cnf(cnf, gate_func=None, post_func=None):
-    """
-    Executes a single configuration. Assumes that the arguments have already
-    been processed with prepare_args().
+    """Execute a single configuration.
+
+    Assumes that the arguments have already been processed with prepare_args().
     """
     func = run_trials
     # Optionally decide whether to run a configuration.
@@ -445,9 +443,9 @@ def run_cnf(cnf, gate_func=None, post_func=None):
 
 
 def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
-    """
-    Executes many configurations. Assumes that the arguments have already been
-    processed with prepare_args().
+    """Execute many configurations.
+
+    Assumes that the arguments have already been processed with prepare_args().
     """
     num_cnfs = len(cnfs)
     print(f"Training {num_cnfs} configurations.")
@@ -468,8 +466,7 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     return res
 
 
-def main():
-    """ This program's entrypoint. """
+def _main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
         description="Train a model on the output of gen_features.py.")
@@ -529,4 +526,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    _main()

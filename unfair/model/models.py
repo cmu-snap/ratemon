@@ -165,7 +165,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         assert len(dat_out.dtype.names) == 1, "Should be only one column."
         clss = np.empty(
             (dat_out.shape[0],), dtype=[(features.LABEL_FET, "int32")])
-        clss[features.LABEL_FET] = (dat_out[:,0] > 1).astype(int)
+        clss[features.LABEL_FET] = (dat_out[:, 0] > 1).astype(int)
         return clss
 
     def __bucketize(self, dat_in, dat_extra, dat_in_start_idx, dat_in_end_idx,
@@ -192,7 +192,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
                 (arr_times - start_time_us) / interval_us).astype(int):
             if interval_idx == num_buckets:
                 self.log(f"Warning: Interval is {interval_idx} when it should be "
-                      f"in the range [0, {num_buckets}]. Fixing interval...")
+                         f"in the range [0, {num_buckets}]. Fixing interval...")
                 interval_idx -= 1
             assert 0 <= interval_idx < num_buckets, \
                 (f"Invalid idx ({interval_idx}) for the number of buckets "
@@ -397,10 +397,10 @@ class BinaryDnn(torch.nn.Module):
         self.fc3 = torch.nn.Linear(dim_3, num_outs)
         self.sg = torch.nn.Sigmoid()
         self.log("BinaryDnn:\n    " +
-              "\n    ".join(
-                  [f"Linear: {lay.in_features}x{lay.out_features}"
-                   for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
-              "\n    Sigmoid")
+                "\n    ".join(
+                    [f"Linear: {lay.in_features}x{lay.out_features}"
+                    for lay in [self.fc0, self.fc1, self.fc2, self.fc3]]) +
+                "\n    Sigmoid")
 
     def forward(self, x):
         x = torch.nn.functional.relu(self.fc0(x))

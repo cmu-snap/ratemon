@@ -112,7 +112,7 @@ def add_training(psr, psr_verify=lambda args: args):
         *add_out(*add_standardize(psr, psr_verify)))
     psr.add_argument(
         "--data-dir",
-        help=("The path to a directory containing the"
+        help=("The path to a directory containing the "
               "training/validation/testing data (required)."),
         required=True, type=str)
     psr.add_argument(

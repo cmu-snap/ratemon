@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""Creates unified training data from separate experiments.
+
 Reads parsed experiment files created by gen_features.py and creates unified
 training, validation, and test sets.
 """
@@ -13,13 +14,11 @@ import random
 
 import numpy as np
 
-import cl_args
-import defaults
-import utils
+from unfair.model import cl_args, defaults, utils
 
 
 class Split:
-    """ Represents either the training, validation, or test split. """
+    """Represents either the training, validation, or test split."""
 
     def __init__(self, name, split_frac, sample_frac, out_dir, dtype,
                  num_pkts_tot, shuffle):
@@ -58,7 +57,8 @@ class Split:
             out_dir, self.name, dat=(num_pkts, dtype.descr))
 
     def take(self, exp_dat, exp_available_idxs):
-        """
+        """Bring additional samples into this Split.
+
         Takes this Split's specified fraction of data from exp_dat,
         choosing from exp_available_idxs. Removes the chosen indices from
         exp_available_idxs and returns the modified version.
@@ -96,8 +96,9 @@ class Split:
         return exp_available_idxs
 
     def finish(self):
-        """
-        Finalize this split. A finalized Split cannot have methods called on it.
+        """Finalize this split, and maybe shuffle it.
+
+        A finalized Split cannot have methods called on it.
         """
         self.finished = True
         if self.dat is None:
@@ -105,7 +106,7 @@ class Split:
             return
 
         # Mark any unused indices as invalid by filling their values with -1.
-        #self.dat[list(self.dat_available_idxs)].fill(-1)
+        # self.dat[list(self.dat_available_idxs)].fill(-1)
         self.dat[self.idx:].fill(-1)
 
         # Shuffle in-place at the end. This is only okay because I plan to
@@ -122,7 +123,8 @@ class Split:
 
 
 def survey(exp_flps, warmup_frac):
-    """
+    """Determine total packets and dtype of valid experiments.
+
     Surveys the provided experiments to determine their total packets and dtype,
     which are returned. Also returns the list of experiment filepaths filtered
     to remove those whose output file is invalid.
@@ -183,11 +185,11 @@ def survey(exp_flps, warmup_frac):
 
 def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
           sample_frac):
-    """
-    Merges the provided experiments into training, validation, and
-    test splits as defined by the percents in split_fracs. Stores the
-    resulting files in out_dir. The experiments contain a total of
-    num_pkts packets and have the provided dtype.
+    """Merge the provided experiments into training, validation, and test splits.
+
+    Uses the defined by the percents in split_fracs. Stores the resulting files
+    in out_dir. The experiments contain a total of num_pkts packets and have the
+    provided dtype.
     """
     print("Preparing split files...")
     splits = {
@@ -245,8 +247,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac,
     del splits
 
 
-def main():
-    """ This program's entrypoint. """
+def _main():
     utils.set_rand_seed()
 
     psr = argparse.ArgumentParser(
@@ -304,4 +305,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    _main()
