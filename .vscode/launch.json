@@ -5,11 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug unfair_runtime.py",
+            "name": "(d) runtime",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
-            // "console": "integratedTerminal",
             "console": "integratedTerminal",
             "args": ["-h"],
             "autoReload": {
@@ -22,13 +21,18 @@
             "sudo": true
         },
         {
-            "name": "Run unfair_runtime.py",
+            "name": "(r) runtime",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
-            // "console": "integratedTerminal",
             "console": "integratedTerminal",
-            "args": ["--interval-ms=100", "--limit=100", "--disable-inference", "--model=HistGbdtSklearn", "--model-file=${workspaceFolder}/data/models/gbdt.pickle"],
+            "args": [
+                "--interval-ms=100",
+                "--limit=100",
+                "--disable-inference",
+                "--model=HistGbdtSklearn",
+                "--model-file=${workspaceFolder}/"
+            ],
             "autoReload": {
                 "enable": false
             },
@@ -37,6 +41,77 @@
                 "PYTHONPATH": "${workspaceFolder}"
             },
             "sudo": true
+        },
+        {
+            "name": "(r) train cubic cubic",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--no-rand",
+                "--conf-trials=1",
+                "--model=HistGbdtSklearn",
+                "--balance",
+                "--drop-popular",
+                "--analyze-features",
+                "--clusters=20",
+                "--features-to-pick=10",
+                "--permutation-importance-repeats=2",
+                "--sample-percent=100",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "(r) prepare_data",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/prepare_data.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--train-split=70",
+                "--val-split=0",
+                "--test-split=30",
+                "--warmup-percent=5",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--sample-percent=15"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "(r) gen_features",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/gen_features.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--untar-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--out-dir=~/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--parallel=20"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
     ]
 }
