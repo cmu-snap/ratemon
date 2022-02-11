@@ -133,7 +133,7 @@ ALPHAS = [i / 1000 for i in range(1, 11)] + [i / 10 for i in range(1, 11)]
 
 # The window durations (multiples of the minimum RTT) at which to
 # evaluate the window-based metrics.
-WINDOWS = [2 ** i for i in range(11)]
+WINDOWS = [2**i for i in range(11)]
 
 # These features cannot be calculated by an isolated receiver and therefore
 # should not be used as training inputs (i.e., should never be in "in_spc").
@@ -149,6 +149,8 @@ UNKNOWABLE_FETS = [
     TPUT_TO_FAIR_SHARE_RATIO_FET,
     LABEL_FET,
 ]
+
+ALL_FEATURES = REGULAR + make_smoothed_features()
 
 # Construct the list of all features that an isolated receiver may use. Do not
 # include any unknowable features.
@@ -178,3 +180,20 @@ PARSE_PACKETS_FETS = [
 ]
 
 REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]
+
+
+def feature_names_to_dtype(fet_names):
+    return [(fet_name, feature_name_to_type(fet_name)) for fet_name in fet_names]
+
+
+def feature_name_to_type(target_fet_name):
+    for fet_name, fet_type in ALL_FEATURES:
+        if fet_name.startswith(fet_name):
+            return fet_type
+    raise Exception(f"Unknown feature: {target_fet_name}")
+
+
+def convert_to_float(dtype):
+    return [
+        (fet_name, fet_type.replace("int", "float")) for fet_name, fet_type in dtype
+    ]

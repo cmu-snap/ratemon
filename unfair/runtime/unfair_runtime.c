@@ -91,8 +91,8 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     pkt.tsecr = ts->rx_opt.rcv_tsecr;
 
     // Determine the total size of the IP packet.
-    u16 total_B = ip->tot_len;
-    pkt.total_B = ntohs(total_B);
+    u16 total_bytes = ip->tot_len;
+    pkt.total_bytes = ntohs(total_bytes);
 
     // Determine the size of the IP header. The header length is in a bitfield,
     // but BPF cannot read bitfield elements. So we need to read a larger chunk
@@ -106,7 +106,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
 #elif __BYTE_ORDER == __BIG_ENDIAN
     ihl = ihl & 0x0f;
 #endif
-    pkt.ihl_B = (u32)ihl * 4;
+    pkt.ihl_bytes = (u32)ihl * 4;
 
     // Determine the size of the TCP header. See notes for IP header length.
     u8 thl;
@@ -118,11 +118,11 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
 #elif __BYTE_ORDER == __BIG_ENDIAN
     thl = (thl & 0xf0) >> 4;
 #endif
-    pkt.thl_B = (u32)thl * 4;
+    pkt.thl_bytes = (u32)thl * 4;
 
     // The TCP payload is the total IP packet length minus IP header minus TCP
     // header.
-    pkt.payload_B = pkt.total_B - pkt.ihl_B - pkt.thl_B;
+    pkt.payload_bytes = pkt.total_bytes - pkt.ihl_bytes - pkt.thl_bytes;
 
     // BPF has trouble extracting the time the proper way
     // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp

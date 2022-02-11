@@ -1089,7 +1089,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
+def parse_received_acks(in_spc_fet_names, flw, recv_pkts, skip_smoothed=False):
     """Generate features for the inference runtime.
 
     In contrast to parse_opened_exp(), this function only has access to receiver
@@ -1102,13 +1102,13 @@ def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
     # negative.
-    assert (
-        (
-            recv_pkts[features.ARRIVAL_TIME_FET][1:]
-            - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
-        )
-        >= 0
-    ).all(), "Packet arrival times are not monotonically increasing!"
+    # assert (
+    #     (
+    #         recv_pkts[features.ARRIVAL_TIME_FET][1:]
+    #         - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
+    #     )
+    #     >= 0
+    # ).all(), "Packet arrival times are not monotonically increasing!"
 
     # Transform absolute times into relative times to make life easier.
     recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
@@ -1116,7 +1116,9 @@ def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
         recv_pkts[features.ARRIVAL_TIME_FET] >= 0
     ).all(), "Packets not processed in order!"
 
-    in_spc_fet_names = set(dtype.names)
+    dtype = features.convert_to_float(features.feature_names_to_dtype(in_spc_fet_names))
+    # print(dtype)
+    # in_spc_fet_names = {name for name, _ in dtype}
     num_pkts = len(recv_pkts)
     # The final fets. -1 implies that a value could not be calculated. Extend
     # the provided dtype with the regular features, which may be required to
@@ -1125,7 +1127,7 @@ def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
     # TODO: Add only the those regular features that are in fact required for
     #       the specific EWMA and windowed features that we need.
     fets = np.full(
-        num_pkts, -1, dtype=tuple(set(dtype) + set(features.REGULAR_KNOWABLE_FETS))
+        num_pkts, -1, dtype=list(set(dtype) | set(features.REGULAR_KNOWABLE_FETS))
     )
 
     # If this flow does not have any packets, then return immediately.
@@ -1534,9 +1536,9 @@ def parse_received_acks(dtype, flw, recv_pkts, skip_smoothed=False):
             else "unknown"
         )
 
-    # Remove unneeded features, which were temporarily-tracked dependencies for
+    # Remove unneeded features that were added as temporarily-tracked dependencies for
     # the requested features.
-    fets = fets[in_spc_fet_names]
+    fets = fets[list(in_spc_fet_names)]
 
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the

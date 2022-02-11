@@ -13,6 +13,7 @@ import time
 from collections import defaultdict
 
 from bcc import BPF
+import torch
 
 from unfair.model import data, features, gen_features, models, utils
 
@@ -69,11 +70,7 @@ def receive_packet(lock_i, flows, pkt):
     lock_i protects flows.
     """
     # Skip packets on the loopback interface.
-    if (
-        pkt.saddr == LOCALHOST
-        or pkt.daddr == LOCALHOST
-        or pkt.saddr == ip_str_to_int("23.40.28.82")
-    ):
+    if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
     flow = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
@@ -121,14 +118,15 @@ def check_flows(lock_i, lock_f, flows, fairness_db, limit, net, disable_inferenc
     print(f"Found {len(flows)} flows")
     for flow, pkts in flows.items():
         print(f"{flow} - {len(pkts)}")
-        if not pkts or (time.time() * 1e6 - pkts[-1][-1]) > (OLD_THRESH_SEC * 1e6):
-            # Remove flows with no packets and flows that have not received
-            # a new packet in five seconds.
-            to_remove.append(flow)
-        elif len(pkts) >= limit:
+        # if not pkts or (time.time() * 1e6 - pkts[-1][-1]) > (OLD_THRESH_SEC * 1e6):
+        #     # Remove flows with no packets and flows that have not received
+        #     # a new packet in five seconds.
+        #     to_remove.append(flow)
+        if len(pkts) >= limit:
             # Plan to run inference on "full" flows.
             to_check.append(flow)  # Garbage collection.
     # Garbage collection.
+    print(f"Removing {len(to_remove)} flows...")
     for flow in to_remove:
         del flows[flow]
     lock_i.release()
@@ -191,6 +189,9 @@ def check_flow(lock_f, fairness_db, net, flow, pkts):
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
+    # Select the most recent 100 packets.
+    pkts = pkts[-100:] if len(pkts) > 100 else pkts
+
     label = inference(net, flow, pkts)
 
     lock_f.acquire()
@@ -207,7 +208,7 @@ def inference(net, flow, pkts):
 
     Returns a label: below fair, approximately fair, above fair.
     """
-    return net.predict(featurize(net.in_spc, flow, pkts), torch=False)
+    return net.predict(torch.tensor(utils.clean(featurize(net, flow, pkts)), dtype=torch.float))
 
 
 def main():
@@ -246,7 +247,7 @@ def main():
     assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
     assert path.isfile(args.model_file), f"Model does not exist: {args.model_file}"
 
-    net = models.MODELS[args["model"]]()
+    net = models.MODELS[args.model]()
     with open(args.model_file, "rb") as fil:
         net.net = pickle.load(fil)
 
@@ -310,7 +311,7 @@ def main():
     while True:
         try:
             if args.interval_ms is not None:
-                time.sleep(args.interval_ms * 1000)
+                time.sleep(args.interval_ms / 1000)
             bpf.perf_buffer_poll()
         except KeyboardInterrupt:
             break

@@ -17,19 +17,19 @@ unfair_dir="$(cd "$(dirname "$0")"/.. && pwd)"
 workspace_dir="$(dirname "$unfair_dir")"
 export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 
-python "$unfair_dir/model/gen_features.py" \
-    --exp-dir="$exp_dir" \
-    --untar-dir="$exp_dir" \
-    --out-dir="$exp_dir" \
-    --parallel=20
-python "$unfair_dir/model/prepare_data.py" \
-    --data-dir="$exp_dir" \
-    --out-dir="$out_dir" \
-    --train-split=70 \
-    --val-split=0 \
-    --test-split=30 \
-    --warmup-percent=5 \
-    --sample-percent=5
+# python "$unfair_dir/model/gen_features.py" \
+#     --exp-dir="$exp_dir" \
+#     --untar-dir="$exp_dir" \
+#     --out-dir="$exp_dir" \
+#     --parallel=20
+# python "$unfair_dir/model/prepare_data.py" \
+#     --data-dir="$exp_dir" \
+#     --out-dir="$out_dir" \
+#     --train-split=70 \
+#     --val-split=0 \
+#     --test-split=30 \
+#     --warmup-percent=5 \
+#     --sample-percent=5
 python "$unfair_dir/model/train.py" \
     --out-dir="$out_dir" \
     --data-dir="$out_dir" \
@@ -37,10 +37,13 @@ python "$unfair_dir/model/train.py" \
     --sample-percent=100 \
     --no-rand \
     --conf-trials=1 \
-    --analyze-features \
-    --clusters=20 \
-    --features-to-pick=10 \
-    --permutation-importance-repeats=2
+    --max-iter=100
+
+    #  \
+    # --analyze-features \
+    # --clusters=20 \
+    # --features-to-pick=10 \
+    # --permutation-importance-repeats=2
 
     # --balance \
     # --drop-popular \
