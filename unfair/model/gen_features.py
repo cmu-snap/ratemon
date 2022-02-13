@@ -613,27 +613,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                         ),
                     )
                 elif metric.startswith(features.TPUT_FET):
-                    # Treat the first packet in the window as the beginning of
-                    # time. Calculate the average throughput over all but the
-                    # first packet.
-                    #
-                    # Sum up the payloads of the packets in the window.
-                    total_bytes = utils.safe_sum(
-                        output[features.WIRELEN_FET],
-                        start_idx=win_start_idx + 1,
-                        end_idx=j,
-                    )
-                    # Divide by the duration of the window.
-                    start_time_us = (
-                        output[win_start_idx][features.ARRIVAL_TIME_FET]
-                        if win_start_idx >= 0
-                        else -1
-                    )
-                    end_time_us = output[j][features.ARRIVAL_TIME_FET]
-                    tput_bps = utils.safe_div(
-                        utils.safe_mul(total_bytes, 8),
-                        utils.safe_div(utils.safe_sub(end_time_us, start_time_us), 1e6),
-                    )
+                    tput_bps = utils.safe_tput_bps(output, win_start_idx,)
                     # If the throughput exceeds the bandwidth, then record a
                     # warning and do not record this throughput.
                     if tput_bps != -1 and tput_bps > exp.bw_bps:
@@ -1089,7 +1069,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(in_spc_fet_names, flw, recv_pkts, skip_smoothed=False):
+def parse_received_acks(
+    in_spc_fet_names, flw, recv_pkts, skip_smoothed=False, debug=False
+):
     """Generate features for the inference runtime.
 
     In contrast to parse_opened_exp(), this function only has access to receiver
@@ -1102,6 +1084,8 @@ def parse_received_acks(in_spc_fet_names, flw, recv_pkts, skip_smoothed=False):
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
     # negative.
+    #
+    # TODO: Figure out why ACKs are not in order.
     # assert (
     #     (
     #         recv_pkts[features.ARRIVAL_TIME_FET][1:]
@@ -1356,25 +1340,7 @@ def parse_received_acks(in_spc_fet_names, flw, recv_pkts, skip_smoothed=False):
                     ),
                 )
             elif metric.startswith(features.TPUT_FET):
-                # Treat the first packet in the window as the beginning of
-                # time. Calculate the average throughput over all but the
-                # first packet.
-                #
-                # Sum up the payloads of the packets in the window.
-                total_bytes = utils.safe_sum(
-                    fets[features.WIRELEN_FET], start_idx=win_start_idx + 1, end_idx=j
-                )
-                # Divide by the duration of the window.
-                start_time_us = (
-                    fets[win_start_idx][features.ARRIVAL_TIME_FET]
-                    if win_start_idx >= 0
-                    else -1
-                )
-                end_time_us = fets[j][features.ARRIVAL_TIME_FET]
-                new = utils.safe_div(
-                    utils.safe_mul(total_bytes, 8),
-                    utils.safe_div(utils.safe_sub(end_time_us, start_time_us), 1e6),
-                )
+                new = utils.safe_tput_bps(fets, win_start_idx,)
             elif metric.startswith(features.RTT_FET):
                 new = utils.safe_mean(fets[features.RTT_FET], win_start_idx, j)
             elif metric.startswith(features.RTT_RATIO_FET):
@@ -1527,14 +1493,15 @@ def parse_received_acks(in_spc_fet_names, flw, recv_pkts, skip_smoothed=False):
         used_rows == total_rows
     ), f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
-    print(f"\tFinal window durations in flow: {flw}:")
-    final_min_rtt_us = fets[-1][features.MIN_RTT_FET]
-    for win in features.WINDOWS:
-        print(
-            f"\t\t{win}: {win * final_min_rtt_us} us"
-            if final_min_rtt_us > 0
-            else "unknown"
-        )
+    if debug:
+        print(f"\tFinal window durations in flow: {flw}:")
+        final_min_rtt_us = fets[-1][features.MIN_RTT_FET]
+        for win in features.WINDOWS:
+            print(
+                f"\t\t{win}: {win * final_min_rtt_us} us"
+                if final_min_rtt_us > 0
+                else "unknown"
+            )
 
     # Remove unneeded features that were added as temporarily-tracked dependencies for
     # the requested features.

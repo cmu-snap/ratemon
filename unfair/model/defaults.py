@@ -1,5 +1,6 @@
 """Default values."""
 
+from enum import Enum
 import struct
 
 
@@ -84,3 +85,24 @@ COPA_HEADER_FMT = "iiidd"
 # "iiidd" is ordinarily 28 bytes. However, when in a C struct, it is padded
 # to enforce memory alignment. Therefore, it somehow ends up being 32 bytes.
 COPA_HEADER_SIZE_B = struct.calcsize(COPA_HEADER_FMT)
+
+
+class Classes(Enum):
+    """Classes for three-class models.
+
+    Flow throughput is lower than, approximately, or above fair.
+    """
+
+    BELOW_FAIR = 0
+    APPROX_FAIR = 1
+    ABOVE_FAIR = 2
+
+
+class Decisions(Enum):
+    """Pacing decisions.
+
+    Either paced or not paced.
+    """
+
+    PACED = 0
+    NOT_PACED = 1

@@ -12,10 +12,11 @@ import time
 
 from collections import defaultdict
 
-from bcc import BPF
 import torch
+from bcc import BPF
+import numpy as np
 
-from unfair.model import data, features, gen_features, models, utils
+from unfair.model import data, defaults, features, gen_features, models, utils
 
 
 def ip_str_to_int(ip_str):
@@ -88,10 +89,12 @@ def receive_packet(lock_i, flows, pkt):
     lock_i.acquire()
     flows[flow].append(dat)
     lock_i.release()
-    print(f"{flow_to_str(flow)} --- {flow_data_to_str(dat)}")
+    # print(f"{flow_to_str(flow)} --- {flow_data_to_str(dat)}")
 
 
-def check_loop(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
+def check_loop(
+    lock_i, lock_f, flows, fairness_db, limit, net, disable_inference, debug=False
+):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -99,23 +102,29 @@ def check_loop(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference
     try:
         while not DONE:
             check_flows(
-                lock_i, lock_f, flows, fairness_db, limit, net, disable_inference
+                lock_i, lock_f, flows, fairness_db, limit, net, disable_inference, debug
             )
-            time.sleep(1)
+
+            lock_f.acquire()
+            print("Current decisions:\n" + "\n".join(f"\t{flow}: {decision}" for flow, decision in fairness_db.items()))
+            lock_f.release()
+            # time.sleep(1)
     except KeyboardInterrupt:
         return
 
 
-def check_flows(lock_i, lock_f, flows, fairness_db, limit, net, disable_inference):
+def check_flows(
+    lock_i, lock_f, flows, fairness_db, limit, net, disable_inference, debug=False
+):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
     """
-    print("Finding flows to check...")
+    print("Examining flows...")
     to_remove = []
     to_check = []
     lock_i.acquire()
-    print(f"Found {len(flows)} flows")
+    print(f"Found {len(flows)} flows total")
     for flow, pkts in flows.items():
         print(f"{flow} - {len(pkts)}")
         # if not pkts or (time.time() * 1e6 - pkts[-1][-1]) > (OLD_THRESH_SEC * 1e6):
@@ -141,15 +150,21 @@ def check_flows(lock_i, lock_f, flows, fairness_db, limit, net, disable_inferenc
         print(f"Checking flow {flow}")
         # Do not hold lock while running inference.
         if not disable_inference:
-            check_flow(lock_f, fairness_db, net, flow, dat)
+            check_flow(lock_f, fairness_db, net, flow, dat, debug)
 
 
-def featurize(net, flow, pkts):
+def featurize(net, flow, pkts, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
-    # Reorganize list of packet metrics into a structured numpy array.
+    fets = gen_features.parse_received_acks(net.in_spc, flow, pkts, debug)
+    data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
+    return fets
+
+
+def packets_to_ndarray(pkts):
+    """Reorganize a list of packet metrics into a structured numpy array."""
     (
         seqs,
         srtts_us,
@@ -169,21 +184,47 @@ def featurize(net, flow, pkts):
     pkts[features.PAYLOAD_FET] = payloads_bytes
     pkts[features.WIRELEN_FET] = totals_bytes
     pkts[features.SRTT_FET] = srtts_us
-
-    fets = gen_features.parse_received_acks(net.in_spc, flow, pkts)
-    data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
-    return fets
+    return pkts
 
 
-def make_decision(flow, label, prev_decision):
+def make_decision(flow, pkts, label, prev_decision):
     """Make a flow unfairness mitigation decision.
 
-    Base the decision on the provided label and previous decision.
+    Base the decision on the provided label and previous decision. Use pkts to
+    calculate any necessary flow metrics, such as the throughput.
+
+    TODO: Instead of passing in pkts, pass in the features and make sure that they
+          include the necessary columns.
     """
-    return 0
+    tput_bps = utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
+
+    if label == defaults.Classes.ABOVE_FAIR:
+        # This flow is sending too fast. Force the sender to halve its rate.
+        new_decision = (defaults.Decisions.PACED, tput_bps / 2)
+    elif prev_decision[0] == defaults.Decisions.PACED:
+        # We are already pacing this flow.
+        if label == defaults.Classes.BELOW_FAIR:
+            # If we are already pacing this flow but we are being too aggressive, then
+            # let it send faster.
+            new_decision = (defaults.Decisions.PACED, tput_bps * 1.5)
+        else:
+            # If we are already pacing this flow and it is behaving as desired, then
+            # all is well. Retain the existing pacing decision.
+            new_decision = prev_decision
+    else:
+        # This flow is not already being paced and is not behaving unfairly, so leave
+        # it alone.
+        new_decision = (defaults.Decisions.NOT_PACED, None)
+
+    return new_decision
 
 
-def check_flow(lock_f, fairness_db, net, flow, pkts):
+def condense_labels(flow, labels):
+    assert len(labels) > 0, "labels cannot be empty"
+    return labels[-1]
+
+
+def check_flow(lock_f, fairness_db, net, flow, pkts, debug=False):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
@@ -191,27 +232,35 @@ def check_flow(lock_f, fairness_db, net, flow, pkts):
     """
     # Select the most recent 100 packets.
     pkts = pkts[-100:] if len(pkts) > 100 else pkts
+    pkts = packets_to_ndarray(pkts)
 
-    label = inference(net, flow, pkts)
+    start_time_s = time.time()
+    labels = inference(net, flow, pkts, debug)
+    print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
+
+    label = condense_labels(flow, labels)
 
     lock_f.acquire()
     prev_decision = fairness_db[flow]
-    new_decision = make_decision(flow, label, prev_decision)
+    new_decision = make_decision(flow, pkts, label, prev_decision)
     fairness_db[flow] = (label, new_decision)
     lock_f.release()
 
     print(f"Report for flow {flow}: {label}, {new_decision}")
 
 
-def inference(net, flow, pkts):
+def inference(net, flow, pkts, debug=False):
     """Run inference on a flow's packets.
 
     Returns a label: below fair, approximately fair, above fair.
     """
-    return net.predict(torch.tensor(utils.clean(featurize(net, flow, pkts)), dtype=torch.float))
+    preds = net.predict(
+        torch.tensor(utils.clean(featurize(net, flow, pkts, debug)), dtype=torch.float)
+    )
+    return [defaults.Classes(pred) for pred in preds]
 
 
-def main():
+def _main():
     parser = ArgumentParser(description="Squelch unfair flows.")
     parser.add_argument("-i", "--interval-ms", help="Poll interval (ms)", type=float)
     parser.add_argument(
@@ -279,6 +328,7 @@ def main():
             args.limit,
             net,
             args.disable_inference,
+            args.debug,
         ),
     )
     check_thread.start()
@@ -327,4 +377,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_main())

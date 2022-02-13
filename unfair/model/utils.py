@@ -662,7 +662,7 @@ def clean(arr):
     """Clean the provided numpy array by removing its column names.
 
     I.e., this converts a structured numpy array into a regular numpy array.
-    Assumes that dtypes can be converted to float. If the
+    Assumes that dtypes can be converted to float.
     """
     assert (
         arr.dtype.names is not None
@@ -843,6 +843,32 @@ def safe_mean(dat, start_idx=None, end_idx=None):
     dat_safe = get_safe(dat, start_idx, end_idx)
     # If the window is empty, then the mean is -1 (unknown).
     return -1 if dat_safe.shape[0] == 0 else np.mean(dat_safe)
+
+
+def safe_tput_bps(dat, start_idx, end_idx):
+    """Safely calculate the throughput over a window of packets.
+
+    dat must be a structured numpy array containing columns titled features.WIRELEN_FET
+    and features.ARRIVAL_TIME_FET. The throughput is calculated between the provided
+    start and end indices.
+    """
+    # Treat the first packet in the window as the beginning of
+    # time. Calculate the average throughput over all but the
+    # first packet.
+    #
+    # Sum up the payloads of the packets in the window.
+    total_bytes = safe_sum(dat[features.WIRELEN_FET], start_idx + 1, end_idx)
+    # Divide by the duration of the window.
+    start_time_us = (
+        dat[start_idx][features.ARRIVAL_TIME_FET]
+        if start_idx >= 0
+        else -1
+    )
+    end_time_us = dat[end_idx][features.ARRIVAL_TIME_FET]
+    return safe_div(
+        safe_mul(total_bytes, 8),
+        safe_div(safe_sub(end_time_us, start_time_us), 1e6),
+    )
 
 
 def safe_update_ewma(prev_ewma, new_val, alpha):
