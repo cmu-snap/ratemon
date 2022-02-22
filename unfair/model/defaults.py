@@ -1,5 +1,6 @@
 """Default values."""
 
+from curses.ascii import ACK
 from enum import Enum
 import struct
 
@@ -46,14 +47,26 @@ DEFAULTS = {
     "l2_regularization": 0,
     "clusters": 30,
     "fets_to_pick": None,
-    "perm_imp_repeats": 10
+    "perm_imp_repeats": 10,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.
 ARGS_TO_IGNORE_MODEL = [
-    "data_dir", "out_dir", "tmp_dir", "sims", "features", "exps",
-    "analyze_features", "sync", "graph", "test_batch", "regen_data",
-    "clusters", "fets_to_pick", "perm_imp_repeats"]
+    "data_dir",
+    "out_dir",
+    "tmp_dir",
+    "sims",
+    "features",
+    "exps",
+    "analyze_features",
+    "sync",
+    "graph",
+    "test_batch",
+    "regen_data",
+    "clusters",
+    "fets_to_pick",
+    "perm_imp_repeats",
+]
 ARGS_TO_IGNORE_DATA = ARGS_TO_IGNORE_MODEL + ["max_iter"]
 # String to prepend to processed train/val/test data saved on disk.
 DATA_PREFIX = "data_"
@@ -87,7 +100,7 @@ COPA_HEADER_FMT = "iiidd"
 COPA_HEADER_SIZE_B = struct.calcsize(COPA_HEADER_FMT)
 
 
-class Classes(Enum):
+class Class(Enum):
     """Classes for three-class models.
 
     Flow throughput is lower than, approximately, or above fair.
@@ -98,7 +111,7 @@ class Classes(Enum):
     ABOVE_FAIR = 2
 
 
-class Decisions(Enum):
+class Decision(Enum):
     """Pacing decisions.
 
     Either paced or not paced.
@@ -106,3 +119,63 @@ class Decisions(Enum):
 
     PACED = 0
     NOT_PACED = 1
+
+
+class ReactionStrategy(Enum):
+    """Defines feedback mechanisms for reactive to flow fairness decisions."""
+
+    AIMD = 0
+    MIMD = 1
+
+    ALL = [AIMD, MIMD]
+    _STRAT_TO_STR = {AIMD: "aimd", MIMD: "mimd"}
+    _STR_TO_STRAT = {string: strat for strat, string in _STRAT_TO_STR.items()}
+
+    @staticmethod
+    def to_str(strat):
+        """Convert an instance of this enum to a string."""
+        if strat not in ReactionStrategy._STRAT_TO_STR:
+            raise KeyError(f"Unknown reaction strategy: {strat}")
+        return ReactionStrategy._STRAT_TO_STR[strat]
+
+    @staticmethod
+    def to_strat(string):
+        """Convert a string to an instance of this enum."""
+        if string not in ReactionStrategy._STR_TO_STRAT:
+            raise KeyError(f"Unknown reaction strategy: {string}")
+        return ReactionStrategy._STR_TO_STRAT[string]
+
+    @staticmethod
+    def choices():
+        """Get the string representations of this enum's choices."""
+        return [ReactionStrategy.to_str(strat) for strat in ReactionStrategy.ALL]
+
+
+class MitigationStrategy(Enum):
+    """Defines unfairness mitigation strategies."""
+
+    RWND_TUNING = 0
+    ACK_PACING = 1
+
+    ALL = [RWND_TUNING, ACK_PACING]
+    _STRAT_TO_STR = {RWND_TUNING: "rwnd", ACK_PACING: "pace"}
+    _STR_TO_STRAT = {string: strat for strat, string in _STRAT_TO_STR.items()}
+
+    @staticmethod
+    def to_str(strat):
+        """Convert an instance of this enum to a string."""
+        if strat not in MitigationStrategy._STRAT_TO_STR:
+            raise KeyError(f"Unknown mitigation strategy: {strat}")
+        return MitigationStrategy._STRAT_TO_STR[strat]
+
+    @staticmethod
+    def to_strat(string):
+        """Convert a string to an instance of this enum."""
+        if string not in MitigationStrategy._STR_TO_STRAT:
+            raise KeyError(f"Unknown mitigation strategy: {string}")
+        return MitigationStrategy._STR_TO_STRAT[string]
+
+    @staticmethod
+    def choices():
+        """Get the string representations of this enum's choices."""
+        return [ReactionStrategy.to_str(strat) for strat in ReactionStrategy.ALL]

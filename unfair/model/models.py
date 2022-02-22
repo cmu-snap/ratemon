@@ -522,11 +522,11 @@ class SvmSklearnWrapper(SvmWrapper):
                 ratio = ratio[0]
 
             if ratio < 1 - defaults.FAIR_THRESH:
-                cls = defaults.Classes.BELOW_FAIR
+                cls = defaults.Class.BELOW_FAIR
             elif ratio <= 1 + defaults.FAIR_THRESH:
-                cls = defaults.Classes.APPROX_FAIR
+                cls = defaults.Class.APPROX_FAIR
             elif ratio > 1 + defaults.FAIR_THRESH:
-                cls = defaults.Classes.ABOVE_FAIR
+                cls = defaults.Class.ABOVE_FAIR
             else:
                 raise Exception("This case should never be reached.")
             return cls

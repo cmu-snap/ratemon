@@ -3,5 +3,8 @@
         "./model"
     ],
     "python.linting.enabled": true,
-    "cmake.configureOnOpen": false
+    "cmake.configureOnOpen": false,
+    "files.associations": {
+        "types.h": "c"
+    }
 }

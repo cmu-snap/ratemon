@@ -14,8 +14,17 @@
 #include <net/ip.h>
 #include <net/sock.h>
 
+struct flow_t
+{
+    u32 saddr;
+    u32 daddr;
+    u16 sport;
+    u16 dport;
+};
+
 struct pkt_t
 {
+    // struct flow_t flow;
     u32 saddr;
     u32 daddr;
     u16 sport;
@@ -34,9 +43,10 @@ struct pkt_t
 };
 
 BPF_PERF_OUTPUT(pkts);
+BPF_HASH(rwnd, struct flow *);
 
 // Need to redefine these because the BCC rewriter does not support rewriting
-// ip_hdr()'s the internal dereferences of skb members.
+// ip_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
 static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
 {
@@ -45,7 +55,7 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
 }
 
 // Need to redefine these because the BCC rewriter does not support rewriting
-// tcp_hdr()'s the internal dereferences of skb members.
+// tcp_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
 static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 {
@@ -72,12 +82,16 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
     struct pkt_t pkt = {};
+    // pkt.flow.saddr = ip->saddr;
+    // pkt.flow.daddr = ip->daddr;
     pkt.saddr = ip->saddr;
     pkt.daddr = ip->daddr;
 
     struct tcphdr *tcp = skb_to_tcphdr(skb);
     u16 sport = tcp->source;
     u16 dport = tcp->dest;
+    // pkt.flow.dport = ntohs(dport);
+    // pkt.flow.sport = ntohs(sport);
     pkt.dport = ntohs(dport);
     pkt.sport = ntohs(sport);
     pkt.seq = tcp->seq;
@@ -108,7 +122,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
 #endif
     pkt.ihl_bytes = (u32)ihl * 4;
 
-    // Determine the size of the TCP header. See notes for IP header length.
+    // Determine the size of the TCP header. See above note about IP header length.
     u8 thl;
     // The TCP data offset is located after the ACK sequence number in the TCP
     // header.
@@ -130,5 +144,87 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     ktime_t tstamp = skb->tstamp;
     pkt.time_us = (u64)tstamp / 1000000;
     pkts.perf_submit(ctx, &pkt, sizeof(pkt));
+    return 0;
+}
+
+int trace_tc_egress(struct pt_regs *ctx, struct sk_buff *skb)
+{
+    if (skb == NULL)
+    {
+        return 0;
+    }
+    // Check this is IPv4.
+    if (skb->protocol != htons(ETH_P_IP))
+    {
+        return 0;
+    }
+
+    struct iphdr *ip = skb_to_iphdr(skb);
+    // Check this is TCP.
+    if (ip->protocol != IPPROTO_TCP)
+    {
+        return 0;
+    }
+
+    struct tcphdr *tcp = skb_to_tcphdr(skb);
+
+    // // Determine the size of the TCP header. See above note about IP header length.
+    // u16 ack;
+    // // The TCP data offset is located after the ACK sequence number in the TCP
+    // // header.
+    // bpf_probe_read(&thl, sizeof(ack), &tcp->ack_seq + 4);
+    // if (! (ack & TCP_FLAG_ACK)) {
+    //     return 0;
+    // }
+
+    u32 saddr = ip->saddr;
+    u32 daddr = ip->daddr;
+    u16 sport = tcp->source;
+    u16 dport = tcp->dest;
+    sport = ntohs(dport);
+    sport = ntohs(sport);
+
+    bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
+    return 0;
+}
+
+int handle_egress(struct sk_buff *skb)
+{
+    if (skb == NULL)
+    {
+        return 0;
+    }
+    // Check this is IPv4.
+    if (skb->protocol != htons(ETH_P_IP))
+    {
+        return 0;
+    }
+
+    struct iphdr *ip = skb_to_iphdr(skb);
+    // Check this is TCP.
+    if (ip->protocol != IPPROTO_TCP)
+    {
+        return 0;
+    }
+
+    struct tcphdr *tcp = skb_to_tcphdr(skb);
+
+    // // Determine the size of the TCP header. See above note about IP header length.
+    // u16 ack;
+    // // The TCP data offset is located after the ACK sequence number in the TCP
+    // // header.
+    // bpf_probe_read(&thl, sizeof(ack), &tcp->ack_seq + 4);
+    // if (! (ack & TCP_FLAG_ACK)) {
+    //     return 0;
+    // }
+
+    u32 saddr = ip->saddr;
+    u32 daddr = ip->daddr;
+    u16 sport = tcp->source;
+    u16 dport = tcp->dest;
+    sport = ntohs(dport);
+    sport = ntohs(sport);
+
+    bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
     return 0;
 }
