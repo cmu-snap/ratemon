@@ -10,16 +10,15 @@ import sys
 import threading
 import time
 
-from collections import defaultdict
-
 import torch
 from bcc import BPF
-import numpy as np
-import pyroute2
-
-# from pyroute2 import IPRoute
+from pyroute2 import IPRoute
+from pyroute2 import protocols
 
 from unfair.model import data, defaults, features, gen_features, models, utils
+from unfair.runtime import mitigation_strategy, reaction_strategy
+from unfair.runtime.mitigation_strategy import MitigationStrategy
+from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
 def ip_str_to_int(ip_str):
@@ -34,13 +33,6 @@ DONE = False
 OLD_THRESH_SEC = 5 * 60
 
 
-def int_to_ip_str(ip_int):
-    """Convert an IP address int into a dotted-quad string."""
-    # Use "<" (little endian) instead of "!" (network / big endian) because the
-    # IP addresses are already stored in little endian.
-    return socket.inet_ntoa(struct.pack("<L", ip_int))
-
-
 class Flow:
     """Represents a single flow, identified by a four-tuple.
 
@@ -52,23 +44,31 @@ class Flow:
     """
 
     def __init__(self, fourtuple):
+        """Set up data structures for a flow."""
         self.lock = threading.RLock()
         self.fourtuple = fourtuple
         self.packets = []
         # The timestamp of the last packet on which we have run inference.
-        self.latest_time_us = 0
+        self.latest_time_sec = 0
         self.label = defaults.Class.APPROX_FAIR
         self.decision = (defaults.Decision.NOT_PACED, None)
 
-    @staticmethod
-    def flow_to_str(fourtuple):
-        """Convert a flow four-tuple into a string."""
-        saddr, daddr, sport, dport = fourtuple
-        return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
-
     def __str__(self):
         """Create a string representation of this flow."""
-        return Flow.flow_to_str(self.fourtuble)
+        return flow_to_str(self.fourtuple)
+
+
+def int_to_ip_str(ip_int):
+    """Convert an IP address int into a dotted-quad string."""
+    # Use "<" (little endian) instead of "!" (network / big endian) because the
+    # IP addresses are already stored in little endian.
+    return socket.inet_ntoa(struct.pack("<L", ip_int))
+
+
+def flow_to_str(fourtuple):
+    """Convert a flow four-tuple into a string."""
+    saddr, daddr, sport, dport = fourtuple
+    return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
 
 
 def flow_data_to_str(dat):
@@ -97,14 +97,13 @@ def receive_packet(flows, flows_lock, pkt):
 
     lock_i protects flows.
     """
-    print("new packet")
     # Skip packets on the loopback interface.
     # if LOCALHOST in (pkt.flow.saddr, pkt.flow.daddr):
     if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
     # flow = (pkt.flow.saddr, pkt.flow.daddr, pkt.flow.sport, pkt.flow.dport)
-    flow = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+    fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
     dat = (
         pkt.seq,
         pkt.srtt_us,
@@ -117,18 +116,21 @@ def receive_packet(flows, flows_lock, pkt):
         pkt.time_us,
     )
 
-    flows_lock.acquire()
-    if flow not in flows:
-        flows[flow] = Flow(flow)
-    flows[flow].packets.append(dat)
-    flows_lock.release()
+    # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
+    if flows_lock.acquire(blocking=False):
+        if fourtuple not in flows:
+            flows[fourtuple] = Flow(fourtuple)
+        flow = flows[fourtuple]
+        # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
+        # packet.
+        if flow.lock.acquire(blocking=False):
+            flow.packets.append(dat)
+            flow.lock.release()
+            print(f"{flow} --- {flow_data_to_str(dat)}")
+        flows_lock.release()
 
-    print(f"{Flow.flow_to_str(flow)} --- {flow_data_to_str(dat)}")
 
-
-def check_loop(
-    flows, flows_lock, net, args
-):
+def check_loop(flows, flows_lock, net, args):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -140,21 +142,20 @@ def check_loop(
             )
 
             flows_lock.acquire()
+            # Do not bother acquiring the per-flow locks since we are just reading data
+            # for logging purposes. It's okay if we get inconsistent information.
             print(
                 "Current decisions:\n"
-                + "\n".join(
-                    f"\t{flow}: {flow.decision}" for flow in flows
-                )
+                + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
             )
             flows_lock.release()
-            # time.sleep(1)
+
+            time.sleep(args.interval_ms / 1e3)
     except KeyboardInterrupt:
         return
 
 
-def check_flows(
-    flows, flows_lock, limit, net, disable_inference, debug=False
-):
+def check_flows(flows, flows_lock, limit, net, disable_inference, debug=False):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -162,44 +163,58 @@ def check_flows(
     print("Examining flows...")
     to_remove = []
     to_check = []
-    print(f"Found {len(flows)} flows total")
+
+    # Need to acquire flows_lock while iterating over flows.
+    flows_lock.acquire()
+    print(f"Found {len(flows)} flows total:")
     for fourtuple, flow in flows.items():
-        # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on to the next flow.
+        print(f"\t{flow} - {len(flow.packets)} packets")
+        # Try to acquire the lock for this flow. If unsuccessful, do not block; move on
+        # to the next flow.
         if flow.lock.acquire(blocking=False):
-            print(f"{fourtuple} - {len(flow.packets)}")
-            if time.time() * 1e6 - flow.latest_time_us > (OLD_THRESH_SEC * 1e6):
+            if len(flow.packets) >= limit:
+                # Plan to run inference on "full" flows.
+                to_check.append(fourtuple)
+            elif flow.latest_time_sec and (
+                time.time() - flow.latest_time_sec > OLD_THRESH_SEC
+            ):
+                # t = time.time()
                 # Remove flows with no packets and flows that have not received
                 # a new packet in five seconds.
                 to_remove.append(fourtuple)
-            if len(flow.packets) >= limit:
-                # Plan to run inference on "full" flows.
-                to_check.append(fourtuple)  # Garbage collection.
             flow.lock.release()
+        else:
+            print(f"Cloud not acquire lock for flow {flow}")
     # Garbage collection.
-    print(f"Removing {len(to_remove)} flows...")
-    flows_lock.acquire()
+    print(f"Removing {len(to_remove)} flows:")
     for fourtuple in to_remove:
+        print(f"\t{flow}")
         del flows[fourtuple]
     flows_lock.release()
 
     print(f"Checking {len(to_check)} flows...")
     for fourtuple in to_check:
-        print(f"Checking flow {fourtuple}")
-        flows[fourtuple].lock.acquire()
-        # packets = flows[fourtuple].packets
-        # flows[fourtuple].packets = []
-        # Do not hold lock while running inference.
-        if not disable_inference:
-            check_flow(net, flow, debug)
-        flows_lock.release()
+        # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
+        # to the next flow.
+        flow = flows[fourtuple]
+        if flow.lock.acquire(blocking=False):
+            print(f"Checking flow {flow}")
+            # packets = flows[fourtuple].packets
+            # flows[fourtuple].packets = []
+            # Do not hold lock while running inference.
+            if not disable_inference:
+                check_flow(flows, fourtuple, net, debug)
+            flow.lock.release()
+        else:
+            print(f"Cloud not acquire lock for flow {flow}")
 
 
-def featurize(net, flow, pkts, debug=False):
+def featurize(net, fourtuple, pkts, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
-    fets = gen_features.parse_received_acks(net.in_spc, flow, pkts, debug)
+    fets = gen_features.parse_received_acks(net.in_spc, fourtuple, pkts, debug)
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return fets
 
@@ -228,7 +243,7 @@ def packets_to_ndarray(pkts):
     return pkts
 
 
-def make_decision(flow, pkts_ndarray):
+def make_decision(flows, fourtuple, pkts_ndarray):
     """Make a flow unfairness mitigation decision.
 
     Base the decision on the flow's label and existing decision. Use the flow's packets
@@ -237,6 +252,7 @@ def make_decision(flow, pkts_ndarray):
     TODO: Instead of passing in using the flow's packets, pass in the features and make
           sure that they include the necessary columns.
     """
+    flow = flows[fourtuple]
     flow.lock.acquire()
     tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
 
@@ -269,45 +285,48 @@ def condense_labels(labels):
 
     Currently, this simply selects the last label.
     """
-    assert len(labels) > 0, "labels cannot be empty"
+    assert len(labels) > 0, "Labels cannot be empty."
     return labels[-1]
 
 
-def check_flow(net, flow, debug=False):
+def check_flow(flows, fourtuple, net, debug=False):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
+    flow = flows[fourtuple]
     flow.lock.acquire()
-
     # Discard all but the most recent 100 packets.
     if len(flow.packets) > 100:
         flow.packets = flow.packets[-100:]
-
     pkts_ndarray = packets_to_ndarray(flow.packets)
 
+    # Record the time at which we check this flow.
+    flow.latest_time_sec = time.time()
+
     start_time_s = time.time()
-    labels = inference(net, flow, pkts_ndarray, debug)
+    labels = inference(net, fourtuple, pkts_ndarray, debug)
     print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
 
     flow.label = condense_labels(labels)
-    make_decision(flow, pkts_ndarray)
+    make_decision(flows, fourtuple, pkts_ndarray)
+    print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
 
     # Clear the flow's packets.
     flow.packets = []
-
-    print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
     flow.lock.release()
 
 
-def inference(net, flow, pkts, debug=False):
+def inference(net, fourtuple, pkts, debug=False):
     """Run inference on a flow's packets.
 
     Returns a label: below fair, approximately fair, above fair.
     """
     preds = net.predict(
-        torch.tensor(utils.clean(featurize(net, flow, pkts, debug)), dtype=torch.float)
+        torch.tensor(
+            utils.clean(featurize(net, fourtuple, pkts, debug)), dtype=torch.float
+        )
     )
     return [defaults.Class(pred) for pred in preds]
 
@@ -319,7 +338,6 @@ def _main():
         "-d", "--debug", action="store_true", help="Print debugging info"
     )
     parser.add_argument(
-        "-i",
         "--interface",
         help='The network interface to attach to (e.g., "eno1").',
         required=True,
@@ -350,20 +368,16 @@ def _main():
     )
     parser.add_argument(
         "--reaction-strategy",
-        choices=defaults.ReactionStrategy.choices(),
-        default=defaults.ReactionStrategy.to_str(defaults.ReactionStrategy.MIMD),
+        choices=reaction_strategy.choices(),
+        default=reaction_strategy.to_str(ReactionStrategy.MIMD),
         help="The reaction/feedback strategy to use.",
-        required=True,
         type=str,
     )
     parser.add_argument(
         "--mitigation-strategy",
-        choices=defaults.MitigationStrategy.choices(),
-        default=defaults.MitigationStrategy.to_str(
-            defaults.MitigationStrategy.RWND_TUNING
-        ),
+        choices=mitigation_strategy.choices(),
+        default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
         help="The unfairness mitigation strategy to use.",
-        required=True,
         type=str,
     )
     args = parser.parse_args()
@@ -387,18 +401,15 @@ def _main():
     #  value.
     # fairness_db = dict()  # defaultdict(lambda: (-1, 0))
 
-    # Lock for the packet input data structures (e.g., "flows"). Only lock when adding or removing flows.
-    flows_lock = threading.Lock()
+    # Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
+    # when adding, removing, or iterating over flows; no need to acquire this lock when
+    # updating a flow object.
+    flows_lock = threading.RLock()
 
     # Set up the inference thread.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(
-            flows,
-            flows_lock,
-            net,
-            args
-        ),
+        args=(flows, flows_lock, net, args),
     )
     check_thread.start()
 
@@ -420,31 +431,31 @@ def _main():
     bpf = BPF(text=bpf_text)
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     # bpf.attach_kprobe(event="tc_egress", fn_name="trace_tc_egress")
-    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    # egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
 
-    # Configure unfairness mitigation strategy.
+    # # Configure unfairness mitigation strategy.
 
-    ipr = pyroute2.IPRoute()
-    ifindex = ipr.link_lookup(ifname=args.interface)
-    # ipr.tc("add", "pfifo", 0, "1:")
-    # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
+    # ipr = pyroute2.IPRoute()
+    # ifindex = ipr.link_lookup(ifname=args.interface)
+    # # ipr.tc("add", "pfifo", 0, "1:")
+    # # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
 
-    # There can also be a chain of actions, which depend on the return
-    # value of the previous action.
-    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
-    # Add the action to a u32 match-all filter
-    ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
-    ipr.tc(
-        "add-filter",
-        "u32",
-        ifindex,
-        parent=0x10000,
-        prio=10,
-        protocol=pyroute2.protocols.ETH_P_ALL,  # Every packet
-        target=0x10020,
-        keys=["0x0/0x0+0"],
-        action=action,
-    )
+    # # There can also be a chain of actions, which depend on the return
+    # # value of the previous action.
+    # action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+    # # Add the action to a u32 match-all filter
+    # ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
+    # ipr.tc(
+    #     "add-filter",
+    #     "u32",
+    #     ifindex,
+    #     parent=0x10000,
+    #     prio=10,
+    #     protocol=protocols.ETH_P_ALL,  # Every packet
+    #     target=0x10020,
+    #     keys=["0x0/0x0+0"],
+    #     action=action,
+    # )
 
     # This function will be called to process an event from the BPF program.
     def process_event(cpu, dat, size):

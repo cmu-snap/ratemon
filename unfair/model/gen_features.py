@@ -613,7 +613,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                         ),
                     )
                 elif metric.startswith(features.TPUT_FET):
-                    tput_bps = utils.safe_tput_bps(output, win_start_idx,)
+                    tput_bps = utils.safe_tput_bps(output, win_start_idx, j)
                     # If the throughput exceeds the bandwidth, then record a
                     # warning and do not record this throughput.
                     if tput_bps != -1 and tput_bps > exp.bw_bps:
@@ -1340,7 +1340,7 @@ def parse_received_acks(
                     ),
                 )
             elif metric.startswith(features.TPUT_FET):
-                new = utils.safe_tput_bps(fets, win_start_idx,)
+                new = utils.safe_tput_bps(fets, win_start_idx, j)
             elif metric.startswith(features.RTT_FET):
                 new = utils.safe_mean(fets[features.RTT_FET], win_start_idx, j)
             elif metric.startswith(features.RTT_RATIO_FET):

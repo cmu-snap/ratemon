@@ -142,7 +142,12 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp
     // is just a u64 in nanoseconds.
     ktime_t tstamp = skb->tstamp;
-    pkt.time_us = (u64)tstamp / 1000000;
+    pkt.time_us = (u64)tstamp / 1000;
+
+    // struct timeval tstamp;
+    // skb_get_timestamp(skb, &tstamp);
+    // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
+
     pkts.perf_submit(ctx, &pkt, sizeof(pkt));
     return 0;
 }

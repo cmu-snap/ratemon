@@ -1,6 +1,5 @@
 """Default values."""
 
-from curses.ascii import ACK
 from enum import Enum
 import struct
 
@@ -119,63 +118,3 @@ class Decision(Enum):
 
     PACED = 0
     NOT_PACED = 1
-
-
-class ReactionStrategy(Enum):
-    """Defines feedback mechanisms for reactive to flow fairness decisions."""
-
-    AIMD = 0
-    MIMD = 1
-
-    ALL = [AIMD, MIMD]
-    _STRAT_TO_STR = {AIMD: "aimd", MIMD: "mimd"}
-    _STR_TO_STRAT = {string: strat for strat, string in _STRAT_TO_STR.items()}
-
-    @staticmethod
-    def to_str(strat):
-        """Convert an instance of this enum to a string."""
-        if strat not in ReactionStrategy._STRAT_TO_STR:
-            raise KeyError(f"Unknown reaction strategy: {strat}")
-        return ReactionStrategy._STRAT_TO_STR[strat]
-
-    @staticmethod
-    def to_strat(string):
-        """Convert a string to an instance of this enum."""
-        if string not in ReactionStrategy._STR_TO_STRAT:
-            raise KeyError(f"Unknown reaction strategy: {string}")
-        return ReactionStrategy._STR_TO_STRAT[string]
-
-    @staticmethod
-    def choices():
-        """Get the string representations of this enum's choices."""
-        return [ReactionStrategy.to_str(strat) for strat in ReactionStrategy.ALL]
-
-
-class MitigationStrategy(Enum):
-    """Defines unfairness mitigation strategies."""
-
-    RWND_TUNING = 0
-    ACK_PACING = 1
-
-    ALL = [RWND_TUNING, ACK_PACING]
-    _STRAT_TO_STR = {RWND_TUNING: "rwnd", ACK_PACING: "pace"}
-    _STR_TO_STRAT = {string: strat for strat, string in _STRAT_TO_STR.items()}
-
-    @staticmethod
-    def to_str(strat):
-        """Convert an instance of this enum to a string."""
-        if strat not in MitigationStrategy._STRAT_TO_STR:
-            raise KeyError(f"Unknown mitigation strategy: {strat}")
-        return MitigationStrategy._STRAT_TO_STR[strat]
-
-    @staticmethod
-    def to_strat(string):
-        """Convert a string to an instance of this enum."""
-        if string not in MitigationStrategy._STR_TO_STRAT:
-            raise KeyError(f"Unknown mitigation strategy: {string}")
-        return MitigationStrategy._STR_TO_STRAT[string]
-
-    @staticmethod
-    def choices():
-        """Get the string representations of this enum's choices."""
-        return [ReactionStrategy.to_str(strat) for strat in ReactionStrategy.ALL]
