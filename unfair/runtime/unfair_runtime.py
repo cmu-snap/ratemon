@@ -178,7 +178,6 @@ def check_flows(flows, flows_lock, limit, net, disable_inference, debug=False):
             elif flow.latest_time_sec and (
                 time.time() - flow.latest_time_sec > OLD_THRESH_SEC
             ):
-                # t = time.time()
                 # Remove flows with no packets and flows that have not received
                 # a new packet in five seconds.
                 to_remove.append(fourtuple)
@@ -431,46 +430,51 @@ def _main():
     bpf = BPF(text=bpf_text)
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     # bpf.attach_kprobe(event="tc_egress", fn_name="trace_tc_egress")
-    # egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
 
     # # Configure unfairness mitigation strategy.
 
-    # ipr = pyroute2.IPRoute()
-    # ifindex = ipr.link_lookup(ifname=args.interface)
+    ipr = IPRoute()
+    ifindex = ipr.link_lookup(ifname=args.interface)
+    assert len(ifindex) == 1
+    ifindex = ifindex[0]
     # # ipr.tc("add", "pfifo", 0, "1:")
     # # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
 
-    # # There can also be a chain of actions, which depend on the return
-    # # value of the previous action.
-    # action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
-    # # Add the action to a u32 match-all filter
-    # ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
-    # ipr.tc(
-    #     "add-filter",
-    #     "u32",
-    #     ifindex,
-    #     parent=0x10000,
-    #     prio=10,
-    #     protocol=protocols.ETH_P_ALL,  # Every packet
-    #     target=0x10020,
-    #     keys=["0x0/0x0+0"],
-    #     action=action,
-    # )
+    # There can also be a chain of actions, which depend on the return
+    # value of the previous action.
+    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+    # Add the action to a u32 match-all filter
+    ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
+    ipr.tc(
+        "add-filter",
+        "u32",
+        ifindex,
+        parent=0x10000,
+        prio=10,
+        protocol=protocols.ETH_P_ALL,  # Every packet
+        target=0x10020,
+        keys=["0x0/0x0+0"],
+        action=action,
+    )
 
     # This function will be called to process an event from the BPF program.
     def process_event(cpu, dat, size):
         receive_packet(flows, flows_lock, bpf["pkts"].event(dat))
-
-    # Loop with callback to process_event().
-    print("Running...press Control-C to end")
     bpf["pkts"].open_perf_buffer(process_event)
-    while True:
-        try:
+
+    print("Running...press Control-C to end")
+    try:
+        # Loop with callback to process_event().
+        while True:
             if args.interval_ms is not None:
                 time.sleep(args.interval_ms / 1000)
             bpf.perf_buffer_poll()
-        except KeyboardInterrupt:
-            break
+    except KeyboardInterrupt:
+        print("Cancelled.")
+    finally:
+        print("Cleaning up...")
+        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
 
     # print("\nFlows:")
     # for flow, pkts in sorted(flows.items()):

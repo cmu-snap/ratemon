@@ -152,26 +152,139 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     return 0;
 }
 
-int trace_tc_egress(struct pt_regs *ctx, struct sk_buff *skb)
+// int trace_tc_egress(struct pt_regs *ctx, struct sk_buff *skb)
+// {
+//     if (skb == NULL)
+//     {
+//         return 0;
+//     }
+//     // Check this is IPv4.
+//     if (skb->protocol != htons(ETH_P_IP))
+//     {
+//         return 0;
+//     }
+
+//     struct iphdr *ip = skb_to_iphdr(skb);
+//     // Check this is TCP.
+//     if (ip->protocol != IPPROTO_TCP)
+//     {
+//         return 0;
+//     }
+
+//     struct tcphdr *tcp = skb_to_tcphdr(skb);
+
+//     // // Determine the size of the TCP header. See above note about IP header length.
+//     // u16 ack;
+//     // // The TCP data offset is located after the ACK sequence number in the TCP
+//     // // header.
+//     // bpf_probe_read(&thl, sizeof(ack), &tcp->ack_seq + 4);
+//     // if (! (ack & TCP_FLAG_ACK)) {
+//     //     return 0;
+//     // }
+
+//     u32 saddr = ip->saddr;
+//     u32 daddr = ip->daddr;
+//     u16 sport = tcp->source;
+//     u16 dport = tcp->dest;
+//     sport = ntohs(dport);
+//     sport = ntohs(sport);
+
+//     bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
+//     return 0;
+// }
+
+// Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
+int handle_egress(struct __sk_buff *skb)
 {
     if (skb == NULL)
     {
         return 0;
     }
-    // Check this is IPv4.
-    if (skb->protocol != htons(ETH_P_IP))
-    {
-        return 0;
+
+    // // Check this is IPv4.
+    // if (skb->protocol != htons(ETH_P_IP))
+    // {
+    //     return 0;
+    // }
+
+    void *data = (void *)(long)skb->data;
+    void *data_end = (void *)(long)skb->data_end;
+    struct ethhdr *eth  = data;
+    struct iphdr  *ip;
+    struct tcphdr *tcp;
+
+    // Do a sanity check to make sure that the IP header does not extend past
+    // the end of the packet.
+    if ((void *)eth + sizeof(*eth) > data_end) {
+            return TC_ACT_UNSPEC;
     }
 
-    struct iphdr *ip = skb_to_iphdr(skb);
+    // Check that this is IP. Calculate the start of the IP header, and do a
+    // sanity check to make sure that the IP header does not extend past the
+    // end of the packet.
+    if (eth->h_proto != htons(ETH_P_IP)) {
+            return TC_ACT_UNSPEC;
+    }
+    ip   = data + sizeof(*eth);
+    if ((void *)ip + sizeof(*ip) > data_end) {
+            return TC_ACT_UNSPEC;
+    }
+
+    // Check that this is TCP. Calculate the start of the TCP header, and do a
+    // sanity check to make sure that the TCP header does not extend past the
+    // end of the packet.
+    if (ip->protocol != IPPROTO_TCP) {
+            return TC_ACT_UNSPEC;
+    }
+    tcp = (void *)ip + sizeof(*ip);
+    if ((void *)tcp + sizeof(*tcp) > data_end) {
+            return TC_ACT_UNSPEC;
+    }
+
+
+
+    // unsigned int payload_size;
+    // unsigned char *payload;
+    // payload_size = ntohs(tcpdata->len) - sizeof(*tcpdata);
+    // payload = (unsigned char *)tcpdata + sizeof(*tcpdata);
+
+    // if ((void *)payload + payload_size > data_end) {
+    //         return TC_ACT_UNSPEC;
+    // }
+
+    // __be16 port = udpdata->dest;
+    // __be16 portToFilter = htons(7878);
+
+    // if (port != portToFilter) {
+    //         return TC_ACT_OK;
+    // }
+
+    // __u32 src_ip = ip->saddr;
+    // __u32 dst_ip = ip->daddr;
+
+    struct flow_t flow;
+    flow.saddr = ip->saddr;
+    flow.daddr = ip->daddr;
+    flow.sport = tcp->source;
+    flow.dport = tcp->dest;
+    flow.sport = ntohs(flow.dport);
+    flow.sport = ntohs(flow.sport);
+
+    bpf_trace_printk("saddr: %d\n", flow.saddr);
+    bpf_trace_printk("daddr: %d\n", flow.daddr);
+    bpf_trace_printk("sport: %d\n", flow.sport);
+    bpf_trace_printk("dport: %d\n", flow.dport);
+
+    return TC_ACT_OK;
+
+    // struct iphdr *ip = skb_to_iphdr(skb);
     // Check this is TCP.
-    if (ip->protocol != IPPROTO_TCP)
-    {
-        return 0;
-    }
+    // if (ip->protocol != IPPROTO_TCP)
+    // {
+    //     return 0;
+    // }
 
-    struct tcphdr *tcp = skb_to_tcphdr(skb);
+    // struct tcphdr *tcp = skb_to_tcphdr(skb);
 
     // // Determine the size of the TCP header. See above note about IP header length.
     // u16 ack;
@@ -182,54 +295,13 @@ int trace_tc_egress(struct pt_regs *ctx, struct sk_buff *skb)
     //     return 0;
     // }
 
-    u32 saddr = ip->saddr;
-    u32 daddr = ip->daddr;
-    u16 sport = tcp->source;
-    u16 dport = tcp->dest;
-    sport = ntohs(dport);
-    sport = ntohs(sport);
+    // u32 saddr = ip->saddr;
+    // u32 daddr = ip->daddr;
+    // u16 sport = tcp->source;
+    // u16 dport = tcp->dest;
+    // sport = ntohs(dport);
+    // sport = ntohs(sport);
 
-    bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
-    return 0;
-}
-
-int handle_egress(struct sk_buff *skb)
-{
-    if (skb == NULL)
-    {
-        return 0;
-    }
-    // Check this is IPv4.
-    if (skb->protocol != htons(ETH_P_IP))
-    {
-        return 0;
-    }
-
-    struct iphdr *ip = skb_to_iphdr(skb);
-    // Check this is TCP.
-    if (ip->protocol != IPPROTO_TCP)
-    {
-        return 0;
-    }
-
-    struct tcphdr *tcp = skb_to_tcphdr(skb);
-
-    // // Determine the size of the TCP header. See above note about IP header length.
-    // u16 ack;
-    // // The TCP data offset is located after the ACK sequence number in the TCP
-    // // header.
-    // bpf_probe_read(&thl, sizeof(ack), &tcp->ack_seq + 4);
-    // if (! (ack & TCP_FLAG_ACK)) {
-    //     return 0;
-    // }
-
-    u32 saddr = ip->saddr;
-    u32 daddr = ip->daddr;
-    u16 sport = tcp->source;
-    u16 dport = tcp->dest;
-    sport = ntohs(dport);
-    sport = ntohs(sport);
-
-    bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
-    return 0;
+    // bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
+    // return 0;
 }
