@@ -2,6 +2,7 @@
 """Monitors incoming TCP flows to detect unfairness."""
 
 from argparse import ArgumentParser
+import ctypes
 from os import path
 import pickle
 import socket
@@ -11,9 +12,11 @@ import threading
 import time
 
 import torch
-from bcc import BPF
 from pyroute2 import IPRoute
 from pyroute2 import protocols
+from pyroute2.netlink.exceptions import NetlinkError
+
+from bcc import BPF
 
 from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import mitigation_strategy, reaction_strategy
@@ -27,10 +30,20 @@ def ip_str_to_int(ip_str):
 
 
 LOCALHOST = ip_str_to_int("127.0.0.1")
-DONE = False
 # Flows that have not received a new packet in this many seconds will be
 # garbage collected.
 OLD_THRESH_SEC = 5 * 60
+
+
+class FlowKey(ctypes.Structure):
+    """A struct to use as the key in maps in the corresponding eBPF program."""
+
+    _fields_ = [
+        ("saddr", ctypes.c_uint),
+        ("daddr", ctypes.c_uint),
+        ("sport", ctypes.c_ushort),
+        ("dport", ctypes.c_ushort),
+    ]
 
 
 class Flow:
@@ -48,6 +61,9 @@ class Flow:
         self.lock = threading.RLock()
         self.fourtuple = fourtuple
         self.packets = []
+        # Smallest RTT ever observed for this flow (microseconds). Used to calculate
+        # the BDP. Updated whenever we compute features for this flow.
+        self.min_rtt_us = sys.maxsize
         # The timestamp of the last packet on which we have run inference.
         self.latest_time_sec = 0
         self.label = defaults.Class.APPROX_FAIR
@@ -92,13 +108,28 @@ def flow_data_to_str(dat):
     )
 
 
-def receive_packet(flows, flows_lock, pkt):
+def receive_packet(flows, flows_lock, pkt, done):
     """Ingest a new packet, identify its flow, and store it.
 
-    lock_i protects flows.
+    This function delegates its main tasks to receive_packet_helper() and instead just
+    guards that function by bypassing it if the done event is set and by catching
+    KeyboardInterrupt exceptions.
+
+    flows_lock protects flows.
+    """
+    try:
+        if not done.is_set():
+            receive_packet_helper(flows, flows_lock, pkt)
+    except KeyboardInterrupt:
+        done.set()
+
+
+def receive_packet_helper(flows, flows_lock, pkt):
+    """Ingest a new packet, identify its flow, and store it.
+
+    flows_lock protects flows.
     """
     # Skip packets on the loopback interface.
-    # if LOCALHOST in (pkt.flow.saddr, pkt.flow.daddr):
     if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
@@ -118,44 +149,56 @@ def receive_packet(flows, flows_lock, pkt):
 
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
     if flows_lock.acquire(blocking=False):
-        if fourtuple not in flows:
-            flows[fourtuple] = Flow(fourtuple)
-        flow = flows[fourtuple]
-        # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
-        # packet.
-        if flow.lock.acquire(blocking=False):
-            flow.packets.append(dat)
-            flow.lock.release()
-            print(f"{flow} --- {flow_data_to_str(dat)}")
-        flows_lock.release()
+        try:
+            if fourtuple in flows:
+                flow = flows[fourtuple]
+            if fourtuple not in flows:
+                flow = Flow(fourtuple)
+                flows[fourtuple] = flow
+
+            # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
+            # packet.
+            if flow.lock.acquire(blocking=False):
+                try:
+                    flow.packets.append(dat)
+                finally:
+                    flow.lock.release()
+                print(f"{flow} --- {flow_data_to_str(dat)}")
+        finally:
+            flows_lock.release()
 
 
-def check_loop(flows, flows_lock, net, args):
+def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
     """
     try:
-        while not DONE:
+        while not done.is_set():
             check_flows(
-                flows, flows_lock, args.limit, net, args.disable_inference, args.debug
+                flows,
+                flows_lock,
+                args.limit,
+                net,
+                flow_to_rwnd,
+                args,
             )
 
-            flows_lock.acquire()
-            # Do not bother acquiring the per-flow locks since we are just reading data
-            # for logging purposes. It's okay if we get inconsistent information.
-            print(
-                "Current decisions:\n"
-                + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
-            )
-            flows_lock.release()
+            with flows_lock:
+                # Do not bother acquiring the per-flow locks since we are just reading
+                # data for logging purposes. It is okay if we get inconsistent
+                # information.
+                print(
+                    "Current decisions:\n"
+                    + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
+                )
 
             time.sleep(args.interval_ms / 1e3)
     except KeyboardInterrupt:
-        return
+        done.set()
 
 
-def check_flows(flows, flows_lock, limit, net, disable_inference, debug=False):
+def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -165,55 +208,61 @@ def check_flows(flows, flows_lock, limit, net, disable_inference, debug=False):
     to_check = []
 
     # Need to acquire flows_lock while iterating over flows.
-    flows_lock.acquire()
-    print(f"Found {len(flows)} flows total:")
-    for fourtuple, flow in flows.items():
-        print(f"\t{flow} - {len(flow.packets)} packets")
-        # Try to acquire the lock for this flow. If unsuccessful, do not block; move on
-        # to the next flow.
-        if flow.lock.acquire(blocking=False):
-            if len(flow.packets) >= limit:
-                # Plan to run inference on "full" flows.
-                to_check.append(fourtuple)
-            elif flow.latest_time_sec and (
-                time.time() - flow.latest_time_sec > OLD_THRESH_SEC
-            ):
-                # Remove flows with no packets and flows that have not received
-                # a new packet in five seconds.
-                to_remove.append(fourtuple)
-            flow.lock.release()
-        else:
-            print(f"Cloud not acquire lock for flow {flow}")
-    # Garbage collection.
-    print(f"Removing {len(to_remove)} flows:")
-    for fourtuple in to_remove:
-        print(f"\t{flow}")
-        del flows[fourtuple]
-    flows_lock.release()
+    with flows_lock:
+        print(f"Found {len(flows)} flows total:")
+        for fourtuple, flow in flows.items():
+            print(f"\t{flow} - {len(flow.packets)} packets")
+            # Try to acquire the lock for this flow. If unsuccessful, do not block; move
+            # on to the next flow.
+            if flow.lock.acquire(blocking=False):
+                try:
+                    if len(flow.packets) >= limit:
+                        # Plan to run inference on "full" flows.
+                        to_check.append(fourtuple)
+                    elif flow.latest_time_sec and (
+                        time.time() - flow.latest_time_sec > OLD_THRESH_SEC
+                    ):
+                        # Remove flows with no packets and flows that have not received
+                        # a new packet in five seconds.
+                        to_remove.append(fourtuple)
+                finally:
+                    flow.lock.release()
+            else:
+                print(f"Cloud not acquire lock for flow {flow}")
+        # Garbage collection.
+        print(f"Removing {len(to_remove)} flows:")
+        for fourtuple in to_remove:
+            print(f"\t{flows[fourtuple]}")
+            del flows[fourtuple]
+            del flow_to_rwnd[FlowKey(*fourtuple)]
 
     print(f"Checking {len(to_check)} flows...")
     for fourtuple in to_check:
+        flow = flows[fourtuple]
         # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
         # to the next flow.
-        flow = flows[fourtuple]
         if flow.lock.acquire(blocking=False):
-            print(f"Checking flow {flow}")
-            # packets = flows[fourtuple].packets
-            # flows[fourtuple].packets = []
-            # Do not hold lock while running inference.
-            if not disable_inference:
-                check_flow(flows, fourtuple, net, debug)
-            flow.lock.release()
+            try:
+                print(f"Checking flow {flow}")
+                if not args.disable_inference:
+                    check_flow(flows, fourtuple, net, flow_to_rwnd, args)
+            finally:
+                flow.lock.release()
         else:
             print(f"Cloud not acquire lock for flow {flow}")
 
 
-def featurize(net, fourtuple, pkts, debug=False):
+def featurize(flows, fourtuple, net, pkts, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
-    fets = gen_features.parse_received_acks(net.in_spc, fourtuple, pkts, debug)
+    flow = flows[fourtuple]
+    with flow.lock:
+        fets, flow.min_rtt_us = gen_features.parse_received_acks(
+            net.in_spc, fourtuple, pkts, flow.min_rtt_us, debug
+        )
+
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return fets
 
@@ -242,7 +291,7 @@ def packets_to_ndarray(pkts):
     return pkts
 
 
-def make_decision(flows, fourtuple, pkts_ndarray):
+def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strategy):
     """Make a flow unfairness mitigation decision.
 
     Base the decision on the flow's label and existing decision. Use the flow's packets
@@ -252,29 +301,43 @@ def make_decision(flows, fourtuple, pkts_ndarray):
           sure that they include the necessary columns.
     """
     flow = flows[fourtuple]
-    flow.lock.acquire()
-    tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
+    with flow.lock:
+        tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
 
-    if flow.label == defaults.Class.ABOVE_FAIR:
-        # This flow is sending too fast. Force the sender to halve its rate.
-        new_decision = (defaults.Decision.PACED, tput_bps / 2)
-    elif flow.decision == defaults.Decision.PACED:
-        # We are already pacing this flow.
-        if flow.label == defaults.Class.BELOW_FAIR:
-            # If we are already pacing this flow but we are being too aggressive, then
-            # let it send faster.
-            new_decision = (defaults.Decision.PACED, tput_bps * 1.5)
+        if flow.label == defaults.Class.ABOVE_FAIR:
+            # This flow is sending too fast. Force the sender to halve its rate.
+            new_decision = (
+                defaults.Decision.PACED,
+                reaction_strategy.react_down(
+                    reaction_strategy, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
+                ),
+            )
+        elif flow.decision == defaults.Decision.PACED:
+            # We are already pacing this flow.
+            if flow.label == defaults.Class.BELOW_FAIR:
+                # If we are already pacing this flow but we are being too aggressive,
+                # then let it send faster.
+                new_decision = (
+                    defaults.Decision.PACED,
+                    reaction_strategy.react_up(
+                        reaction_strategy, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
+                    ),
+                )
+            else:
+                # If we are already pacing this flow and it is behaving as desired, then
+                # all is well. Retain the existing pacing decision.
+                new_decision = flow.decision
         else:
-            # If we are already pacing this flow and it is behaving as desired, then
-            # all is well. Retain the existing pacing decision.
-            new_decision = flow.decision
-    else:
-        # This flow is not already being paced and is not behaving unfairly, so leave
-        # it alone.
-        new_decision = (defaults.Decision.NOT_PACED, None)
+            # This flow is not already being paced and is not behaving unfairly, so
+            # leave it alone.
+            new_decision = (defaults.Decision.NOT_PACED, None)
 
-    flow.decision = new_decision
-    flow.lock.release()
+        if flow.decision != new_decision:
+            flow_to_rwnd[FlowKey(*flow.fourtuple)] = ctypes.c_int(
+                round(new_decision[1])
+            )
+
+        flow.decision = new_decision
 
 
 def condense_labels(labels):
@@ -288,43 +351,45 @@ def condense_labels(labels):
     return labels[-1]
 
 
-def check_flow(flows, fourtuple, net, debug=False):
+def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
     flow = flows[fourtuple]
-    flow.lock.acquire()
-    # Discard all but the most recent 100 packets.
-    if len(flow.packets) > 100:
-        flow.packets = flow.packets[-100:]
-    pkts_ndarray = packets_to_ndarray(flow.packets)
+    with flow.lock:
+        # Discard all but the most recent 100 packets.
+        if len(flow.packets) > 100:
+            flow.packets = flow.packets[-100:]
+        pkts_ndarray = packets_to_ndarray(flow.packets)
 
-    # Record the time at which we check this flow.
-    flow.latest_time_sec = time.time()
+        # Record the time at which we check this flow.
+        flow.latest_time_sec = time.time()
 
-    start_time_s = time.time()
-    labels = inference(net, fourtuple, pkts_ndarray, debug)
-    print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
+        start_time_s = time.time()
+        labels = inference(flows, fourtuple, net, pkts_ndarray, args.debug)
+        print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
 
-    flow.label = condense_labels(labels)
-    make_decision(flows, fourtuple, pkts_ndarray)
-    print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
+        flow.label = condense_labels(labels)
+        make_decision(
+            flows, fourtuple, pkts_ndarray, flow_to_rwnd, args.reaction_strategy
+        )
+        print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
 
-    # Clear the flow's packets.
-    flow.packets = []
-    flow.lock.release()
+        # Clear the flow's packets.
+        flow.packets = []
 
 
-def inference(net, fourtuple, pkts, debug=False):
+def inference(flows, fourtuple, net, pkts, debug=False):
     """Run inference on a flow's packets.
 
     Returns a label: below fair, approximately fair, above fair.
     """
     preds = net.predict(
         torch.tensor(
-            utils.clean(featurize(net, fourtuple, pkts, debug)), dtype=torch.float
+            utils.clean(featurize(flows, fourtuple, net, pkts, debug)),
+            dtype=torch.float,
         )
     )
     return [defaults.Class(pred) for pred in preds]
@@ -405,12 +470,8 @@ def _main():
     # updating a flow object.
     flows_lock = threading.RLock()
 
-    # Set up the inference thread.
-    check_thread = threading.Thread(
-        target=check_loop,
-        args=(flows, flows_lock, net, args),
-    )
-    check_thread.start()
+    done = threading.Event()
+    done.clear()
 
     # Load BPF text.
     bpf_flp = path.join(
@@ -432,6 +493,15 @@ def _main():
     # bpf.attach_kprobe(event="tc_egress", fn_name="trace_tc_egress")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
 
+    flow_to_rwnd = bpf["flow_to_rwnd"]
+
+    # Set up the inference thread.
+    check_thread = threading.Thread(
+        target=check_loop,
+        args=(flows, flows_lock, net, args, flow_to_rwnd, done),
+    )
+    check_thread.start()
+
     # # Configure unfairness mitigation strategy.
 
     ipr = IPRoute()
@@ -444,34 +514,42 @@ def _main():
     # There can also be a chain of actions, which depend on the return
     # value of the previous action.
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
-    # Add the action to a u32 match-all filter
-    ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
-    ipr.tc(
-        "add-filter",
-        "u32",
-        ifindex,
-        parent=0x10000,
-        prio=10,
-        protocol=protocols.ETH_P_ALL,  # Every packet
-        target=0x10020,
-        keys=["0x0/0x0+0"],
-        action=action,
-    )
+    try:
+        # Add the action to a u32 match-all filter
+        ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
+        ipr.tc(
+            "add-filter",
+            "u32",
+            ifindex,
+            parent=0x10000,
+            prio=10,
+            protocol=protocols.ETH_P_ALL,  # Every packet
+            target=0x10020,
+            keys=["0x0/0x0+0"],
+            action=action,
+        )
+    except NetlinkError:
+        print("Error: Unable to configure TC.")
+        return 1
 
     # This function will be called to process an event from the BPF program.
     def process_event(cpu, dat, size):
-        receive_packet(flows, flows_lock, bpf["pkts"].event(dat))
+        receive_packet(flows, flows_lock, bpf["pkts"].event(dat), done)
+
     bpf["pkts"].open_perf_buffer(process_event)
 
     print("Running...press Control-C to end")
     try:
         # Loop with callback to process_event().
-        while True:
+        while not done.is_set():
             if args.interval_ms is not None:
                 time.sleep(args.interval_ms / 1000)
             bpf.perf_buffer_poll()
     except KeyboardInterrupt:
         print("Cancelled.")
+        # global DONE
+        # DONE = True
+        done.set()
     finally:
         print("Cleaning up...")
         ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
@@ -480,8 +558,6 @@ def _main():
     # for flow, pkts in sorted(flows.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    global DONE
-    DONE = True
     check_thread.join()
     return 0
 

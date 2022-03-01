@@ -98,7 +98,7 @@ def main():
              "bottleneck_queue_p": int(round(
                  que_mult *
                  max(1,
-                     utils.bdp_B(bw_Mbps, dly_us * 6) / float(PACKET_SIZE_B)))),
+                     utils.bdp_B(bw_Mbps * 1e6, dly_us / 1e6 * 6) / float(PACKET_SIZE_B)))),
              "unfair_flows": unfair_flws,
              "unfair_proto": UNFAIR_PROTO,
              "fair_flows": fair_flws,

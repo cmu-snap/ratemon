@@ -1052,9 +1052,9 @@ def has_non_finite(arr):
     return False
 
 
-def bdp_B(bw_Mbps, rtt_us):
+def bdp_B(bw_bps, rtt_sec):
     """Calculate the BDP in bytes."""
-    return (bw_Mbps / 8.0 * 1e6) * (rtt_us / 1e6)
+    return (bw_bps / 8.0) * rtt_sec
 
 
 def get_split_data_flp(split_dir, name):

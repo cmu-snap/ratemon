@@ -1070,15 +1070,23 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
 
 def parse_received_acks(
-    in_spc_fet_names, flw, recv_pkts, skip_smoothed=False, debug=False
+    in_spc_fet_names,
+    flw,
+    recv_pkts,
+    previous_min_rtt_us,
+    skip_smoothed=False,
+    debug=False,
 ):
     """Generate features for the inference runtime.
+
+    Requires the existing minimum RTT (microseconds).
 
     In contrast to parse_opened_exp(), this function only has access to receiver
     information, and only processes a single flow. Features that cannot be calculated
     are set to -1.
 
-    Returns a structured numpy array with the resulting features.
+    Returns a tuple containing a structured numpy array with the resulting features and
+    the updated minimum RTT (microseconds).
     """
     # Verify that the packets have been received in order (i.e., their
     # arrival times are monotonically increasing). Calculate the time
@@ -1201,7 +1209,7 @@ def parse_received_acks(
         rtt_us = recv_pkt[features.SRTT_FET]
         fets[j][features.RTT_FET] = rtt_us
         min_rtt_us = utils.safe_min(
-            sys.maxsize if first else fets[j - 1][features.MIN_RTT_FET], rtt_us
+            previous_min_rtt_us if first else fets[j - 1][features.MIN_RTT_FET], rtt_us
         )
         fets[j][features.MIN_RTT_FET] = min_rtt_us
         rtt_estimate_ratio = utils.safe_div(rtt_us, min_rtt_us)

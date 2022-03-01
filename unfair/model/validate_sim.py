@@ -48,7 +48,7 @@ def plot_f1b(flps, var, out_dir):
     # into a multiple of the BDP.
     x_vals = [
         sim.queue_p / (
-            utils.bdp_B(sim.bw_Mbps, 6 * sim.btl_delay_us) / PKT_SIZE_B)
+            utils.bdp_B(sim.bw_bps, 6 * sim.btl_delay_us / 1e6) / PKT_SIZE_B)
         for sim in sims]
 
     plt.figure(figsize=(8, 3))

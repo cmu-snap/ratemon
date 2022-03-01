@@ -11,25 +11,25 @@ class MitigationStrategy(Enum):
 
 
 ALL = [MitigationStrategy.RWND_TUNING, MitigationStrategy.ACK_PACING]
-_STRAT_TO_STR = {
+_STRATEGY_TO_STR = {
     MitigationStrategy.RWND_TUNING: "rwnd",
     MitigationStrategy.ACK_PACING: "pace",
 }
-_STR_TO_STRAT = {string: strat for strat, string in _STRAT_TO_STR.items()}
+_STR_TO_STRATEGY = {string: strat for strat, string in _STRATEGY_TO_STR.items()}
 
 
-def to_str(strat):
+def to_str(strategy):
     """Convert an instance of this enum to a string."""
-    if strat not in _STRAT_TO_STR:
-        raise KeyError(f"Unknown mitigation strategy: {strat}")
-    return _STRAT_TO_STR[strat]
+    if strategy not in _STRATEGY_TO_STR:
+        raise KeyError(f"Unknown mitigation strategy: {strategy}")
+    return _STRATEGY_TO_STR[strategy]
 
 
 def to_strat(string):
     """Convert a string to an instance of this enum."""
-    if string not in _STR_TO_STRAT:
+    if string not in _STR_TO_STRATEGY:
         raise KeyError(f"Unknown mitigation strategy: {string}")
-    return _STR_TO_STRAT[string]
+    return _STR_TO_STRATEGY[string]
 
 
 def choices():
