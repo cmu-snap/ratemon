@@ -292,7 +292,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
         pkt_loss_total_estimate = 0
         # Loss rate estimation.
         prev_seq = None
-        prev_payload_bytesytes = None
+        prev_payload_bytes = None
         highest_seq = None
         # Use for Copa RTT estimation.
         snd_ack_idx = 0
@@ -324,8 +324,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             output[j][features.SEQ_FET] = recv_seq
             retrans = recv_seq in unique_pkts or (
                 prev_seq is not None
-                and prev_payload_bytesytes is not None
-                and (prev_seq + (1 if packet_seq else prev_payload_bytesytes))
+                and prev_payload_bytes is not None
+                and (prev_seq + (1 if packet_seq else prev_payload_bytes))
                 > recv_seq
             )
             if retrans:
@@ -486,8 +486,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     recv_seq == -1
                     or prev_seq is None
                     or prev_seq == -1
-                    or prev_payload_bytesytes is None
-                    or prev_payload_bytesytes <= 0
+                    or prev_payload_bytes is None
+                    or prev_payload_bytes <= 0
                     or payload_bytes <= 0
                     or highest_seq is None
                     or
@@ -500,7 +500,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 else round(
                     (
                         recv_seq
-                        - (1 if packet_seq else prev_payload_bytesytes)
+                        - (1 if packet_seq else prev_payload_bytes)
                         - prev_seq
                     )
                     / (1 if packet_seq else payload_bytes)
@@ -773,7 +773,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 output[j][metric] = new
 
             prev_seq = recv_seq
-            prev_payload_bytesytes = payload_bytes
+            prev_payload_bytes = payload_bytes
             highest_seq = (
                 prev_seq if highest_seq is None else max(highest_seq, prev_seq)
             )
@@ -1145,7 +1145,7 @@ def parse_received_acks(
     pkt_loss_total_estimate = 0
     # Loss rate estimation.
     prev_seq = None
-    prev_payload_bytesytes = None
+    prev_payload_bytes = None
     highest_seq = None
 
     # Track which packets are definitely retransmissions. Ignore these
@@ -1171,8 +1171,8 @@ def parse_received_acks(
         fets[j][features.SEQ_FET] = recv_seq
         retrans = recv_seq in unique_pkts or (
             prev_seq is not None
-            and prev_payload_bytesytes is not None
-            and (prev_seq + (1 if packet_seq else prev_payload_bytesytes)) > recv_seq
+            and prev_payload_bytes is not None
+            and (prev_seq + (1 if packet_seq else prev_payload_bytes)) > recv_seq
         )
         if retrans:
             # If this packet is a multiple retransmission, then this line
@@ -1225,8 +1225,8 @@ def parse_received_acks(
                 recv_seq == -1
                 or prev_seq is None
                 or prev_seq == -1
-                or prev_payload_bytesytes is None
-                or prev_payload_bytesytes <= 0
+                or prev_payload_bytes is None
+                or prev_payload_bytes <= 0
                 or payload_bytes <= 0
                 or highest_seq is None
                 or
@@ -1237,10 +1237,13 @@ def parse_received_acks(
                 retrans
             )
             else round(
-                (recv_seq - (1 if packet_seq else prev_payload_bytesytes) - prev_seq)
+                (recv_seq - (1 if packet_seq else prev_payload_bytes) - prev_seq)
                 / (1 if packet_seq else payload_bytes)
             )
         )
+        if pkt_loss_cur_estimate > 1000:
+            print("warning")
+
 
         if pkt_loss_cur_estimate != -1:
             pkt_loss_total_estimate += pkt_loss_cur_estimate
@@ -1393,6 +1396,12 @@ def parse_received_acks(
 
                         # Look at each lost packet...
                         for k in range(pkt_loss_cur_estimate):
+                            # FIXME: There is a bug here. pkt_loss_cur_estimate grows
+                            #        very large, causing this loop to take a long time.
+                            #
+                            #        It appears that we were not converting the sequence
+                            #        number byte order.
+
                             # Compute the approximate time at
                             # which the packet should have been
                             # received if it had not been lost.
@@ -1483,7 +1492,7 @@ def parse_received_acks(
             fets[j][metric] = new
 
         prev_seq = recv_seq
-        prev_payload_bytesytes = payload_bytes
+        prev_payload_bytes = payload_bytes
         highest_seq = prev_seq if highest_seq is None else max(highest_seq, prev_seq)
         # In the event of sequence number wraparound, reset the sequence
         # number tracking.
@@ -1511,10 +1520,11 @@ def parse_received_acks(
                 else "unknown"
             )
 
+    # Extract the new min RTT before we maybe throw that feature away.
+    new_min_rtt_sec = fets[features.MIN_RTT_FET][-1]
     # Remove unneeded features that were added as temporarily-tracked dependencies for
     # the requested features.
     fets = fets[list(in_spc_fet_names)]
-
     # Determine if there are any NaNs or Infs in the results. For the results
     # for each flow, look through all features (columns) and make a note of the
     # features that bad values. Flatten these lists of feature names, using a
@@ -1523,7 +1533,7 @@ def parse_received_acks(
     if bad_fets:
         print(f"Warning: Flow {flw} has NaNs of Infs in features: {bad_fets}")
 
-    return fets
+    return fets, new_min_rtt_sec
 
 
 def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):

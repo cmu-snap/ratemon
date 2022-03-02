@@ -65,7 +65,7 @@ class Flow:
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize
         # The timestamp of the last packet on which we have run inference.
-        self.latest_time_sec = 0
+        self.latest_time_sec = time.time()
         self.label = defaults.Class.APPROX_FAIR
         self.decision = (defaults.Decision.NOT_PACED, None)
 
@@ -133,7 +133,6 @@ def receive_packet_helper(flows, flows_lock, pkt):
     if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
-    # flow = (pkt.flow.saddr, pkt.flow.daddr, pkt.flow.sport, pkt.flow.dport)
     fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
     dat = (
         pkt.seq,
@@ -163,7 +162,7 @@ def receive_packet_helper(flows, flows_lock, pkt):
                     flow.packets.append(dat)
                 finally:
                     flow.lock.release()
-                print(f"{flow} --- {flow_data_to_str(dat)}")
+                # print(f"{flow} --- {flow_data_to_str(dat)}")
         finally:
             flows_lock.release()
 
@@ -184,6 +183,7 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
                 args,
             )
 
+            # print("186")
             with flows_lock:
                 # Do not bother acquiring the per-flow locks since we are just reading
                 # data for logging purposes. It is okay if we get inconsistent
@@ -208,6 +208,7 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
     to_check = []
 
     # Need to acquire flows_lock while iterating over flows.
+    # print("211")
     with flows_lock:
         print(f"Found {len(flows)} flows total:")
         for fourtuple, flow in flows.items():
@@ -258,6 +259,7 @@ def featurize(flows, fourtuple, net, pkts, debug=False):
     Returns a structured numpy array.
     """
     flow = flows[fourtuple]
+    # print("262")
     with flow.lock:
         fets, flow.min_rtt_us = gen_features.parse_received_acks(
             net.in_spc, fourtuple, pkts, flow.min_rtt_us, debug
@@ -291,7 +293,7 @@ def packets_to_ndarray(pkts):
     return pkts
 
 
-def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strategy):
+def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
     """Make a flow unfairness mitigation decision.
 
     Base the decision on the flow's label and existing decision. Use the flow's packets
@@ -309,7 +311,7 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strateg
             new_decision = (
                 defaults.Decision.PACED,
                 reaction_strategy.react_down(
-                    reaction_strategy, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
+                    reaction_strat, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
                 ),
             )
         elif flow.decision == defaults.Decision.PACED:
@@ -320,7 +322,7 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strateg
                 new_decision = (
                     defaults.Decision.PACED,
                     reaction_strategy.react_up(
-                        reaction_strategy, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
+                        reaction_strat, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
                     ),
                 )
             else:
@@ -332,12 +334,18 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strateg
             # leave it alone.
             new_decision = (defaults.Decision.NOT_PACED, None)
 
+        # FIXME: Why are the BDP calculations coming out so small? Is the throughput
+        #        just low due to low application demand?
+
         if flow.decision != new_decision:
-            flow_to_rwnd[FlowKey(*flow.fourtuple)] = ctypes.c_int(
+            assert new_decision[1] > 0, (
+                "Error: RWND must be greater than 0, "
+                f"but is {new_decision[1]} for flow {flow}"
+            )
+            flow_to_rwnd[FlowKey(*flow.fourtuple)] = ctypes.c_ushort(
                 round(new_decision[1])
             )
-
-        flow.decision = new_decision
+            flow.decision = new_decision
 
 
 def condense_labels(labels):
@@ -445,6 +453,8 @@ def _main():
         type=str,
     )
     args = parser.parse_args()
+    args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
+    args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
 
     assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
     assert path.isfile(args.model_file), f"Model does not exist: {args.model_file}"
@@ -547,8 +557,6 @@ def _main():
             bpf.perf_buffer_poll()
     except KeyboardInterrupt:
         print("Cancelled.")
-        # global DONE
-        # DONE = True
         done.set()
     finally:
         print("Cleaning up...")

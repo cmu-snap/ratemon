@@ -14,6 +14,7 @@
 #include <net/ip.h>
 #include <net/sock.h>
 
+
 struct flow_t
 {
     u32 saddr;
@@ -43,7 +44,7 @@ struct pkt_t
 };
 
 BPF_PERF_OUTPUT(pkts);
-BPF_HASH(flow_to_rwnd, struct flow_t, u32);
+BPF_HASH(flow_to_rwnd, struct flow_t, u16);
 
 // Need to redefine these because the BCC rewriter does not support rewriting
 // ip_hdr()'s internal dereferences of skb members.
@@ -94,7 +95,8 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     // pkt.flow.sport = ntohs(sport);
     pkt.dport = ntohs(dport);
     pkt.sport = ntohs(sport);
-    pkt.seq = tcp->seq;
+    u32 seq = tcp->seq;
+    pkt.seq = ntohs(seq);
 
     struct tcp_sock *ts = tcp_sk(sk);
     pkt.srtt_us = ts->srtt_us >> 3;
@@ -249,24 +251,27 @@ int handle_egress(struct __sk_buff *skb)
     flow.sport = ntohs(sport);
     flow.dport = ntohs(dport);
 
-    bpf_trace_printk("Looking up RWND for flow: %d:%d\n", flow.daddr, flow.dport);
+    // bpf_trace_printk("Looking up RWND for flow: %d:%d\n", flow.daddr, flow.dport);
 
     // Look up the RWND value for this flow.
-    u32 *rwnd = flow_to_rwnd.lookup(&flow);
+    u16 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
         return TC_ACT_OK;
     }
 
-    bpf_trace_printk("Setting RWND for flow %d:%d = %d\n", flow.daddr, flow.dport, rwnd);
+    bpf_trace_printk("Setting RWND for flow %d:%d = %d\n", flow.daddr, flow.dport, *rwnd);
 
-    // Write the new RWND value into the packet.
-    bpf_skb_store_bytes(
-        skb,
-        ((void *)tcp + 14 - (void *)skb),
-        rwnd,
-        sizeof(u32),
-        BPF_F_RECOMPUTE_CSUM);
+    // u16 rwnd = htons(10000);
+
+    // // Write the new RWND value into the packet.
+    // bpf_skb_store_bytes(
+    //     skb,
+    //     ((void *)tcp + 14 - (void *)skb),
+    //     &rwnd,
+    //     sizeof(u16),
+    //     BPF_F_RECOMPUTE_CSUM);
+    tcp->window = *rwnd;
 
     return TC_ACT_OK;
 }
