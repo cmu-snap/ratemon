@@ -17,15 +17,14 @@
 
 struct flow_t
 {
-    u32 saddr;
-    u32 daddr;
-    u16 sport;
-    u16 dport;
+    u32 local_addr;
+    u32 remote_addr;
+    u16 local_port;
+    u16 remote_port;
 };
 
 struct pkt_t
 {
-    // struct flow_t flow;
     u32 saddr;
     u32 daddr;
     u16 sport;
@@ -52,6 +51,7 @@ BPF_HASH(flow_to_rwnd, struct flow_t, u16);
 static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
 {
     // unstable API. verify logic in ip_hdr() -> skb_network_header().
+    // https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L2286
     return (struct iphdr *)(skb->head + skb->network_header);
 }
 
@@ -61,6 +61,7 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
 static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 {
     // unstable API. verify logic in tcp_hdr() -> skb_transport_header().
+    // https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L2269
     return (struct tcphdr *)(skb->head + skb->transport_header);
 }
 
@@ -83,20 +84,18 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
     struct pkt_t pkt = {};
-    // pkt.flow.saddr = ip->saddr;
-    // pkt.flow.daddr = ip->daddr;
     pkt.saddr = ip->saddr;
     pkt.daddr = ip->daddr;
 
     struct tcphdr *tcp = skb_to_tcphdr(skb);
     u16 sport = tcp->source;
     u16 dport = tcp->dest;
-    // pkt.flow.dport = ntohs(dport);
-    // pkt.flow.sport = ntohs(sport);
     pkt.dport = ntohs(dport);
     pkt.sport = ntohs(sport);
     u32 seq = tcp->seq;
-    pkt.seq = ntohs(seq);
+    pkt.seq = ntohl(seq);
+
+    // bpf_trace_printk("daddr: %d, dport: %d, seq: %d\n", pkt.daddr, pkt.dport, pkt.seq);
 
     struct tcp_sock *ts = tcp_sk(sk);
     pkt.srtt_us = ts->srtt_us >> 3;
@@ -244,25 +243,36 @@ int handle_egress(struct __sk_buff *skb)
 
     // Prepare the lookup key.
     struct flow_t flow;
-    flow.saddr = ip->saddr;
-    flow.daddr = ip->daddr;
-    u16 sport = tcp->source;
-    u16 dport = tcp->dest;
-    flow.sport = ntohs(sport);
-    flow.dport = ntohs(dport);
+    flow.local_addr = ip->saddr;
+    flow.remote_addr = ip->daddr;
+    u16 local_port = tcp->source;
+    u16 remote_port = tcp->dest;
+    flow.local_port = ntohs(local_port);
+    flow.remote_port = ntohs(remote_port);
 
-    // bpf_trace_printk("Looking up RWND for flow: %d:%d\n", flow.daddr, flow.dport);
+    bpf_trace_printk("local_addr: %u ", flow.local_addr);
+    bpf_trace_printk("remote_addr: %u ", flow.remote_addr);
+    bpf_trace_printk("local_port: %u ", flow.local_port);
+    bpf_trace_printk("remote_port: %u\n", flow.remote_port);
+
+    bpf_trace_printk("Looking up RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
 
     // Look up the RWND value for this flow.
     u16 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
+        bpf_trace_printk("Warning: Could not find RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
+        bpf_trace_printk("Warning: Could not find RWND for flow (remote): %u:%u\n", flow.remote_addr, flow.remote_port);
         return TC_ACT_OK;
     }
 
-    bpf_trace_printk("Setting RWND for flow %d:%d = %d\n", flow.daddr, flow.dport, *rwnd);
+    bpf_trace_printk("Setting RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, *rwnd);
 
     // u16 rwnd = htons(10000);
+
+    // TODO: Need to take window scaling into account. The scaling option is part of
+    //       the handshake. Detect if an outgoing packet is part of a handshake and
+    //       extract the window scale option and store it in a map.
 
     // // Write the new RWND value into the packet.
     // bpf_skb_store_bytes(

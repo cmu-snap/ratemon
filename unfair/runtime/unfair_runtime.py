@@ -39,10 +39,10 @@ class FlowKey(ctypes.Structure):
     """A struct to use as the key in maps in the corresponding eBPF program."""
 
     _fields_ = [
-        ("saddr", ctypes.c_uint),
-        ("daddr", ctypes.c_uint),
-        ("sport", ctypes.c_ushort),
-        ("dport", ctypes.c_ushort),
+        ("local_addr", ctypes.c_uint),
+        ("remote_addr", ctypes.c_uint),
+        ("local_port", ctypes.c_ushort),
+        ("remote_port", ctypes.c_ushort),
     ]
 
 
@@ -151,7 +151,7 @@ def receive_packet_helper(flows, flows_lock, pkt):
         try:
             if fourtuple in flows:
                 flow = flows[fourtuple]
-            if fourtuple not in flows:
+            else:
                 flow = Flow(fourtuple)
                 flows[fourtuple] = flow
 
@@ -235,7 +235,9 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
         for fourtuple in to_remove:
             print(f"\t{flows[fourtuple]}")
             del flows[fourtuple]
-            del flow_to_rwnd[FlowKey(*fourtuple)]
+            flow_key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
+            if flow_key in flow_to_rwnd:
+                del flow_to_rwnd[flow_key]
 
     print(f"Checking {len(to_check)} flows...")
     for fourtuple in to_check:
@@ -271,6 +273,9 @@ def featurize(flows, fourtuple, net, pkts, debug=False):
 
 def packets_to_ndarray(pkts):
     """Reorganize a list of packet metrics into a structured numpy array."""
+    # For some reason, the packets tend to get reordered after they are timestamped on
+    # arrival. Sort packets by timestamp.
+    pkts = sorted(pkts, key=lambda pkt: pkt[-1])
     (
         seqs,
         srtts_us,
@@ -342,9 +347,11 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
                 "Error: RWND must be greater than 0, "
                 f"but is {new_decision[1]} for flow {flow}"
             )
-            flow_to_rwnd[FlowKey(*flow.fourtuple)] = ctypes.c_ushort(
+            flow_to_rwnd[FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])] = ctypes.c_ushort(
                 round(new_decision[1])
             )
+            for foo, bar in flow_to_rwnd.items():
+                print(foo.local_addr, foo.remote_addr, foo.local_port, foo.remote_port, bar)
             flow.decision = new_decision
 
 

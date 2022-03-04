@@ -325,8 +325,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             retrans = recv_seq in unique_pkts or (
                 prev_seq is not None
                 and prev_payload_bytes is not None
-                and (prev_seq + (1 if packet_seq else prev_payload_bytes))
-                > recv_seq
+                and (prev_seq + (1 if packet_seq else prev_payload_bytes)) > recv_seq
             )
             if retrans:
                 # If this packet is a multiple retransmission, then this line
@@ -498,11 +497,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     retrans
                 )
                 else round(
-                    (
-                        recv_seq
-                        - (1 if packet_seq else prev_payload_bytes)
-                        - prev_seq
-                    )
+                    (recv_seq - (1 if packet_seq else prev_payload_bytes) - prev_seq)
                     / (1 if packet_seq else payload_bytes)
                 )
             )
@@ -1093,14 +1088,15 @@ def parse_received_acks(
     # difference between subsequent packets and make sure that it is never
     # negative.
     #
-    # TODO: Figure out why ACKs are not in order.
-    # assert (
-    #     (
-    #         recv_pkts[features.ARRIVAL_TIME_FET][1:]
-    #         - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
-    #     )
-    #     >= 0
-    # ).all(), "Packet arrival times are not monotonically increasing!"
+    # TODO: For some reason, the packets tend to get reordered after they are
+    # timestamped on arrival. Figure out why.
+    assert (
+        (
+            recv_pkts[features.ARRIVAL_TIME_FET][1:]
+            - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
+        )
+        >= 0
+    ).all(), "Packet arrival times are not monotonically increasing!"
 
     # Transform absolute times into relative times to make life easier.
     recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
@@ -1243,7 +1239,6 @@ def parse_received_acks(
         )
         if pkt_loss_cur_estimate > 1000:
             print("warning")
-
 
         if pkt_loss_cur_estimate != -1:
             pkt_loss_total_estimate += pkt_loss_cur_estimate
