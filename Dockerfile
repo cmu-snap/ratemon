@@ -12,19 +12,28 @@ RUN apt-get update && \
         flex \
         git \
         libedit-dev \
+        libjpeg-dev \
         libllvm7 \
         llvm-7-dev \
         libclang-7-dev \
-        python \
         zlib1g-dev \
         libelf-dev \
         libfl-dev \
         openssh-client \
-        python3-distutils \
-        python3-venv && \
+        software-properties-common && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install tools and dependencies. Clean the apt metadata afterwards.
+RUN add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    DEBIAN_FRONTEND="noninteractive" apt-get -y --no-install-recommends install \
+        python3.6 \
+        python3.6-venv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# python3.6-distutils \
 # # Need to set up an SSH key in order to clone with SSH.
 # RUN mkdir "/.ssh" && ssh-keygen -t rsa -N '' -f "/.ssh/id_rsa"
 # RUN ls /.ssh
@@ -35,18 +44,23 @@ RUN apt-get update && \
 COPY requirements.txt /requirements.txt
 
 # Prepare python virtualenv
-RUN python3 -m venv .venv && \
+RUN python3.6 -m venv .venv && \
     . /.venv/bin/activate && \
+    pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Install bcc
-RUN git clone https://github.com/iovisor/bcc.git && git checkout v0.24.0
+RUN git clone https://github.com/iovisor/bcc.git
 WORKDIR /bcc
-RUN mkdir build && cd build && \
+RUN . /.venv/bin/activate && \
+    git checkout v0.24.0 && \
+    mkdir build && cd build && \
     cmake .. && \
     make -j "$(nproc)" && \
-    sudo make install && \
+    make install && \
     cmake -DPYTHON_CMD="$(which python)" .. && \
     cd src/python && \
     make -j "$(nproc)" && \
-    sudo make install
+    make install
+
+WORKDIR "$HOME"

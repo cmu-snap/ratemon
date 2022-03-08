@@ -250,9 +250,15 @@ int handle_egress(struct __sk_buff *skb)
     flow.local_port = ntohs(local_port);
     flow.remote_port = ntohs(remote_port);
 
-    bpf_trace_printk("local_addr: %u ", flow.local_addr);
-    bpf_trace_printk("remote_addr: %u ", flow.remote_addr);
-    bpf_trace_printk("local_port: %u ", flow.local_port);
+    // For debugging purposes, only modify flows from local port 9998-10000.
+    if (flow.local_port < 9998 || flow.local_port > 10000)
+    {
+        return TC_ACT_OK;
+    }
+
+    bpf_trace_printk("local_addr: %u\n", flow.local_addr);
+    bpf_trace_printk("remote_addr: %u\n", flow.remote_addr);
+    bpf_trace_printk("local_port: %u\n", flow.local_port);
     bpf_trace_printk("remote_port: %u\n", flow.remote_port);
 
     bpf_trace_printk("Looking up RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
