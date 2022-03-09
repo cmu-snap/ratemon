@@ -20,6 +20,7 @@ RUN apt-get update && \
         libclang-7-dev \
         libelf-dev \
         libfl-dev \
+        "linux-headers-$(uname -r)" \
         net-tools \
         openssh-client \
         software-properties-common \
