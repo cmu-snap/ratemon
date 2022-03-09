@@ -1,5 +1,5 @@
 
-FROM ubuntu:20.04
+FROM ubuntu:18.04
 
 ENV HOME="/"
 
@@ -26,25 +26,28 @@ RUN apt-get update && \
         tmux \
         tree \
         vim \
+        python3 \
+        python3-venv \
         zlib1g-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install python. Clean the apt metadata afterwards. This happens separately
-# because we need "add-apt-repository" from "software-properties-common".
-RUN add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get update && \
-    DEBIAN_FRONTEND="noninteractive" apt-get -y --no-install-recommends install \
-        python3.6 \
-        python3.6-venv && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# # Install python. Clean the apt metadata afterwards. This happens separately
+# # because we need "add-apt-repository" from "software-properties-common".
+# RUN add-apt-repository -y ppa:deadsnakes/ppa && \
+#     apt-get update && \
+#     DEBIAN_FRONTEND="noninteractive" apt-get -y --no-install-recommends install \
+#         python3.6 \
+#         python3.6-venv && \
+#     apt-get clean && \
+#     rm -rf /var/lib/apt/lists/*
 
 # Prepare python virtualenv.
 COPY requirements.txt /requirements.txt
-RUN python3.6 -m venv .venv && \
+RUN python3 -m venv .venv && \
     . /.venv/bin/activate && \
     pip install --upgrade pip && \
+    pip install wheel && \
     pip install -r /requirements.txt
 
 # Install bcc.
