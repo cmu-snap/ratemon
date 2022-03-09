@@ -9,18 +9,23 @@ RUN apt-get update && \
         bison \
         build-essential \
         cmake \
+        emacs \
         flex \
         git \
+        less \
         libedit-dev \
         libjpeg-dev \
         libllvm7 \
         llvm-7-dev \
         libclang-7-dev \
-        zlib1g-dev \
         libelf-dev \
         libfl-dev \
+        net-tools \
         openssh-client \
-        software-properties-common && \
+        software-properties-common \
+        tmux \
+        tree \
+        zlib1g-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -58,7 +63,7 @@ RUN . /.venv/bin/activate && \
     cmake .. && \
     make -j "$(nproc)" && \
     make install && \
-    cmake -DPYTHON_CMD="$(which python)" .. && \
+    cmake -DCMAKE_INSTALL_PREFIX="/.venv" -DPYTHON_CMD="$(which python)" .. && \
     cd src/python && \
     make -j "$(nproc)" && \
     make install

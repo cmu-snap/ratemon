@@ -31,8 +31,8 @@
                 "--limit=100",
                 // "--disable-inference",
                 "--model=HistGbdtSklearn",
-                "--model-file=/home/ccanel/out/cloudlab/2021-5-12/cubic-bbr/model_False-1-3-False-False-100-2-linear-0-0.001-10-10-100-HistGbdtSklearn-0.09-100-True-None-0-l1-None-100.0-False-0-None-0.1-10-0.pickle",
-                "--interface=eno1"
+                "--model-file=/out/cloudlab/2021-5-12/cubic-bbr/model_False-1-3-False-False-100-2-linear-0-0.001-10-10-100-HistGbdtSklearn-0.09-100-True-None-0-l1-None-100.0-False-0-None-0.1-10-0.pickle",
+                "--interface=eth0"
             ],
             "autoReload": {
                 "enable": false
@@ -41,7 +41,7 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             },
-            "sudo": true
+            "sudo": false
         },
         {
             "name": "(r) train cubic cubic",
