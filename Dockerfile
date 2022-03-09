@@ -29,7 +29,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install tools and dependencies. Clean the apt metadata afterwards.
+# Install python. Clean the apt metadata afterwards. This happens separately
+# because we need "add-apt-repository" from "software-properties-common".
 RUN add-apt-repository -y ppa:deadsnakes/ppa && \
     apt-get update && \
     DEBIAN_FRONTEND="noninteractive" apt-get -y --no-install-recommends install \
@@ -38,23 +39,14 @@ RUN add-apt-repository -y ppa:deadsnakes/ppa && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# python3.6-distutils \
-# # Need to set up an SSH key in order to clone with SSH.
-# RUN mkdir "/.ssh" && ssh-keygen -t rsa -N '' -f "/.ssh/id_rsa"
-# RUN ls /.ssh
-# RUN git config --global core.sshCommand "ssh -i /.ssh/id_rsa -F /dev/null"
-
-# RUN git submodule update --init
-
+# Prepare python virtualenv.
 COPY requirements.txt /requirements.txt
-
-# Prepare python virtualenv
 RUN python3.6 -m venv .venv && \
     . /.venv/bin/activate && \
     pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r /requirements.txt
 
-# Install bcc
+# Install bcc.
 RUN git clone https://github.com/iovisor/bcc.git
 WORKDIR /bcc
 RUN . /.venv/bin/activate && \
