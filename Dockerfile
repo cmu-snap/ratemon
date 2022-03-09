@@ -1,3 +1,5 @@
+# Note: I have tested this with python3.6 only. If you have trouble, try using
+#       python3.6.
 
 FROM ubuntu:18.04
 
@@ -33,8 +35,11 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# # Install python. Clean the apt metadata afterwards. This happens separately
-# # because we need "add-apt-repository" from "software-properties-common".
+# Note: This is not required for Ubuntu 18.04 because the default version of python3
+#       is python3.6
+#
+# Install python3.6. Clean the apt metadata afterwards. This happens separately
+# because we need "add-apt-repository" from "software-properties-common".
 # RUN add-apt-repository -y ppa:deadsnakes/ppa && \
 #     apt-get update && \
 #     DEBIAN_FRONTEND="noninteractive" apt-get -y --no-install-recommends install \
