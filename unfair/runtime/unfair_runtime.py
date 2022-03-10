@@ -7,6 +7,7 @@ from os import path
 import pickle
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -33,6 +34,8 @@ LOCALHOST = ip_str_to_int("127.0.0.1")
 # Flows that have not received a new packet in this many seconds will be
 # garbage collected.
 OLD_THRESH_SEC = 5 * 60
+# The sysctl configuration item for TCP window scaling.
+WINDOW_SCALING_CONFIG = "net.ipv4.tcp_window_scaling"
 
 
 class FlowKey(ctypes.Structure):
@@ -72,6 +75,45 @@ class Flow:
     def __str__(self):
         """Create a string representation of this flow."""
         return flow_to_str(self.fourtuple)
+
+
+def disable_window_scaling():
+    """Disable TCP window scaling."""
+    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=0"', shell=True)
+
+
+def enable_window_scaling():
+    """Enable TCP window scaling."""
+    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=1"', shell=True)
+
+
+def load_bpf(debug=False):
+    """Load the corresponding eBPF program."""
+    # Load BPF text.
+    bpf_flp = path.join(
+        path.abspath(path.dirname(__file__)),
+        path.basename(__file__).strip().split(".")[0] + ".c",
+    )
+    if not path.isfile(bpf_flp):
+        print(f"Could not find BPF program: {bpf_flp}")
+        return 1
+    print(f"Loading BPF program: {bpf_flp}")
+    with open(bpf_flp, "r", encoding="utf-8") as fil:
+        bpf_text = fil.read()
+    if debug:
+        print(bpf_text)
+
+    # Load BPF program.
+    return BPF(text=bpf_text)
+
+
+def load_model(model, model_file):
+    """Load the provided trained model."""
+    assert path.isfile(model_file), f"Model does not exist: {model_file}"
+    net = models.MODELS[model]()
+    with open(model_file, "rb") as fil:
+        net.net = pickle.load(fil)
+    return net
 
 
 def int_to_ip_str(ip_int):
@@ -347,11 +389,17 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
                 "Error: RWND must be greater than 0, "
                 f"but is {new_decision[1]} for flow {flow}"
             )
-            flow_to_rwnd[FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])] = ctypes.c_ushort(
-                round(new_decision[1])
-            )
+            flow_to_rwnd[
+                FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
+            ] = ctypes.c_ushort(round(new_decision[1]))
             for foo, bar in flow_to_rwnd.items():
-                print(foo.local_addr, foo.remote_addr, foo.local_port, foo.remote_port, bar)
+                print(
+                    foo.local_addr,
+                    foo.remote_addr,
+                    foo.local_port,
+                    foo.remote_port,
+                    bar,
+                )
             flow.decision = new_decision
 
 
@@ -410,7 +458,8 @@ def inference(flows, fourtuple, net, pkts, debug=False):
     return [defaults.Class(pred) for pred in preds]
 
 
-def _main():
+def parse_args():
+    """Parse arguments."""
     parser = ArgumentParser(description="Squelch unfair flows.")
     parser.add_argument("-i", "--interval-ms", help="Poll interval (ms)", type=float)
     parser.add_argument(
@@ -462,71 +511,27 @@ def _main():
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
-
     assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
-    assert path.isfile(args.model_file), f"Model does not exist: {args.model_file}"
+    return args
 
-    net = models.MODELS[args.model]()
-    with open(args.model_file, "rb") as fil:
-        net.net = pickle.load(fil)
 
-    # Maps each flow (four-tuple) to a list of packets for that flow. New
-    # packets are appended to the ends of these lists. Periodically, a flow's
-    # packets are consumed by the inference engine and that flow's list is
-    # reset to empty.
-    flows = dict()  # defaultdict(list)
-    # Maps each flow (four-tuple) to a tuple of fairness state:
-    #   (is_fair, response)
-    # where is_fair is either -1 (no label), 0 (below fair), 1 (approximately
-    # fair), or 2 (above fair) and response is a either ACK pacing rate or RWND
-    #  value.
-    # fairness_db = dict()  # defaultdict(lambda: (-1, 0))
-
-    # Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
-    # when adding, removing, or iterating over flows; no need to acquire this lock when
-    # updating a flow object.
-    flows_lock = threading.RLock()
-
-    done = threading.Event()
-    done.clear()
-
-    # Load BPF text.
-    bpf_flp = path.join(
-        path.abspath(path.dirname(__file__)),
-        path.basename(__file__).strip().split(".")[0] + ".c",
-    )
-    if not path.isfile(bpf_flp):
-        print(f"Could not find BPF program: {bpf_flp}")
-        return 1
-    print(f"Loading BPF program: {bpf_flp}")
-    with open(bpf_flp, "r", encoding="utf-8") as fil:
-        bpf_text = fil.read()
-    if args.debug:
-        print(bpf_text)
+def run(args):
+    """Core logic."""
+    net = load_model(args.model, args.model_file)
 
     # Load BPF program.
-    bpf = BPF(text=bpf_text)
+    bpf = load_bpf(args.debug)
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
-    # bpf.attach_kprobe(event="tc_egress", fn_name="trace_tc_egress")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
-
     flow_to_rwnd = bpf["flow_to_rwnd"]
 
-    # Set up the inference thread.
-    check_thread = threading.Thread(
-        target=check_loop,
-        args=(flows, flows_lock, net, args, flow_to_rwnd, done),
-    )
-    check_thread.start()
-
-    # # Configure unfairness mitigation strategy.
-
+    # Configure unfairness mitigation strategy.
     ipr = IPRoute()
     ifindex = ipr.link_lookup(ifname=args.interface)
     assert len(ifindex) == 1
     ifindex = ifindex[0]
-    # # ipr.tc("add", "pfifo", 0, "1:")
-    # # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
+    # ipr.tc("add", "pfifo", 0, "1:")
+    # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
 
     # There can also be a chain of actions, which depend on the return
     # value of the previous action.
@@ -548,6 +553,26 @@ def _main():
     except NetlinkError:
         print("Error: Unable to configure TC.")
         return 1
+
+    # Maps each flow (four-tuple) to a list of packets for that flow. New
+    # packets are appended to the ends of these lists. Periodically, a flow's
+    # packets are consumed by the inference engine and that flow's list is
+    # reset to empty.
+    flows = dict()
+    # Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
+    # when adding, removing, or iterating over flows; no need to acquire this lock when
+    # updating a flow object.
+    flows_lock = threading.RLock()
+    # Flag to trigger threads to terminate.
+    done = threading.Event()
+    done.clear()
+
+    # Set up the inference thread.
+    check_thread = threading.Thread(
+        target=check_loop,
+        args=(flows, flows_lock, net, args, flow_to_rwnd, done),
+    )
+    check_thread.start()
 
     # This function will be called to process an event from the BPF program.
     def process_event(cpu, dat, size):
@@ -574,7 +599,16 @@ def _main():
     #     print("\t", flow_to_str(flow), len(pkts))
 
     check_thread.join()
-    return 0
+
+
+def _main():
+    args = parse_args()
+    # Disable window scaling while this program is running.
+    disable_window_scaling()
+    try:
+        return run(args)
+    finally:
+        enable_window_scaling()
 
 
 if __name__ == "__main__":
