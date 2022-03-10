@@ -35,6 +35,7 @@
 	// Uncomment to connect as a non-root user if you've added one. See https://aka.ms/vscode-remote/containers/non-root.
 	// "remoteUser": "vscode"
 	"mounts": [
-		"source=/home/ccanel/out,target=/out,type=bind"
+		"source=/home/ccanel/out,target=/out,type=bind",
+		"source=/usr/src/linux-headers-4.15.0-169,target=/usr/src/4.15.0-169-generic,type=bind"
 	]
 }
