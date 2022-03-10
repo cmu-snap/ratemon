@@ -14,7 +14,6 @@
 #include <net/ip.h>
 #include <net/sock.h>
 
-
 struct flow_t
 {
     u32 local_addr;
@@ -152,47 +151,6 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     pkts.perf_submit(ctx, &pkt, sizeof(pkt));
     return 0;
 }
-
-// int trace_tc_egress(struct pt_regs *ctx, struct sk_buff *skb)
-// {
-//     if (skb == NULL)
-//     {
-//         return 0;
-//     }
-//     // Check this is IPv4.
-//     if (skb->protocol != htons(ETH_P_IP))
-//     {
-//         return 0;
-//     }
-
-//     struct iphdr *ip = skb_to_iphdr(skb);
-//     // Check this is TCP.
-//     if (ip->protocol != IPPROTO_TCP)
-//     {
-//         return 0;
-//     }
-
-//     struct tcphdr *tcp = skb_to_tcphdr(skb);
-
-//     // // Determine the size of the TCP header. See above note about IP header length.
-//     // u16 ack;
-//     // // The TCP data offset is located after the ACK sequence number in the TCP
-//     // // header.
-//     // bpf_probe_read(&thl, sizeof(ack), &tcp->ack_seq + 4);
-//     // if (! (ack & TCP_FLAG_ACK)) {
-//     //     return 0;
-//     // }
-
-//     u32 saddr = ip->saddr;
-//     u32 daddr = ip->daddr;
-//     u16 sport = tcp->source;
-//     u16 dport = tcp->dest;
-//     sport = ntohs(dport);
-//     sport = ntohs(sport);
-
-//     bpf_trace_printk("packet sent: %d -> %d", saddr, daddr);
-//     return 0;
-// }
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
