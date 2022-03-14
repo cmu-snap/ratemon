@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """Monitors incoming TCP flows to detect unfairness."""
 
 from argparse import ArgumentParser
@@ -340,7 +339,7 @@ def packets_to_ndarray(pkts):
     return pkts
 
 
-def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
+def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
     """Make a flow unfairness mitigation decision.
 
     Base the decision on the flow's label and existing decision. Use the flow's packets
@@ -351,35 +350,43 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
     """
     flow = flows[fourtuple]
     with flow.lock:
-        tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
-
-        if flow.label == defaults.Class.ABOVE_FAIR:
-            # This flow is sending too fast. Force the sender to halve its rate.
+        if args.reaction_strategy == ReactionStrategy.FILE:
             new_decision = (
                 defaults.Decision.PACED,
-                reaction_strategy.react_down(
-                    reaction_strat, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
-                ),
+                reaction_strategy.get_scheduled_pacing(args.schedule),
             )
-        elif flow.decision == defaults.Decision.PACED:
-            # We are already pacing this flow.
-            if flow.label == defaults.Class.BELOW_FAIR:
-                # If we are already pacing this flow but we are being too aggressive,
-                # then let it send faster.
+        else:
+            tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
+
+            if flow.label == defaults.Class.ABOVE_FAIR:
+                # This flow is sending too fast. Force the sender to halve its rate.
                 new_decision = (
                     defaults.Decision.PACED,
-                    reaction_strategy.react_up(
-                        reaction_strat, utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6)
+                    reaction_strategy.react_down(
+                        args.reaction_strategy,
+                        utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6),
                     ),
                 )
+            elif flow.decision == defaults.Decision.PACED:
+                # We are already pacing this flow.
+                if flow.label == defaults.Class.BELOW_FAIR:
+                    # If we are already pacing this flow but we are being too aggressive,
+                    # then let it send faster.
+                    new_decision = (
+                        defaults.Decision.PACED,
+                        reaction_strategy.react_up(
+                            args.reaction_strategy,
+                            utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6),
+                        ),
+                    )
+                else:
+                    # If we are already pacing this flow and it is behaving as desired, then
+                    # all is well. Retain the existing pacing decision.
+                    new_decision = flow.decision
             else:
-                # If we are already pacing this flow and it is behaving as desired, then
-                # all is well. Retain the existing pacing decision.
-                new_decision = flow.decision
-        else:
-            # This flow is not already being paced and is not behaving unfairly, so
-            # leave it alone.
-            new_decision = (defaults.Decision.NOT_PACED, None)
+                # This flow is not already being paced and is not behaving unfairly, so
+                # leave it alone.
+                new_decision = (defaults.Decision.NOT_PACED, None)
 
         # FIXME: Why are the BDP calculations coming out so small? Is the throughput
         #        just low due to low application demand?
@@ -392,14 +399,6 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, reaction_strat):
             flow_to_rwnd[
                 FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
             ] = ctypes.c_ushort(round(new_decision[1]))
-            for foo, bar in flow_to_rwnd.items():
-                print(
-                    foo.local_addr,
-                    foo.remote_addr,
-                    foo.local_port,
-                    foo.remote_port,
-                    bar,
-                )
             flow.decision = new_decision
 
 
@@ -435,9 +434,7 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
         print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
 
         flow.label = condense_labels(labels)
-        make_decision(
-            flows, fourtuple, pkts_ndarray, flow_to_rwnd, args.reaction_strategy
-        )
+        make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args)
         print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
 
         # Clear the flow's packets.
@@ -502,6 +499,17 @@ def parse_args():
         type=str,
     )
     parser.add_argument(
+        "--schedule",
+        help=(
+            f"A CSV file specifying a pacing schedule to use with the "
+            f'"{reaction_strategy.to_str(ReactionStrategy.FILE)}" reaction strategy. '
+            "Each line should be of the form: <start time (seconds)>,<RWND>. "
+            "*Note* Allow at least 10 seconds for warmup."
+        ),
+        required=False,
+        type=str,
+    )
+    parser.add_argument(
         "--mitigation-strategy",
         choices=mitigation_strategy.choices(),
         default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
@@ -512,6 +520,10 @@ def parse_args():
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
     assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
+
+    assert args.reaction_strategy == ReactionStrategy.FILE and args.schedule is not None
+    args.schedule = ReactionStrategy.parse_pacing_schedule(args.schedule)
+
     return args
 
 
