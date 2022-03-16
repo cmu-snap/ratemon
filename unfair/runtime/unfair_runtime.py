@@ -1,7 +1,9 @@
 """Monitors incoming TCP flows to detect unfairness."""
 
 from argparse import ArgumentParser
+import atexit
 import ctypes
+import os
 from os import path
 import pickle
 import socket
@@ -12,11 +14,10 @@ import threading
 import time
 
 import torch
-from pyroute2 import IPRoute
-from pyroute2 import protocols
+from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
 
-from bcc import BPF
+from bcc import BPF, BPFAttachType
 
 from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import mitigation_strategy, reaction_strategy
@@ -46,6 +47,9 @@ class FlowKey(ctypes.Structure):
         ("local_port", ctypes.c_ushort),
         ("remote_port", ctypes.c_ushort),
     ]
+
+    def __str__(self):
+        return f"raddr: {self.remote_addr}, laddr: {self.local_addr}, rport: {self.remote_port}, lport: {self.local_port}"
 
 
 class Flow:
@@ -396,9 +400,14 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
                 "Error: RWND must be greater than 0, "
                 f"but is {new_decision[1]} for flow {flow}"
             )
-            flow_to_rwnd[
-                FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
-            ] = ctypes.c_ushort(round(new_decision[1]))
+            print(f"Setting flow {flow} RWND to: {round(new_decision[1])}")
+            key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
+            print(f"Key: {key}")
+            flow_to_rwnd[key] = ctypes.c_ushort(round(new_decision[1]))
+
+            for foo, bar in flow_to_rwnd.items():
+                print(foo.local_port, foo.remote_port, bar)
+
             flow.decision = new_decision
 
 
@@ -521,8 +530,12 @@ def parse_args():
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
     assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
 
-    assert args.reaction_strategy == ReactionStrategy.FILE and args.schedule is not None
-    args.schedule = ReactionStrategy.parse_pacing_schedule(args.schedule)
+    assert (
+        args.reaction_strategy != ReactionStrategy.FILE or args.schedule is not None
+    ), "Must specify schedule file."
+    if args.schedule is not None:
+        assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
+        args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
 
     return args
 
@@ -536,6 +549,17 @@ def run(args):
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
+
+    func_sock_ops = bpf.load_func("sock_stuff", bpf.SOCK_OPS)
+    fd = os.open("/sys/fs/bpf", os.O_RDONLY)
+    bpf.attach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+    # bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+
+    def detach():
+        print("Detaching...")
+        bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+
+    atexit.register(detach)
 
     # Configure unfairness mitigation strategy.
     ipr = IPRoute()

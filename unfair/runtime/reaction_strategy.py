@@ -90,7 +90,7 @@ def parse_pacing_schedule(flp):
                 raise RuntimeError(f"Improperly formed schedule line: {line}") from exc
 
     assert len(schedule) > 0
-    return sorted(schedule, lambda p: p[0])
+    return sorted(schedule, key=lambda p: p[0])
 
 
 def get_scheduled_pacing(schedule):
