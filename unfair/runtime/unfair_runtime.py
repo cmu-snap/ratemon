@@ -551,14 +551,13 @@ def run(args):
     flow_to_rwnd = bpf["flow_to_rwnd"]
 
     func_sock_ops = bpf.load_func("sock_stuff", bpf.SOCK_OPS)
-    fd = os.open("/sys/fs/bpf", os.O_RDONLY)
+    fd = os.open("/home/ccanel/cgroups_test", os.O_RDONLY)
     bpf.attach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
     # bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
 
     def detach():
-        print("Detaching...")
+        print("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-
     atexit.register(detach)
 
     # Configure unfairness mitigation strategy.

@@ -72,14 +72,13 @@ static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
     return (struct tcphdr *)(skb->head + skb->transport_header);
 }
 
-
 // Get the total length in bytes of a TCP header.
 static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
 {
     // The TCP data offset is located after the ACK sequence number in the TCP
     // header.
     // bpf_probe_read(&thl, sizeof(thl), &tcp->ack_seq + 4);
-    u8 thl = *(u8*)(&tcp->ack_seq + 4);
+    u8 thl = *(u8 *)(&tcp->ack_seq + 4);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     thl = (thl & 0x0f) >> 4;
 #elif __BYTE_ORDER == __BIG_ENDIAN
@@ -132,19 +131,19 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     u16 total_bytes = ip->tot_len;
     pkt.total_bytes = ntohs(total_bytes);
 
-//     // Determine the size of the IP header. The header length is in a bitfield,
-//     // but BPF cannot read bitfield elements. So we need to read a larger chunk
-//     // of bytes and extract the header length from that. Same for the TCP
-//     // header. We only read a single byte, so we do not need to use ntohs().
-//     u8 ihl;
-//     // The IP header length is the first field in the IP header.
-//     bpf_probe_read(&ihl, sizeof(ihl), &ip->tos - 1);
-// #if __BYTE_ORDER == __LITTLE_ENDIAN
-//     ihl = (ihl & 0xf0) >> 4;
-// #elif __BYTE_ORDER == __BIG_ENDIAN
-//     ihl = ihl & 0x0f;
-// #endif
-//     pkt.ihl_bytes = (u32)ihl * 4;
+    //     // Determine the size of the IP header. The header length is in a bitfield,
+    //     // but BPF cannot read bitfield elements. So we need to read a larger chunk
+    //     // of bytes and extract the header length from that. Same for the TCP
+    //     // header. We only read a single byte, so we do not need to use ntohs().
+    //     u8 ihl;
+    //     // The IP header length is the first field in the IP header.
+    //     bpf_probe_read(&ihl, sizeof(ihl), &ip->tos - 1);
+    // #if __BYTE_ORDER == __LITTLE_ENDIAN
+    //     ihl = (ihl & 0xf0) >> 4;
+    // #elif __BYTE_ORDER == __BIG_ENDIAN
+    //     ihl = ihl & 0x0f;
+    // #endif
+    //     pkt.ihl_bytes = (u32)ihl * 4;
 
     tcp_hdr_len(tcp, &pkt.thl_bytes);
 
@@ -372,23 +371,41 @@ int handle_egress(struct __sk_buff *skb)
     return TC_ACT_OK;
 }
 
-
-static __always_inline void write_window_scale(struct bpf_sock_ops *skops) {
-    bpf_trace_printk("sock_stuff\n");
-    return;
+static inline void write_window_scale(struct bpf_sock_ops *skops)
+{
+    bpf_trace_printk("write_window_scale\n");
 }
 
-int sock_stuff(struct bpf_sock_ops *skops) {
-    u32 op = skops->op;
+// https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
+static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
+{
+    bpf_sock_ops_cb_flags_set(
+        skops,
+        skops->bpf_sock_ops_cb_flags |
+            BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
+    // bpf_sock_ops_cb_flags_set(
+    //     skops,
+    //     skops->bpf_sock_ops_cb_flags);
+}
+
+int sock_stuff(struct bpf_sock_ops *skops)
+{
+    bpf_trace_printk("sock_stuff\n");
     /* ipv4 only */
     if (skops->family != AF_INET)
-	return 0;
-    switch (op) {
-        case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-            write_window_scale(skops);
-            break;
-        default:
-            break;
+    {
+        return 1;
     }
-    return 0;
+    switch (skops->op)
+    {
+    case BPF_SOCK_OPS_TCP_CONNECT_CB:
+        set_hdr_cb_flags(skops);
+        break;
+    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+        write_window_scale(skops);
+        break;
+    default:
+        break;
+    }
+    return 1;
 }
