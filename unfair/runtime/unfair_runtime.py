@@ -219,6 +219,8 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
     """
     try:
         while not done.is_set():
+            last_check = time.time()
+
             check_flows(
                 flows,
                 flows_lock,
@@ -238,7 +240,15 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
                     + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
                 )
 
-            time.sleep(args.interval_ms / 1e3)
+            if args.inference_interval_ms is not None:
+                time.sleep(
+                    max(
+                        0,
+                        # The time remaining in the interval, accounting for the time
+                        # spent checking the flows.
+                        args.inference_interval_ms / 1e3 - (time.time() - last_check),
+                    )
+                )
     except KeyboardInterrupt:
         done.set()
 
@@ -262,7 +272,11 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
             # on to the next flow.
             if flow.lock.acquire(blocking=False):
                 try:
-                    if len(flow.packets) >= limit:
+                    # TODO: Need some notion of "this is the minimum number or time
+                    # interval of packets that I need to run the model".
+                    if len(flow.packets) > 0 and (
+                        limit is None or len(flow.packets) > limit
+                    ):
                         # Plan to run inference on "full" flows.
                         to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
@@ -396,17 +410,25 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
         #        just low due to low application demand?
 
         if flow.decision != new_decision:
-            assert new_decision[1] > 0, (
-                "Error: RWND must be greater than 0, "
-                f"but is {new_decision[1]} for flow {flow}"
-            )
-            print(f"Setting flow {flow} RWND to: {round(new_decision[1])}")
             key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
-            print(f"Key: {key}")
-            flow_to_rwnd[key] = ctypes.c_ushort(round(new_decision[1]))
+            if new_decision[1] is None:
+                print(f"No longer suppressing flow {flow}")
+                del flow_to_rwnd[key]
+            else:
+                assert new_decision[1] > 0, (
+                    "Error: RWND must be greater than 0, "
+                    f"but is {new_decision[1]} for flow {flow}"
+                )
+                if new_decision[1] > 2**16:
+                    print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
+                    new_decision[1] = 2**16 - 1
 
-            for foo, bar in flow_to_rwnd.items():
-                print(foo.local_port, foo.remote_port, bar)
+                to_set = round(new_decision[1])
+                print(f"Setting flow {flow} RWND to: {to_set}")
+                flow_to_rwnd[key] = ctypes.c_ushort(to_set)
+
+                # for foo, bar in flow_to_rwnd.items():
+                #     print(foo.local_port, foo.remote_port, bar)
 
             flow.decision = new_decision
 
@@ -467,7 +489,18 @@ def inference(flows, fourtuple, net, pkts, debug=False):
 def parse_args():
     """Parse arguments."""
     parser = ArgumentParser(description="Squelch unfair flows.")
-    parser.add_argument("-i", "--interval-ms", help="Poll interval (ms)", type=float)
+    parser.add_argument(
+        "-p",
+        "--poll-interval-ms",
+        help="Packet poll interval (sleep time; ms).",
+        type=float,
+    )
+    parser.add_argument(
+        "-i",
+        "--inference-interval-ms",
+        help="Hard interval to enforce between checking flows (start to start; ms).",
+        type=float,
+    )
     parser.add_argument(
         "-d", "--debug", action="store_true", help="Print debugging info"
     )
@@ -480,7 +513,6 @@ def parse_args():
     parser.add_argument(
         "-l",
         "--limit",
-        default=100,
         help=("The number of packets to accumulate for a flow between inference runs."),
         type=int,
     )
@@ -528,7 +560,9 @@ def parse_args():
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
-    assert args.limit > 0, f'"--limit" must be greater than 0 but is: {args.limit}'
+    assert (
+        args.limit is None or args.limit > 0
+    ), f'"--limit" must be greater than 0 but is: {args.limit}'
 
     assert (
         args.reaction_strategy != ReactionStrategy.FILE or args.schedule is not None
@@ -620,8 +654,8 @@ def run(args):
     try:
         # Loop with callback to process_event().
         while not done.is_set():
-            if args.interval_ms is not None:
-                time.sleep(args.interval_ms / 1000)
+            if args.poll_interval_ms is not None:
+                time.sleep(args.poll_interval_ms / 1e3)
             bpf.perf_buffer_poll()
     except KeyboardInterrupt:
         print("Cancelled.")
