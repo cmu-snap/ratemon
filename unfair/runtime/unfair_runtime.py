@@ -550,15 +550,16 @@ def run(args):
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
 
-    func_sock_ops = bpf.load_func("sock_stuff", bpf.SOCK_OPS)
-    fd = os.open("/home/ccanel/cgroups_test", os.O_RDONLY)
-    bpf.attach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-    # bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-
-    def detach():
-        print("Detaching sock_ops hook...")
-        bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-    atexit.register(detach)
+    # Logic for reading/writing TCP window scale.
+    # func_sock_ops = bpf.load_func("sock_stuff", bpf.SOCK_OPS)
+    # fd = os.open("/home/ccanel/src/unfair/cgroups_test", os.O_RDONLY)
+    # bpf.attach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+    # # bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+    #
+    # def detach():
+    #     print("Detaching sock_ops hook...")
+    #     bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
+    # atexit.register(detach)
 
     # Configure unfairness mitigation strategy.
     ipr = IPRoute()

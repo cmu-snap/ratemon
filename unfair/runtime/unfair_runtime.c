@@ -15,8 +15,9 @@
 #include <net/sock.h>
 #include <net/tcp.h>
 
+
 // The fixed TCP window scale to use.
-#define FIXED_WIN_SCALE 5
+#define FIXED_WIN_SCALE 0
 
 // Key for use in flow-based maps.
 struct flow_t
@@ -47,6 +48,18 @@ struct pkt_t
     u64 time_us;
 };
 
+struct tcp_opt
+{
+    __u8 kind;
+    __u8 len;
+    __u8 data;
+    // union
+    // {
+    //     __u8 data[4];
+    //     __u32 data32;
+    // };
+} __attribute__((packed));
+
 // Pass packet features to userspace.
 BPF_PERF_OUTPUT(pkts);
 // Read RWND limit for flow, as set by userspace.
@@ -72,12 +85,31 @@ static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
     return (struct tcphdr *)(skb->head + skb->transport_header);
 }
 
+// Get the total length in bytes of an IP header.
+static inline void ip_hdr_len(struct iphdr *ip, u32 *ihl_int)
+{
+    // Determine the size of the IP header. The header length is in a bitfield,
+    // but BPF cannot read bitfield elements. So we need to read a larger chunk
+    // of bytes and extract the header length from that. We only read a single
+    // byte, so we do not need to use ntohs().
+    // The IP header length is the first field in the IP header.
+    u8 ihl = *(u8 *)(&ip->tos - 1);
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    ihl = (ihl & 0xf0) >> 4;
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    ihl = ihl & 0x0f;
+#endif
+    *ihl_int = (u32)ihl * 4;
+}
+
 // Get the total length in bytes of a TCP header.
 static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
 {
-    // The TCP data offset is located after the ACK sequence number in the TCP
-    // header.
-    // bpf_probe_read(&thl, sizeof(thl), &tcp->ack_seq + 4);
+    // Determine the size of the TCP header. The TCP data offset is located after
+    // the ACK sequence number in the TCP header.The data offset is in a bitfield,
+    // but BPF cannot read bitfield elements. So we need to read a larger chunk
+    // of bytes and extract the data offset from that. We only read a single
+    // byte, so we do not need to use ntohs().
     u8 thl = *(u8 *)(&tcp->ack_seq + 4);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     thl = (thl & 0x0f) >> 4;
@@ -85,6 +117,21 @@ static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
     thl = (thl & 0xf0) >> 4;
 #endif
     *thl_int = (u32)thl * 4;
+}
+
+static inline bool is_syn(struct tcphdr* tcp)
+{
+    u8 flags = *(u8 *)(&tcp->ack_seq + 5);
+    bpf_trace_printk("flags: %u\n", flags);
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    bpf_trace_printk("little endian\n");
+    return flags & 0b01000000;
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    bpf_trace_printk("big endian\n");
+    return flags & 0b00000010;
+#else
+    return 0;
+#endif
 }
 
 int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
@@ -117,6 +164,14 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     u32 seq = tcp->seq;
     pkt.seq = ntohl(seq);
 
+    // if (is_syn(tcp)) {
+    //     bpf_trace_printk("is syn!\n");
+    //     // set_window_scaling(tcp);
+    // } else {
+    //     bpf_trace_printk("not syn\n");
+    // }
+    // bpf_trace_printk("sport: %u, dport: %u, seq: %u\n", pkt.sport, pkt.dport, pkt.seq);
+    // bpf_trace_printk("saddr: %u, daddr: %u\n", pkt.saddr, pkt.daddr, pkt.seq);
     // bpf_trace_printk("daddr: %d, dport: %d, seq: %d\n", pkt.daddr, pkt.dport, pkt.seq);
 
     struct tcp_sock *ts = tcp_sk(sk);
@@ -127,26 +182,13 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     pkt.tsval = ts->rx_opt.rcv_tsval;
     pkt.tsecr = ts->rx_opt.rcv_tsecr;
 
-    // Determine the total size of the IP packet.
-    u16 total_bytes = ip->tot_len;
-    pkt.total_bytes = ntohs(total_bytes);
-
-    //     // Determine the size of the IP header. The header length is in a bitfield,
-    //     // but BPF cannot read bitfield elements. So we need to read a larger chunk
-    //     // of bytes and extract the header length from that. Same for the TCP
-    //     // header. We only read a single byte, so we do not need to use ntohs().
-    //     u8 ihl;
-    //     // The IP header length is the first field in the IP header.
-    //     bpf_probe_read(&ihl, sizeof(ihl), &ip->tos - 1);
-    // #if __BYTE_ORDER == __LITTLE_ENDIAN
-    //     ihl = (ihl & 0xf0) >> 4;
-    // #elif __BYTE_ORDER == __BIG_ENDIAN
-    //     ihl = ihl & 0x0f;
-    // #endif
-    //     pkt.ihl_bytes = (u32)ihl * 4;
-
+    // Determine the IP/TCP header lengths.
+    ip_hdr_len(ip, &pkt.ihl_bytes);
     tcp_hdr_len(tcp, &pkt.thl_bytes);
 
+    // Determine total IP packet size and the TCP payload size.
+    u16 total_bytes = ip->tot_len;
+    pkt.total_bytes = ntohs(total_bytes);
     // The TCP payload is the total IP packet length minus IP header minus TCP
     // header.
     pkt.payload_bytes = pkt.total_bytes - pkt.ihl_bytes - pkt.thl_bytes;
@@ -165,81 +207,81 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     return 0;
 }
 
-// // Sets the TCP window scale option (if present) to 5.
-// static void set_window_scaling(struct tcphdr *tcp)
-// {
-//     u32 hdr_len;
-//     tcp_hdr_len(tcp, &hdr_len);
-//     u32 options_len = hdr_len - 20;
+// Sets the TCP window scale option (if present) to 5.
+static void set_window_scaling(struct tcphdr *tcp)
+{
+    u32 hdr_len;
+    tcp_hdr_len(tcp, &hdr_len);
+    u32 options_len = hdr_len - 20;
 
-//     if (options_len == 0)
-//     {
-//         return;
-//     }
+    if (options_len == 0)
+    {
+        return;
+    }
 
-//     u8 *options = (u8*) (&tcp->urg_ptr + 2);
-//     // u32 options_offset = 0;
+    u8 *options = (u8*) (&tcp->urg_ptr + 2);
+    // u32 options_offset = 0;
 
-//     // #pragma clang loop unroll(full)
-//     for (int i = 0; i < 10;) {
-//         int j = i / 2;
-//         i += 2;
-//     }
+    // #pragma clang loop unroll(full)
+    for (int i = 0; i < 10;) {
+        int j = i / 2;
+        i += 2;
+    }
 
-//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     // for (u32 options_offset = 0; options_offset < 20;)
-//     // // while (options_offset < 20)
-//     // {
-//     //     // If there are less than 20 bytes of options and we have read them all, then return.
-//     //     if (options_offset > options_len)
-//     //     {
-//     //         return;
-//     //     }
+    // There will be at most 20 bytes of options, so we can upper-bound this loop.
+    for (u32 options_offset = 0; options_offset < 20;)
+    // while (options_offset < 20)
+    {
+        // If there are less than 20 bytes of options and we have read them all, then return.
+        if (options_offset > options_len)
+        {
+            return;
+        }
 
-//     //     // Parse this option:
-//     //     //     1-byte kind,
-//     //     //     1-byte length (includes kind and length as well),
-//     //     //     variable-length option value.
-//     //     u8 kind = *(options + options_offset);
-//     //     u8 len = *(options + 1);
-//     //     // If this is the window scale option, then set the window scale to 1.
-//     //     if (kind == TCPOPT_WINDOW)
-//     //     {
-//     //         u8 *win_scale = options + options_offset + 2;
-//     //         *win_scale = FIXED_WIN_SCALE;
-//     //         return;
-//     //     }
+        // Parse this option:
+        //     1-byte kind,
+        //     1-byte length (includes kind and length as well),
+        //     variable-length option value.
+        u8 kind = *(options + options_offset);
+        u8 len = *(options + 1);
+        // If this is the window scale option, then set the window scale to 1.
+        if (kind == TCPOPT_WINDOW)
+        {
+            u8 *win_scale = options + options_offset + 2;
+            *win_scale = FIXED_WIN_SCALE;
+            return;
+        }
 
-//     //     options_offset += len;
-//     // }
+        options_offset += len;
+    }
 
-//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     // while (options_offset < 20)
-//     // {
-//     //     // If there are less than 20 bytes of options and we have read them all, then return.
-//     //     if (options_offset > options_len)
-//     //     {
-//     //         return;
-//     //     }
+    // // There will be at most 20 bytes of options, so we can upper-bound this loop.
+    // while (options_offset < 20)
+    // {
+    //     // If there are less than 20 bytes of options and we have read them all, then return.
+    //     if (options_offset > options_len)
+    //     {
+    //         return;
+    //     }
 
-//     //     // Parse this option:
-//     //     //     1-byte kind,
-//     //     //     1-byte length (includes kind and length as well),
-//     //     //     variable-length option value.
-//     //     u8 kind = *(options + options_offset);
-//     //     u8 len = *(options + 1);
-//     //     // If this is the window scale option, then set the window scale to 1.
-//     //     if (kind == TCPOPT_WINDOW)
-//     //     {
-//     //         u8 *win_scale = options + options_offset + 2;
-//     //         *win_scale = FIXED_WIN_SCALE;
-//     //         return;
-//     //     }
+    //     // Parse this option:
+    //     //     1-byte kind,
+    //     //     1-byte length (includes kind and length as well),
+    //     //     variable-length option value.
+    //     u8 kind = *(options + options_offset);
+    //     u8 len = *(options + 1);
+    //     // If this is the window scale option, then set the window scale to 1.
+    //     if (kind == TCPOPT_WINDOW)
+    //     {
+    //         u8 *win_scale = options + options_offset + 2;
+    //         *win_scale = FIXED_WIN_SCALE;
+    //         return;
+    //     }
 
-//     //     options_offset += len;
-//     // }
-//     return;
-// }
+    //     options_offset += len;
+    // }
+    return;
+}
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
@@ -337,19 +379,19 @@ int handle_egress(struct __sk_buff *skb)
     u16 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
-        bpf_trace_printk("Warning: Could not find RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
-        bpf_trace_printk("Warning: Could not find RWND for flow (remote): %u:%u\n", flow.remote_addr, flow.remote_port);
+        // bpf_trace_printk("Warning: Could not find RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
+        // bpf_trace_printk("Warning: Could not find RWND for flow (remote): %u:%u\n", flow.remote_addr, flow.remote_port);
         return TC_ACT_OK;
     }
     if (*rwnd == 0)
     {
-        bpf_trace_printk("Warning: Zero RWND for flow (local): %u:%u\n", *rwnd, flow.local_addr, flow.local_port);
-        bpf_trace_printk("Warning: Zero RWND for flow (remote): %u:%u\n", *rwnd, flow.remote_addr, flow.remote_port);
+        // bpf_trace_printk("Warning: Zero RWND for flow (local): %u:%u\n", *rwnd, flow.local_addr, flow.local_port);
+        // bpf_trace_printk("Warning: Zero RWND for flow (remote): %u:%u\n", *rwnd, flow.remote_addr, flow.remote_port);
         return TC_ACT_OK;
     }
 
-    bpf_trace_printk("Setting RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, *rwnd);
-    bpf_trace_printk("Setting RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, *rwnd);
+    // bpf_trace_printk("Setting RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, *rwnd);
+    // bpf_trace_printk("Setting RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, *rwnd);
 
     // TODO: Need to take window scaling into account? The scaling option is part of
     //       the handshake. Detect if an outgoing packet is part of a handshake and
@@ -374,37 +416,166 @@ int handle_egress(struct __sk_buff *skb)
 static inline void write_window_scale(struct bpf_sock_ops *skops)
 {
     bpf_trace_printk("write_window_scale\n");
+
+    struct tcp_opt win_scale_opt = {};
+    win_scale_opt.kind = TCPOPT_WINDOW;
+
+    // struct tcphdr *th = skops->skb_data;
+    // if (th->syn)
+    // int x = 0;
+    if (skops->skb_tcp_flags & TCP_FLAG_ACK)
+    {
+        // x += 1;
+        // bpf_trace_printk("is syn\n");
+
+        /* Search the win scale option written by kernel
+         * in the SYN packet.
+         */
+        int ret = bpf_load_hdr_opt(skops, &win_scale_opt,
+                                   sizeof(win_scale_opt), 0);
+        // if (ret != 3 || win_scale_opt.len != 3 ||
+        //     win_scale_opt.kind != TCPOPT_WINDOW)
+        // {
+        //     bpf_trace_printk("error 1\n");
+        // }
+        // else
+        // {
+        //     u8 window_scale = win_scale_opt.data[0];
+        //     bpf_trace_printk("window scale: %u\n", window_scale);
+        // }
+
+        // /* Write the win scale option that kernel
+        //  * has already written.
+        //  */
+        // err = bpf_store_hdr_opt(skops, &win_scale_opt,
+        // 			sizeof(win_scale_opt), 0);
+        // if (err != -EEXIST)
+        // 	RET_CG_ERR(err);
+    } else {
+        // x += 2;
+        // bpf_trace_printk("not syn\n");
+    }
+    // int y = x + 1;
 }
 
 // https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
 static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
 {
+    bpf_trace_printk("set_hdr_cb_flags\n");
+    // bpf_sock_ops_cb_flags_set(
+    //     skops,
+    //     skops->bpf_sock_ops_cb_flags |
+    //         BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
+    //         BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
     bpf_sock_ops_cb_flags_set(
         skops,
         skops->bpf_sock_ops_cb_flags |
-            BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
+            BPF_SOCK_OPS_STATE_CB_FLAG);
     // bpf_sock_ops_cb_flags_set(
     //     skops,
     //     skops->bpf_sock_ops_cb_flags);
 }
 
+#define TCPHDR_FIN 0x01
+#define TCPHDR_SYN 0x02
+#define TCPHDR_RST 0x04
+#define TCPHDR_PSH 0x08
+#define TCPHDR_ACK 0x10
+#define TCPHDR_URG 0x20
+#define TCPHDR_ECE 0x40
+#define TCPHDR_CWR 0x80
+#define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
+
+static inline __u8 skops_tcp_flags(const struct bpf_sock_ops *skops)
+{
+	return skops->skb_tcp_flags;
+}
+
+static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
+{
+	__u8 tcp_flags = skops_tcp_flags(skops);
+
+	if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
+		/* Check the SYN from bpf_sock_ops_kern->syn_skb */
+		bpf_trace_printk("synack\n");
+
+	// /* Passive side should have cleared the write hdr cb by now */
+	// if (skops->local_port == passive_lport_h)
+	// 	return 0;
+
+	return 1;
+}
+
+
 int sock_stuff(struct bpf_sock_ops *skops)
 {
-    bpf_trace_printk("sock_stuff\n");
+    bpf_trace_printk("sock_stuff %u\n", skops->op);
     /* ipv4 only */
-    if (skops->family != AF_INET)
-    {
-        return 1;
-    }
+    // if (skops->family != AF_INET)
+    // {
+    //     return 1;
+    // }
+
+    set_hdr_cb_flags(skops);
+
+    // TODO: Print port...try to filter to just the messgaes related to our connections.
     switch (skops->op)
     {
+    case BPF_SOCK_OPS_TIMEOUT_INIT:
+        bpf_trace_printk("BPF_SOCK_OPS_TIMEOUT_INIT\n");
+        break;
+    case BPF_SOCK_OPS_RWND_INIT:
+        bpf_trace_printk("BPF_SOCK_OPS_RWND_INIT\n");
+        break;
+    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
+        break;
+    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
+        break;
+    case BPF_SOCK_OPS_NEEDS_ECN:
+        bpf_trace_printk("BPF_SOCK_OPS_NEEDS_ECN\n");
+        break;
+    case BPF_SOCK_OPS_BASE_RTT:
+        bpf_trace_printk("BPF_SOCK_OPS_BASE_RTT\n");
+        break;
+    case BPF_SOCK_OPS_RTO_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_RTO_CB\n");
+        break;
+    case BPF_SOCK_OPS_RETRANS_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_RETRANS_CB\n");
+        break;
+    case BPF_SOCK_OPS_STATE_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_STATE_CB %u %u\n", skops->state, skops->args[1]);
+        break;
+    case BPF_SOCK_OPS_RTT_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_RTT_CB\n");
+        break;
+    case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
+        break;
+    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
+        // return handle_hdr_opt_len(skops);
+        // u8 flags = skops->   skb_tcp_flags;
+        break;
+    case BPF_SOCK_OPS_TCP_LISTEN_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_TCP_LISTEN_CB\n");
+        break;
     case BPF_SOCK_OPS_TCP_CONNECT_CB:
-        set_hdr_cb_flags(skops);
+        bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
+        // write_window_scale(skops);
+        // set_hdr_cb_flags(skops);
         break;
     case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-        write_window_scale(skops);
+        bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
+        // write_window_scale(skops);
+        // if (skops->skb_tcp_flags & TCP_FLAG_ACK) {
+        //     bpf_trace_printk("outgoing syn!\n");
+        // }
         break;
     default:
+        bpf_trace_printk("default\n");
         break;
     }
     return 1;
