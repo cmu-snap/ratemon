@@ -49,7 +49,10 @@ class FlowKey(ctypes.Structure):
     ]
 
     def __str__(self):
-        return f"raddr: {self.remote_addr}, laddr: {self.local_addr}, rport: {self.remote_port}, lport: {self.local_port}"
+        return (
+            f"raddr: {self.remote_addr}, laddr: {self.local_addr}, "
+            f"rport: {self.remote_port}, lport: {self.local_port}"
+        )
 
 
 class Flow:
@@ -388,8 +391,8 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
             elif flow.decision == defaults.Decision.PACED:
                 # We are already pacing this flow.
                 if flow.label == defaults.Class.BELOW_FAIR:
-                    # If we are already pacing this flow but we are being too aggressive,
-                    # then let it send faster.
+                    # If we are already pacing this flow but we are being too
+                    # aggressive, then let it send faster.
                     new_decision = (
                         defaults.Decision.PACED,
                         reaction_strategy.react_up(
@@ -398,8 +401,8 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
                         ),
                     )
                 else:
-                    # If we are already pacing this flow and it is behaving as desired, then
-                    # all is well. Retain the existing pacing decision.
+                    # If we are already pacing this flow and it is behaving as desired,
+                    # then all is well. Retain the existing pacing decision.
                     new_decision = flow.decision
             else:
                 # This flow is not already being paced and is not behaving unfairly, so
@@ -427,8 +430,8 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
                 print(f"Setting flow {flow} RWND to: {to_set}")
                 flow_to_rwnd[key] = ctypes.c_ushort(to_set)
 
-                # for foo, bar in flow_to_rwnd.items():
-                #     print(foo.local_port, foo.remote_port, bar)
+            for key, val in flow_to_rwnd.items():
+                print(key.local_port, key.remote_port, val)
 
             flow.decision = new_decision
 
