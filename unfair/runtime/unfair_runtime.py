@@ -560,6 +560,17 @@ def parse_args():
         help="The unfairness mitigation strategy to use.",
         type=str,
     )
+    parser.add_argument(
+        "--cgroup",
+        help=(
+            "The cgroup that will contain processes to monitor. "
+            "Practically speaking, this is the path to a directory. "
+            "BCC and eBPF must know this to monitor/set TCP header options, "
+            "(in particular, the TCP window scale)."
+        ),
+        required=True,
+        type=str,
+    )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
@@ -574,6 +585,7 @@ def parse_args():
         assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
         args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
 
+    assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
     return args
 
 

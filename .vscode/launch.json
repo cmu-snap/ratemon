@@ -53,9 +53,10 @@
                 "--limit=100",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
-                "--interface=ens34",
+                "--interface=ens3",
                 "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/rwnd_schedule.csv"
+                "--schedule=${workspaceFolder}/test/rwnd_schedule.csv",
+                "--cgroup=${workspaceFolder}/test/test_cgroup"
             ],
             "autoReload": {
                 "enable": false
