@@ -464,8 +464,17 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
         flow.latest_time_sec = time.time()
 
         start_time_s = time.time()
-        labels = inference(flows, fourtuple, net, pkts_ndarray, args.debug)
-        print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
+        try:
+            labels = inference(flows, fourtuple, net, pkts_ndarray, args.debug)
+        except AssertionError as exp:
+            # FIXME: There is a strange bug when normalizing the packet arrival times
+            # that causes the arrival times to not be in order even though we sort the
+            # packets. If this (or any other assertion error) occurs, then just skip
+            # this batch of packets.
+            print(f"Error, skipping batch of packets: {exp}")
+            return
+        finally:
+            print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
 
         flow.label = condense_labels(labels)
         make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args)
@@ -600,20 +609,21 @@ def run(args):
     flow_to_rwnd = bpf["flow_to_rwnd"]
 
     # Logic for reading/writing TCP window scale.
-    # func_sock_ops = bpf.load_func("sock_stuff", bpf.SOCK_OPS)
-    # fd = os.open("/home/ccanel/src/unfair/cgroups_test", os.O_RDONLY)
-    # bpf.attach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-    # # bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-    #
-    # def detach():
-    #     print("Detaching sock_ops hook...")
-    #     bpf.detach_func(func_sock_ops, fd, BPFAttachType.CGROUP_SOCK_OPS)
-    # atexit.register(detach)
+    func_sock_ops = bpf.load_func("foo", bpf.SOCK_OPS)  # sock_stuff
+    filedesc = os.open(args.cgroup, os.O_RDONLY)
+    bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
+    def detach_sockops():
+        print("Detaching sock_ops hook...")
+        bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+    atexit.register(detach_sockops)
 
     # Configure unfairness mitigation strategy.
     ipr = IPRoute()
     ifindex = ipr.link_lookup(ifname=args.interface)
-    assert len(ifindex) == 1
+    assert (
+        len(ifindex) == 1
+    ), f"Trouble looking up index for interface {args.interface}: {ifindex}"
     ifindex = ifindex[0]
     # ipr.tc("add", "pfifo", 0, "1:")
     # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")

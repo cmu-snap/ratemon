@@ -14,6 +14,7 @@
 #include <net/ip.h>
 #include <net/sock.h>
 #include <net/tcp.h>
+// #include <bpf_endian.h>
 
 
 // The fixed TCP window scale to use.
@@ -65,7 +66,7 @@ BPF_PERF_OUTPUT(pkts);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_rwnd, struct flow_t, u16);
 
-// Need to redefine these because the BCC rewriter does not support rewriting
+// Need to redefine this because the BCC rewriter does not support rewriting
 // ip_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
 static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
@@ -75,7 +76,7 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
     return (struct iphdr *)(skb->head + skb->network_header);
 }
 
-// Need to redefine these because the BCC rewriter does not support rewriting
+// Need to redefine this because the BCC rewriter does not support rewriting
 // tcp_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
 static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
@@ -88,11 +89,10 @@ static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 // Get the total length in bytes of an IP header.
 static inline void ip_hdr_len(struct iphdr *ip, u32 *ihl_int)
 {
-    // Determine the size of the IP header. The header length is in a bitfield,
-    // but BPF cannot read bitfield elements. So we need to read a larger chunk
-    // of bytes and extract the header length from that. We only read a single
+    // The header length is before the ToS field in the TCP header. However, the header
+    // length is in a bitfield, but BPF cannot read bitfield elements. So we need to
+    // read a whole byte and extract the data offset from that. We only read a single
     // byte, so we do not need to use ntohs().
-    // The IP header length is the first field in the IP header.
     u8 ihl = *(u8 *)(&ip->tos - 1);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     ihl = (ihl & 0xf0) >> 4;
@@ -105,11 +105,10 @@ static inline void ip_hdr_len(struct iphdr *ip, u32 *ihl_int)
 // Get the total length in bytes of a TCP header.
 static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
 {
-    // Determine the size of the TCP header. The TCP data offset is located after
-    // the ACK sequence number in the TCP header.The data offset is in a bitfield,
-    // but BPF cannot read bitfield elements. So we need to read a larger chunk
-    // of bytes and extract the data offset from that. We only read a single
-    // byte, so we do not need to use ntohs().
+    // The TCP data offset is located after the ACK sequence number in the TCP header.
+    // However, the data offset is in a bitfield, but BPF cannot read bitfield
+    // elements. So we need to read a whole byte and extract the data offset from that.
+    // We only read a single byte, so we do not need to use ntohs().
     u8 thl = *(u8 *)(&tcp->ack_seq + 4);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     thl = (thl & 0x0f) >> 4;
@@ -286,8 +285,6 @@ static void set_window_scaling(struct tcphdr *tcp)
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
 {
-    // bpf_trace_printk("Processing packet...\n");
-
     if (skb == NULL)
     {
         return TC_ACT_OK;
@@ -329,23 +326,6 @@ int handle_egress(struct __sk_buff *skb)
     {
         return TC_ACT_OK;
     }
-
-    // Determine the size of the TCP header. See above note about IP header length.
-    // u8 thl;
-    // The TCP data offset is located after the ACK sequence number in the TCP
-    // header.
-    // bpf_probe_read(&thl, sizeof(thl), &tcp->ack_seq + 4);
-
-    //     u8 thl = *(u8*)(&tcp->ack_seq + 4);
-    // #if __BYTE_ORDER == __LITTLE_ENDIAN
-    //     thl = (thl & 0x0f) >> 4;
-    // #elif __BYTE_ORDER == __BIG_ENDIAN
-    //     thl = (thl & 0xf0) >> 4;
-    // #endif
-    //     u32 thl32 = (u32)thl * 4;
-
-    // u32 x;
-    // tcp_hdr_len(tcp, &x);
 
     // If this is a SYN packet, then overwrite the window scaling option.
     // if (*(&tcp->ack_seq + 5) & TCP_FLAG_SYN)
@@ -459,21 +439,31 @@ static inline void write_window_scale(struct bpf_sock_ops *skops)
 }
 
 // https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
-static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
+// static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
+// {
+//     bpf_trace_printk("set_hdr_cb_flags\n");
+//     bpf_sock_ops_cb_flags_set(
+//         skops,
+//         skops->bpf_sock_ops_cb_flags |
+//             BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
+//             BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
+//     // bpf_sock_ops_cb_flags_set(
+//     //     skops,
+//     //     skops->bpf_sock_ops_cb_flags |
+//     //         BPF_SOCK_OPS_STATE_CB_FLAG);
+//     // bpf_sock_ops_cb_flags_set(
+//     //     skops,
+//     //     skops->bpf_sock_ops_cb_flags);
+// }
+
+static inline void set_hdr_cb_flags(struct bpf_sock_ops *skops, __u32 extra)
 {
-    bpf_trace_printk("set_hdr_cb_flags\n");
-    // bpf_sock_ops_cb_flags_set(
-    //     skops,
-    //     skops->bpf_sock_ops_cb_flags |
-    //         BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
-    //         BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
-    bpf_sock_ops_cb_flags_set(
-        skops,
-        skops->bpf_sock_ops_cb_flags |
-            BPF_SOCK_OPS_STATE_CB_FLAG);
-    // bpf_sock_ops_cb_flags_set(
-    //     skops,
-    //     skops->bpf_sock_ops_cb_flags);
+	bpf_sock_ops_cb_flags_set(skops,
+				  skops->bpf_sock_ops_cb_flags |
+				  BPF_SOCK_OPS_PARSE_UNKNOWN_HDR_OPT_CB_FLAG |
+				  BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG |
+                  BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
+				  extra);
 }
 
 #define TCPHDR_FIN 0x01
@@ -506,77 +496,125 @@ static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 	return 1;
 }
 
-
-int sock_stuff(struct bpf_sock_ops *skops)
+static int active_opt_len(struct bpf_sock_ops *skops)
 {
-    bpf_trace_printk("sock_stuff %u\n", skops->op);
-    /* ipv4 only */
-    // if (skops->family != AF_INET)
-    // {
-    //     return 1;
-    // }
+	int err;
 
-    set_hdr_cb_flags(skops);
+	/* Reserve more than enough to allow the -EEXIST test in
+	 * the write_active_opt().
+	 */
+	err = bpf_reserve_hdr_opt(skops, 12, 0);
+	if (err)
+        return 0;
 
-    // TODO: Print port...try to filter to just the messgaes related to our connections.
-    switch (skops->op)
-    {
-    case BPF_SOCK_OPS_TIMEOUT_INIT:
-        bpf_trace_printk("BPF_SOCK_OPS_TIMEOUT_INIT\n");
-        break;
-    case BPF_SOCK_OPS_RWND_INIT:
-        bpf_trace_printk("BPF_SOCK_OPS_RWND_INIT\n");
-        break;
-    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
-        break;
-    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
-        break;
-    case BPF_SOCK_OPS_NEEDS_ECN:
-        bpf_trace_printk("BPF_SOCK_OPS_NEEDS_ECN\n");
-        break;
-    case BPF_SOCK_OPS_BASE_RTT:
-        bpf_trace_printk("BPF_SOCK_OPS_BASE_RTT\n");
-        break;
-    case BPF_SOCK_OPS_RTO_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_RTO_CB\n");
-        break;
-    case BPF_SOCK_OPS_RETRANS_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_RETRANS_CB\n");
-        break;
-    case BPF_SOCK_OPS_STATE_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_STATE_CB %u %u\n", skops->state, skops->args[1]);
-        break;
-    case BPF_SOCK_OPS_RTT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_RTT_CB\n");
-        break;
-    case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
-        break;
-    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
-        // return handle_hdr_opt_len(skops);
-        // u8 flags = skops->   skb_tcp_flags;
-        break;
-    case BPF_SOCK_OPS_TCP_LISTEN_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_TCP_LISTEN_CB\n");
-        break;
-    case BPF_SOCK_OPS_TCP_CONNECT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
-        // write_window_scale(skops);
-        // set_hdr_cb_flags(skops);
-        break;
-    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
-        // write_window_scale(skops);
-        // if (skops->skb_tcp_flags & TCP_FLAG_ACK) {
-        //     bpf_trace_printk("outgoing syn!\n");
-        // }
-        break;
-    default:
-        bpf_trace_printk("default\n");
-        break;
-    }
-    return 1;
+	return 1;
 }
+
+int foo(struct bpf_sock_ops *skops)
+{
+	int true_val = 1;
+    __u16 passive_lport_h = 0;
+    __u16 passive_lport_n = 0;
+
+	switch (skops->op) {
+	case BPF_SOCK_OPS_TCP_LISTEN_CB:
+		passive_lport_h = skops->local_port;
+		passive_lport_n = htons(passive_lport_h);
+		bpf_setsockopt(skops, SOL_TCP, TCP_SAVE_SYN,
+			       &true_val, sizeof(true_val));
+		set_hdr_cb_flags(skops, 0);
+		break;
+	case BPF_SOCK_OPS_TCP_CONNECT_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
+		set_hdr_cb_flags(skops, 0);
+		break;
+	case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
+		return 1;
+	case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
+		return active_opt_len(skops);
+	case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
+		return 1;
+	case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
+        bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
+		return 1;
+	}
+
+	return 1;
+}
+
+// int sock_stuff(struct bpf_sock_ops *skops)
+// {
+//     bpf_trace_printk("sock_stuff %u\n", skops->op);
+//     /* ipv4 only */
+//     // if (skops->family != AF_INET)
+//     // {
+//     //     return 1;
+//     // }
+
+//     set_hdr_cb_flags(skops);
+
+//     // TODO: Print port...try to filter to just the messgaes related to our connections.
+//     switch (skops->op)
+//     {
+//     case BPF_SOCK_OPS_TIMEOUT_INIT:
+//         bpf_trace_printk("BPF_SOCK_OPS_TIMEOUT_INIT\n");
+//         break;
+//     case BPF_SOCK_OPS_RWND_INIT:
+//         bpf_trace_printk("BPF_SOCK_OPS_RWND_INIT\n");
+//         break;
+//     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_NEEDS_ECN:
+//         bpf_trace_printk("BPF_SOCK_OPS_NEEDS_ECN\n");
+//         break;
+//     case BPF_SOCK_OPS_BASE_RTT:
+//         bpf_trace_printk("BPF_SOCK_OPS_BASE_RTT\n");
+//         break;
+//     case BPF_SOCK_OPS_RTO_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_RTO_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_RETRANS_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_RETRANS_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_STATE_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_STATE_CB %u %u\n", skops->state, skops->args[1]);
+//         break;
+//     case BPF_SOCK_OPS_RTT_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_RTT_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
+//         // return handle_hdr_opt_len(skops);
+//         // u8 flags = skops->   skb_tcp_flags;
+//         break;
+//     case BPF_SOCK_OPS_TCP_LISTEN_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_TCP_LISTEN_CB\n");
+//         break;
+//     case BPF_SOCK_OPS_TCP_CONNECT_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
+//         // write_window_scale(skops);
+//         // set_hdr_cb_flags(skops);
+//         break;
+//     case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+//         bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
+//         // write_window_scale(skops);
+//         // if (skops->skb_tcp_flags & TCP_FLAG_ACK) {
+//         //     bpf_trace_printk("outgoing syn!\n");
+//         // }
+//         break;
+//     default:
+//         bpf_trace_printk("default\n");
+//         break;
+//     }
+//     return 1;
+// }
