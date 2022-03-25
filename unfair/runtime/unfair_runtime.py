@@ -699,11 +699,12 @@ def run(args):
 def _main():
     args = parse_args()
     # Disable window scaling while this program is running.
-    disable_window_scaling()
+    # disable_window_scaling()
     try:
         return run(args)
     finally:
-        enable_window_scaling()
+        pass
+        # enable_window_scaling()
 
 
 if __name__ == "__main__":

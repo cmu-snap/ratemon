@@ -49,16 +49,10 @@ struct pkt_t
     u64 time_us;
 };
 
-struct tcp_opt
-{
-    __u8 kind;
-    __u8 len;
-    __u8 data;
-    // union
-    // {
-    //     __u8 data[4];
-    //     __u32 data32;
-    // };
+struct tcp_opt {
+	__u8 kind;
+	__u8 len;
+	__u8 data;
 } __attribute__((packed));
 
 // Pass packet features to userspace.
@@ -158,8 +152,8 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     struct tcphdr *tcp = skb_to_tcphdr(skb);
     u16 sport = tcp->source;
     u16 dport = tcp->dest;
-    pkt.dport = ntohs(dport);
     pkt.sport = ntohs(sport);
+    pkt.dport = ntohs(dport);
     u32 seq = tcp->seq;
     pkt.seq = ntohl(seq);
 
@@ -393,49 +387,61 @@ int handle_egress(struct __sk_buff *skb)
     return TC_ACT_OK;
 }
 
-static inline void write_window_scale(struct bpf_sock_ops *skops)
+static int write_active_opt(struct bpf_sock_ops *skops)
 {
-    bpf_trace_printk("write_window_scale\n");
+	struct tcphdr *th = skops->skb_data;
+	if ((void *)(th + 1) > skops->skb_data_end)
+		return 1;
 
-    struct tcp_opt win_scale_opt = {};
-    win_scale_opt.kind = TCPOPT_WINDOW;
+	if (th->syn && th->ack) {
 
-    // struct tcphdr *th = skops->skb_data;
-    // if (th->syn)
-    // int x = 0;
-    if (skops->skb_tcp_flags & TCP_FLAG_ACK)
-    {
-        // x += 1;
-        // bpf_trace_printk("is syn\n");
+		struct tcp_opt win_scale_opt = {};
+        int ret;
+    	win_scale_opt.kind = TCPOPT_WINDOW;
+        win_scale_opt.len = 0;
+        win_scale_opt.data = 0;
 
-        /* Search the win scale option written by kernel
-         * in the SYN packet.
-         */
-        int ret = bpf_load_hdr_opt(skops, &win_scale_opt,
-                                   sizeof(win_scale_opt), 0);
-        // if (ret != 3 || win_scale_opt.len != 3 ||
-        //     win_scale_opt.kind != TCPOPT_WINDOW)
-        // {
-        //     bpf_trace_printk("error 1\n");
-        // }
-        // else
-        // {
-        //     u8 window_scale = win_scale_opt.data[0];
-        //     bpf_trace_printk("window scale: %u\n", window_scale);
-        // }
+		/* Search the win scale option written by kernel
+		 * in the SYN packet.
+		 */
+		ret = bpf_load_hdr_opt(skops, &win_scale_opt,
+				       sizeof(win_scale_opt), 0);
+		if (ret != 3 || win_scale_opt.len != 3 ||
+		    win_scale_opt.kind != TCPOPT_WINDOW)
+        {
+            switch (ret) {
+                case -ENOMSG:
+                    bpf_trace_printk("synack write -ENOMSG\n");
+                    break;
+                case -EINVAL:
+                    bpf_trace_printk("synack write -EINVAL\n");
+                    break;
+                case -ENOENT:
+                    bpf_trace_printk("synack write -ENOENT\n");
+                    break;
+                case -ENOSPC:
+                    bpf_trace_printk("synack write -ENOSPC\n");
+                    break;
+                case -EFAULT:
+                    bpf_trace_printk("synack write -EFAULT\n");
+                    break;
+                case -EPERM:
+                    bpf_trace_printk("synack write -EPERM\n");
+                    break;
+                default:
+                    bpf_trace_printk("synack write default failure\n");
+            }
+        } else {
+            bpf_trace_printk("synack write win scale: %u\n", win_scale_opt.data);
+        }
 
-        // /* Write the win scale option that kernel
-        //  * has already written.
-        //  */
-        // err = bpf_store_hdr_opt(skops, &win_scale_opt,
-        // 			sizeof(win_scale_opt), 0);
-        // if (err != -EEXIST)
-        // 	RET_CG_ERR(err);
-    } else {
-        // x += 2;
-        // bpf_trace_printk("not syn\n");
-    }
-    // int y = x + 1;
+        bpf_trace_printk(
+            "synack write; %u -> %u",
+            ntohs(th->source),
+            ntohs(th->dest));
+	}
+
+	return 1;
 }
 
 // https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
@@ -481,21 +487,6 @@ static inline __u8 skops_tcp_flags(const struct bpf_sock_ops *skops)
 	return skops->skb_tcp_flags;
 }
 
-static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
-{
-	__u8 tcp_flags = skops_tcp_flags(skops);
-
-	if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
-		/* Check the SYN from bpf_sock_ops_kern->syn_skb */
-		bpf_trace_printk("synack\n");
-
-	// /* Passive side should have cleared the write hdr cb by now */
-	// if (skops->local_port == passive_lport_h)
-	// 	return 0;
-
-	return 1;
-}
-
 static int active_opt_len(struct bpf_sock_ops *skops)
 {
 	int err;
@@ -509,6 +500,70 @@ static int active_opt_len(struct bpf_sock_ops *skops)
 
 	return 1;
 }
+
+static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
+{
+    // struct tcphdr *tcp;
+	__u8 tcp_flags = skops_tcp_flags(skops);
+
+	if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
+    {
+		/* Check the SYN from bpf_sock_ops_kern->syn_skb */
+
+        struct tcp_opt win_scale_opt = {};
+        int ret;
+    	win_scale_opt.kind = TCPOPT_WINDOW;
+        win_scale_opt.len = 0;
+        win_scale_opt.data = 0;
+
+		/* Search the win scale option written by kernel
+		 * in the SYN packet.
+		 */
+		ret = bpf_load_hdr_opt(skops, &win_scale_opt,
+				       sizeof(win_scale_opt), 0);
+		if (ret != 3 || win_scale_opt.len != 3 ||
+		    win_scale_opt.kind != TCPOPT_WINDOW)
+        {
+            switch (ret) {
+                case -ENOMSG:
+                    bpf_trace_printk("synack -ENOMSG\n");
+                    break;
+                case -EINVAL:
+                    bpf_trace_printk("synack -EINVAL\n");
+                    break;
+                case -ENOENT:
+                    bpf_trace_printk("synack -ENOENT\n");
+                    break;
+                case -ENOSPC:
+                    bpf_trace_printk("synack -ENOSPC\n");
+                    break;
+                case -EFAULT:
+                    bpf_trace_printk("synack -EFAULT\n");
+                    break;
+                case -EPERM:
+                    bpf_trace_printk("synack -EPERM\n");
+                    break;
+                default:
+                    bpf_trace_printk("synack default failure\n");
+            }
+        } else {
+            bpf_trace_printk("synack win scale: %u\n", win_scale_opt.data);
+        }
+
+        bpf_trace_printk(
+            "synack; %u -> %u",
+            skops->local_port,
+            ntohl(skops->remote_port));
+    }
+
+	// /* Passive side should have cleared the write hdr cb by now */
+	// if (skops->local_port == passive_lport_h)
+	// 	RET_CG_ERR(0);
+
+	return active_opt_len(skops);
+}
+
+
 
 int foo(struct bpf_sock_ops *skops)
 {
@@ -525,20 +580,20 @@ int foo(struct bpf_sock_ops *skops)
 		set_hdr_cb_flags(skops, 0);
 		break;
 	case BPF_SOCK_OPS_TCP_CONNECT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
+        // bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
 		set_hdr_cb_flags(skops, 0);
 		break;
 	case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
+        // bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
 		return 1;
 	case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
         bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
-		return active_opt_len(skops);
+		return handle_hdr_opt_len(skops);
 	case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
         bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
-		return 1;
+		return write_active_opt(skops);
 	case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
+        // bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
 		return 1;
 	}
 
