@@ -200,81 +200,81 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     return 0;
 }
 
-// Sets the TCP window scale option (if present) to 5.
-static void set_window_scaling(struct tcphdr *tcp)
-{
-    u32 hdr_len;
-    tcp_hdr_len(tcp, &hdr_len);
-    u32 options_len = hdr_len - 20;
+// // Sets the TCP window scale option (if present) to 5.
+// static void set_window_scaling(struct tcphdr *tcp)
+// {
+//     u32 hdr_len;
+//     tcp_hdr_len(tcp, &hdr_len);
+//     u32 options_len = hdr_len - 20;
 
-    if (options_len == 0)
-    {
-        return;
-    }
+//     if (options_len == 0)
+//     {
+//         return;
+//     }
 
-    u8 *options = (u8*) (&tcp->urg_ptr + 2);
-    // u32 options_offset = 0;
+//     u8 *options = (u8*) (&tcp->urg_ptr + 2);
+//     // u32 options_offset = 0;
 
-    // #pragma clang loop unroll(full)
-    for (int i = 0; i < 10;) {
-        int j = i / 2;
-        i += 2;
-    }
+//     // #pragma clang loop unroll(full)
+//     for (int i = 0; i < 10;) {
+//         int j = i / 2;
+//         i += 2;
+//     }
 
-    // There will be at most 20 bytes of options, so we can upper-bound this loop.
-    for (u32 options_offset = 0; options_offset < 20;)
-    // while (options_offset < 20)
-    {
-        // If there are less than 20 bytes of options and we have read them all, then return.
-        if (options_offset > options_len)
-        {
-            return;
-        }
+//     // There will be at most 20 bytes of options, so we can upper-bound this loop.
+//     for (u32 options_offset = 0; options_offset < 20;)
+//     // while (options_offset < 20)
+//     {
+//         // If there are less than 20 bytes of options and we have read them all, then return.
+//         if (options_offset > options_len)
+//         {
+//             return;
+//         }
 
-        // Parse this option:
-        //     1-byte kind,
-        //     1-byte length (includes kind and length as well),
-        //     variable-length option value.
-        u8 kind = *(options + options_offset);
-        u8 len = *(options + 1);
-        // If this is the window scale option, then set the window scale to 1.
-        if (kind == TCPOPT_WINDOW)
-        {
-            u8 *win_scale = options + options_offset + 2;
-            *win_scale = FIXED_WIN_SCALE;
-            return;
-        }
+//         // Parse this option:
+//         //     1-byte kind,
+//         //     1-byte length (includes kind and length as well),
+//         //     variable-length option value.
+//         u8 kind = *(options + options_offset);
+//         u8 len = *(options + 1);
+//         // If this is the window scale option, then set the window scale to 1.
+//         if (kind == TCPOPT_WINDOW)
+//         {
+//             u8 *win_scale = options + options_offset + 2;
+//             *win_scale = FIXED_WIN_SCALE;
+//             return;
+//         }
 
-        options_offset += len;
-    }
+//         options_offset += len;
+//     }
 
-    // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-    // while (options_offset < 20)
-    // {
-    //     // If there are less than 20 bytes of options and we have read them all, then return.
-    //     if (options_offset > options_len)
-    //     {
-    //         return;
-    //     }
+//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
+//     // while (options_offset < 20)
+//     // {
+//     //     // If there are less than 20 bytes of options and we have read them all, then return.
+//     //     if (options_offset > options_len)
+//     //     {
+//     //         return;
+//     //     }
 
-    //     // Parse this option:
-    //     //     1-byte kind,
-    //     //     1-byte length (includes kind and length as well),
-    //     //     variable-length option value.
-    //     u8 kind = *(options + options_offset);
-    //     u8 len = *(options + 1);
-    //     // If this is the window scale option, then set the window scale to 1.
-    //     if (kind == TCPOPT_WINDOW)
-    //     {
-    //         u8 *win_scale = options + options_offset + 2;
-    //         *win_scale = FIXED_WIN_SCALE;
-    //         return;
-    //     }
+//     //     // Parse this option:
+//     //     //     1-byte kind,
+//     //     //     1-byte length (includes kind and length as well),
+//     //     //     variable-length option value.
+//     //     u8 kind = *(options + options_offset);
+//     //     u8 len = *(options + 1);
+//     //     // If this is the window scale option, then set the window scale to 1.
+//     //     if (kind == TCPOPT_WINDOW)
+//     //     {
+//     //         u8 *win_scale = options + options_offset + 2;
+//     //         *win_scale = FIXED_WIN_SCALE;
+//     //         return;
+//     //     }
 
-    //     options_offset += len;
-    // }
-    return;
-}
+//     //     options_offset += len;
+//     // }
+//     return;
+// }
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
@@ -389,23 +389,20 @@ int handle_egress(struct __sk_buff *skb)
 
 static int write_active_opt(struct bpf_sock_ops *skops)
 {
-	struct tcphdr *th = skops->skb_data;
-	if ((void *)(th + 1) > skops->skb_data_end)
-		return 1;
+	struct tcphdr *tcp;
+	struct tcp_opt win_scale_opt = {};
+    int ret;
 
-	if (th->syn && th->ack) {
+    tcp = skops->skb_data;
+	if ((void *)(tcp + 1) > skops->skb_data_end)
+		return 0;
 
-		struct tcp_opt win_scale_opt = {};
-        int ret;
+	if (tcp->syn && tcp->ack) {
     	win_scale_opt.kind = TCPOPT_WINDOW;
         win_scale_opt.len = 0;
         win_scale_opt.data = 0;
 
-		/* Search the win scale option written by kernel
-		 * in the SYN packet.
-		 */
-		ret = bpf_load_hdr_opt(skops, &win_scale_opt,
-				       sizeof(win_scale_opt), 0);
+		ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
 		if (ret != 3 || win_scale_opt.len != 3 ||
 		    win_scale_opt.kind != TCPOPT_WINDOW)
         {
@@ -430,15 +427,46 @@ static int write_active_opt(struct bpf_sock_ops *skops)
                     break;
                 default:
                     bpf_trace_printk("synack write default failure\n");
+                    break;
             }
-        } else {
-            bpf_trace_printk("synack write win scale: %u\n", win_scale_opt.data);
+            return 0;
         }
 
         bpf_trace_printk(
-            "synack write; %u -> %u",
-            ntohs(th->source),
-            ntohs(th->dest));
+            "synack write; %u -> %u; win scale: %u\n",
+            ntohs(tcp->source),
+            ntohs(tcp->dest),
+            win_scale_opt.data);
+
+        bpf_sock_ops_cb_flags_set(skops,
+                skops->bpf_sock_ops_cb_flags &
+                ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
+
+        // u8 noop = 1;
+        // ret = bpf_store_hdr_opt(skops, &noop,
+        //         sizeof(noop), 0);
+        // switch (ret) {
+        //     case -ENOMSG:
+        //         bpf_trace_printk("synack write noop -ENOMSG\n");
+        //         break;
+        //     case -EINVAL:
+        //         bpf_trace_printk("synack write noop -EINVAL\n");
+        //         break;
+        //     case -ENOENT:
+        //         bpf_trace_printk("synack write noop -ENOENT\n");
+        //         break;
+        //     case -ENOSPC:
+        //         bpf_trace_printk("synack write noop -ENOSPC\n");
+        //         break;
+        //     case -EFAULT:
+        //         bpf_trace_printk("synack write noop -EFAULT\n");
+        //         break;
+        //     case -EPERM:
+        //         bpf_trace_printk("synack write noop -EPERM\n");
+        //         break;
+        //     default:
+        //         bpf_trace_printk("synack write noop default ret: %d\n", ret);
+        // }
 	}
 
 	return 1;
@@ -466,122 +494,171 @@ static inline void set_hdr_cb_flags(struct bpf_sock_ops *skops, __u32 extra)
 {
 	bpf_sock_ops_cb_flags_set(skops,
 				  skops->bpf_sock_ops_cb_flags |
-				  BPF_SOCK_OPS_PARSE_UNKNOWN_HDR_OPT_CB_FLAG |
 				  BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG |
-                  BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
 				  extra);
 }
+				//   BPF_SOCK_OPS_PARSE_UNKNOWN_HDR_OPT_CB_FLAG |
+                //   BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
 
-#define TCPHDR_FIN 0x01
+// #define TCPHDR_FIN 0x01
 #define TCPHDR_SYN 0x02
-#define TCPHDR_RST 0x04
-#define TCPHDR_PSH 0x08
+// #define TCPHDR_RST 0x04
+// #define TCPHDR_PSH 0x08
 #define TCPHDR_ACK 0x10
-#define TCPHDR_URG 0x20
-#define TCPHDR_ECE 0x40
-#define TCPHDR_CWR 0x80
+// #define TCPHDR_URG 0x20
+// #define TCPHDR_ECE 0x40
+// #define TCPHDR_CWR 0x80
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
-static inline __u8 skops_tcp_flags(const struct bpf_sock_ops *skops)
-{
-	return skops->skb_tcp_flags;
-}
+// static inline __u8 skops_tcp_flags(const struct bpf_sock_ops *skops)
+// {
+// 	return skops->skb_tcp_flags;
+// }
 
-static int active_opt_len(struct bpf_sock_ops *skops)
-{
-	int err;
+// static int active_opt_len(struct bpf_sock_ops *skops)
+// {
+// 	int err;
 
-	/* Reserve more than enough to allow the -EEXIST test in
-	 * the write_active_opt().
-	 */
-	err = bpf_reserve_hdr_opt(skops, 12, 0);
-	if (err)
-        return 0;
+// 	/* Reserve more than enough to allow the -EEXIST test in
+// 	 * the write_active_opt().
+// 	 */
+// 	err = bpf_reserve_hdr_opt(skops, 3, 0);  // 12
+// 	if (err)
+//         return 0;
 
-	return 1;
-}
+// 	return 1;
+// }
 
 static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 {
+    // int err;
     // struct tcphdr *tcp;
-	__u8 tcp_flags = skops_tcp_flags(skops);
+	// __u8 tcp_flags = skops_tcp_flags(skops);
 
-	if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
+	// if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
+    if ((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
     {
-		/* Check the SYN from bpf_sock_ops_kern->syn_skb */
+        // err = bpf_reserve_hdr_opt(skops, 3, 0);  // 12
+        if (bpf_reserve_hdr_opt(skops, 3, 0))
+            return 0;
+		// /* Check the SYN from bpf_sock_ops_kern->syn_skb */
 
-        struct tcp_opt win_scale_opt = {};
-        int ret;
-    	win_scale_opt.kind = TCPOPT_WINDOW;
-        win_scale_opt.len = 0;
-        win_scale_opt.data = 0;
+        // struct tcp_opt win_scale_opt = {};
+        // int ret;
+    	// win_scale_opt.kind = TCPOPT_WINDOW;
+        // win_scale_opt.len = 0;
+        // win_scale_opt.data = 0;
 
-		/* Search the win scale option written by kernel
-		 * in the SYN packet.
-		 */
-		ret = bpf_load_hdr_opt(skops, &win_scale_opt,
-				       sizeof(win_scale_opt), 0);
-		if (ret != 3 || win_scale_opt.len != 3 ||
-		    win_scale_opt.kind != TCPOPT_WINDOW)
-        {
-            switch (ret) {
-                case -ENOMSG:
-                    bpf_trace_printk("synack -ENOMSG\n");
-                    break;
-                case -EINVAL:
-                    bpf_trace_printk("synack -EINVAL\n");
-                    break;
-                case -ENOENT:
-                    bpf_trace_printk("synack -ENOENT\n");
-                    break;
-                case -ENOSPC:
-                    bpf_trace_printk("synack -ENOSPC\n");
-                    break;
-                case -EFAULT:
-                    bpf_trace_printk("synack -EFAULT\n");
-                    break;
-                case -EPERM:
-                    bpf_trace_printk("synack -EPERM\n");
-                    break;
-                default:
-                    bpf_trace_printk("synack default failure\n");
-            }
-        } else {
-            bpf_trace_printk("synack win scale: %u\n", win_scale_opt.data);
-        }
+		// /* Search the win scale option written by kernel
+		//  * in the SYN packet.
+		//  */
+		// ret = bpf_load_hdr_opt(skops, &win_scale_opt,
+		// 		       sizeof(win_scale_opt), 0);
+		// if (ret != 3 || win_scale_opt.len != 3 ||
+		//     win_scale_opt.kind != TCPOPT_WINDOW)
+        // {
+        //     switch (ret) {
+        //         case -ENOMSG:
+        //             bpf_trace_printk("synack len -ENOMSG\n");
+        //             break;
+        //         case -EINVAL:
+        //             bpf_trace_printk("synack len -EINVAL\n");
+        //             break;
+        //         case -ENOENT:
+        //             bpf_trace_printk("synack len -ENOENT\n");
+        //             break;
+        //         case -ENOSPC:
+        //             bpf_trace_printk("synack len -ENOSPC\n");
+        //             break;
+        //         case -EFAULT:
+        //             bpf_trace_printk("synack len -EFAULT\n");
+        //             break;
+        //         case -EPERM:
+        //             bpf_trace_printk("synack len -EPERM\n");
+        //             break;
+        //         default:
+        //             bpf_trace_printk("synack len default failure\n");
+        //     }
+        // } else {
+        //     bpf_trace_printk("synack len win scale: %u\n", win_scale_opt.data);
+        // }
 
-        bpf_trace_printk(
-            "synack; %u -> %u",
-            skops->local_port,
-            ntohl(skops->remote_port));
+        // bpf_trace_printk(
+        //     "synack len; %u -> %u",
+        //     skops->local_port,
+        //     ntohl(skops->remote_port));
     }
-
+    return 1;
 	// /* Passive side should have cleared the write hdr cb by now */
 	// if (skops->local_port == passive_lport_h)
 	// 	RET_CG_ERR(0);
 
-	return active_opt_len(skops);
+	// return active_opt_len(skops);
 }
 
+
+// static void active_established(struct bpf_sock_ops *skops) {
+//     struct tcp_opt win_scale_opt = {};
+//     int ret;
+//     win_scale_opt.kind = TCPOPT_WINDOW;
+//     win_scale_opt.len = 0;
+//     win_scale_opt.data = 0;
+
+//     ret = bpf_load_hdr_opt(skops, &win_scale_opt,
+//                     sizeof(win_scale_opt), 0);
+//     if (ret != 3 || win_scale_opt.len != 3 ||
+//         win_scale_opt.kind != TCPOPT_WINDOW)
+//     {
+//         switch (ret) {
+//             case -ENOMSG:
+//                 bpf_trace_printk("synack active est -ENOMSG\n");
+//                 break;
+//             case -EINVAL:
+//                 bpf_trace_printk("synack active est -EINVAL\n");
+//                 break;
+//             case -ENOENT:
+//                 bpf_trace_printk("synack active est -ENOENT\n");
+//                 break;
+//             case -ENOSPC:
+//                 bpf_trace_printk("synack active est -ENOSPC\n");
+//                 break;
+//             case -EFAULT:
+//                 bpf_trace_printk("synack active est -EFAULT\n");
+//                 break;
+//             case -EPERM:
+//                 bpf_trace_printk("synack active est -EPERM\n");
+//                 break;
+//             default:
+//                 bpf_trace_printk("synack active est default failure\n");
+//         }
+//     } else {
+//         bpf_trace_printk("synack active est win scale: %u\n", win_scale_opt.data);
+//     }
+
+//     bpf_trace_printk(
+//         "synack active est; %u -> %u",
+//         skops->local_port,
+//         ntohl(skops->remote_port));
+// }
 
 
 int foo(struct bpf_sock_ops *skops)
 {
-	int true_val = 1;
-    __u16 passive_lport_h = 0;
-    __u16 passive_lport_n = 0;
+	// int true_val = 1;
+    // __u16 passive_lport_h = 0;
+    // __u16 passive_lport_n = 0;
 
 	switch (skops->op) {
 	case BPF_SOCK_OPS_TCP_LISTEN_CB:
-		passive_lport_h = skops->local_port;
-		passive_lport_n = htons(passive_lport_h);
-		bpf_setsockopt(skops, SOL_TCP, TCP_SAVE_SYN,
-			       &true_val, sizeof(true_val));
+		// passive_lport_h = skops->local_port;
+		// passive_lport_n = htons(passive_lport_h);
+		// bpf_setsockopt(skops, SOL_TCP, TCP_SAVE_SYN,
+		// 	       &true_val, sizeof(true_val));
 		set_hdr_cb_flags(skops, 0);
 		break;
 	case BPF_SOCK_OPS_TCP_CONNECT_CB:
         // bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
-		set_hdr_cb_flags(skops, 0);
+		// set_hdr_cb_flags(skops, 0);
 		break;
 	case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
         // bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
@@ -595,6 +672,10 @@ int foo(struct bpf_sock_ops *skops)
 	case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
         // bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
 		return 1;
+    // case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+    //     bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
+    //     // active_established(skops);
+    //     return 1;
 	}
 
 	return 1;
