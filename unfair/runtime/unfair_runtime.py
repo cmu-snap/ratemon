@@ -608,14 +608,15 @@ def run(args):
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
 
-    # Logic for reading/writing TCP window scale.
-    func_sock_ops = bpf.load_func("foo", bpf.SOCK_OPS)  # sock_stuff
+    # Logic for reading the TCP window scale.
+    func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
     filedesc = os.open(args.cgroup, os.O_RDONLY)
     bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
     def detach_sockops():
         print("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
     atexit.register(detach_sockops)
 
     # Configure unfairness mitigation strategy.

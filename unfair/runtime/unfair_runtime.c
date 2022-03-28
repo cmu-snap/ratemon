@@ -14,11 +14,15 @@
 #include <net/ip.h>
 #include <net/sock.h>
 #include <net/tcp.h>
-// #include <bpf_endian.h>
 
+// BPF SOCK_OPS program return codes.
+#define SOCKOPS_OK 1
+#define SOCKOPS_ERR 0
 
-// The fixed TCP window scale to use.
-#define FIXED_WIN_SCALE 0
+// TCP header flags.
+#define TCPHDR_SYN 0x02
+#define TCPHDR_ACK 0x10
+#define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
 // Key for use in flow-based maps.
 struct flow_t
@@ -49,16 +53,19 @@ struct pkt_t
     u64 time_us;
 };
 
-struct tcp_opt {
-	__u8 kind;
-	__u8 len;
-	__u8 data;
+struct tcp_opt
+{
+    __u8 kind;
+    __u8 len;
+    __u8 data;
 } __attribute__((packed));
 
 // Pass packet features to userspace.
 BPF_PERF_OUTPUT(pkts);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_rwnd, struct flow_t, u16);
+// Read RWND limit for flow, as set by userspace.
+BPF_HASH(flow_to_win_scale, struct flow_t, u8);
 
 // Need to redefine this because the BCC rewriter does not support rewriting
 // ip_hdr()'s internal dereferences of skb members.
@@ -112,7 +119,7 @@ static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
     *thl_int = (u32)thl * 4;
 }
 
-static inline bool is_syn(struct tcphdr* tcp)
+static inline bool is_syn(struct tcphdr *tcp)
 {
     u8 flags = *(u8 *)(&tcp->ack_seq + 5);
     bpf_trace_printk("flags: %u\n", flags);
@@ -200,82 +207,6 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     return 0;
 }
 
-// // Sets the TCP window scale option (if present) to 5.
-// static void set_window_scaling(struct tcphdr *tcp)
-// {
-//     u32 hdr_len;
-//     tcp_hdr_len(tcp, &hdr_len);
-//     u32 options_len = hdr_len - 20;
-
-//     if (options_len == 0)
-//     {
-//         return;
-//     }
-
-//     u8 *options = (u8*) (&tcp->urg_ptr + 2);
-//     // u32 options_offset = 0;
-
-//     // #pragma clang loop unroll(full)
-//     for (int i = 0; i < 10;) {
-//         int j = i / 2;
-//         i += 2;
-//     }
-
-//     // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     for (u32 options_offset = 0; options_offset < 20;)
-//     // while (options_offset < 20)
-//     {
-//         // If there are less than 20 bytes of options and we have read them all, then return.
-//         if (options_offset > options_len)
-//         {
-//             return;
-//         }
-
-//         // Parse this option:
-//         //     1-byte kind,
-//         //     1-byte length (includes kind and length as well),
-//         //     variable-length option value.
-//         u8 kind = *(options + options_offset);
-//         u8 len = *(options + 1);
-//         // If this is the window scale option, then set the window scale to 1.
-//         if (kind == TCPOPT_WINDOW)
-//         {
-//             u8 *win_scale = options + options_offset + 2;
-//             *win_scale = FIXED_WIN_SCALE;
-//             return;
-//         }
-
-//         options_offset += len;
-//     }
-
-//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     // while (options_offset < 20)
-//     // {
-//     //     // If there are less than 20 bytes of options and we have read them all, then return.
-//     //     if (options_offset > options_len)
-//     //     {
-//     //         return;
-//     //     }
-
-//     //     // Parse this option:
-//     //     //     1-byte kind,
-//     //     //     1-byte length (includes kind and length as well),
-//     //     //     variable-length option value.
-//     //     u8 kind = *(options + options_offset);
-//     //     u8 len = *(options + 1);
-//     //     // If this is the window scale option, then set the window scale to 1.
-//     //     if (kind == TCPOPT_WINDOW)
-//     //     {
-//     //         u8 *win_scale = options + options_offset + 2;
-//     //         *win_scale = FIXED_WIN_SCALE;
-//     //         return;
-//     //     }
-
-//     //     options_offset += len;
-//     // }
-//     return;
-// }
-
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
 {
@@ -321,12 +252,6 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // If this is a SYN packet, then overwrite the window scaling option.
-    // if (*(&tcp->ack_seq + 5) & TCP_FLAG_SYN)
-    // {
-    //     set_window_scaling(tcp);
-    // }
-
     // Prepare the lookup key.
     struct flow_t flow;
     flow.local_addr = ip->saddr;
@@ -342,415 +267,148 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // bpf_trace_printk("local_addr: %u\n", flow.local_addr);
-    // bpf_trace_printk("remote_addr: %u\n", flow.remote_addr);
-    // bpf_trace_printk("local_port: %u\n", flow.local_port);
-    // bpf_trace_printk("remote_port: %u\n", flow.remote_port);
-
-    // bpf_trace_printk("Looking up RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
-
     // Look up the RWND value for this flow.
     u16 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
-        // bpf_trace_printk("Warning: Could not find RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
-        // bpf_trace_printk("Warning: Could not find RWND for flow (remote): %u:%u\n", flow.remote_addr, flow.remote_port);
+        // We do not know the RWND value to use for this flow.
         return TC_ACT_OK;
     }
     if (*rwnd == 0)
     {
-        // bpf_trace_printk("Warning: Zero RWND for flow (local): %u:%u\n", *rwnd, flow.local_addr, flow.local_port);
-        // bpf_trace_printk("Warning: Zero RWND for flow (remote): %u:%u\n", *rwnd, flow.remote_addr, flow.remote_port);
+        // The RWND is configured to be 0. That does not make sense.
         return TC_ACT_OK;
     }
 
-    // bpf_trace_printk("Setting RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, *rwnd);
-    // bpf_trace_printk("Setting RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, *rwnd);
+    u8 *win_scale = flow_to_win_scale.lookup(&flow);
+    if (win_scale == NULL)
+    {
+        // We do not know the window scale to use for this flow.
+        return TC_ACT_OK;
+    }
 
-    // TODO: Need to take window scaling into account? The scaling option is part of
-    //       the handshake. Detect if an outgoing packet is part of a handshake and
-    //       extract the window scale option and store it in a map.
+    bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
 
-    // // Write the new RWND value into the packet.
-    // bpf_skb_store_bytes(
-    //     skb,
-    //     ((void *)tcp + 14 - (void *)skb),
-    //     &rwnd,
-    //     sizeof(u16),
-    //     BPF_F_RECOMPUTE_CSUM);
-    tcp->window = htons(*rwnd >> FIXED_WIN_SCALE);
-
-    // u16 rwnd_check = tcp->window;
-    // bpf_trace_printk("Checking RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, rwnd_check);
-    // bpf_trace_printk("Checking RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, rwnd_check);
+    // Apply the window scale to the configured RWND value and set it in the packet.
+    tcp->window = htons(*rwnd >> *win_scale);
 
     return TC_ACT_OK;
 }
 
-static int write_active_opt(struct bpf_sock_ops *skops)
+static inline int set_hdr_cb_flags(struct bpf_sock_ops *skops)
 {
-	struct tcphdr *tcp;
-	struct tcp_opt win_scale_opt = {};
-    int ret;
-
-    tcp = skops->skb_data;
-	if ((void *)(tcp + 1) > skops->skb_data_end)
-		return 0;
-
-	if (tcp->syn && tcp->ack) {
-    	win_scale_opt.kind = TCPOPT_WINDOW;
-        win_scale_opt.len = 0;
-        win_scale_opt.data = 0;
-
-		ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
-		if (ret != 3 || win_scale_opt.len != 3 ||
-		    win_scale_opt.kind != TCPOPT_WINDOW)
-        {
-            switch (ret) {
-                case -ENOMSG:
-                    bpf_trace_printk("synack write -ENOMSG\n");
-                    break;
-                case -EINVAL:
-                    bpf_trace_printk("synack write -EINVAL\n");
-                    break;
-                case -ENOENT:
-                    bpf_trace_printk("synack write -ENOENT\n");
-                    break;
-                case -ENOSPC:
-                    bpf_trace_printk("synack write -ENOSPC\n");
-                    break;
-                case -EFAULT:
-                    bpf_trace_printk("synack write -EFAULT\n");
-                    break;
-                case -EPERM:
-                    bpf_trace_printk("synack write -EPERM\n");
-                    break;
-                default:
-                    bpf_trace_printk("synack write default failure\n");
-                    break;
-            }
-            return 0;
-        }
-
-        bpf_trace_printk(
-            "synack write; %u -> %u; win scale: %u\n",
-            ntohs(tcp->source),
-            ntohs(tcp->dest),
-            win_scale_opt.data);
-
-        bpf_sock_ops_cb_flags_set(skops,
-                skops->bpf_sock_ops_cb_flags &
-                ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
-
-        // u8 noop = 1;
-        // ret = bpf_store_hdr_opt(skops, &noop,
-        //         sizeof(noop), 0);
-        // switch (ret) {
-        //     case -ENOMSG:
-        //         bpf_trace_printk("synack write noop -ENOMSG\n");
-        //         break;
-        //     case -EINVAL:
-        //         bpf_trace_printk("synack write noop -EINVAL\n");
-        //         break;
-        //     case -ENOENT:
-        //         bpf_trace_printk("synack write noop -ENOENT\n");
-        //         break;
-        //     case -ENOSPC:
-        //         bpf_trace_printk("synack write noop -ENOSPC\n");
-        //         break;
-        //     case -EFAULT:
-        //         bpf_trace_printk("synack write noop -EFAULT\n");
-        //         break;
-        //     case -EPERM:
-        //         bpf_trace_printk("synack write noop -EPERM\n");
-        //         break;
-        //     default:
-        //         bpf_trace_printk("synack write noop default ret: %d\n", ret);
-        // }
-	}
-
-	return 1;
+    // Set the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+    // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+    if (bpf_sock_ops_cb_flags_set(skops,
+                                  skops->bpf_sock_ops_cb_flags |
+                                      BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
 }
 
-// https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
-// static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
-// {
-//     bpf_trace_printk("set_hdr_cb_flags\n");
-//     bpf_sock_ops_cb_flags_set(
-//         skops,
-//         skops->bpf_sock_ops_cb_flags |
-//             BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
-//             BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
-//     // bpf_sock_ops_cb_flags_set(
-//     //     skops,
-//     //     skops->bpf_sock_ops_cb_flags |
-//     //         BPF_SOCK_OPS_STATE_CB_FLAG);
-//     // bpf_sock_ops_cb_flags_set(
-//     //     skops,
-//     //     skops->bpf_sock_ops_cb_flags);
-// }
-
-static inline void set_hdr_cb_flags(struct bpf_sock_ops *skops, __u32 extra)
+static inline int clear_hdr_cb_flags(struct bpf_sock_ops *skops)
 {
-	bpf_sock_ops_cb_flags_set(skops,
-				  skops->bpf_sock_ops_cb_flags |
-				  BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG |
-				  extra);
+    // Clear the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+    // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+    if (bpf_sock_ops_cb_flags_set(skops,
+                                  skops->bpf_sock_ops_cb_flags &
+                                      ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
 }
-				//   BPF_SOCK_OPS_PARSE_UNKNOWN_HDR_OPT_CB_FLAG |
-                //   BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG |
 
-// #define TCPHDR_FIN 0x01
-#define TCPHDR_SYN 0x02
-// #define TCPHDR_RST 0x04
-// #define TCPHDR_PSH 0x08
-#define TCPHDR_ACK 0x10
-// #define TCPHDR_URG 0x20
-// #define TCPHDR_ECE 0x40
-// #define TCPHDR_CWR 0x80
-#define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
-
-// static inline __u8 skops_tcp_flags(const struct bpf_sock_ops *skops)
-// {
-// 	return skops->skb_tcp_flags;
-// }
-
-// static int active_opt_len(struct bpf_sock_ops *skops)
-// {
-// 	int err;
-
-// 	/* Reserve more than enough to allow the -EEXIST test in
-// 	 * the write_active_opt().
-// 	 */
-// 	err = bpf_reserve_hdr_opt(skops, 3, 0);  // 12
-// 	if (err)
-//         return 0;
-
-// 	return 1;
-// }
-
-static int handle_hdr_opt_len(struct bpf_sock_ops *skops)
+static inline int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 {
-    // int err;
-    // struct tcphdr *tcp;
-	// __u8 tcp_flags = skops_tcp_flags(skops);
+    // If this is a SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
+    // reserving three bytes (the minimim) for a TCP header option. These three bytes
+    // will never actually be used, but reserving space is the only way for that
+    // callback to be triggered.
+    if (((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK) &&
+        bpf_reserve_hdr_opt(skops, 3, 0))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
+}
 
-	// if ((tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
-    if ((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK)
+static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
+{
+    if (skops->family != AF_INET)
     {
-        // err = bpf_reserve_hdr_opt(skops, 3, 0);  // 12
-        if (bpf_reserve_hdr_opt(skops, 3, 0))
-            return 0;
-		// /* Check the SYN from bpf_sock_ops_kern->syn_skb */
-
-        // struct tcp_opt win_scale_opt = {};
-        // int ret;
-    	// win_scale_opt.kind = TCPOPT_WINDOW;
-        // win_scale_opt.len = 0;
-        // win_scale_opt.data = 0;
-
-		// /* Search the win scale option written by kernel
-		//  * in the SYN packet.
-		//  */
-		// ret = bpf_load_hdr_opt(skops, &win_scale_opt,
-		// 		       sizeof(win_scale_opt), 0);
-		// if (ret != 3 || win_scale_opt.len != 3 ||
-		//     win_scale_opt.kind != TCPOPT_WINDOW)
-        // {
-        //     switch (ret) {
-        //         case -ENOMSG:
-        //             bpf_trace_printk("synack len -ENOMSG\n");
-        //             break;
-        //         case -EINVAL:
-        //             bpf_trace_printk("synack len -EINVAL\n");
-        //             break;
-        //         case -ENOENT:
-        //             bpf_trace_printk("synack len -ENOENT\n");
-        //             break;
-        //         case -ENOSPC:
-        //             bpf_trace_printk("synack len -ENOSPC\n");
-        //             break;
-        //         case -EFAULT:
-        //             bpf_trace_printk("synack len -EFAULT\n");
-        //             break;
-        //         case -EPERM:
-        //             bpf_trace_printk("synack len -EPERM\n");
-        //             break;
-        //         default:
-        //             bpf_trace_printk("synack len default failure\n");
-        //     }
-        // } else {
-        //     bpf_trace_printk("synack len win scale: %u\n", win_scale_opt.data);
-        // }
-
-        // bpf_trace_printk(
-        //     "synack len; %u -> %u",
-        //     skops->local_port,
-        //     ntohl(skops->remote_port));
+        // This is not an IPv4 packet. We only support IPv4 packets because the struct
+        // we use as a map key stores IP addresses as 32 bits. This is purely an
+        // implementation detail.
+        bpf_trace_printk("Not using IPv4 for flow on local port %u!\n", skops->local_port);
+        return SOCKOPS_OK;
     }
-    return 1;
-	// /* Passive side should have cleared the write hdr cb by now */
-	// if (skops->local_port == passive_lport_h)
-	// 	RET_CG_ERR(0);
+    if ((skops->skb_tcp_flags & TCPHDR_SYNACK) != TCPHDR_SYNACK)
+    {
+        // This is not a SYNACK packet.
+        return SOCKOPS_OK;
+    }
 
-	// return active_opt_len(skops);
+    // This is a SYNACK packet.
+
+    struct tcp_opt win_scale_opt = {
+        .kind = TCPOPT_WINDOW,
+        .len = 0,
+        .data = 0};
+    int ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
+    if (ret != 3 || win_scale_opt.len != 3 ||
+        win_scale_opt.kind != TCPOPT_WINDOW)
+    {
+        switch (ret)
+        {
+        case -ENOMSG:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOMSG\n", skops->local_port);
+            break;
+        case -EINVAL:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EINVAL\n", skops->local_port);
+            break;
+        case -ENOENT:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOENT\n", skops->local_port);
+            break;
+        case -ENOSPC:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOSPC\n", skops->local_port);
+            break;
+        case -EFAULT:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EFAULT\n", skops->local_port);
+            break;
+        case -EPERM:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EPERM\n", skops->local_port);
+            break;
+        default:
+            bpf_trace_printk("Failure loading window scale option for flow on local port %u: failure code = %d\n", skops->local_port, ret);
+        }
+        return SOCKOPS_ERR;
+    }
+
+    bpf_trace_printk(
+        "TCP window scale for flow %u -> %u = %u\n",
+        ntohl(skops->remote_port), skops->local_port, win_scale_opt.data);
+
+    // Record this window scale for use when setting the RWND in the egress path.
+    struct flow_t flow = {
+        .local_addr = skops->local_ip4,
+        .remote_addr = skops->remote_ip4,
+        .local_port = (u16)skops->local_port,
+        .remote_port = (u16)ntohl(skops->remote_port)};
+    // Use update() instead of insert() in case this port is being reused.
+    // TODO: Change to insert() once the flow cleanup code is implemented.
+    flow_to_win_scale.update(&flow, &win_scale_opt.data);
+
+    // Clear the flag that enables the header option write callback.
+    return clear_hdr_cb_flags(skops);
 }
 
-
-// static void active_established(struct bpf_sock_ops *skops) {
-//     struct tcp_opt win_scale_opt = {};
-//     int ret;
-//     win_scale_opt.kind = TCPOPT_WINDOW;
-//     win_scale_opt.len = 0;
-//     win_scale_opt.data = 0;
-
-//     ret = bpf_load_hdr_opt(skops, &win_scale_opt,
-//                     sizeof(win_scale_opt), 0);
-//     if (ret != 3 || win_scale_opt.len != 3 ||
-//         win_scale_opt.kind != TCPOPT_WINDOW)
-//     {
-//         switch (ret) {
-//             case -ENOMSG:
-//                 bpf_trace_printk("synack active est -ENOMSG\n");
-//                 break;
-//             case -EINVAL:
-//                 bpf_trace_printk("synack active est -EINVAL\n");
-//                 break;
-//             case -ENOENT:
-//                 bpf_trace_printk("synack active est -ENOENT\n");
-//                 break;
-//             case -ENOSPC:
-//                 bpf_trace_printk("synack active est -ENOSPC\n");
-//                 break;
-//             case -EFAULT:
-//                 bpf_trace_printk("synack active est -EFAULT\n");
-//                 break;
-//             case -EPERM:
-//                 bpf_trace_printk("synack active est -EPERM\n");
-//                 break;
-//             default:
-//                 bpf_trace_printk("synack active est default failure\n");
-//         }
-//     } else {
-//         bpf_trace_printk("synack active est win scale: %u\n", win_scale_opt.data);
-//     }
-
-//     bpf_trace_printk(
-//         "synack active est; %u -> %u",
-//         skops->local_port,
-//         ntohl(skops->remote_port));
-// }
-
-
-int foo(struct bpf_sock_ops *skops)
+int read_win_scale(struct bpf_sock_ops *skops)
 {
-	// int true_val = 1;
-    // __u16 passive_lport_h = 0;
-    // __u16 passive_lport_n = 0;
-
-	switch (skops->op) {
-	case BPF_SOCK_OPS_TCP_LISTEN_CB:
-		// passive_lport_h = skops->local_port;
-		// passive_lport_n = htons(passive_lport_h);
-		// bpf_setsockopt(skops, SOL_TCP, TCP_SAVE_SYN,
-		// 	       &true_val, sizeof(true_val));
-		set_hdr_cb_flags(skops, 0);
-		break;
-	case BPF_SOCK_OPS_TCP_CONNECT_CB:
-        // bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
-		// set_hdr_cb_flags(skops, 0);
-		break;
-	case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
-        // bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
-		return 1;
-	case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
-		return handle_hdr_opt_len(skops);
-	case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-        bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
-		return write_active_opt(skops);
-	case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-        // bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
-		return 1;
-    // case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-    //     bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
-    //     // active_established(skops);
-    //     return 1;
-	}
-
-	return 1;
+    switch (skops->op)
+    {
+    case BPF_SOCK_OPS_TCP_LISTEN_CB:
+        return set_hdr_cb_flags(skops);
+    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+        return handle_hdr_opt_len(skops);
+    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+        return handle_write_hdr_opt(skops);
+    }
+    return SOCKOPS_OK;
 }
-
-// int sock_stuff(struct bpf_sock_ops *skops)
-// {
-//     bpf_trace_printk("sock_stuff %u\n", skops->op);
-//     /* ipv4 only */
-//     // if (skops->family != AF_INET)
-//     // {
-//     //     return 1;
-//     // }
-
-//     set_hdr_cb_flags(skops);
-
-//     // TODO: Print port...try to filter to just the messgaes related to our connections.
-//     switch (skops->op)
-//     {
-//     case BPF_SOCK_OPS_TIMEOUT_INIT:
-//         bpf_trace_printk("BPF_SOCK_OPS_TIMEOUT_INIT\n");
-//         break;
-//     case BPF_SOCK_OPS_RWND_INIT:
-//         bpf_trace_printk("BPF_SOCK_OPS_RWND_INIT\n");
-//         break;
-//     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_NEEDS_ECN:
-//         bpf_trace_printk("BPF_SOCK_OPS_NEEDS_ECN\n");
-//         break;
-//     case BPF_SOCK_OPS_BASE_RTT:
-//         bpf_trace_printk("BPF_SOCK_OPS_BASE_RTT\n");
-//         break;
-//     case BPF_SOCK_OPS_RTO_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_RTO_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_RETRANS_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_RETRANS_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_STATE_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_STATE_CB %u %u\n", skops->state, skops->args[1]);
-//         break;
-//     case BPF_SOCK_OPS_RTT_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_RTT_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_PARSE_HDR_OPT_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_PARSE_HDR_OPT_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_HDR_OPT_LEN_CB\n");
-//         // return handle_hdr_opt_len(skops);
-//         // u8 flags = skops->   skb_tcp_flags;
-//         break;
-//     case BPF_SOCK_OPS_TCP_LISTEN_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_TCP_LISTEN_CB\n");
-//         break;
-//     case BPF_SOCK_OPS_TCP_CONNECT_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_TCP_CONNECT_CB\n");
-//         // write_window_scale(skops);
-//         // set_hdr_cb_flags(skops);
-//         break;
-//     case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-//         bpf_trace_printk("BPF_SOCK_OPS_WRITE_HDR_OPT_CB\n");
-//         // write_window_scale(skops);
-//         // if (skops->skb_tcp_flags & TCP_FLAG_ACK) {
-//         //     bpf_trace_printk("outgoing syn!\n");
-//         // }
-//         break;
-//     default:
-//         bpf_trace_printk("default\n");
-//         break;
-//     }
-//     return 1;
-// }
