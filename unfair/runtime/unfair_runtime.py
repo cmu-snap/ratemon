@@ -182,8 +182,8 @@ def receive_packet_helper(flows, flows_lock, pkt):
     flows_lock protects flows.
     """
     global NUM_PACKETS
-    with flows_lock:
-        NUM_PACKETS += 1
+    # with flows_lock:
+    NUM_PACKETS += 1
     return
 
     # Skip packets on the loopback interface.
