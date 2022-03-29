@@ -60,8 +60,16 @@ struct tcp_opt
     __u8 data;
 } __attribute__((packed));
 
+struct ringbuf
+{
+    struct pkt_t pkts[1024];
+    u32 pointer;
+};
+
 // Pass packet features to userspace.
 BPF_PERF_OUTPUT(pkts);
+// Assemble mapping of flow to packets.
+BPF_HASH(test, struct flow_t, struct ringbuf);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_rwnd, struct flow_t, u16);
 // Read RWND limit for flow, as set by userspace.
@@ -80,7 +88,7 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
 // Need to redefine this because the BCC rewriter does not support rewriting
 // tcp_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
-static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
+static inline struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 {
     // unstable API. verify logic in tcp_hdr() -> skb_transport_header().
     // https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L2269
@@ -204,6 +212,8 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
 
     pkts.perf_submit(ctx, &pkt, sizeof(pkt));
+
+
     return 0;
 }
 

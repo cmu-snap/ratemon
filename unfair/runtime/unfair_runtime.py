@@ -3,6 +3,7 @@
 from argparse import ArgumentParser
 import atexit
 import ctypes
+import math
 import os
 from os import path
 import pickle
@@ -36,6 +37,9 @@ LOCALHOST = ip_str_to_int("127.0.0.1")
 OLD_THRESH_SEC = 5 * 60
 # The sysctl configuration item for TCP window scaling.
 WINDOW_SCALING_CONFIG = "net.ipv4.tcp_window_scaling"
+
+
+NUM_PACKETS = 0
 
 
 class FlowKey(ctypes.Structure):
@@ -177,26 +181,19 @@ def receive_packet_helper(flows, flows_lock, pkt):
 
     flows_lock protects flows.
     """
+    global NUM_PACKETS
+    with flows_lock:
+        NUM_PACKETS += 1
+    return
+
     # Skip packets on the loopback interface.
     if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
-    fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-    dat = (
-        pkt.seq,
-        pkt.srtt_us,
-        pkt.tsval,
-        pkt.tsecr,
-        pkt.total_bytes,
-        pkt.ihl_bytes,
-        pkt.thl_bytes,
-        pkt.payload_bytes,
-        pkt.time_us,
-    )
-
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
     if flows_lock.acquire(blocking=False):
         try:
+            fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
             if fourtuple in flows:
                 flow = flows[fourtuple]
             else:
@@ -207,10 +204,23 @@ def receive_packet_helper(flows, flows_lock, pkt):
             # packet.
             if flow.lock.acquire(blocking=False):
                 try:
+                    dat = (
+                        pkt.seq,
+                        pkt.srtt_us,
+                        pkt.tsval,
+                        pkt.tsecr,
+                        pkt.total_bytes,
+                        pkt.ihl_bytes,
+                        pkt.thl_bytes,
+                        pkt.payload_bytes,
+                        pkt.time_us,
+                    )
                     flow.packets.append(dat)
+
+                    # global NUM_PACKETS
+                    # NUM_PACKETS += 1
                 finally:
                     flow.lock.release()
-                # print(f"{flow} --- {flow_data_to_str(dat)}")
         finally:
             flows_lock.release()
 
@@ -233,15 +243,14 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
                 args,
             )
 
-            # print("186")
-            with flows_lock:
-                # Do not bother acquiring the per-flow locks since we are just reading
-                # data for logging purposes. It is okay if we get inconsistent
-                # information.
-                print(
-                    "Current decisions:\n"
-                    + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
-                )
+            # with flows_lock:
+            #     # Do not bother acquiring the per-flow locks since we are just reading
+            #     # data for logging purposes. It is okay if we get inconsistent
+            #     # information.
+            #     print(
+            #         "Current decisions:\n"
+            #         + "\n".join(f"\t{flow}: {flow.decision}" for flow in flows.values())
+            #     )
 
             if args.inference_interval_ms is not None:
                 time.sleep(
@@ -261,16 +270,13 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
 
     Remove old and empty flows.
     """
-    print("Examining flows...")
     to_remove = []
     to_check = []
 
     # Need to acquire flows_lock while iterating over flows.
-    # print("211")
     with flows_lock:
-        print(f"Found {len(flows)} flows total:")
         for fourtuple, flow in flows.items():
-            print(f"\t{flow} - {len(flow.packets)} packets")
+            # print(f"\t{flow} - {len(flow.packets)} packets")
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
             if flow.lock.acquire(blocking=False):
@@ -293,22 +299,18 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
             else:
                 print(f"Cloud not acquire lock for flow {flow}")
         # Garbage collection.
-        print(f"Removing {len(to_remove)} flows:")
         for fourtuple in to_remove:
-            print(f"\t{flows[fourtuple]}")
             del flows[fourtuple]
             flow_key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
             if flow_key in flow_to_rwnd:
                 del flow_to_rwnd[flow_key]
 
-    print(f"Checking {len(to_check)} flows...")
     for fourtuple in to_check:
         flow = flows[fourtuple]
         # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
         # to the next flow.
         if flow.lock.acquire(blocking=False):
             try:
-                print(f"Checking flow {flow}")
                 if not args.disable_inference:
                     check_flow(flows, fourtuple, net, flow_to_rwnd, args)
             finally:
@@ -323,7 +325,6 @@ def featurize(flows, fourtuple, net, pkts, debug=False):
     Returns a structured numpy array.
     """
     flow = flows[fourtuple]
-    # print("262")
     with flow.lock:
         fets, flow.min_rtt_us = gen_features.parse_received_acks(
             net.in_spc, fourtuple, pkts, flow.min_rtt_us, debug
@@ -413,25 +414,22 @@ def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
         #        just low due to low application demand?
 
         if flow.decision != new_decision:
+            print(f"New decision for flow {flow}: {new_decision}")
+
             key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
             if new_decision[1] is None:
-                print(f"No longer suppressing flow {flow}")
                 del flow_to_rwnd[key]
             else:
+                new_decision = (new_decision[0], round(new_decision[1]))
                 assert new_decision[1] > 0, (
                     "Error: RWND must be greater than 0, "
                     f"but is {new_decision[1]} for flow {flow}"
                 )
-                if new_decision[1] > 2**16:
-                    print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
-                    new_decision[1] = 2**16 - 1
+                # if new_decision[1] > 2**16:
+                #     print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
+                #     new_decision[1] = 2**16 - 1
 
-                to_set = round(new_decision[1])
-                print(f"Setting flow {flow} RWND to: {to_set}")
-                flow_to_rwnd[key] = ctypes.c_ushort(to_set)
-
-            for key, val in flow_to_rwnd.items():
-                print(key.local_port, key.remote_port, val)
+                flow_to_rwnd[key] = ctypes.c_ushort(new_decision[1])
 
             flow.decision = new_decision
 
@@ -455,6 +453,7 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
     """
     flow = flows[fourtuple]
     with flow.lock:
+        print(f"Running inference on {len(flow.packets)} packets for flow {flow}")
         # Discard all but the most recent 100 packets.
         if len(flow.packets) > 100:
             flow.packets = flow.packets[-100:]
@@ -474,11 +473,11 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
             print(f"Error, skipping batch of packets: {exp}")
             return
         finally:
-            print(f"Inference took: {(time.time() - start_time_s) * 1e3} ms")
+            print(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
 
         flow.label = condense_labels(labels)
         make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args)
-        print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
+        # print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
 
         # Clear the flow's packets.
         flow.packets = []
@@ -668,7 +667,7 @@ def run(args):
         target=check_loop,
         args=(flows, flows_lock, net, args, flow_to_rwnd, done),
     )
-    check_thread.start()
+    # check_thread.start()
 
     # This function will be called to process an event from the BPF program.
     def process_event(cpu, dat, size):
@@ -677,12 +676,30 @@ def run(args):
     bpf["pkts"].open_perf_buffer(process_event)
 
     print("Running...press Control-C to end")
+    last_time_s = time.time()
+    with flows_lock:
+        last_packets = NUM_PACKETS
     try:
         # Loop with callback to process_event().
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
             bpf.perf_buffer_poll()
+
+            cur_time_s = time.time()
+            delta_s = cur_time_s - last_time_s
+            if delta_s > 10:
+                with flows_lock:
+                    cur_packets = NUM_PACKETS
+                pps = (cur_packets - last_packets) / delta_s
+                print(f"cur_packets: {cur_packets}")
+                print(
+                    f"Packets per second: {pps:.2f}, "
+                    f"processed throughput at 1500 B MSS: {pps * 1500 * 8 / 1e6:.2f} Mbps"
+                )
+                last_time_s = cur_time_s
+                last_packets = cur_packets
+
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
@@ -694,7 +711,7 @@ def run(args):
     # for flow, pkts in sorted(flows.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    check_thread.join()
+    # check_thread.join()
 
 
 def _main():
