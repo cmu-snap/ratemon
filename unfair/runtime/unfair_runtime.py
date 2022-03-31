@@ -182,10 +182,10 @@ def receive_packet_helper(flows, flows_lock, pkt):
     flows_lock protects flows.
     """
     global NUM_PACKETS
-    # with flows_lock:
-    NUM_PACKETS += 1
-    return
 
+    # Skip packets that are just empty structs.
+    if not pkt.valid:
+        return
     # Skip packets on the loopback interface.
     if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
@@ -218,7 +218,7 @@ def receive_packet_helper(flows, flows_lock, pkt):
                     flow.packets.append(dat)
 
                     # global NUM_PACKETS
-                    # NUM_PACKETS += 1
+                    NUM_PACKETS += 1
                 finally:
                     flow.lock.release()
         finally:
@@ -599,8 +599,6 @@ def parse_args():
 
 def run(args):
     """Core logic."""
-    global NUM_PACKETS
-
     net = load_model(args.model, args.model_file)
 
     # Load BPF program.
@@ -608,7 +606,7 @@ def run(args):
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
-    packet_array = bpf["packet_array"]
+    ringbuffer = bpf["ringbuffer"]
 
     # Logic for reading the TCP window scale.
     func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
@@ -670,13 +668,7 @@ def run(args):
         target=check_loop,
         args=(flows, flows_lock, net, args, flow_to_rwnd, done),
     )
-    # check_thread.start()
-
-    # This function will be called to process an event from the BPF program.
-    def process_event(cpu, dat, size):
-        receive_packet(flows, flows_lock, bpf["pkts"].event(dat), done)
-
-    # bpf["pkts"].open_perf_buffer(process_event)
+    check_thread.start()
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -684,36 +676,43 @@ def run(args):
     with flows_lock:
         last_packets = NUM_PACKETS
     try:
-        # Loop with callback to process_event().
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-            # bpf.perf_buffer_poll()
 
-            # time.sleep(0.1)
+            current_epoch = ringbuffer[0].epoch
+            if current_epoch == last_epoch:
+                time.sleep(0.1)
+            else:
+                new_packets = list(ringbuffer.items_lookup_batch())
+                # print(f"Found {len(new_packets)} new packets")
 
-            foo = list(packet_array.items_lookup_batch())
-            current_epoch = foo[0][1].epoch
-            print(f"Current epoch: {current_epoch}")
-            if current_epoch != last_epoch:
-                print("Found new packets")
-                for k, v in foo:
-                    receive_packet(flows, flows_lock, v, done)
-            last_epoch = current_epoch
-            # with flows_lock:
-
-                    # print(k, v.epoch, v.valid);
-                    # if v.epoch == epoch:
-                    #     NUM_PACKETS += 1
+                # It is likely that an epoch transition occurred in the middle of the
+                # array. Find this point. Process all packets after this transition
+                # point (older packets) before processing packets before the transition
+                # point (newer packets).
+                epoch_transition_idx = None
+                for idx, pkt in new_packets:
+                    if pkt.epoch != current_epoch:
+                        # We found an older epoch. Process these packets first.
+                        if epoch_transition_idx is None:
+                            epoch_transition_idx = idx
+                        receive_packet(flows, flows_lock, pkt, done)
+                if epoch_transition_idx is not None:
+                    # print(
+                    #     f"Epoch transition at idx {epoch_transition_idx}: "
+                    #     f"{current_epoch} -> {new_packets[epoch_transition_idx][1].epoch}"
+                    # )
+                    for idx in range(epoch_transition_idx):
+                        receive_packet(flows, flows_lock, new_packets[idx][1], done)
+                last_epoch = current_epoch
 
             cur_time_s = time.time()
             delta_s = cur_time_s - last_time_s
             if delta_s > 10:
-
                 with flows_lock:
                     cur_packets = NUM_PACKETS
                 pps = (cur_packets - last_packets) / delta_s
-                print(f"cur_packets: {cur_packets}")
                 print(
                     f"Packets per second: {pps:.2f}, "
                     f"processed throughput at 1500 B MSS: {pps * 1500 * 8 / 1e6:.2f} Mbps"
@@ -732,7 +731,7 @@ def run(args):
     # for flow, pkts in sorted(flows.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    # check_thread.join()
+    check_thread.join()
 
 
 def _main():

@@ -24,7 +24,8 @@
 #define TCPHDR_ACK 0x10
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
-#define FLOW_MAX_PACKETS 83333
+#define FLOW_MAX_PACKETS 65536
+// #define FLOW_MAX_PACKETS 1024
 
 // Key for use in flow-based maps.
 struct flow_t
@@ -50,7 +51,6 @@ struct pkt_t
     u32 ihl_bytes;
     u32 thl_bytes;
     u32 payload_bytes;
-    // Required for time_us to be 64 bits.
     u32 epoch;
     u64 time_us;
     u32 valid;
@@ -63,17 +63,17 @@ struct tcp_opt
     __u8 data;
 } __attribute__((packed));
 
-struct flow_buff_t
-{
-    struct pkt_t pkts[FLOW_MAX_PACKETS];
-    u32 next_free;
-};
+// struct flow_buff_t
+// {
+//     struct pkt_t pkts[FLOW_MAX_PACKETS];
+//     u32 next_free;
+// };
 
 // Pass packet features to userspace.
-BPF_PERF_OUTPUT(pkts);
+// BPF_PERF_OUTPUT(pkts);
 // Assemble mapping of flow to packets.
 // BPF_HASH(flow_to_pkts, struct flow_t, struct flow_buff_t);
-BPF_ARRAY(packet_array, struct pkt_t, FLOW_MAX_PACKETS);
+BPF_ARRAY(ringbuffer, struct pkt_t, FLOW_MAX_PACKETS);
 BPF_ARRAY(next_free, int, 1);
 BPF_ARRAY(epoch, u32, 1);
 // Read RWND limit for flow, as set by userspace.
@@ -155,7 +155,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
     // Check this is IPv4.
-    if (skb->protocol != htons(ETH_P_IP))
+    if (skb->protocol != bpf_htons(ETH_P_IP))
     {
         return 0;
     }
@@ -167,81 +167,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
 
-    struct pkt_t pkt = {};
-    pkt.saddr = ip->saddr;
-    pkt.daddr = ip->daddr;
-
-    struct tcphdr *tcp = skb_to_tcphdr(skb);
-    u16 sport = tcp->source;
-    u16 dport = tcp->dest;
-    pkt.sport = ntohs(sport);
-    pkt.dport = ntohs(dport);
-    u32 seq = tcp->seq;
-    pkt.seq = ntohl(seq);
-
-    // if (is_syn(tcp)) {
-    //     bpf_trace_printk("is syn!\n");
-    //     // set_window_scaling(tcp);
-    // } else {
-    //     bpf_trace_printk("not syn\n");
-    // }
-    // bpf_trace_printk("sport: %u, dport: %u, seq: %u\n", pkt.sport, pkt.dport, pkt.seq);
-    // bpf_trace_printk("saddr: %u, daddr: %u\n", pkt.saddr, pkt.daddr, pkt.seq);
-    // bpf_trace_printk("daddr: %d, dport: %d, seq: %d\n", pkt.daddr, pkt.dport, pkt.seq);
-
-    struct tcp_sock *ts = tcp_sk(sk);
-    pkt.srtt_us = ts->srtt_us >> 3;
-    // TODO: For the timestamp option, we also need to parse the sent packets.
-    // We use the timestamp option to determine the RTT. But what if we just
-    // use srtt instead? Let's start with that.
-    pkt.tsval = ts->rx_opt.rcv_tsval;
-    pkt.tsecr = ts->rx_opt.rcv_tsecr;
-
-    // Determine the IP/TCP header lengths.
-    ip_hdr_len(ip, &pkt.ihl_bytes);
-    tcp_hdr_len(tcp, &pkt.thl_bytes);
-
-    // Determine total IP packet size and the TCP payload size.
-    u16 total_bytes = ip->tot_len;
-    pkt.total_bytes = ntohs(total_bytes);
-    // The TCP payload is the total IP packet length minus IP header minus TCP
-    // header.
-    pkt.payload_bytes = pkt.total_bytes - pkt.ihl_bytes - pkt.thl_bytes;
-
-    // BPF has trouble extracting the time the proper way
-    // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp
-    // is just a u64 in nanoseconds.
-    ktime_t tstamp = skb->tstamp;
-    pkt.time_us = (u64)tstamp / 1000;
-
-    // struct timeval tstamp;
-    // skb_get_timestamp(skb, &tstamp);
-    // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
-
-    pkts.perf_submit(ctx, &pkt, sizeof(pkt));
-
-    // struct flow_t flow = {
-    //     .local_addr = pkt.daddr,
-    //     .remote_addr = pkt.saddr,
-    //     .local_port = pkt.dport,
-    //     .remote_port = pkt.sport
-    // };
-    // struct flow_buff_t *flow_buff = flow_to_pkts.lookup_or_try_init(&flow);
-    // if (flow_buff == NULL)
-    // {
-    //     // struct flow_buff_t new_flow_buff;
-    //     // new_flow_buff.next_free = 0;
-    //     // new_flow_buff.pkts[new_flow_buff.next_free++] = pkt;
-    //     // flow_to_pkts.insert(&flow, &new_flow_buff);
-    //     return 0;
-    // }
-    // if (flow_buff->next_free < FLOW_MAX_PACKETS)
-    // {
-    //     flow_buff->pkts[flow_buff->next_free++] = pkt;
-    // }
-
-    // packet_array.update(&loc, &pkt);
-
+    // Look up the current epoch.
     int zero = 0;
     u32 *epoch_ptr = epoch.lookup(&zero);
     if (epoch_ptr == NULL)
@@ -250,11 +176,58 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     }
     u32 epoch_int = *epoch_ptr;
 
+    // Look up the index of the next location in the ringbuffer.
     int *next_free_ptr = next_free.lookup(&zero);
     if (next_free_ptr == NULL)
     {
         return 0;
     }
+    int next_free_int = *next_free_ptr;
+    // bpf_trace_printk("next_free_int: %d, epoch_int: %u\n", next_free_int, epoch_int);
+
+    // Get the next location in the ringbuffer.
+    struct pkt_t *pkt = ringbuffer.lookup(&next_free_int);
+    if (pkt == NULL)
+    {
+        return 0;
+    }
+    // Fill in packet metadata needed for managing the ringbuffer.
+    pkt->valid = 1;
+    pkt->epoch = epoch_int;
+
+    pkt->saddr = ip->saddr;
+    pkt->daddr = ip->daddr;
+
+    struct tcphdr *tcp = skb_to_tcphdr(skb);
+    pkt->sport = bpf_ntohs(tcp->source);
+    pkt->dport = bpf_ntohs(tcp->dest);
+    pkt->seq = bpf_ntohl(tcp->seq);
+
+    struct tcp_sock *ts = tcp_sk(sk);
+    pkt->srtt_us = ts->srtt_us >> 3;
+    // TODO: For the timestamp option, we also need to parse the sent packets.
+    // We use the timestamp option to determine the RTT. But what if we just
+    // use srtt instead? Let's start with that.
+    pkt->tsval = ts->rx_opt.rcv_tsval;
+    pkt->tsecr = ts->rx_opt.rcv_tsecr;
+
+    // Determine the IP/TCP header lengths.
+    ip_hdr_len(ip, &pkt->ihl_bytes);
+    tcp_hdr_len(tcp, &pkt->thl_bytes);
+
+    // Determine total IP packet size and the TCP payload size.
+    pkt->total_bytes = bpf_ntohs(ip->tot_len);
+    // The TCP payload is the total IP packet length minus IP header minus TCP
+    // header.
+    pkt->payload_bytes = pkt->total_bytes - pkt->ihl_bytes - pkt->thl_bytes;
+
+    // BPF has trouble extracting the time the proper way
+    // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp
+    // is just a u64 in nanoseconds.
+    ktime_t tstamp = skb->tstamp;
+    pkt->time_us = (u64)tstamp / 1000;
+
+    // Advance the ringbuffer to the next position.
     (*next_free_ptr)++;
     if ((*next_free_ptr) >= FLOW_MAX_PACKETS)
     {
@@ -262,30 +235,9 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         (*epoch_ptr)++;
     }
 
-    int next_free_int = *next_free_ptr;
-    bpf_trace_printk("next_free_int: %d\n", next_free_int);
-    // int one = 1;
-    // struct pkt_t *pktt = packet_array.lookup(&one);
-    struct pkt_t *pktt = packet_array.lookup(&next_free_int);
-    if (pktt == NULL)
-    {
-        return 0;
-    }
-    pktt->saddr = pkt.saddr;
-    pktt->daddr = pkt.daddr;
-    pktt->sport = pkt.sport;
-    pktt->dport = pkt.dport;
-    pktt->seq = pkt.seq;
-    pktt->srtt_us = pkt.srtt_us;
-    pktt->tsval = pkt.tsval;
-    pktt->tsecr = pkt.tsecr;
-    pktt->total_bytes = pkt.total_bytes;
-    pktt->ihl_bytes = pkt.ihl_bytes;
-    pktt->thl_bytes = pkt.thl_bytes;
-    pktt->payload_bytes = pkt.payload_bytes;
-    pktt->epoch = epoch_int;
-    pktt->time_us = pkt.time_us;
-    pktt->valid = 1;
+    // struct timeval tstamp;
+    // skb_get_timestamp(skb, &tstamp);
+    // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
 
     return 0;
 }
@@ -314,7 +266,7 @@ int handle_egress(struct __sk_buff *skb)
     // Check that this is IP. Calculate the start of the IP header, and do a
     // sanity check to make sure that the IP header does not extend past the
     // end of the packet.
-    if (eth->h_proto != htons(ETH_P_IP))
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
     {
         return TC_ACT_OK;
     }
@@ -339,10 +291,8 @@ int handle_egress(struct __sk_buff *skb)
     struct flow_t flow;
     flow.local_addr = ip->saddr;
     flow.remote_addr = ip->daddr;
-    u16 local_port = tcp->source;
-    u16 remote_port = tcp->dest;
-    flow.local_port = ntohs(local_port);
-    flow.remote_port = ntohs(remote_port);
+    flow.local_port = bpf_ntohs(tcp->source);
+    flow.remote_port = bpf_ntohs(tcp->dest);
 
     // For debugging purposes, only modify flows from local port 9998-10000.
     if (flow.local_port < 9998 || flow.local_port > 10000)
@@ -373,7 +323,7 @@ int handle_egress(struct __sk_buff *skb)
     bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
 
     // Apply the window scale to the configured RWND value and set it in the packet.
-    tcp->window = htons(*rwnd >> *win_scale);
+    tcp->window = bpf_htons(*rwnd >> *win_scale);
 
     return TC_ACT_OK;
 }
@@ -466,14 +416,14 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
 
     bpf_trace_printk(
         "TCP window scale for flow %u -> %u = %u\n",
-        ntohl(skops->remote_port), skops->local_port, win_scale_opt.data);
+        bpf_ntohl(skops->remote_port), skops->local_port, win_scale_opt.data);
 
     // Record this window scale for use when setting the RWND in the egress path.
     struct flow_t flow = {
         .local_addr = skops->local_ip4,
         .remote_addr = skops->remote_ip4,
         .local_port = (u16)skops->local_port,
-        .remote_port = (u16)ntohl(skops->remote_port)};
+        .remote_port = (u16)bpf_ntohl(skops->remote_port)};
     // Use update() instead of insert() in case this port is being reused.
     // TODO: Change to insert() once the flow cleanup code is implemented.
     flow_to_win_scale.update(&flow, &win_scale_opt.data);
