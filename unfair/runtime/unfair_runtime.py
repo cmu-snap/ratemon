@@ -599,6 +599,8 @@ def parse_args():
 
 def run(args):
     """Core logic."""
+    global NUM_PACKETS
+
     net = load_model(args.model, args.model_file)
 
     # Load BPF program.
@@ -606,6 +608,7 @@ def run(args):
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
+    packet_array = bpf["packet_array"]
 
     # Logic for reading the TCP window scale.
     func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
@@ -673,10 +676,11 @@ def run(args):
     def process_event(cpu, dat, size):
         receive_packet(flows, flows_lock, bpf["pkts"].event(dat), done)
 
-    bpf["pkts"].open_perf_buffer(process_event)
+    # bpf["pkts"].open_perf_buffer(process_event)
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
+    last_epoch = -1
     with flows_lock:
         last_packets = NUM_PACKETS
     try:
@@ -684,11 +688,28 @@ def run(args):
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-            bpf.perf_buffer_poll()
+            # bpf.perf_buffer_poll()
+
+            # time.sleep(0.1)
+
+            foo = list(packet_array.items_lookup_batch())
+            current_epoch = foo[0][1].epoch
+            print(f"Current epoch: {current_epoch}")
+            if current_epoch != last_epoch:
+                print("Found new packets")
+                for k, v in foo:
+                    receive_packet(flows, flows_lock, v, done)
+            last_epoch = current_epoch
+            # with flows_lock:
+
+                    # print(k, v.epoch, v.valid);
+                    # if v.epoch == epoch:
+                    #     NUM_PACKETS += 1
 
             cur_time_s = time.time()
             delta_s = cur_time_s - last_time_s
             if delta_s > 10:
+
                 with flows_lock:
                     cur_packets = NUM_PACKETS
                 pps = (cur_packets - last_packets) / delta_s

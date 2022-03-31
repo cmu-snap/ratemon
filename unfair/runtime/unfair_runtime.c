@@ -24,6 +24,8 @@
 #define TCPHDR_ACK 0x10
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
+#define FLOW_MAX_PACKETS 83333
+
 // Key for use in flow-based maps.
 struct flow_t
 {
@@ -49,8 +51,9 @@ struct pkt_t
     u32 thl_bytes;
     u32 payload_bytes;
     // Required for time_us to be 64 bits.
-    u32 padding;
+    u32 epoch;
     u64 time_us;
+    u32 valid;
 };
 
 struct tcp_opt
@@ -60,16 +63,19 @@ struct tcp_opt
     __u8 data;
 } __attribute__((packed));
 
-struct ringbuf
+struct flow_buff_t
 {
-    struct pkt_t pkts[1024];
-    u32 pointer;
+    struct pkt_t pkts[FLOW_MAX_PACKETS];
+    u32 next_free;
 };
 
 // Pass packet features to userspace.
 BPF_PERF_OUTPUT(pkts);
 // Assemble mapping of flow to packets.
-BPF_HASH(test, struct flow_t, struct ringbuf);
+// BPF_HASH(flow_to_pkts, struct flow_t, struct flow_buff_t);
+BPF_ARRAY(packet_array, struct pkt_t, FLOW_MAX_PACKETS);
+BPF_ARRAY(next_free, int, 1);
+BPF_ARRAY(epoch, u32, 1);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_rwnd, struct flow_t, u16);
 // Read RWND limit for flow, as set by userspace.
@@ -160,6 +166,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     {
         return 0;
     }
+
     struct pkt_t pkt = {};
     pkt.saddr = ip->saddr;
     pkt.daddr = ip->daddr;
@@ -213,6 +220,72 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
 
     pkts.perf_submit(ctx, &pkt, sizeof(pkt));
 
+    // struct flow_t flow = {
+    //     .local_addr = pkt.daddr,
+    //     .remote_addr = pkt.saddr,
+    //     .local_port = pkt.dport,
+    //     .remote_port = pkt.sport
+    // };
+    // struct flow_buff_t *flow_buff = flow_to_pkts.lookup_or_try_init(&flow);
+    // if (flow_buff == NULL)
+    // {
+    //     // struct flow_buff_t new_flow_buff;
+    //     // new_flow_buff.next_free = 0;
+    //     // new_flow_buff.pkts[new_flow_buff.next_free++] = pkt;
+    //     // flow_to_pkts.insert(&flow, &new_flow_buff);
+    //     return 0;
+    // }
+    // if (flow_buff->next_free < FLOW_MAX_PACKETS)
+    // {
+    //     flow_buff->pkts[flow_buff->next_free++] = pkt;
+    // }
+
+    // packet_array.update(&loc, &pkt);
+
+    int zero = 0;
+    u32 *epoch_ptr = epoch.lookup(&zero);
+    if (epoch_ptr == NULL)
+    {
+        return 0;
+    }
+    u32 epoch_int = *epoch_ptr;
+
+    int *next_free_ptr = next_free.lookup(&zero);
+    if (next_free_ptr == NULL)
+    {
+        return 0;
+    }
+    (*next_free_ptr)++;
+    if ((*next_free_ptr) >= FLOW_MAX_PACKETS)
+    {
+        (*next_free_ptr) = 0;
+        (*epoch_ptr)++;
+    }
+
+    int next_free_int = *next_free_ptr;
+    bpf_trace_printk("next_free_int: %d\n", next_free_int);
+    // int one = 1;
+    // struct pkt_t *pktt = packet_array.lookup(&one);
+    struct pkt_t *pktt = packet_array.lookup(&next_free_int);
+    if (pktt == NULL)
+    {
+        return 0;
+    }
+    pktt->saddr = pkt.saddr;
+    pktt->daddr = pkt.daddr;
+    pktt->sport = pkt.sport;
+    pktt->dport = pkt.dport;
+    pktt->seq = pkt.seq;
+    pktt->srtt_us = pkt.srtt_us;
+    pktt->tsval = pkt.tsval;
+    pktt->tsecr = pkt.tsecr;
+    pktt->total_bytes = pkt.total_bytes;
+    pktt->ihl_bytes = pkt.ihl_bytes;
+    pktt->thl_bytes = pkt.thl_bytes;
+    pktt->payload_bytes = pkt.payload_bytes;
+    pktt->epoch = epoch_int;
+    pktt->time_us = pkt.time_us;
+    pktt->valid = 1;
 
     return 0;
 }
