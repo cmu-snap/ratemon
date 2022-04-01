@@ -3,7 +3,7 @@
 from argparse import ArgumentParser
 import atexit
 import ctypes
-import math
+import multiprocessing
 import os
 from os import path
 import pickle
@@ -319,19 +319,17 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
             print(f"Cloud not acquire lock for flow {flow}")
 
 
-def featurize(flows, fourtuple, net, pkts, debug=False):
+def featurize(fourtuple, net, pkts, min_rtt_us, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
-    flow = flows[fourtuple]
-    with flow.lock:
-        fets, flow.min_rtt_us = gen_features.parse_received_acks(
-            net.in_spc, fourtuple, pkts, flow.min_rtt_us, debug
-        )
+    fets, min_rtt_us = gen_features.parse_received_acks(
+        net.in_spc, fourtuple, pkts, min_rtt_us, debug
+    )
 
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
-    return fets
+    return fets, min_rtt_us
 
 
 def packets_to_ndarray(pkts):
@@ -464,7 +462,11 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
 
         start_time_s = time.time()
         try:
-            labels = inference(flows, fourtuple, net, pkts_ndarray, args.debug)
+            with multiprocessing.Pool(1) as pool:
+                labels, flow.min_rtt_us = pool.starmap(
+                    inference,
+                    [(fourtuple, net, pkts_ndarray, flow.min_rtt_us, args.debug)],
+                )[0]
         except AssertionError as exp:
             # FIXME: There is a strange bug when normalizing the packet arrival times
             # that causes the arrival times to not be in order even though we sort the
@@ -483,18 +485,19 @@ def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
         flow.packets = []
 
 
-def inference(flows, fourtuple, net, pkts, debug=False):
+def inference(fourtuple, net, pkts, min_rtt_us, debug=False):
     """Run inference on a flow's packets.
 
     Returns a label: below fair, approximately fair, above fair.
     """
+    fets, min_rtt_us = featurize(fourtuple, net, pkts, min_rtt_us, debug)
     preds = net.predict(
         torch.tensor(
-            utils.clean(featurize(flows, fourtuple, net, pkts, debug)),
+            utils.clean(fets),
             dtype=torch.float,
         )
     )
-    return [defaults.Class(pred) for pred in preds]
+    return [defaults.Class(pred) for pred in preds], min_rtt_us
 
 
 def parse_args():
@@ -715,7 +718,8 @@ def run(args):
                 pps = (cur_packets - last_packets) / delta_s
                 print(
                     f"Packets per second: {pps:.2f}, "
-                    f"processed throughput at 1500 B MSS: {pps * 1500 * 8 / 1e6:.2f} Mbps"
+                    "processed throughput at 1500 B MSS: "
+                    f"{pps * 1500 * 8 / 1e6:.2f} Mbps"
                 )
                 last_time_s = cur_time_s
                 last_packets = cur_packets
