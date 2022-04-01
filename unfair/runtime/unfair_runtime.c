@@ -133,21 +133,6 @@ static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
     *thl_int = (u32)thl * 4;
 }
 
-static inline bool is_syn(struct tcphdr *tcp)
-{
-    u8 flags = *(u8 *)(&tcp->ack_seq + 5);
-    bpf_trace_printk("flags: %u\n", flags);
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-    bpf_trace_printk("little endian\n");
-    return flags & 0b01000000;
-#elif __BYTE_ORDER == __BIG_ENDIAN
-    bpf_trace_printk("big endian\n");
-    return flags & 0b00000010;
-#else
-    return 0;
-#endif
-}
-
 int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
 {
     if (skb == NULL)
@@ -320,7 +305,7 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
+    // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
 
     // Apply the window scale to the configured RWND value and set it in the packet.
     tcp->window = bpf_htons(*rwnd >> *win_scale);
@@ -369,7 +354,7 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
         // This is not an IPv4 packet. We only support IPv4 packets because the struct
         // we use as a map key stores IP addresses as 32 bits. This is purely an
         // implementation detail.
-        bpf_trace_printk("Not using IPv4 for flow on local port %u!\n", skops->local_port);
+        bpf_trace_printk("Warning: Not using IPv4 for flow on local port %u\n", skops->local_port);
         return SOCKOPS_OK;
     }
     if ((skops->skb_tcp_flags & TCPHDR_SYNACK) != TCPHDR_SYNACK)
@@ -391,25 +376,25 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
         switch (ret)
         {
         case -ENOMSG:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOMSG\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOMSG\n", skops->local_port);
             break;
         case -EINVAL:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EINVAL\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EINVAL\n", skops->local_port);
             break;
         case -ENOENT:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOENT\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOENT\n", skops->local_port);
             break;
         case -ENOSPC:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -ENOSPC\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOSPC\n", skops->local_port);
             break;
         case -EFAULT:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EFAULT\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EFAULT\n", skops->local_port);
             break;
         case -EPERM:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: -EPERM\n", skops->local_port);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EPERM\n", skops->local_port);
             break;
         default:
-            bpf_trace_printk("Failure loading window scale option for flow on local port %u: failure code = %d\n", skops->local_port, ret);
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: failure code = %d\n", skops->local_port, ret);
         }
         return SOCKOPS_ERR;
     }
