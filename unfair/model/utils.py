@@ -7,7 +7,9 @@ import os
 from os import path
 import pickle
 import random
+import socket
 import struct
+import subprocess
 import sys
 import time
 import zipfile
@@ -31,6 +33,8 @@ from unfair.model import defaults, features
 
 # Values considered unsafe for division and min().
 UNSAFE = {-1, 0}
+# The sysctl configuration item for TCP window scaling.
+WINDOW_SCALING_CONFIG = "net.ipv4.tcp_window_scaling"
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -818,7 +822,7 @@ def get_safe(dat, start_idx=None, end_idx=None):
     if end_idx is None:
         end_idx = 0 if dat.shape[0] == 0 else dat.shape[0] - 1
     # Extract the window.
-    dat_win = dat[start_idx:end_idx + 1]
+    dat_win = dat[start_idx : end_idx + 1]
     # Eliminate values that are -1 (unknown).
     return dat_win[dat_win != -1]
 
@@ -859,11 +863,7 @@ def safe_tput_bps(dat, start_idx, end_idx):
     # Sum up the payloads of the packets in the window.
     total_bytes = safe_sum(dat[features.WIRELEN_FET], start_idx + 1, end_idx)
     # Divide by the duration of the window.
-    start_time_us = (
-        dat[start_idx][features.ARRIVAL_TIME_FET]
-        if start_idx >= 0
-        else -1
-    )
+    start_time_us = dat[start_idx][features.ARRIVAL_TIME_FET] if start_idx >= 0 else -1
     end_time_us = dat[end_idx][features.ARRIVAL_TIME_FET]
     return safe_div(
         safe_mul(total_bytes, 8),
@@ -1441,3 +1441,52 @@ def find_bound(vals, target, min_idx, max_idx, which):
 
     assert min_idx <= bound <= max_idx
     return bound
+
+
+def ip_str_to_int(ip_str):
+    """Convert an IP address string in dotted-quad notation to an integer."""
+    return struct.unpack("<L", socket.inet_aton(ip_str))[0]
+
+
+def int_to_ip_str(ip_int):
+    """Convert an IP address int into a dotted-quad string."""
+    # Use "<" (little endian) instead of "!" (network / big endian) because the
+    # IP addresses are already stored in little endian.
+    return socket.inet_ntoa(struct.pack("<L", ip_int))
+
+
+def disable_window_scaling():
+    """Disable TCP window scaling."""
+    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=0"', shell=True)
+
+
+def enable_window_scaling():
+    """Enable TCP window scaling."""
+    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=1"', shell=True)
+
+
+def flow_to_str(fourtuple):
+    """Convert a flow four-tuple into a string."""
+    saddr, daddr, sport, dport = fourtuple
+    return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
+
+
+def ebpf_packet_tuple_to_str(dat):
+    """Convert a tuple created from an eBPF packet into a string."""
+    (
+        seq,
+        srtt_us,
+        tsval,
+        tsecr,
+        total_bytes,
+        ihl_bytes,
+        thl_bytes,
+        payload_bytes,
+        time_us,
+    ) = dat
+    return (
+        f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
+        f"total: {total_bytes} B, IP header: {ihl_bytes} B, "
+        f"TCP header: {thl_bytes} B, payload: {payload_bytes} B, "
+        f"time: {time.ctime(time_us / 1e3)}"
+    )

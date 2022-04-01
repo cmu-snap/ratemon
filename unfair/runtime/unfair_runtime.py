@@ -2,99 +2,31 @@
 
 from argparse import ArgumentParser
 import atexit
-import ctypes
 import multiprocessing
 import os
 from os import path
-import pickle
-import socket
-import struct
-import subprocess
+import queue
 import sys
 import threading
 import time
 
-import torch
 from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
 
 from bcc import BPF, BPFAttachType
 
-from unfair.model import data, defaults, features, gen_features, models, utils
-from unfair.runtime import mitigation_strategy, reaction_strategy
+from unfair.model import models, utils
+from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
 from unfair.runtime.mitigation_strategy import MitigationStrategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
-def ip_str_to_int(ip_str):
-    """Convert an IP address string in dotted-quad notation to an integer."""
-    return struct.unpack("<L", socket.inet_aton(ip_str))[0]
-
-
-LOCALHOST = ip_str_to_int("127.0.0.1")
+LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 # Flows that have not received a new packet in this many seconds will be
 # garbage collected.
 OLD_THRESH_SEC = 5 * 60
-# The sysctl configuration item for TCP window scaling.
-WINDOW_SCALING_CONFIG = "net.ipv4.tcp_window_scaling"
-
 
 NUM_PACKETS = 0
-
-
-class FlowKey(ctypes.Structure):
-    """A struct to use as the key in maps in the corresponding eBPF program."""
-
-    _fields_ = [
-        ("local_addr", ctypes.c_uint),
-        ("remote_addr", ctypes.c_uint),
-        ("local_port", ctypes.c_ushort),
-        ("remote_port", ctypes.c_ushort),
-    ]
-
-    def __str__(self):
-        return (
-            f"raddr: {self.remote_addr}, laddr: {self.local_addr}, "
-            f"rport: {self.remote_port}, lport: {self.local_port}"
-        )
-
-
-class Flow:
-    """Represents a single flow, identified by a four-tuple.
-
-    A Flow object is created when we first receive a packet for the flow. A Flow object
-    is deleted when it has been five minutes since we have checked this flow's
-    fairness.
-
-    Must acquire self.lock before accessing members.
-    """
-
-    def __init__(self, fourtuple):
-        """Set up data structures for a flow."""
-        self.lock = threading.RLock()
-        self.fourtuple = fourtuple
-        self.packets = []
-        # Smallest RTT ever observed for this flow (microseconds). Used to calculate
-        # the BDP. Updated whenever we compute features for this flow.
-        self.min_rtt_us = sys.maxsize
-        # The timestamp of the last packet on which we have run inference.
-        self.latest_time_sec = time.time()
-        self.label = defaults.Class.APPROX_FAIR
-        self.decision = (defaults.Decision.NOT_PACED, None)
-
-    def __str__(self):
-        """Create a string representation of this flow."""
-        return flow_to_str(self.fourtuple)
-
-
-def disable_window_scaling():
-    """Disable TCP window scaling."""
-    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=0"', shell=True)
-
-
-def enable_window_scaling():
-    """Enable TCP window scaling."""
-    subprocess.check_call(f'sudo sysctl -w "{WINDOW_SCALING_CONFIG}=1"', shell=True)
 
 
 def load_bpf(debug=False):
@@ -117,49 +49,6 @@ def load_bpf(debug=False):
     return BPF(text=bpf_text)
 
 
-def load_model(model, model_file):
-    """Load the provided trained model."""
-    assert path.isfile(model_file), f"Model does not exist: {model_file}"
-    net = models.MODELS[model]()
-    with open(model_file, "rb") as fil:
-        net.net = pickle.load(fil)
-    return net
-
-
-def int_to_ip_str(ip_int):
-    """Convert an IP address int into a dotted-quad string."""
-    # Use "<" (little endian) instead of "!" (network / big endian) because the
-    # IP addresses are already stored in little endian.
-    return socket.inet_ntoa(struct.pack("<L", ip_int))
-
-
-def flow_to_str(fourtuple):
-    """Convert a flow four-tuple into a string."""
-    saddr, daddr, sport, dport = fourtuple
-    return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
-
-
-def flow_data_to_str(dat):
-    """Convert a flow data tuple into a string."""
-    (
-        seq,
-        srtt_us,
-        tsval,
-        tsecr,
-        total_bytes,
-        ihl_bytes,
-        thl_bytes,
-        payload_bytes,
-        time_us,
-    ) = dat
-    return (
-        f"seq: {seq}, srtt: {srtt_us} us, tsval: {tsval}, tsecr: {tsecr}, "
-        f"total: {total_bytes} B, IP header: {ihl_bytes} B, "
-        f"TCP header: {thl_bytes} B, payload: {payload_bytes} B, "
-        f"time: {time.ctime(time_us / 1e3)}"
-    )
-
-
 def receive_packet(flows, flows_lock, pkt, done):
     """Ingest a new packet, identify its flow, and store it.
 
@@ -170,8 +59,8 @@ def receive_packet(flows, flows_lock, pkt, done):
     flows_lock protects flows.
     """
     try:
-        if not done.is_set():
-            receive_packet_helper(flows, flows_lock, pkt)
+        # if not done.is_set():
+        receive_packet_helper(flows, flows_lock, pkt)
     except KeyboardInterrupt:
         done.set()
 
@@ -193,12 +82,12 @@ def receive_packet_helper(flows, flows_lock, pkt):
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
     if flows_lock.acquire(blocking=False):
         try:
-            fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-            if fourtuple in flows:
-                flow = flows[fourtuple]
+            flowkey = flow_utils.FlowKey(pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+            if flowkey in flows:
+                flow = flows[flowkey]
             else:
-                flow = Flow(fourtuple)
-                flows[fourtuple] = flow
+                flow = flow_utils.Flow(flowkey)
+                flows[flowkey] = flow
 
             # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
             # packet.
@@ -225,7 +114,7 @@ def receive_packet_helper(flows, flows_lock, pkt):
             flows_lock.release()
 
 
-def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
+def check_loop(flows, flows_lock, args, que, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -234,14 +123,7 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
         while not done.is_set():
             last_check = time.time()
 
-            check_flows(
-                flows,
-                flows_lock,
-                args.limit,
-                net,
-                flow_to_rwnd,
-                args,
-            )
+            check_flows(flows, flows_lock, args, que)
 
             # with flows_lock:
             #     # Do not bother acquiring the per-flow locks since we are just reading
@@ -265,7 +147,7 @@ def check_loop(flows, flows_lock, net, args, flow_to_rwnd, done):
         done.set()
 
 
-def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
+def check_flows(flows, flows_lock, args, que):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -275,7 +157,7 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
 
     # Need to acquire flows_lock while iterating over flows.
     with flows_lock:
-        for fourtuple, flow in flows.items():
+        for flowkey, flow in flows.items():
             # print(f"\t{flow} - {len(flow.packets)} packets")
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
@@ -284,220 +166,61 @@ def check_flows(flows, flows_lock, limit, net, flow_to_rwnd, args):
                     # TODO: Need some notion of "this is the minimum number or time
                     # interval of packets that I need to run the model".
                     if len(flow.packets) > 0 and (
-                        limit is None or len(flow.packets) > limit
+                        args.min_packets is None or len(flow.packets) > args.min_packets
                     ):
                         # Plan to run inference on "full" flows.
-                        to_check.append(fourtuple)
+                        to_check.append(flowkey)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
                     ):
                         # Remove flows with no packets and flows that have not received
                         # a new packet in five seconds.
-                        to_remove.append(fourtuple)
+                        to_remove.append(flowkey)
                 finally:
                     flow.lock.release()
             else:
                 print(f"Cloud not acquire lock for flow {flow}")
         # Garbage collection.
-        for fourtuple in to_remove:
-            del flows[fourtuple]
-            flow_key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
-            if flow_key in flow_to_rwnd:
-                del flow_to_rwnd[flow_key]
+        for flowkey in to_remove:
+            del flows[flowkey]
+            # if flow_key in flow_to_rwnd:
+            #     del flow_to_rwnd[flow_key]
 
-    for fourtuple in to_check:
-        flow = flows[fourtuple]
+    for flowkey in to_check:
+        flow = flows[flowkey]
         # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
         # to the next flow.
         if flow.lock.acquire(blocking=False):
             try:
                 if not args.disable_inference:
-                    check_flow(flows, fourtuple, net, flow_to_rwnd, args)
+                    check_flow(flows, flowkey, args, que)
             finally:
                 flow.lock.release()
         else:
             print(f"Cloud not acquire lock for flow {flow}")
 
 
-def featurize(fourtuple, net, pkts, min_rtt_us, debug=False):
-    """Compute features for the provided list of packets.
-
-    Returns a structured numpy array.
-    """
-    fets, min_rtt_us = gen_features.parse_received_acks(
-        net.in_spc, fourtuple, pkts, min_rtt_us, debug
-    )
-
-    data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
-    return fets, min_rtt_us
-
-
-def packets_to_ndarray(pkts):
-    """Reorganize a list of packet metrics into a structured numpy array."""
-    # For some reason, the packets tend to get reordered after they are timestamped on
-    # arrival. Sort packets by timestamp.
-    pkts = sorted(pkts, key=lambda pkt: pkt[-1])
-    (
-        seqs,
-        srtts_us,
-        tsvals,
-        tsecrs,
-        totals_bytes,
-        _,
-        _,
-        payloads_bytes,
-        times_us,
-    ) = zip(*pkts)
-    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
-    pkts[features.SEQ_FET] = seqs
-    pkts[features.ARRIVAL_TIME_FET] = times_us
-    pkts[features.TS_1_FET] = tsvals
-    pkts[features.TS_2_FET] = tsecrs
-    pkts[features.PAYLOAD_FET] = payloads_bytes
-    pkts[features.WIRELEN_FET] = totals_bytes
-    pkts[features.SRTT_FET] = srtts_us
-    return pkts
-
-
-def make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args):
-    """Make a flow unfairness mitigation decision.
-
-    Base the decision on the flow's label and existing decision. Use the flow's packets
-    to calculate any necessary flow metrics, such as the throughput.
-
-    TODO: Instead of passing in using the flow's packets, pass in the features and make
-          sure that they include the necessary columns.
-    """
-    flow = flows[fourtuple]
-    with flow.lock:
-        if args.reaction_strategy == ReactionStrategy.FILE:
-            new_decision = (
-                defaults.Decision.PACED,
-                reaction_strategy.get_scheduled_pacing(args.schedule),
-            )
-        else:
-            tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
-
-            if flow.label == defaults.Class.ABOVE_FAIR:
-                # This flow is sending too fast. Force the sender to halve its rate.
-                new_decision = (
-                    defaults.Decision.PACED,
-                    reaction_strategy.react_down(
-                        args.reaction_strategy,
-                        utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6),
-                    ),
-                )
-            elif flow.decision == defaults.Decision.PACED:
-                # We are already pacing this flow.
-                if flow.label == defaults.Class.BELOW_FAIR:
-                    # If we are already pacing this flow but we are being too
-                    # aggressive, then let it send faster.
-                    new_decision = (
-                        defaults.Decision.PACED,
-                        reaction_strategy.react_up(
-                            args.reaction_strategy,
-                            utils.bdp_B(tput_bps, flow.min_rtt_us / 1e6),
-                        ),
-                    )
-                else:
-                    # If we are already pacing this flow and it is behaving as desired,
-                    # then all is well. Retain the existing pacing decision.
-                    new_decision = flow.decision
-            else:
-                # This flow is not already being paced and is not behaving unfairly, so
-                # leave it alone.
-                new_decision = (defaults.Decision.NOT_PACED, None)
-
-        # FIXME: Why are the BDP calculations coming out so small? Is the throughput
-        #        just low due to low application demand?
-
-        if flow.decision != new_decision:
-            print(f"New decision for flow {flow}: {new_decision}")
-
-            key = FlowKey(fourtuple[1], fourtuple[0], fourtuple[3], fourtuple[2])
-            if new_decision[1] is None:
-                del flow_to_rwnd[key]
-            else:
-                new_decision = (new_decision[0], round(new_decision[1]))
-                assert new_decision[1] > 0, (
-                    "Error: RWND must be greater than 0, "
-                    f"but is {new_decision[1]} for flow {flow}"
-                )
-                # if new_decision[1] > 2**16:
-                #     print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
-                #     new_decision[1] = 2**16 - 1
-
-                flow_to_rwnd[key] = ctypes.c_ushort(new_decision[1])
-
-            flow.decision = new_decision
-
-
-def condense_labels(labels):
-    """Combine multiple labels into a single label.
-
-    For example, smooth the labels by selecting the average label.
-
-    Currently, this simply selects the last label.
-    """
-    assert len(labels) > 0, "Labels cannot be empty."
-    return labels[-1]
-
-
-def check_flow(flows, fourtuple, net, flow_to_rwnd, args):
+def check_flow(flows, flowkey, args, que):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
-    flow = flows[fourtuple]
+    flow = flows[flowkey]
     with flow.lock:
         print(f"Running inference on {len(flow.packets)} packets for flow {flow}")
-        # Discard all but the most recent 100 packets.
-        if len(flow.packets) > 100:
-            flow.packets = flow.packets[-100:]
-        pkts_ndarray = packets_to_ndarray(flow.packets)
-
+        # Discard all but the most recent few packets.
+        if len(flow.packets) > args.min_packets:
+            flow.packets = flow.packets[-args.min_packets :]
         # Record the time at which we check this flow.
         flow.latest_time_sec = time.time()
-
-        start_time_s = time.time()
         try:
-            with multiprocessing.Pool(1) as pool:
-                labels, flow.min_rtt_us = pool.starmap(
-                    inference,
-                    [(fourtuple, net, pkts_ndarray, flow.min_rtt_us, args.debug)],
-                )[0]
-        except AssertionError as exp:
-            # FIXME: There is a strange bug when normalizing the packet arrival times
-            # that causes the arrival times to not be in order even though we sort the
-            # packets. If this (or any other assertion error) occurs, then just skip
-            # this batch of packets.
-            print(f"Error, skipping batch of packets: {exp}")
-            return
-        finally:
-            print(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
-
-        flow.label = condense_labels(labels)
-        make_decision(flows, fourtuple, pkts_ndarray, flow_to_rwnd, args)
-        # print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
-
-        # Clear the flow's packets.
-        flow.packets = []
-
-
-def inference(fourtuple, net, pkts, min_rtt_us, debug=False):
-    """Run inference on a flow's packets.
-
-    Returns a label: below fair, approximately fair, above fair.
-    """
-    fets, min_rtt_us = featurize(fourtuple, net, pkts, min_rtt_us, debug)
-    preds = net.predict(
-        torch.tensor(
-            utils.clean(fets),
-            dtype=torch.float,
-        )
-    )
-    return [defaults.Class(pred) for pred in preds], min_rtt_us
+            que.put((flowkey, flow.packets), block=False)
+        except queue.Full:
+            pass
+        else:
+            # Clear the flow's packets.
+            flow.packets = []
 
 
 def parse_args():
@@ -507,12 +230,14 @@ def parse_args():
         "-p",
         "--poll-interval-ms",
         help="Packet poll interval (sleep time; ms).",
+        required=False,
         type=float,
     )
     parser.add_argument(
         "-i",
         "--inference-interval-ms",
         help="Hard interval to enforce between checking flows (start to start; ms).",
+        required=False,
         type=float,
     )
     parser.add_argument(
@@ -523,12 +248,6 @@ def parse_args():
         help='The network interface to attach to (e.g., "eno1").',
         required=True,
         type=str,
-    )
-    parser.add_argument(
-        "-l",
-        "--limit",
-        help=("The number of packets to accumulate for a flow between inference runs."),
-        type=int,
     )
     parser.add_argument(
         "-s",
@@ -551,6 +270,7 @@ def parse_args():
         choices=reaction_strategy.choices(),
         default=reaction_strategy.to_str(ReactionStrategy.MIMD),
         help="The reaction/feedback strategy to use.",
+        required=False,
         type=str,
     )
     parser.add_argument(
@@ -569,6 +289,7 @@ def parse_args():
         choices=mitigation_strategy.choices(),
         default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
         help="The unfairness mitigation strategy to use.",
+        required=False,
         type=str,
     )
     parser.add_argument(
@@ -582,12 +303,19 @@ def parse_args():
         required=True,
         type=str,
     )
+    parser.add_argument(
+        "--min-packets",
+        default=100,
+        help="The minimum packets required to run inference on a flow.",
+        required=False,
+        type=int,
+    )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
     assert (
-        args.limit is None or args.limit > 0
-    ), f'"--limit" must be greater than 0 but is: {args.limit}'
+        args.min_packets > 0
+    ), f'"--min-packets" must be greater than 0 but is: {args.min_packets}'
 
     assert (
         args.reaction_strategy != ReactionStrategy.FILE or args.schedule is not None
@@ -602,8 +330,6 @@ def parse_args():
 
 def run(args):
     """Core logic."""
-    net = load_model(args.model, args.model_file)
-
     # Load BPF program.
     bpf = load_bpf(args.debug)
     bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
@@ -662,16 +388,22 @@ def run(args):
     # when adding, removing, or iterating over flows; no need to acquire this lock when
     # updating a flow object.
     flows_lock = threading.RLock()
-    # Flag to trigger threads to terminate.
-    done = threading.Event()
+    # Flag to trigger threads/processes to terminate.
+    done = multiprocessing.Event()
     done.clear()
 
+    que = multiprocessing.Queue()
     # Set up the inference thread.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(flows, flows_lock, net, args, flow_to_rwnd, done),
+        args=(flows, flows_lock, args, que, done),
     )
-    check_thread.start()
+    # check_thread.start()
+
+    inference_proc = multiprocessing.Process(
+        target=inference.run, args=(args, que, done, flow_to_rwnd)
+    )
+    # inference_proc.start()
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -682,47 +414,10 @@ def run(args):
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-
-            current_epoch = ringbuffer[0].epoch
-            if current_epoch == last_epoch:
-                time.sleep(0.1)
-            else:
-                new_packets = list(ringbuffer.items_lookup_batch())
-                # print(f"Found {len(new_packets)} new packets")
-
-                # It is likely that an epoch transition occurred in the middle of the
-                # array. Find this point. Process all packets after this transition
-                # point (older packets) before processing packets before the transition
-                # point (newer packets).
-                epoch_transition_idx = None
-                for idx, pkt in new_packets:
-                    if pkt.epoch != current_epoch:
-                        # We found an older epoch. Process these packets first.
-                        if epoch_transition_idx is None:
-                            epoch_transition_idx = idx
-                        receive_packet(flows, flows_lock, pkt, done)
-                if epoch_transition_idx is not None:
-                    # print(
-                    #     f"Epoch transition at idx {epoch_transition_idx}: "
-                    #     f"{current_epoch} -> {new_packets[epoch_transition_idx][1].epoch}"
-                    # )
-                    for idx in range(epoch_transition_idx):
-                        receive_packet(flows, flows_lock, new_packets[idx][1], done)
-                last_epoch = current_epoch
-
-            cur_time_s = time.time()
-            delta_s = cur_time_s - last_time_s
-            if delta_s > 10:
-                with flows_lock:
-                    cur_packets = NUM_PACKETS
-                pps = (cur_packets - last_packets) / delta_s
-                print(
-                    f"Packets per second: {pps:.2f}, "
-                    "processed throughput at 1500 B MSS: "
-                    f"{pps * 1500 * 8 / 1e6:.2f} Mbps"
-                )
-                last_time_s = cur_time_s
-                last_packets = cur_packets
+            last_epoch = poll_ringbuffer(
+                ringbuffer, flows, flows_lock, done, last_epoch
+            )
+            last_time_s, last_packets = log_rate(flows_lock, last_time_s, last_packets)
 
     except KeyboardInterrupt:
         print("Cancelled.")
@@ -735,18 +430,62 @@ def run(args):
     # for flow, pkts in sorted(flows.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    check_thread.join()
+    # check_thread.join()
+    # inference_proc.join()
+
+
+def poll_ringbuffer(ringbuffer, flows, flows_lock, done, last_epoch):
+    print("poll_ringbuffer")
+    current_epoch = ringbuffer[0].epoch
+    if current_epoch == last_epoch:
+        time.sleep(0.1)
+    else:
+        new_packets = list(ringbuffer.items_lookup_batch())
+        print(f"Found {len(new_packets)} new packets")
+
+        # It is likely that an epoch transition occurred in the middle of the
+        # array. Find this point. Process all packets after this transition
+        # point (older packets) before processing packets before the transition
+        # point (newer packets).
+        epoch_transition_idx = None
+        for idx, pkt in new_packets:
+            print(f"{idx}")
+            if pkt.epoch != current_epoch:
+                # We found an older epoch. Process these packets first.
+                if epoch_transition_idx is None:
+                    epoch_transition_idx = idx
+                receive_packet(flows, flows_lock, pkt, done)
+        if epoch_transition_idx is not None:
+            print(
+                f"Epoch transition at idx {epoch_transition_idx}: "
+                f"{current_epoch} -> {new_packets[epoch_transition_idx][1].epoch}"
+            )
+            for idx in range(epoch_transition_idx):
+                receive_packet(flows, flows_lock, new_packets[idx][1], done)
+        last_epoch = current_epoch
+    return last_epoch
+
+
+def log_rate(flows_lock, last_time_s, last_packets):
+    print("log_rate")
+    cur_time_s = time.time()
+    delta_s = cur_time_s - last_time_s
+    if delta_s > 10:
+        with flows_lock:
+            cur_packets = NUM_PACKETS
+        pps = (cur_packets - last_packets) / delta_s
+        print(
+            f"Packets per second: {pps:.2f}, "
+            "processed throughput at 1500 B MSS: "
+            f"{pps * 1500 * 8 / 1e6:.2f} Mbps"
+        )
+        last_time_s = cur_time_s
+        last_packets = cur_packets
+    return last_time_s, last_packets
 
 
 def _main():
-    args = parse_args()
-    # Disable window scaling while this program is running.
-    # disable_window_scaling()
-    try:
-        return run(args)
-    finally:
-        pass
-        # enable_window_scaling()
+    return run(parse_args())
 
 
 if __name__ == "__main__":
