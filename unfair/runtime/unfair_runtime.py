@@ -27,6 +27,7 @@ LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 OLD_THRESH_SEC = 5 * 60
 
 NUM_PACKETS = 0
+flowkey_map = dict()
 
 
 def load_bpf(debug=False):
@@ -82,7 +83,12 @@ def receive_packet_helper(flows, flows_lock, pkt):
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
     if flows_lock.acquire(blocking=False):
         try:
-            flowkey = flow_utils.FlowKey(pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+            fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+            if fourtuple in flowkey_map:
+                flowkey = flowkey_map[fourtuple]
+            else:
+                flowkey = flow_utils.FlowKey(pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
+                flowkey_map[fourtuple] = flowkey
             if flowkey in flows:
                 flow = flows[flowkey]
             else:
@@ -392,17 +398,17 @@ def run(args):
     done = multiprocessing.Event()
     done.clear()
 
-    que = multiprocessing.Queue()
+    # que = multiprocessing.Queue()
     # Set up the inference thread.
-    check_thread = threading.Thread(
-        target=check_loop,
-        args=(flows, flows_lock, args, que, done),
-    )
+    # check_thread = threading.Thread(
+    #     target=check_loop,
+    #     args=(flows, flows_lock, args, que, done),
+    # )
     # check_thread.start()
 
-    inference_proc = multiprocessing.Process(
-        target=inference.run, args=(args, que, done, flow_to_rwnd)
-    )
+    # inference_proc = multiprocessing.Process(
+    #     target=inference.run, args=(args, que, done, flow_to_rwnd)
+    # )
     # inference_proc.start()
 
     print("Running...press Control-C to end")
