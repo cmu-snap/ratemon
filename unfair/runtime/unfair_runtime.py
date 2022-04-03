@@ -27,7 +27,6 @@ LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 OLD_THRESH_SEC = 5 * 60
 
 NUM_PACKETS = 0
-flowkey_map = dict()
 
 
 def load_bpf(debug=False):
@@ -50,23 +49,7 @@ def load_bpf(debug=False):
     return BPF(text=bpf_text)
 
 
-def receive_packet(flows, flows_lock, pkt, done):
-    """Ingest a new packet, identify its flow, and store it.
-
-    This function delegates its main tasks to receive_packet_helper() and instead just
-    guards that function by bypassing it if the done event is set and by catching
-    KeyboardInterrupt exceptions.
-
-    flows_lock protects flows.
-    """
-    try:
-        # if not done.is_set():
-        receive_packet_helper(flows, flows_lock, pkt)
-    except KeyboardInterrupt:
-        done.set()
-
-
-def receive_packet_helper(flows, flows_lock, pkt):
+def receive_packet(flows, flows_lock, pkt):
     """Ingest a new packet, identify its flow, and store it.
 
     flows_lock protects flows.
@@ -83,17 +66,14 @@ def receive_packet_helper(flows, flows_lock, pkt):
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
     if flows_lock.acquire(blocking=False):
         try:
-            fourtuple = (pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-            if fourtuple in flowkey_map:
-                flowkey = flowkey_map[fourtuple]
+            # The order needs to be (local addr, remote addr, local port, remote port)
+            # to make creating a flow_utils.FlowKey simpler.
+            fourtuple = (pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)
+            if fourtuple in flows:
+                flow = flows[fourtuple]
             else:
-                flowkey = flow_utils.FlowKey(pkt.saddr, pkt.daddr, pkt.sport, pkt.dport)
-                flowkey_map[fourtuple] = flowkey
-            if flowkey in flows:
-                flow = flows[flowkey]
-            else:
-                flow = flow_utils.Flow(flowkey)
-                flows[flowkey] = flow
+                flow = flow_utils.Flow(fourtuple)
+                flows[fourtuple] = flow
 
             # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
             # packet.
@@ -120,7 +100,7 @@ def receive_packet_helper(flows, flows_lock, pkt):
             flows_lock.release()
 
 
-def check_loop(flows, flows_lock, args, que, done):
+def check_loop(flows, flows_lock, flow_to_rwnd, args, que, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -129,7 +109,7 @@ def check_loop(flows, flows_lock, args, que, done):
         while not done.is_set():
             last_check = time.time()
 
-            check_flows(flows, flows_lock, args, que)
+            check_flows(flows, flows_lock, flow_to_rwnd, args, que)
 
             # with flows_lock:
             #     # Do not bother acquiring the per-flow locks since we are just reading
@@ -153,7 +133,7 @@ def check_loop(flows, flows_lock, args, que, done):
         done.set()
 
 
-def check_flows(flows, flows_lock, args, que):
+def check_flows(flows, flows_lock, flow_to_rwnd, args, que):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -163,7 +143,7 @@ def check_flows(flows, flows_lock, args, que):
 
     # Need to acquire flows_lock while iterating over flows.
     with flows_lock:
-        for flowkey, flow in flows.items():
+        for fourtuple, flow in flows.items():
             # print(f"\t{flow} - {len(flow.packets)} packets")
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
@@ -175,53 +155,54 @@ def check_flows(flows, flows_lock, args, que):
                         args.min_packets is None or len(flow.packets) > args.min_packets
                     ):
                         # Plan to run inference on "full" flows.
-                        to_check.append(flowkey)
+                        to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
                     ):
                         # Remove flows with no packets and flows that have not received
                         # a new packet in five seconds.
-                        to_remove.append(flowkey)
+                        to_remove.append(fourtuple)
                 finally:
                     flow.lock.release()
             else:
                 print(f"Cloud not acquire lock for flow {flow}")
         # Garbage collection.
-        for flowkey in to_remove:
-            del flows[flowkey]
-            # if flow_key in flow_to_rwnd:
-            #     del flow_to_rwnd[flow_key]
+        for fourtuple in to_remove:
+            flowkey = flows[fourtuple].flowkey
+            if flowkey in flow_to_rwnd:
+                del flow_to_rwnd[flowkey]
+            del flows[fourtuple]
 
-    for flowkey in to_check:
-        flow = flows[flowkey]
+    for fourtuple in to_check:
+        flow = flows[fourtuple]
         # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
         # to the next flow.
         if flow.lock.acquire(blocking=False):
             try:
                 if not args.disable_inference:
-                    check_flow(flows, flowkey, args, que)
+                    check_flow(flows, fourtuple, args, que)
             finally:
                 flow.lock.release()
         else:
             print(f"Cloud not acquire lock for flow {flow}")
 
 
-def check_flow(flows, flowkey, args, que):
+def check_flow(flows, fourtuple, args, que):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
-    flow = flows[flowkey]
+    flow = flows[fourtuple]
     with flow.lock:
         print(f"Running inference on {len(flow.packets)} packets for flow {flow}")
         # Discard all but the most recent few packets.
         if len(flow.packets) > args.min_packets:
-            flow.packets = flow.packets[-args.min_packets :]
+            flow.packets = flow.packets[-args.min_packets:]
         # Record the time at which we check this flow.
         flow.latest_time_sec = time.time()
         try:
-            que.put((flowkey, flow.packets), block=False)
+            que.put((fourtuple, flow.packets), block=False)
         except queue.Full:
             pass
         else:
@@ -402,7 +383,7 @@ def run(args):
     # Set up the inference thread.
     # check_thread = threading.Thread(
     #     target=check_loop,
-    #     args=(flows, flows_lock, args, que, done),
+    #     args=(flows, flows_lock, flow_to_rwnd, args, que, done),
     # )
     # check_thread.start()
 
@@ -420,11 +401,13 @@ def run(args):
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-            last_epoch = poll_ringbuffer(
-                ringbuffer, flows, flows_lock, done, last_epoch
+            found_packets, last_epoch = poll_ringbuffer(
+                ringbuffer, flows, flows_lock, last_epoch
             )
             last_time_s, last_packets = log_rate(flows_lock, last_time_s, last_packets)
-
+            if not found_packets:
+                # If we did not find any new packets, then sleep for a while.
+                time.sleep(0.1)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
@@ -440,12 +423,11 @@ def run(args):
     # inference_proc.join()
 
 
-def poll_ringbuffer(ringbuffer, flows, flows_lock, done, last_epoch):
-    print("poll_ringbuffer")
+def poll_ringbuffer(ringbuffer, flows, flows_lock, last_epoch):
+    """Poll a custom eBPF ringbuffer."""
     current_epoch = ringbuffer[0].epoch
-    if current_epoch == last_epoch:
-        time.sleep(0.1)
-    else:
+    found_packets = current_epoch != last_epoch
+    if found_packets:
         new_packets = list(ringbuffer.items_lookup_batch())
         print(f"Found {len(new_packets)} new packets")
 
@@ -455,28 +437,27 @@ def poll_ringbuffer(ringbuffer, flows, flows_lock, done, last_epoch):
         # point (newer packets).
         epoch_transition_idx = None
         for idx, pkt in new_packets:
-            print(f"{idx}")
             if pkt.epoch != current_epoch:
                 # We found an older epoch. Process these packets first.
                 if epoch_transition_idx is None:
                     epoch_transition_idx = idx
-                receive_packet(flows, flows_lock, pkt, done)
+                receive_packet(flows, flows_lock, pkt)
         if epoch_transition_idx is not None:
             print(
                 f"Epoch transition at idx {epoch_transition_idx}: "
                 f"{current_epoch} -> {new_packets[epoch_transition_idx][1].epoch}"
             )
             for idx in range(epoch_transition_idx):
-                receive_packet(flows, flows_lock, new_packets[idx][1], done)
+                receive_packet(flows, flows_lock, new_packets[idx][1])
         last_epoch = current_epoch
-    return last_epoch
+    return found_packets, last_epoch
 
 
-def log_rate(flows_lock, last_time_s, last_packets):
-    print("log_rate")
+def log_rate(flows_lock, last_time_s, last_packets, target_delta_s=10):
+    """Log the packet processing rate."""
     cur_time_s = time.time()
     delta_s = cur_time_s - last_time_s
-    if delta_s > 10:
+    if delta_s > target_delta_s:
         with flows_lock:
             cur_packets = NUM_PACKETS
         pps = (cur_packets - last_packets) / delta_s

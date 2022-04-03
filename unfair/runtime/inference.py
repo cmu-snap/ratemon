@@ -10,7 +10,7 @@ import time
 import torch
 
 from unfair.model import data, defaults, features, gen_features, models, utils
-from unfair.runtime import reaction_strategy
+from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
@@ -172,11 +172,12 @@ def run(args, que, done, flow_to_rwnd):
 
     while not done.is_set():
         try:
-            flowkey, pkts = que.get(timeout=1)
+            fourtuple, pkts = que.get(timeout=1)
         except queue.Empty:
             continue
 
         start_time_s = time.time()
+        flowkey = flow_utils.FlowKey(*fourtuple)
         pkts_ndarray = packets_to_ndarray(pkts)
         try:
             labels, min_rtts_us[flowkey] = inference(

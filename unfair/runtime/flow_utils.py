@@ -37,6 +37,7 @@ class FlowKey(ctypes.Structure):
         )
 
     def __hash__(self):
+        """Hash this just like a fourtuple."""
         return hash(
             (self.local_addr, self.remote_addr, self.local_port, self.remote_port)
         )
@@ -52,10 +53,11 @@ class Flow:
     Must acquire self.lock before accessing members.
     """
 
-    def __init__(self, flowkey):
+    def __init__(self, fourtuple):
         """Set up data structures for a flow."""
         self.lock = threading.RLock()
-        self.flowkey = flowkey
+        self.fourtuple = fourtuple
+        self.flowkey = FlowKey(*fourtuple)
         self.packets = []
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
