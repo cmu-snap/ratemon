@@ -1,6 +1,6 @@
 """Default values."""
 
-from enum import Enum
+from enum import IntEnum
 import struct
 
 
@@ -99,7 +99,7 @@ COPA_HEADER_FMT = "iiidd"
 COPA_HEADER_SIZE_B = struct.calcsize(COPA_HEADER_FMT)
 
 
-class Class(Enum):
+class Class(IntEnum):
     """Classes for three-class models.
 
     Flow throughput is lower than, approximately, or above fair.
@@ -110,7 +110,7 @@ class Class(Enum):
     ABOVE_FAIR = 2
 
 
-class Decision(Enum):
+class Decision(IntEnum):
     """Pacing decisions.
 
     Either paced or not paced.

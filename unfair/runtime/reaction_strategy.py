@@ -1,10 +1,10 @@
 """Defines feedback mechanisms for reacting to flow fairness decisions."""
 
-from enum import Enum
+from enum import IntEnum
 import time
 
 
-class ReactionStrategy(Enum):
+class ReactionStrategy(IntEnum):
     """Defines feedback mechanisms for reacting to flow fairness decisions."""
 
     AIMD = 0

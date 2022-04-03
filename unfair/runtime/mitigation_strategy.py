@@ -1,9 +1,9 @@
 """Defines unfairness mitigation strategies."""
 
-from enum import Enum
+from enum import IntEnum
 
 
-class MitigationStrategy(Enum):
+class MitigationStrategy(IntEnum):
     """Defines unfairness mitigation strategies."""
 
     RWND_TUNING = 0
