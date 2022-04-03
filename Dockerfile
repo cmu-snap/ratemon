@@ -49,7 +49,7 @@ RUN apt-get update && \
 
 # Prepare python virtualenv.
 COPY requirements.txt /requirements.txt
-RUN python3 -m venv .venv && \
+RUN python3.6 -m venv .venv && \
     . /.venv/bin/activate && \
     pip install --upgrade pip && \
     pip install wheel && \

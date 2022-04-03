@@ -15,8 +15,17 @@
 #include <net/sock.h>
 #include <net/tcp.h>
 
-// The fixed TCP window scale to use.
-#define FIXED_WIN_SCALE 5
+// BPF SOCK_OPS program return codes.
+#define SOCKOPS_OK 1
+#define SOCKOPS_ERR 0
+
+// TCP header flags.
+#define TCPHDR_SYN 0x02
+#define TCPHDR_ACK 0x10
+#define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
+
+#define FLOW_MAX_PACKETS 65536
+// #define FLOW_MAX_PACKETS 1024
 
 // Key for use in flow-based maps.
 struct flow_t
@@ -42,17 +51,37 @@ struct pkt_t
     u32 ihl_bytes;
     u32 thl_bytes;
     u32 payload_bytes;
-    // Required for time_us to be 64 bits.
-    u32 padding;
+    u32 epoch;
     u64 time_us;
+    u32 valid;
 };
 
+struct tcp_opt
+{
+    __u8 kind;
+    __u8 len;
+    __u8 data;
+} __attribute__((packed));
+
+// struct flow_buff_t
+// {
+//     struct pkt_t pkts[FLOW_MAX_PACKETS];
+//     u32 next_free;
+// };
+
 // Pass packet features to userspace.
-BPF_PERF_OUTPUT(pkts);
+// BPF_PERF_OUTPUT(pkts);
+// Assemble mapping of flow to packets.
+// BPF_HASH(flow_to_pkts, struct flow_t, struct flow_buff_t);
+BPF_ARRAY(ringbuffer, struct pkt_t, FLOW_MAX_PACKETS);
+BPF_ARRAY(next_free, int, 1);
+BPF_ARRAY(epoch, u32, 1);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_rwnd, struct flow_t, u16);
+// Read RWND limit for flow, as set by userspace.
+BPF_HASH(flow_to_win_scale, struct flow_t, u8);
 
-// Need to redefine these because the BCC rewriter does not support rewriting
+// Need to redefine this because the BCC rewriter does not support rewriting
 // ip_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
 static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
@@ -62,22 +91,39 @@ static inline struct iphdr *skb_to_iphdr(const struct sk_buff *skb)
     return (struct iphdr *)(skb->head + skb->network_header);
 }
 
-// Need to redefine these because the BCC rewriter does not support rewriting
+// Need to redefine this because the BCC rewriter does not support rewriting
 // tcp_hdr()'s internal dereferences of skb members.
 // Based on: https://github.com/iovisor/bcc/blob/master/tools/tcpdrop.py
-static struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
+static inline struct tcphdr *skb_to_tcphdr(const struct sk_buff *skb)
 {
     // unstable API. verify logic in tcp_hdr() -> skb_transport_header().
     // https://elixir.bootlin.com/linux/v4.15/source/include/linux/skbuff.h#L2269
     return (struct tcphdr *)(skb->head + skb->transport_header);
 }
 
+// Get the total length in bytes of an IP header.
+static inline void ip_hdr_len(struct iphdr *ip, u32 *ihl_int)
+{
+    // The header length is before the ToS field in the TCP header. However, the header
+    // length is in a bitfield, but BPF cannot read bitfield elements. So we need to
+    // read a whole byte and extract the data offset from that. We only read a single
+    // byte, so we do not need to use ntohs().
+    u8 ihl = *(u8 *)(&ip->tos - 1);
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    ihl = (ihl & 0xf0) >> 4;
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    ihl = ihl & 0x0f;
+#endif
+    *ihl_int = (u32)ihl * 4;
+}
+
 // Get the total length in bytes of a TCP header.
 static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
 {
-    // The TCP data offset is located after the ACK sequence number in the TCP
-    // header.
-    // bpf_probe_read(&thl, sizeof(thl), &tcp->ack_seq + 4);
+    // The TCP data offset is located after the ACK sequence number in the TCP header.
+    // However, the data offset is in a bitfield, but BPF cannot read bitfield
+    // elements. So we need to read a whole byte and extract the data offset from that.
+    // We only read a single byte, so we do not need to use ntohs().
     u8 thl = *(u8 *)(&tcp->ack_seq + 4);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     thl = (thl & 0x0f) >> 4;
@@ -94,7 +140,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
     // Check this is IPv4.
-    if (skb->protocol != htons(ETH_P_IP))
+    if (skb->protocol != bpf_htons(ETH_P_IP))
     {
         return 0;
     }
@@ -105,147 +151,85 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     {
         return 0;
     }
-    struct pkt_t pkt = {};
-    pkt.saddr = ip->saddr;
-    pkt.daddr = ip->daddr;
+
+    // Look up the current epoch.
+    int zero = 0;
+    u32 *epoch_ptr = epoch.lookup(&zero);
+    if (epoch_ptr == NULL)
+    {
+        return 0;
+    }
+    u32 epoch_int = *epoch_ptr;
+
+    // Look up the index of the next location in the ringbuffer.
+    int *next_free_ptr = next_free.lookup(&zero);
+    if (next_free_ptr == NULL)
+    {
+        return 0;
+    }
+    int next_free_int = *next_free_ptr;
+    // bpf_trace_printk("next_free_int: %d, epoch_int: %u\n", next_free_int, epoch_int);
+
+    // Get the next location in the ringbuffer.
+    struct pkt_t *pkt = ringbuffer.lookup(&next_free_int);
+    if (pkt == NULL)
+    {
+        return 0;
+    }
+    // Fill in packet metadata needed for managing the ringbuffer.
+    pkt->valid = 1;
+    pkt->epoch = epoch_int;
+
+    pkt->saddr = ip->saddr;
+    pkt->daddr = ip->daddr;
 
     struct tcphdr *tcp = skb_to_tcphdr(skb);
-    u16 sport = tcp->source;
-    u16 dport = tcp->dest;
-    pkt.dport = ntohs(dport);
-    pkt.sport = ntohs(sport);
-    u32 seq = tcp->seq;
-    pkt.seq = ntohl(seq);
-
-    // bpf_trace_printk("daddr: %d, dport: %d, seq: %d\n", pkt.daddr, pkt.dport, pkt.seq);
+    pkt->sport = bpf_ntohs(tcp->source);
+    pkt->dport = bpf_ntohs(tcp->dest);
+    pkt->seq = bpf_ntohl(tcp->seq);
 
     struct tcp_sock *ts = tcp_sk(sk);
-    pkt.srtt_us = ts->srtt_us >> 3;
+    pkt->srtt_us = ts->srtt_us >> 3;
     // TODO: For the timestamp option, we also need to parse the sent packets.
     // We use the timestamp option to determine the RTT. But what if we just
     // use srtt instead? Let's start with that.
-    pkt.tsval = ts->rx_opt.rcv_tsval;
-    pkt.tsecr = ts->rx_opt.rcv_tsecr;
+    pkt->tsval = ts->rx_opt.rcv_tsval;
+    pkt->tsecr = ts->rx_opt.rcv_tsecr;
 
-    // Determine the total size of the IP packet.
-    u16 total_bytes = ip->tot_len;
-    pkt.total_bytes = ntohs(total_bytes);
+    // Determine the IP/TCP header lengths.
+    ip_hdr_len(ip, &pkt->ihl_bytes);
+    tcp_hdr_len(tcp, &pkt->thl_bytes);
 
-    //     // Determine the size of the IP header. The header length is in a bitfield,
-    //     // but BPF cannot read bitfield elements. So we need to read a larger chunk
-    //     // of bytes and extract the header length from that. Same for the TCP
-    //     // header. We only read a single byte, so we do not need to use ntohs().
-    //     u8 ihl;
-    //     // The IP header length is the first field in the IP header.
-    //     bpf_probe_read(&ihl, sizeof(ihl), &ip->tos - 1);
-    // #if __BYTE_ORDER == __LITTLE_ENDIAN
-    //     ihl = (ihl & 0xf0) >> 4;
-    // #elif __BYTE_ORDER == __BIG_ENDIAN
-    //     ihl = ihl & 0x0f;
-    // #endif
-    //     pkt.ihl_bytes = (u32)ihl * 4;
-
-    tcp_hdr_len(tcp, &pkt.thl_bytes);
-
+    // Determine total IP packet size and the TCP payload size.
+    pkt->total_bytes = bpf_ntohs(ip->tot_len);
     // The TCP payload is the total IP packet length minus IP header minus TCP
     // header.
-    pkt.payload_bytes = pkt.total_bytes - pkt.ihl_bytes - pkt.thl_bytes;
+    pkt->payload_bytes = pkt->total_bytes - pkt->ihl_bytes - pkt->thl_bytes;
 
     // BPF has trouble extracting the time the proper way
     // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp
     // is just a u64 in nanoseconds.
     ktime_t tstamp = skb->tstamp;
-    pkt.time_us = (u64)tstamp / 1000;
+    pkt->time_us = (u64)tstamp / 1000;
+
+    // Advance the ringbuffer to the next position.
+    (*next_free_ptr)++;
+    if ((*next_free_ptr) >= FLOW_MAX_PACKETS)
+    {
+        (*next_free_ptr) = 0;
+        (*epoch_ptr)++;
+    }
 
     // struct timeval tstamp;
     // skb_get_timestamp(skb, &tstamp);
     // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
 
-    pkts.perf_submit(ctx, &pkt, sizeof(pkt));
     return 0;
 }
-
-// // Sets the TCP window scale option (if present) to 5.
-// static void set_window_scaling(struct tcphdr *tcp)
-// {
-//     u32 hdr_len;
-//     tcp_hdr_len(tcp, &hdr_len);
-//     u32 options_len = hdr_len - 20;
-
-//     if (options_len == 0)
-//     {
-//         return;
-//     }
-
-//     u8 *options = (u8*) (&tcp->urg_ptr + 2);
-//     // u32 options_offset = 0;
-
-//     // #pragma clang loop unroll(full)
-//     for (int i = 0; i < 10;) {
-//         int j = i / 2;
-//         i += 2;
-//     }
-
-//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     // for (u32 options_offset = 0; options_offset < 20;)
-//     // // while (options_offset < 20)
-//     // {
-//     //     // If there are less than 20 bytes of options and we have read them all, then return.
-//     //     if (options_offset > options_len)
-//     //     {
-//     //         return;
-//     //     }
-
-//     //     // Parse this option:
-//     //     //     1-byte kind,
-//     //     //     1-byte length (includes kind and length as well),
-//     //     //     variable-length option value.
-//     //     u8 kind = *(options + options_offset);
-//     //     u8 len = *(options + 1);
-//     //     // If this is the window scale option, then set the window scale to 1.
-//     //     if (kind == TCPOPT_WINDOW)
-//     //     {
-//     //         u8 *win_scale = options + options_offset + 2;
-//     //         *win_scale = FIXED_WIN_SCALE;
-//     //         return;
-//     //     }
-
-//     //     options_offset += len;
-//     // }
-
-//     // // There will be at most 20 bytes of options, so we can upper-bound this loop.
-//     // while (options_offset < 20)
-//     // {
-//     //     // If there are less than 20 bytes of options and we have read them all, then return.
-//     //     if (options_offset > options_len)
-//     //     {
-//     //         return;
-//     //     }
-
-//     //     // Parse this option:
-//     //     //     1-byte kind,
-//     //     //     1-byte length (includes kind and length as well),
-//     //     //     variable-length option value.
-//     //     u8 kind = *(options + options_offset);
-//     //     u8 len = *(options + 1);
-//     //     // If this is the window scale option, then set the window scale to 1.
-//     //     if (kind == TCPOPT_WINDOW)
-//     //     {
-//     //         u8 *win_scale = options + options_offset + 2;
-//     //         *win_scale = FIXED_WIN_SCALE;
-//     //         return;
-//     //     }
-
-//     //     options_offset += len;
-//     // }
-//     return;
-// }
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
 {
-    // bpf_trace_printk("Processing packet...\n");
-
     if (skb == NULL)
     {
         return TC_ACT_OK;
@@ -267,7 +251,7 @@ int handle_egress(struct __sk_buff *skb)
     // Check that this is IP. Calculate the start of the IP header, and do a
     // sanity check to make sure that the IP header does not extend past the
     // end of the packet.
-    if (eth->h_proto != htons(ETH_P_IP))
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
     {
         return TC_ACT_OK;
     }
@@ -288,37 +272,12 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // Determine the size of the TCP header. See above note about IP header length.
-    // u8 thl;
-    // The TCP data offset is located after the ACK sequence number in the TCP
-    // header.
-    // bpf_probe_read(&thl, sizeof(thl), &tcp->ack_seq + 4);
-
-    //     u8 thl = *(u8*)(&tcp->ack_seq + 4);
-    // #if __BYTE_ORDER == __LITTLE_ENDIAN
-    //     thl = (thl & 0x0f) >> 4;
-    // #elif __BYTE_ORDER == __BIG_ENDIAN
-    //     thl = (thl & 0xf0) >> 4;
-    // #endif
-    //     u32 thl32 = (u32)thl * 4;
-
-    // u32 x;
-    // tcp_hdr_len(tcp, &x);
-
-    // If this is a SYN packet, then overwrite the window scaling option.
-    // if (*(&tcp->ack_seq + 5) & TCP_FLAG_SYN)
-    // {
-    //     set_window_scaling(tcp);
-    // }
-
     // Prepare the lookup key.
     struct flow_t flow;
     flow.local_addr = ip->saddr;
     flow.remote_addr = ip->daddr;
-    u16 local_port = tcp->source;
-    u16 remote_port = tcp->dest;
-    flow.local_port = ntohs(local_port);
-    flow.remote_port = ntohs(remote_port);
+    flow.local_port = bpf_ntohs(tcp->source);
+    flow.remote_port = bpf_ntohs(tcp->dest);
 
     // For debugging purposes, only modify flows from local port 9998-10000.
     if (flow.local_port < 9998 || flow.local_port > 10000)
@@ -326,86 +285,148 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // bpf_trace_printk("local_addr: %u\n", flow.local_addr);
-    // bpf_trace_printk("remote_addr: %u\n", flow.remote_addr);
-    // bpf_trace_printk("local_port: %u\n", flow.local_port);
-    // bpf_trace_printk("remote_port: %u\n", flow.remote_port);
-
-    // bpf_trace_printk("Looking up RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
-
     // Look up the RWND value for this flow.
     u16 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
-        bpf_trace_printk("Warning: Could not find RWND for flow (local): %u:%u\n", flow.local_addr, flow.local_port);
-        bpf_trace_printk("Warning: Could not find RWND for flow (remote): %u:%u\n", flow.remote_addr, flow.remote_port);
+        // We do not know the RWND value to use for this flow.
         return TC_ACT_OK;
     }
     if (*rwnd == 0)
     {
-        bpf_trace_printk("Warning: Zero RWND for flow (local): %u:%u\n", *rwnd, flow.local_addr, flow.local_port);
-        bpf_trace_printk("Warning: Zero RWND for flow (remote): %u:%u\n", *rwnd, flow.remote_addr, flow.remote_port);
+        // The RWND is configured to be 0. That does not make sense.
         return TC_ACT_OK;
     }
 
-    bpf_trace_printk("Setting RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, *rwnd);
-    bpf_trace_printk("Setting RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, *rwnd);
+    u8 *win_scale = flow_to_win_scale.lookup(&flow);
+    if (win_scale == NULL)
+    {
+        // We do not know the window scale to use for this flow.
+        return TC_ACT_OK;
+    }
 
-    // TODO: Need to take window scaling into account? The scaling option is part of
-    //       the handshake. Detect if an outgoing packet is part of a handshake and
-    //       extract the window scale option and store it in a map.
+    // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
 
-    // // Write the new RWND value into the packet.
-    // bpf_skb_store_bytes(
-    //     skb,
-    //     ((void *)tcp + 14 - (void *)skb),
-    //     &rwnd,
-    //     sizeof(u16),
-    //     BPF_F_RECOMPUTE_CSUM);
-    tcp->window = htons(*rwnd >> FIXED_WIN_SCALE);
-
-    // u16 rwnd_check = tcp->window;
-    // bpf_trace_printk("Checking RWND for flow (local): %u:%u = %u\n", flow.local_addr, flow.local_port, rwnd_check);
-    // bpf_trace_printk("Checking RWND for flow (remote): %u:%u = %u\n", flow.remote_addr, flow.remote_port, rwnd_check);
+    // Apply the window scale to the configured RWND value and set it in the packet.
+    tcp->window = bpf_htons(*rwnd >> *win_scale);
 
     return TC_ACT_OK;
 }
 
-static inline void write_window_scale(struct bpf_sock_ops *skops)
+static inline int set_hdr_cb_flags(struct bpf_sock_ops *skops)
 {
-    bpf_trace_printk("write_window_scale\n");
+    // Set the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+    // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+    if (bpf_sock_ops_cb_flags_set(skops,
+                                  skops->bpf_sock_ops_cb_flags |
+                                      BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
 }
 
-// https://elixir.bootlin.com/linux/latest/source/tools/testing/selftests/bpf/test_tcp_hdr_options.h#L113
-static __always_inline void set_hdr_cb_flags(struct bpf_sock_ops *skops)
+static inline int clear_hdr_cb_flags(struct bpf_sock_ops *skops)
 {
-    bpf_sock_ops_cb_flags_set(
-        skops,
-        skops->bpf_sock_ops_cb_flags |
-            BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
-    // bpf_sock_ops_cb_flags_set(
-    //     skops,
-    //     skops->bpf_sock_ops_cb_flags);
+    // Clear the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+    // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+    if (bpf_sock_ops_cb_flags_set(skops,
+                                  skops->bpf_sock_ops_cb_flags &
+                                      ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
 }
 
-int sock_stuff(struct bpf_sock_ops *skops)
+static inline int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 {
-    bpf_trace_printk("sock_stuff\n");
-    /* ipv4 only */
+    // If this is a SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
+    // reserving three bytes (the minimim) for a TCP header option. These three bytes
+    // will never actually be used, but reserving space is the only way for that
+    // callback to be triggered.
+    if (((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK) &&
+        bpf_reserve_hdr_opt(skops, 3, 0))
+        return SOCKOPS_ERR;
+    return SOCKOPS_OK;
+}
+
+static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
+{
     if (skops->family != AF_INET)
     {
-        return 1;
+        // This is not an IPv4 packet. We only support IPv4 packets because the struct
+        // we use as a map key stores IP addresses as 32 bits. This is purely an
+        // implementation detail.
+        bpf_trace_printk("Warning: Not using IPv4 for flow on local port %u\n", skops->local_port);
+        return SOCKOPS_OK;
     }
+    if ((skops->skb_tcp_flags & TCPHDR_SYNACK) != TCPHDR_SYNACK)
+    {
+        // This is not a SYNACK packet.
+        return SOCKOPS_OK;
+    }
+
+    // This is a SYNACK packet.
+
+    struct tcp_opt win_scale_opt = {
+        .kind = TCPOPT_WINDOW,
+        .len = 0,
+        .data = 0};
+    int ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
+    if (ret != 3 || win_scale_opt.len != 3 ||
+        win_scale_opt.kind != TCPOPT_WINDOW)
+    {
+        switch (ret)
+        {
+        case -ENOMSG:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOMSG\n", skops->local_port);
+            break;
+        case -EINVAL:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EINVAL\n", skops->local_port);
+            break;
+        case -ENOENT:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOENT\n", skops->local_port);
+            break;
+        case -ENOSPC:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -ENOSPC\n", skops->local_port);
+            break;
+        case -EFAULT:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EFAULT\n", skops->local_port);
+            break;
+        case -EPERM:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: -EPERM\n", skops->local_port);
+            break;
+        default:
+            bpf_trace_printk("Error: Failure loading window scale option for flow on local port %u: failure code = %d\n", skops->local_port, ret);
+        }
+        return SOCKOPS_ERR;
+    }
+
+    bpf_trace_printk(
+        "TCP window scale for flow %u -> %u = %u\n",
+        bpf_ntohl(skops->remote_port), skops->local_port, win_scale_opt.data);
+
+    // Record this window scale for use when setting the RWND in the egress path.
+    struct flow_t flow = {
+        .local_addr = skops->local_ip4,
+        .remote_addr = skops->remote_ip4,
+        .local_port = (u16)skops->local_port,
+        .remote_port = (u16)bpf_ntohl(skops->remote_port)};
+    // Use update() instead of insert() in case this port is being reused.
+    // TODO: Change to insert() once the flow cleanup code is implemented.
+    flow_to_win_scale.update(&flow, &win_scale_opt.data);
+
+    // Clear the flag that enables the header option write callback.
+    return clear_hdr_cb_flags(skops);
+}
+
+int read_win_scale(struct bpf_sock_ops *skops)
+{
     switch (skops->op)
     {
-    case BPF_SOCK_OPS_TCP_CONNECT_CB:
-        set_hdr_cb_flags(skops);
-        break;
+    case BPF_SOCK_OPS_TCP_LISTEN_CB:
+        return set_hdr_cb_flags(skops);
+    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+        return handle_hdr_opt_len(skops);
     case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-        write_window_scale(skops);
-        break;
-    default:
-        break;
+        return handle_write_hdr_opt(skops);
     }
-    return 1;
+    return SOCKOPS_OK;
 }

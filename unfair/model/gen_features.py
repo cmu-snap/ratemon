@@ -1157,7 +1157,7 @@ def parse_received_acks(
     packet_seq = False  # cca in {"copa", "vivace"}
 
     for j, recv_pkt in enumerate(recv_pkts):
-        if j % 100 == 0:
+        if debug and j % 100 == 0:
             print(f"\tFlow {flw}: {j}/{num_pkts} packets")
         # Whether this is the first packet.
         first = j == 0
@@ -1238,7 +1238,7 @@ def parse_received_acks(
             )
         )
         if pkt_loss_cur_estimate > 1000:
-            print("warning")
+            print(f"Warning: High packet loss estimate: {pkt_loss_cur_estimate}")
 
         if pkt_loss_cur_estimate != -1:
             pkt_loss_total_estimate += pkt_loss_cur_estimate
