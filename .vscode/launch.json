@@ -27,11 +27,11 @@
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
             "console": "integratedTerminal",
             "args": [
-                "--limit=100",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
                 "--interface=ens3",
-                "--cgroup=${workspaceFolder}/test/test_cgroup"
+                "--cgroup=${workspaceFolder}/test/test_cgroup",
+                "--inference-interval-ms=1000"
             ],
             "autoReload": {
                 "enable": false
