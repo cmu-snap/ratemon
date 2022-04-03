@@ -37,6 +37,13 @@ def get_dataloaders(args, net):
         # Save scaling parameters. We always need to save the scaling parameters,
         # because the trained model cannot be used without them.
         utils.save_scl_prms(args["out_dir"], scl_prms)
+
+    # Select the specific columns that we want to use as input features.
+    # trn[0] is the input data.
+    trn = (trn[0][list(args["features"])], trn[1], trn[2])
+    val = (val[0][list(args["features"])], val[1], val[2])
+    tst = (tst[0][list(args["features"])], tst[1], tst[2])
+
     return create_dataloaders(args, trn, val, tst)
 
 
