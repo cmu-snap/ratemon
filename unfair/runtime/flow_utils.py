@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from unfair.model import defaults
+from unfair.model import defaults, utils
 
 
 class FlowKey(ctypes.Structure):
@@ -32,8 +32,8 @@ class FlowKey(ctypes.Structure):
     def __str__(self):
         """Create a string representation of a flow fourtuple."""
         return (
-            f"(R) {self.remote_addr}:{self.remote_port} <-> "
-            f"{self.local_addr}:{self.local_port} (L)"
+            f"(R) {utils.int_to_ip_str(self.remote_addr)}:{self.remote_port} <-> "
+            f"{utils.int_to_ip_str(self.local_addr)}:{self.local_port} (L)"
         )
 
     def __hash__(self):

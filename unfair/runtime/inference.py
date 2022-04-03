@@ -167,7 +167,7 @@ def run(args, que, done, flow_to_rwnd):
     This function is designed to be the target of a process.
     """
     net = load_model(args.model, args.model_file)
-    min_rtts_us = collections.defaultdict(lambda: float("int"))
+    min_rtts_us = collections.defaultdict(lambda: float("inf"))
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
     while not done.is_set():
@@ -181,7 +181,7 @@ def run(args, que, done, flow_to_rwnd):
         pkts_ndarray = packets_to_ndarray(pkts)
         try:
             labels, min_rtts_us[flowkey] = inference(
-                net, flowkey, pkts, min_rtts_us[flowkey], args.debug
+                net, flowkey, pkts_ndarray, min_rtts_us[flowkey], args.debug
             )
         except AssertionError as exp:
             # FIXME: There is a strange bug when normalizing the packet arrival times

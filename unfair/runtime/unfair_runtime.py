@@ -54,13 +54,8 @@ def receive_packet(flows, flows_lock, pkt):
 
     flows_lock protects flows.
     """
-    global NUM_PACKETS
-
     # Skip packets that are just empty structs.
     if not pkt.valid:
-        return
-    # Skip packets on the loopback interface.
-    if LOCALHOST in (pkt.saddr, pkt.daddr):
         return
 
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
@@ -92,7 +87,7 @@ def receive_packet(flows, flows_lock, pkt):
                     )
                     flow.packets.append(dat)
 
-                    # global NUM_PACKETS
+                    global NUM_PACKETS
                     NUM_PACKETS += 1
                 finally:
                     flow.lock.release()
@@ -151,8 +146,17 @@ def check_flows(flows, flows_lock, flow_to_rwnd, args, que):
                 try:
                     # TODO: Need some notion of "this is the minimum number or time
                     # interval of packets that I need to run the model".
-                    if len(flow.packets) > 0 and (
-                        args.min_packets is None or len(flow.packets) > args.min_packets
+                    if (
+                        len(flow.packets) > 0
+                        and (
+                            args.min_packets is None
+                            or len(flow.packets) > args.min_packets
+                        )
+                        # Skip flows on the loopback interface.
+                        and (
+                            LOCALHOST
+                            not in (flow.flowkey.local_addr, flow.flowkey.remote_addr)
+                        )
                     ):
                         # Plan to run inference on "full" flows.
                         to_check.append(fourtuple)
@@ -379,18 +383,18 @@ def run(args):
     done = multiprocessing.Event()
     done.clear()
 
-    # que = multiprocessing.Queue()
+    que = multiprocessing.Queue()
     # Set up the inference thread.
-    # check_thread = threading.Thread(
-    #     target=check_loop,
-    #     args=(flows, flows_lock, flow_to_rwnd, args, que, done),
-    # )
-    # check_thread.start()
+    check_thread = threading.Thread(
+        target=check_loop,
+        args=(flows, flows_lock, flow_to_rwnd, args, que, done),
+    )
+    check_thread.start()
 
-    # inference_proc = multiprocessing.Process(
-    #     target=inference.run, args=(args, que, done, flow_to_rwnd)
-    # )
-    # inference_proc.start()
+    inference_proc = multiprocessing.Process(
+        target=inference.run, args=(args, que, done, flow_to_rwnd)
+    )
+    inference_proc.start()
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -419,8 +423,8 @@ def run(args):
     # for flow, pkts in sorted(flows.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    # check_thread.join()
-    # inference_proc.join()
+    check_thread.join()
+    inference_proc.join()
 
 
 def poll_ringbuffer(ringbuffer, flows, flows_lock, last_epoch):
