@@ -2,6 +2,7 @@
 
 import collections
 import ctypes
+import multiprocessing
 from os import path
 import pickle
 import queue
@@ -12,6 +13,12 @@ import torch
 from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
+
+
+# inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
+
+inference_flags_lock = multiprocessing.RLock()
+inference_flags = collections.defaultdict(lambda: multiprocessing.Value(typecode_or_type="i", lock=False))
 
 
 def load_model(model, model_file):
@@ -129,7 +136,7 @@ def make_decision(
             #     print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
             #     new_decision[1] = 2**16 - 1
 
-            flow_to_rwnd[flowkey] = ctypes.c_ushort(new_decision[1])
+            flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[1])
 
         decisions[flowkey] = new_decision
 
@@ -202,4 +209,7 @@ def run(args, que, done, flow_to_rwnd):
             flow_to_rwnd,
             args,
         )
+
+        with inference_flags_lock:
+            inference_flags[fourtuple].value = 0
         # print(f"Report for flow {flow}: {flow.label}, {flow.decision}")

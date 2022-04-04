@@ -24,8 +24,9 @@
 #define TCPHDR_ACK 0x10
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
-#define FLOW_MAX_PACKETS 8192
+// #define FLOW_MAX_PACKETS 8192
 // #define FLOW_MAX_PACKETS 65536
+#define FLOW_MAX_PACKETS 262144
 // #define FLOW_MAX_PACKETS 1024
 
 // Key for use in flow-based maps.
@@ -77,8 +78,10 @@ struct tcp_opt
 BPF_ARRAY(ringbuffer, struct pkt_t, FLOW_MAX_PACKETS);
 BPF_ARRAY(next_free, int, 1);
 BPF_ARRAY(epoch, u32, 1);
-// Read RWND limit for flow, as set by userspace.
-BPF_HASH(flow_to_rwnd, struct flow_t, u16);
+// Read RWND limit for flow, as set by userspace. Even though the advertised window
+// is only 16 bits in the TCP header, use 32 bits here because we have not taken
+// window scaling into account yet.
+BPF_HASH(flow_to_rwnd, struct flow_t, u32);
 // Read RWND limit for flow, as set by userspace.
 BPF_HASH(flow_to_win_scale, struct flow_t, u8);
 
@@ -282,14 +285,8 @@ int handle_egress(struct __sk_buff *skb)
     flow.local_port = bpf_ntohs(tcp->source);
     flow.remote_port = bpf_ntohs(tcp->dest);
 
-    // For debugging purposes, only modify flows from local port 9998-10000.
-    if (flow.local_port < 9998 || flow.local_port > 10000)
-    {
-        return TC_ACT_OK;
-    }
-
     // Look up the RWND value for this flow.
-    u16 *rwnd = flow_to_rwnd.lookup(&flow);
+    u32 *rwnd = flow_to_rwnd.lookup(&flow);
     if (rwnd == NULL)
     {
         // We do not know the RWND value to use for this flow.
@@ -311,7 +308,7 @@ int handle_egress(struct __sk_buff *skb)
     // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
 
     // Apply the window scale to the configured RWND value and set it in the packet.
-    tcp->window = bpf_htons(*rwnd >> *win_scale);
+    tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
 
     return TC_ACT_OK;
 }

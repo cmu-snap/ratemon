@@ -55,7 +55,35 @@
                 "--reaction-strategy=file",
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000"
+                "--inference-interval-ms=1000",
+                "--disable-inference"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": true
+        },
+        {
+            "name": "(r) runtime, schedule, cprofile",
+            "type": "python",
+            "request": "launch",
+            "module": "cProfile"
+            "console": "integratedTerminal",
+            "args": [
+                "-o", "/tmp/tmp.prof",
+                "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+                "--model=HistGbdtSklearn",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
+                "--interface=ens3",
+                "--reaction-strategy=file",
+                "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
+                "--cgroup=${workspaceFolder}/test/test_cgroup",
+                "--inference-interval-ms=1000",
+                "--disable-inference"
             ],
             "autoReload": {
                 "enable": false

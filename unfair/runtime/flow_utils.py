@@ -1,6 +1,7 @@
 """Defines useful classes for representing flows."""
 
 import ctypes
+import multiprocessing
 import sys
 import threading
 import time
@@ -55,7 +56,8 @@ class Flow:
 
     def __init__(self, fourtuple):
         """Set up data structures for a flow."""
-        self.lock = threading.RLock()
+        self.ingress_lock = threading.RLock()
+        # self.inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
         self.fourtuple = fourtuple
         self.flowkey = FlowKey(*fourtuple)
         self.packets = []
