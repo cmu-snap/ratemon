@@ -58,45 +58,116 @@ def load_bpf(debug=False):
     return BPF(text=bpf_text)
 
 
-def receive_packets(packets):
-    """Ingest a new packet, identify its flow, and store it."""
+def receive_packets(packets, last_epoch):
+    """Ingest new packets, identify their flows, and store them."""
     # Build a local mapping of flows to packets for this batch so that we do not need
     # to acquire a flow lock for every packet.
-    flows_cache = collections.defaultdict(list)
+    #
+    # It is likely that an epoch transition occurred in the middle of the
+    # array. Find this point. Record packets after this transition
+    # point (older packets) separately from packets before the transition
+    # point (newer packets).
+    older_flows_cache = collections.defaultdict(list)
+    newer_flows_cache = collections.defaultdict(list)
     total_bytes = 0
-    for _, pkt in packets:
-        # Skip packets that are just empty structs. The total_bytes field is
-        # guaranteed never to be zero for valid packets.
-        if pkt.total_bytes == 0:
-            continue
-        total_bytes += pkt.total_bytes
+    current_epoch = last_epoch
 
-        # The order needs to be (local addr, remote addr, local port, remote port)
-        # to make creating a flow_utils.FlowKey simpler.
-        flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append((
-            pkt.seq,
-            pkt.srtt_us,
-            # pkt.tsval,
-            # pkt.tsecr,
-            pkt.total_bytes,
-            # pkt.ihl_bytes,
-            # pkt.thl_bytes,
-            pkt.payload_bytes,
-            pkt.time_us,
-        ))
+    try:
+        _, first = next(packets)
+        current_epoch = first.epoch
+        if current_epoch == last_epoch:
+            return 0, 0
+
+        # First packet
+        if first.total_bytes != 0:
+            total_bytes += first.total_bytes
+            newer_flows_cache[
+                (first.daddr, first.saddr, first.dport, first.sport)
+            ].append(
+                (
+                    first.seq,
+                    first.srtt_us,
+                    first.total_bytes,
+                    first.payload_bytes,
+                    first.time_us,
+                )
+            )
+
+        # Newer packets
+        while True:
+            _, pkt = next(packets)
+            if pkt.total_bytes == 0:
+                continue
+            if pkt.epoch != current_epoch:
+                break
+            total_bytes += pkt.total_bytes
+            newer_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
+                (
+                    pkt.seq,
+                    pkt.srtt_us,
+                    pkt.total_bytes,
+                    pkt.payload_bytes,
+                    pkt.time_us,
+                )
+            )
+
+        # Middle packet. If this code is reached, then pkt is defined.
+        if pkt.epoch != current_epoch and pkt.total_bytes != 0:
+            total_bytes += pkt.total_bytes
+            older_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
+                (
+                    pkt.seq,
+                    pkt.srtt_us,
+                    pkt.total_bytes,
+                    pkt.payload_bytes,
+                    pkt.time_us,
+                )
+            )
+
+        # Older packets
+        while True:
+            _, pkt = next(packets)
+            if pkt.total_bytes == 0:
+                continue
+            total_bytes += pkt.total_bytes
+            older_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
+                (
+                    pkt.seq,
+                    pkt.srtt_us,
+                    pkt.total_bytes,
+                    pkt.payload_bytes,
+                    pkt.time_us,
+                )
+            )
+    except StopIteration:
+        pass
 
     # Update the master flows database.
+    num_packets = 0
     with FLOWS_LOCK:
-        for fourtuple, packets in flows_cache.items():
+        # Older flows first this time.
+        for fourtuple, flow_packets in older_flows_cache.items():
             if fourtuple in FLOWS:
                 flow = FLOWS[fourtuple]
             else:
                 flow = flow_utils.Flow(fourtuple)
                 FLOWS[fourtuple] = flow
             with flow.ingress_lock:
-                flow.packets.extend(packets)
+                num_packets += len(flow_packets)
+                flow.packets.extend(flow_packets)
 
-    return total_bytes
+        # Then the newer flows.
+        for fourtuple, flow_packets in newer_flows_cache.items():
+            if fourtuple in FLOWS:
+                flow = FLOWS[fourtuple]
+            else:
+                flow = flow_utils.Flow(fourtuple)
+                FLOWS[fourtuple] = flow
+            with flow.ingress_lock:
+                num_packets += len(flow_packets)
+                flow.packets.extend(flow_packets)
+
+    return current_epoch, num_packets, total_bytes
 
 
 def check_loop(flow_to_rwnd, args, que, done):
@@ -215,7 +286,6 @@ def check_flow(fourtuple, args, que):
         # Record the time at which we check this flow.
         flow.latest_time_sec = time.time()
 
-        # with inference.inference_flags_lock:
         # Only submit new packets for inference if inference is not already running.
         if inference.inference_flags[fourtuple].value == 0:
             inference.inference_flags[fourtuple].value = 1
@@ -232,57 +302,30 @@ def check_flow(fourtuple, args, que):
 
 def poll_ringbuffer(ringbuffer, last_epoch):
     """Poll a custom eBPF ringbuffer."""
+    # Peek at the first element.
     current_epoch = ringbuffer[0].epoch
-    found_packets = current_epoch != last_epoch
-    total_bytes = 0
     num_packets = 0
-    if found_packets:
-        new_packets = list(ringbuffer.items_lookup_batch())
-        num_packets = len(new_packets)
+    total_bytes = 0
+    if current_epoch != last_epoch:
+        last_epoch, num_packets, total_bytes = receive_packets(
+            ringbuffer.items_lookup_batch(), last_epoch
+        )
+
         print(f"Found {num_packets} new packets")
-
-        # It is likely that an epoch transition occurred in the middle of the
-        # array. Find this point. Process all packets after this transition
-        # point (older packets) before processing packets before the transition
-        # point (newer packets).
-        epoch_transition_idx = 0
-        for idx, pkt in new_packets:
-            if pkt.epoch != current_epoch:
-                epoch_transition_idx = idx
-                break
-                # We found an older epoch. Process these packets first.
-                # if epoch_transition_idx is None:
-                # receive_packet(pkt)
-
-        total_bytes = receive_packets(new_packets[epoch_transition_idx:])
-
-        if epoch_transition_idx > 0:
-            print(
-                f"Epoch transition at idx {epoch_transition_idx}: "
-                f"{current_epoch} -> {new_packets[epoch_transition_idx][1].epoch}"
-            )
-            total_bytes += receive_packets(new_packets[:epoch_transition_idx])
-
-            # for idx in range(epoch_transition_idx):
-            #     receive_packet(new_packets[idx][1])
-        last_epoch = current_epoch
-        # print(f"Average bytes per packet: {total_bytes / len(new_packets):.2f}")
-    return found_packets, last_epoch, total_bytes, num_packets
+        # print(f"Average bytes per packet: {total_bytes / num_packets:.2f}")
+    return last_epoch, num_packets, total_bytes
 
 
 def log_rate(
     last_time_s,
-    delta_total_bytes,
     delta_num_packets,
+    delta_total_bytes,
     target_delta_s=10,
 ):
     """Log the packet processing rate."""
     cur_time_s = time.time()
     delta_s = cur_time_s - last_time_s
     if delta_s > target_delta_s:
-        # with FLOWS_LOCK:
-        #     cur_packets = NUM_PACKETS
-        # pps =
         print(
             f"Packets per second: {delta_num_packets / delta_s:.2f}, "
             f"throughput: {delta_total_bytes / delta_s / 1e6:.2f} Mbps"
@@ -469,24 +512,24 @@ def run(args):
     print("Running...press Control-C to end")
     last_time_s = time.time()
     last_epoch = -1
-    delta_total_bytes = 0
     delta_num_packets = 0
+    delta_total_bytes = 0
     try:
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-            found_packets, last_epoch, total_bytes, num_packets = poll_ringbuffer(
+            last_epoch, num_packets, total_bytes = poll_ringbuffer(
                 ringbuffer, last_epoch
             )
 
-            delta_total_bytes += total_bytes
             delta_num_packets += num_packets
+            delta_total_bytes += total_bytes
             last_time_s, delta_total_bytes, delta_num_packets = log_rate(
-                last_time_s, delta_total_bytes, delta_num_packets
+                last_time_s, delta_num_packets, delta_total_bytes
             )
-            # if not found_packets:
-            # If we did not find any new packets, then sleep for a while.
-            # time.sleep(0.1)
+            if num_packets == 0:
+                # If we did not find any new packets, then sleep for a while.
+                time.sleep(0.1)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
