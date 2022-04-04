@@ -24,7 +24,8 @@
 #define TCPHDR_ACK 0x10
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
-#define FLOW_MAX_PACKETS 65536
+#define FLOW_MAX_PACKETS 8192
+// #define FLOW_MAX_PACKETS 65536
 // #define FLOW_MAX_PACKETS 1024
 
 // Key for use in flow-based maps.
@@ -45,15 +46,15 @@ struct pkt_t
     u16 dport;
     u32 seq;
     u32 srtt_us;
-    u32 tsval;
-    u32 tsecr;
+    // u32 tsval;
+    // u32 tsecr;
     u32 total_bytes;
-    u32 ihl_bytes;
-    u32 thl_bytes;
+    // u32 ihl_bytes;
+    // u32 thl_bytes;
     u32 payload_bytes;
     u32 epoch;
     u64 time_us;
-    u32 valid;
+    // u32 valid;
 };
 
 struct tcp_opt
@@ -159,7 +160,6 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     {
         return 0;
     }
-    u32 epoch_int = *epoch_ptr;
 
     // Look up the index of the next location in the ringbuffer.
     int *next_free_ptr = next_free.lookup(&zero);
@@ -177,8 +177,8 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
         return 0;
     }
     // Fill in packet metadata needed for managing the ringbuffer.
-    pkt->valid = 1;
-    pkt->epoch = epoch_int;
+    // pkt->valid = 1;
+    pkt->epoch = *epoch_ptr;
 
     pkt->saddr = ip->saddr;
     pkt->daddr = ip->daddr;
@@ -189,22 +189,25 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     pkt->seq = bpf_ntohl(tcp->seq);
 
     struct tcp_sock *ts = tcp_sk(sk);
+    // For some reason, this is stored << 3.
     pkt->srtt_us = ts->srtt_us >> 3;
     // TODO: For the timestamp option, we also need to parse the sent packets.
     // We use the timestamp option to determine the RTT. But what if we just
     // use srtt instead? Let's start with that.
-    pkt->tsval = ts->rx_opt.rcv_tsval;
-    pkt->tsecr = ts->rx_opt.rcv_tsecr;
+    // pkt->tsval = ts->rx_opt.rcv_tsval;
+    // pkt->tsecr = ts->rx_opt.rcv_tsecr;
 
     // Determine the IP/TCP header lengths.
-    ip_hdr_len(ip, &pkt->ihl_bytes);
-    tcp_hdr_len(tcp, &pkt->thl_bytes);
+    u32 ihl_bytes;
+    u32 thl_bytes;
+    ip_hdr_len(ip, &ihl_bytes);
+    tcp_hdr_len(tcp, &thl_bytes);
 
     // Determine total IP packet size and the TCP payload size.
     pkt->total_bytes = bpf_ntohs(ip->tot_len);
     // The TCP payload is the total IP packet length minus IP header minus TCP
     // header.
-    pkt->payload_bytes = pkt->total_bytes - pkt->ihl_bytes - pkt->thl_bytes;
+    pkt->payload_bytes = pkt->total_bytes - ihl_bytes - thl_bytes;
 
     // BPF has trouble extracting the time the proper way
     // (skb_get_timestamp()), so we do this manually. The skb's raw timestamp

@@ -55,7 +55,7 @@ def receive_packet(flows, flows_lock, pkt):
     flows_lock protects flows.
     """
     # Skip packets that are just empty structs.
-    if not pkt.valid:
+    if pkt.seq == 0:
         return
 
     # Attempt to acquire flows_lock. If unsuccessful, skip this packet.
@@ -77,11 +77,11 @@ def receive_packet(flows, flows_lock, pkt):
                     dat = (
                         pkt.seq,
                         pkt.srtt_us,
-                        pkt.tsval,
-                        pkt.tsecr,
+                        # pkt.tsval,
+                        # pkt.tsecr,
                         pkt.total_bytes,
-                        pkt.ihl_bytes,
-                        pkt.thl_bytes,
+                        # pkt.ihl_bytes,
+                        # pkt.thl_bytes,
                         pkt.payload_bytes,
                         pkt.time_us,
                     )
@@ -399,16 +399,21 @@ def run(args):
     print("Running...press Control-C to end")
     last_time_s = time.time()
     last_epoch = -1
+    delta_total_bytes = 0
     with flows_lock:
         last_packets = NUM_PACKETS
     try:
         while not done.is_set():
             if args.poll_interval_ms is not None:
                 time.sleep(args.poll_interval_ms / 1e3)
-            found_packets, last_epoch = poll_ringbuffer(
+            found_packets, last_epoch, total_bytes = poll_ringbuffer(
                 ringbuffer, flows, flows_lock, last_epoch
             )
-            last_time_s, last_packets = log_rate(flows_lock, last_time_s, last_packets)
+
+            delta_total_bytes += total_bytes
+            last_time_s, last_packets, delta_total_bytes = log_rate(
+                flows_lock, last_time_s, last_packets, delta_total_bytes
+            )
             if not found_packets:
                 # If we did not find any new packets, then sleep for a while.
                 time.sleep(0.1)
@@ -431,6 +436,7 @@ def poll_ringbuffer(ringbuffer, flows, flows_lock, last_epoch):
     """Poll a custom eBPF ringbuffer."""
     current_epoch = ringbuffer[0].epoch
     found_packets = current_epoch != last_epoch
+    total_bytes = 0
     if found_packets:
         new_packets = list(ringbuffer.items_lookup_batch())
         print(f"Found {len(new_packets)} new packets")
@@ -441,6 +447,7 @@ def poll_ringbuffer(ringbuffer, flows, flows_lock, last_epoch):
         # point (newer packets).
         epoch_transition_idx = None
         for idx, pkt in new_packets:
+            total_bytes += pkt.total_bytes
             if pkt.epoch != current_epoch:
                 # We found an older epoch. Process these packets first.
                 if epoch_transition_idx is None:
@@ -454,10 +461,12 @@ def poll_ringbuffer(ringbuffer, flows, flows_lock, last_epoch):
             for idx in range(epoch_transition_idx):
                 receive_packet(flows, flows_lock, new_packets[idx][1])
         last_epoch = current_epoch
-    return found_packets, last_epoch
+    return found_packets, last_epoch, total_bytes
 
 
-def log_rate(flows_lock, last_time_s, last_packets, target_delta_s=10):
+def log_rate(
+    flows_lock, last_time_s, last_packets, delta_total_bytes, target_delta_s=10
+):
     """Log the packet processing rate."""
     cur_time_s = time.time()
     delta_s = cur_time_s - last_time_s
@@ -467,12 +476,12 @@ def log_rate(flows_lock, last_time_s, last_packets, target_delta_s=10):
         pps = (cur_packets - last_packets) / delta_s
         print(
             f"Packets per second: {pps:.2f}, "
-            "processed throughput at 1500 B MSS: "
-            f"{pps * 1500 * 8 / 1e6:.2f} Mbps"
+            f"throughput: {delta_total_bytes / delta_s / 1e6:.2f} Mbps"
         )
         last_time_s = cur_time_s
         last_packets = cur_packets
-    return last_time_s, last_packets
+        delta_total_bytes = 0
+    return last_time_s, last_packets, delta_total_bytes
 
 
 def _main():

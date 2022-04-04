@@ -142,19 +142,19 @@ def packets_to_ndarray(pkts):
     (
         seqs,
         srtts_us,
-        tsvals,
-        tsecrs,
+        # tsvals,
+        # tsecrs,
         totals_bytes,
-        _,
-        _,
+        # _,
+        # _,
         payloads_bytes,
         times_us,
     ) = zip(*pkts)
     pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
     pkts[features.SEQ_FET] = seqs
     pkts[features.ARRIVAL_TIME_FET] = times_us
-    pkts[features.TS_1_FET] = tsvals
-    pkts[features.TS_2_FET] = tsecrs
+    # pkts[features.TS_1_FET] = tsvals
+    # pkts[features.TS_2_FET] = tsecrs
     pkts[features.PAYLOAD_FET] = payloads_bytes
     pkts[features.WIRELEN_FET] = totals_bytes
     pkts[features.SRTT_FET] = srtts_us
