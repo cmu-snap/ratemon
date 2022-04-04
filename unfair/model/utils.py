@@ -822,7 +822,7 @@ def get_safe(dat, start_idx=None, end_idx=None):
     if end_idx is None:
         end_idx = 0 if dat.shape[0] == 0 else dat.shape[0] - 1
     # Extract the window.
-    dat_win = dat[start_idx : end_idx + 1]
+    dat_win = dat[start_idx:end_idx + 1]
     # Eliminate values that are -1 (unknown).
     return dat_win[dat_win != -1]
 
