@@ -82,7 +82,7 @@
                 "--reaction-strategy=file",
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000",
+                // "--inference-interval-ms=1000",
                 "--disable-inference"
             ],
             "autoReload": {

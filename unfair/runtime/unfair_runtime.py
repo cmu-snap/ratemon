@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser
 import atexit
+import collections
 import multiprocessing
 import os
 from os import path
@@ -59,48 +60,42 @@ def load_bpf(debug=False):
 
 def receive_packets(packets):
     """Ingest a new packet, identify its flow, and store it."""
-    # Attempt to acquire FLOWS_LOCK. If unsuccessful, skip this packet.
+    # Build a local mapping of flows to packets for this batch so that we do not need
+    # to acquire a flow lock for every packet.
+    flows_cache = collections.defaultdict(list)
     total_bytes = 0
+    for _, pkt in packets:
+        # Skip packets that are just empty structs. The total_bytes field is
+        # guaranteed never to be zero for valid packets.
+        if pkt.total_bytes == 0:
+            continue
+        total_bytes += pkt.total_bytes
 
-    if FLOWS_LOCK.acquire(blocking=False):
-        try:
-            for idx in range(len(packets)):
-                pkt = packets[idx][1]
+        # The order needs to be (local addr, remote addr, local port, remote port)
+        # to make creating a flow_utils.FlowKey simpler.
+        flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append((
+            pkt.seq,
+            pkt.srtt_us,
+            # pkt.tsval,
+            # pkt.tsecr,
+            pkt.total_bytes,
+            # pkt.ihl_bytes,
+            # pkt.thl_bytes,
+            pkt.payload_bytes,
+            pkt.time_us,
+        ))
 
-                # Skip packets that are just empty structs. The total_bytes field is
-                # guaranteed never to be zero for valid packets.
-                if pkt.total_bytes == 0:
-                    continue
-                total_bytes += pkt.total_bytes
+    # Update the master flows database.
+    with FLOWS_LOCK:
+        for fourtuple, packets in flows_cache.items():
+            if fourtuple in FLOWS:
+                flow = FLOWS[fourtuple]
+            else:
+                flow = flow_utils.Flow(fourtuple)
+                FLOWS[fourtuple] = flow
+            with flow.ingress_lock:
+                flow.packets.extend(packets)
 
-                # The order needs to be (local addr, remote addr, local port, remote port)
-                # to make creating a flow_utils.FlowKey simpler.
-                fourtuple = (pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)
-                if fourtuple in FLOWS:
-                    flow = FLOWS[fourtuple]
-                else:
-                    flow = flow_utils.Flow(fourtuple)
-                    FLOWS[fourtuple] = flow
-
-                # Attempt to acquire the lock for this flow. If unsuccessful, then skip this
-                # packet.
-                # if flow.ingress_lock.acquire(blocking=False):
-                #     try:
-                flow.packets.append((
-                    pkt.seq,
-                    pkt.srtt_us,
-                    # pkt.tsval,
-                    # pkt.tsecr,
-                    pkt.total_bytes,
-                    # pkt.ihl_bytes,
-                    # pkt.thl_bytes,
-                    pkt.payload_bytes,
-                    pkt.time_us,
-                ))
-                    # finally:
-                    #     flow.ingress_lock.release()
-        finally:
-            FLOWS_LOCK.release()
     return total_bytes
 
 
@@ -464,12 +459,12 @@ def run(args):
         target=check_loop,
         args=(flow_to_rwnd, args, que, done),
     )
-    check_thread.start()
+    # check_thread.start()
 
     inference_proc = multiprocessing.Process(
         target=inference.run, args=(args, que, done, flow_to_rwnd)
     )
-    inference_proc.start()
+    # inference_proc.start()
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -489,9 +484,9 @@ def run(args):
             last_time_s, delta_total_bytes, delta_num_packets = log_rate(
                 last_time_s, delta_total_bytes, delta_num_packets
             )
-            if not found_packets:
-                # If we did not find any new packets, then sleep for a while.
-                time.sleep(0.1)
+            # if not found_packets:
+            # If we did not find any new packets, then sleep for a while.
+            # time.sleep(0.1)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
@@ -503,8 +498,8 @@ def run(args):
     # for flow, pkts in sorted(FLOWS.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    check_thread.join()
-    inference_proc.join()
+    # check_thread.join()
+    # inference_proc.join()
 
 
 def _main():

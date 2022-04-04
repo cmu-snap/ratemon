@@ -27,6 +27,7 @@
 // #define FLOW_MAX_PACKETS 8192
 // #define FLOW_MAX_PACKETS 65536
 #define FLOW_MAX_PACKETS 262144
+// #define FLOW_MAX_PACKETS 524288
 // #define FLOW_MAX_PACKETS 1024
 
 // Key for use in flow-based maps.
