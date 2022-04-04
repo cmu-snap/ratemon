@@ -25,6 +25,7 @@ from unfair.runtime.reaction_strategy import ReactionStrategy
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 # Flows that have not received a new packet in this many seconds will be
 # garbage collected.
+# 5 minutes
 OLD_THRESH_SEC = 5 * 60
 
 # Maps each flow (four-tuple) to a list of packets for that flow. New
@@ -214,7 +215,6 @@ def check_flows(flow_to_rwnd, args, que):
     # Need to acquire FLOWS_LOCK while iterating over FLOWS.
     with FLOWS_LOCK:
         for fourtuple, flow in FLOWS.items():
-            # print(f"\t{flow} - {len(flow.packets)} packets")
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
@@ -238,24 +238,27 @@ def check_flows(flow_to_rwnd, args, que):
                             and flow.flowkey.local_port <= 10000
                         )
                     ):
-                        # Plan to run inference on "full" flows.
+                        # Plan to run inference on this flows.
                         to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
                     ):
-                        # Remove flows with no packets and flows that have not received
-                        # a new packet in five seconds.
+                        # Remove flows that have not been selected for inference in a
+                        # while.
                         to_remove.append(fourtuple)
                 finally:
                     flow.ingress_lock.release()
             else:
-                print(f"Could not acquire lock for flow {flow}")
+                print(f"Could not acquire lock for flow: {flow}")
         # Garbage collection.
         for fourtuple in to_remove:
             flowkey = FLOWS[fourtuple].flowkey
             if flowkey in flow_to_rwnd:
                 del flow_to_rwnd[flowkey]
             del FLOWS[fourtuple]
+            with inference.INFERENCE_FLAGS_LOCK:
+                if fourtuple in inference.INFERENCE_FLAGS:
+                    del inference.INFERENCE_FLAGS[fourtuple]
 
     for fourtuple in to_check:
         flow = FLOWS[fourtuple]
@@ -263,12 +266,11 @@ def check_flows(flow_to_rwnd, args, que):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                if not args.disable_inference:
-                    check_flow(fourtuple, args, que)
+                check_flow(fourtuple, args, que)
             finally:
                 flow.ingress_lock.release()
         else:
-            print(f"Cloud not acquire lock for flow {flow}")
+            print(f"Could not acquire lock for flow: {flow}")
 
 
 def check_flow(fourtuple, args, que):
@@ -278,8 +280,7 @@ def check_flow(fourtuple, args, que):
     pacing for the flow. Updates the flow's fairness record.
     """
     flow = FLOWS[fourtuple]
-    with flow.ingress_lock and inference.inference_flags_lock:
-        print(f"Running inference on {len(flow.packets)} packets for flow {flow}")
+    with flow.ingress_lock and inference.INFERENCE_FLAGS_LOCK:
         # Discard all but the most recent few packets.
         if len(flow.packets) > args.min_packets:
             flow.packets = flow.packets[-args.min_packets :]
@@ -287,17 +288,22 @@ def check_flow(fourtuple, args, que):
         flow.latest_time_sec = time.time()
 
         # Only submit new packets for inference if inference is not already running.
-        if inference.inference_flags[fourtuple].value == 0:
-            inference.inference_flags[fourtuple].value = 1
+        if inference.INFERENCE_FLAGS[fourtuple].value == 0:
+            inference.INFERENCE_FLAGS[fourtuple].value = 1
             try:
-                que.put((fourtuple, flow.packets), block=False)
+                print(
+                    f"Scheduling inference on {len(flow.packets)} "
+                    f"packets for flow: {flow}"
+                )
+                if not args.disable_inference:
+                    que.put((fourtuple, flow.packets), block=False)
             except queue.Full:
                 pass
             else:
                 # Clear the flow's packets.
                 flow.packets = []
         else:
-            print("Skipping inference")
+            print(f"Skipping inference for flow: {flow}")
 
 
 def poll_ringbuffer(ringbuffer, last_epoch):
@@ -502,12 +508,12 @@ def run(args):
         target=check_loop,
         args=(flow_to_rwnd, args, que, done),
     )
-    # check_thread.start()
+    check_thread.start()
 
     inference_proc = multiprocessing.Process(
         target=inference.run, args=(args, que, done, flow_to_rwnd)
     )
-    # inference_proc.start()
+    inference_proc.start()
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -541,8 +547,8 @@ def run(args):
     # for flow, pkts in sorted(FLOWS.items()):
     #     print("\t", flow_to_str(flow), len(pkts))
 
-    # check_thread.join()
-    # inference_proc.join()
+    check_thread.join()
+    inference_proc.join()
 
 
 def _main():

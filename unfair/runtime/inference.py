@@ -15,10 +15,10 @@ from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
-# inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
-
-inference_flags_lock = multiprocessing.RLock()
-inference_flags = collections.defaultdict(lambda: multiprocessing.Value(typecode_or_type="i", lock=False))
+INFERENCE_FLAGS_LOCK = multiprocessing.RLock()
+INFERENCE_FLAGS = collections.defaultdict(
+    lambda: multiprocessing.Value(typecode_or_type="i", lock=False)
+)
 
 
 def load_model(model, model_file):
@@ -121,9 +121,8 @@ def make_decision(
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
+    print(f"New decision for flow {flowkey}: {new_decision}")
     if decisions[flowkey] != new_decision:
-        print(f"New decision for flow {flowkey}: {new_decision}")
-
         if new_decision[1] is None:
             del flow_to_rwnd[flowkey]
         else:
@@ -210,6 +209,6 @@ def run(args, que, done, flow_to_rwnd):
             args,
         )
 
-        with inference_flags_lock:
-            inference_flags[fourtuple].value = 0
+        with INFERENCE_FLAGS_LOCK:
+            INFERENCE_FLAGS[fourtuple].value = 0
         # print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
