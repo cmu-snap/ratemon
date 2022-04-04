@@ -53,7 +53,7 @@
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/rwnd_schedule.csv",
+                "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000"
             ],
