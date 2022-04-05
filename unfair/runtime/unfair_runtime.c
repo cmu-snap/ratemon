@@ -113,7 +113,7 @@ static inline void ip_hdr_len(struct iphdr *ip, u32 *ihl_int)
     // length is in a bitfield, but BPF cannot read bitfield elements. So we need to
     // read a whole byte and extract the data offset from that. We only read a single
     // byte, so we do not need to use ntohs().
-    u8 ihl = *(u8 *)(&ip->tos - 1);
+    u8 ihl = *(((u8 *)(&ip->tos)) - 1);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     ihl = (ihl & 0xf0) >> 4;
 #elif __BYTE_ORDER == __BIG_ENDIAN
@@ -129,7 +129,7 @@ static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
     // However, the data offset is in a bitfield, but BPF cannot read bitfield
     // elements. So we need to read a whole byte and extract the data offset from that.
     // We only read a single byte, so we do not need to use ntohs().
-    u8 thl = *(u8 *)(&tcp->ack_seq + 4);
+    u8 thl = *(((u8 *)(&tcp->ack_seq)) + 4);
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     thl = (thl & 0x0f) >> 4;
 #elif __BYTE_ORDER == __BIG_ENDIAN
@@ -206,6 +206,7 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     u32 thl_bytes;
     ip_hdr_len(ip, &ihl_bytes);
     tcp_hdr_len(tcp, &thl_bytes);
+    // bpf_trace_printk("seq: %u, ip header: %u, tcp header: %u\n", pkt->seq, ihl_bytes, thl_bytes);
 
     // Determine total IP packet size and the TCP payload size.
     pkt->total_bytes = bpf_ntohs(ip->tot_len);
