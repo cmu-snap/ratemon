@@ -14,7 +14,6 @@ from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
-
 INFERENCE_FLAGS_LOCK = multiprocessing.RLock()
 INFERENCE_FLAGS = collections.defaultdict(
     lambda: multiprocessing.Value(typecode_or_type="i", lock=False)

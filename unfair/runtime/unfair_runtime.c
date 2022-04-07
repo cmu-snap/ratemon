@@ -24,9 +24,9 @@
 #define TCPHDR_ACK 0x10
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
-// #define FLOW_MAX_PACKETS 8192
+#define FLOW_MAX_PACKETS 8192
 // #define FLOW_MAX_PACKETS 65536
-#define FLOW_MAX_PACKETS 262144
+// #define FLOW_MAX_PACKETS 262144
 // #define FLOW_MAX_PACKETS 524288
 // #define FLOW_MAX_PACKETS 1024
 
@@ -73,7 +73,7 @@ struct tcp_opt
 // };
 
 // Pass packet features to userspace.
-// BPF_PERF_OUTPUT(pkts);
+BPF_PERF_OUTPUT(pkts);
 // Assemble mapping of flow to packets.
 // BPF_HASH(flow_to_pkts, struct flow_t, struct flow_buff_t);
 BPF_ARRAY(ringbuffer, struct pkt_t, FLOW_MAX_PACKETS);
@@ -136,6 +136,14 @@ static inline void tcp_hdr_len(struct tcphdr *tcp, u32 *thl_int)
     thl = (thl & 0xf0) >> 4;
 #endif
     *thl_int = (u32)thl * 4;
+}
+
+int get_tcp_seq(struct tcphdr* tcp) {
+    return ntohl(tcp->seq);
+}
+
+int get_tcp_header_size(struct tcphdr* tcp) {
+    return tcp->doff * 4;
 }
 
 int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
@@ -232,6 +240,21 @@ int trace_tcp_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
     // skb_get_timestamp(skb, &tstamp);
     // pkt.time_us = tstamp.tv_sec * 1000000 + tstamp.tv_usec;
 
+
+    struct pkt_t pkt_2 = {
+        .saddr = pkt->saddr,
+        .daddr = pkt->daddr,
+        .sport = pkt->sport,
+        .dport = pkt->dport,
+        .seq = pkt->seq,
+        .srtt_us = pkt->srtt_us,
+        .total_bytes = pkt->total_bytes,
+        .payload_bytes = pkt->payload_bytes,
+        .time_us = pkt->time_us,
+        .epoch = pkt->epoch
+    };
+
+    pkts.perf_submit(ctx, &pkt_2, sizeof(pkt_2));
     return 0;
 }
 

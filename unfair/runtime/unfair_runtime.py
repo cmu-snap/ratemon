@@ -6,7 +6,9 @@ import collections
 import multiprocessing
 import os
 from os import path
+import pcapy
 import queue
+import scapy
 import sys
 import threading
 import time
@@ -37,6 +39,9 @@ FLOWS = dict()
 # when adding, removing, or iterating over flows; no need to acquire this lock when
 # updating a flow object.
 FLOWS_LOCK = threading.RLock()
+
+NUM_PACKETS = 0
+TOTAL_BYTES = 0
 
 
 def load_bpf(debug=False):
@@ -96,7 +101,7 @@ def receive_packets(packets, last_epoch):
 
         # Newer packets
         while True:
-            _, pkt = next(packets)
+            idx, pkt = next(packets)
             if pkt.total_bytes == 0:
                 continue
             if pkt.epoch != current_epoch:
@@ -114,6 +119,7 @@ def receive_packets(packets, last_epoch):
 
         # Middle packet. If this code is reached, then pkt is defined.
         if pkt.epoch != current_epoch and pkt.total_bytes != 0:
+            print(f"Found epoch transition at index {idx}")
             total_bytes += pkt.total_bytes
             older_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
                 (
@@ -515,27 +521,77 @@ def run(args):
     )
     inference_proc.start()
 
+    # NUM_PACKETS = 0
+    # TOTAL_BYTES = 0
+
+    # This function will be called to process an event from the BPF program.
+    def process_event(cpu, dat, size):
+        # When this is called, it is actually in the same thread.
+        pkt = bpf["pkts"].event(dat)
+
+        # drop packets from localhost
+        if pkt.saddr == 0x7f000001 or pkt.daddr == 0x7f000001:
+            return
+        # only accept packets from ports 9998, 9999, and 10000
+        if pkt.dport not in (9998, 9999, 10000):
+            return
+
+        global NUM_PACKETS, TOTAL_BYTES
+        NUM_PACKETS += 1
+        TOTAL_BYTES += pkt.total_bytes
+
+        # print(pkt.total_bytes)
+        # print current process id and thread id
+        # print(
+        #     f"process_event {multiprocessing.current_process().pid} {threading.current_thread().ident}"
+        # )
+        return
+
+    bpf["pkts"].open_perf_buffer(process_event)
+
+
     print("Running...press Control-C to end")
     last_time_s = time.time()
     last_epoch = -1
-    delta_num_packets = 0
-    delta_total_bytes = 0
+    # delta_num_packets = 0
+    # delta_total_bytes = 0
+    last_num_packets = NUM_PACKETS
+    last_total_bytes = TOTAL_BYTES
     try:
         while not done.is_set():
-            if args.poll_interval_ms is not None:
-                time.sleep(args.poll_interval_ms / 1e3)
-            last_epoch, num_packets, total_bytes = poll_ringbuffer(
-                ringbuffer, last_epoch
-            )
+            # if args.poll_interval_ms is not None:
+            #     time.sleep(args.poll_interval_ms / 1e3)
 
-            delta_num_packets += num_packets
-            delta_total_bytes += total_bytes
-            last_time_s, delta_total_bytes, delta_num_packets = log_rate(
-                last_time_s, delta_num_packets, delta_total_bytes
-            )
-            if num_packets == 0:
-                # If we did not find any new packets, then sleep for a while.
-                time.sleep(0.1)
+            # print(
+            #    f"main {multiprocessing.current_process().pid} {threading.current_thread().ident}"
+            # )
+            bpf.perf_buffer_poll()
+
+            # print change in NUM_PACKETS and TOTAL_BYTES every 10 seconds
+            now_s = time.time()
+            delta_time_s = now_s - last_time_s
+            if delta_time_s >= 10:
+                delta_num_packets = NUM_PACKETS - last_num_packets
+                delta_total_bytes = TOTAL_BYTES - last_total_bytes
+                last_time_s = now_s
+                last_num_packets = NUM_PACKETS
+                last_total_bytes = TOTAL_BYTES
+                print(
+                    f"{NUM_PACKETS} packets, {TOTAL_BYTES} bytes, {delta_num_packets / delta_time_s:.2f} pps, {8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+                )
+
+            # last_epoch, num_packets, total_bytes = poll_ringbuffer(
+            #     ringbuffer, last_epoch
+            # )
+
+            # delta_num_packets += num_packets
+            # delta_total_bytes += total_bytes
+            # last_time_s, delta_total_bytes, delta_num_packets = log_rate(
+            #     last_time_s, delta_num_packets, delta_total_bytes
+            # )
+            # if num_packets == 0:
+            #     # If we did not find any new packets, then sleep for a while.
+            #     time.sleep(0.1)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
@@ -555,5 +611,31 @@ def _main():
     return run(parse_args())
 
 
+def receive_packet_scapy(packet):
+    global NUM_PACKETS, TOTAL_BYTES
+    NUM_PACKETS += 1
+    TOTAL_BYTES += packet.ip.len
+
+
+# def sniff(interface):
+#     scapy.sniff(filter="tcp", iface=interface, prn=receive_packet_scapy)
+
+def receive_packet_pcapy(header, data):
+    global NUM_PACKETS, TOTAL_BYTES
+    NUM_PACKETS += 1
+    TOTAL_BYTES += header.len
+
+
+def sniff_pcapy(interface):
+    # sniff packets using pcapy
+    pcap = pcapy.open_live(interface, 65536, 0, 1000)
+    pcap.setfilter("tcp")
+    while True:
+        receive_packet_pcapy(*pcap.next())
+        # pcap.loop(0, receive_packet_pcapy)
+
+
 if __name__ == "__main__":
-    sys.exit(_main())
+    # sys.exit(_main())
+    # sniff("ens3")
+    sniff_pcapy("ens3")
