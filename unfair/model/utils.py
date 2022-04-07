@@ -822,7 +822,7 @@ def get_safe(dat, start_idx=None, end_idx=None):
     if end_idx is None:
         end_idx = 0 if dat.shape[0] == 0 else dat.shape[0] - 1
     # Extract the window.
-    dat_win = dat[start_idx:end_idx + 1]
+    dat_win = dat[start_idx : end_idx + 1]
     # Eliminate values that are -1 (unknown).
     return dat_win[dat_win != -1]
 
@@ -1467,8 +1467,8 @@ def enable_window_scaling():
 
 def flow_to_str(fourtuple):
     """Convert a flow four-tuple into a string."""
-    saddr, daddr, sport, dport = fourtuple
-    return f"{int_to_ip_str(saddr)}:{sport} -> {int_to_ip_str(daddr)}:{dport}"
+    local_addr, remote_addr, local_port, remote_port = fourtuple
+    return f"{int_to_ip_str(remote_addr)}:{remote_port} -> {int_to_ip_str(local_addr)}:{local_port}"
 
 
 def ebpf_packet_tuple_to_str(dat):

@@ -19,8 +19,9 @@ from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
 
 from bcc import BPF, BPFAttachType
+import netifaces as ni
 
-from unfair.model import models, utils
+from unfair.model import defaults, models, utils
 from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
 from unfair.runtime.mitigation_strategy import MitigationStrategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
@@ -44,6 +45,7 @@ FLOWS_LOCK = threading.RLock()
 
 NUM_PACKETS = 0
 TOTAL_BYTES = 0
+MY_IP = None
 
 
 def load_bpf(debug=False):
@@ -612,56 +614,64 @@ def _main():
     return run(parse_args())
 
 
-def receive_packet_scapy(packet):
-    global NUM_PACKETS, TOTAL_BYTES
-    NUM_PACKETS += 1
-    TOTAL_BYTES += packet.ip.len
-
-
-# def sniff(interface):
-#     scapy.sniff(filter="tcp", iface=interface, prn=receive_packet_scapy)
-
-
 # Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
 def receive_packet_pcapy(header, packet):
     if header is None:
         return
 
+    # The Ethernet header is 14 bytes.
     ehl = 14
     eth = unpack("!6s6sH", packet[:ehl])
-
-    # Network protocol is IP.
+    # Skip packet if network protocol is not IP.
     if socket.ntohs(eth[2]) != 8:
         return
-
     ip = unpack("!BBHHHBBH4s4s", packet[ehl : 20 + ehl])
     version_ihl = ip[0]
-
-    # IP version is 4 and protocol is TCP.
+    # Skip packer if IP version is not 4 or protocol is not TCP.
     if (version_ihl >> 4) != 4 or ip[6] != 6:
         return
 
     ihl = (version_ihl & 0xF) * 4
     tcp_offset = ehl + ihl
     tcp = unpack("!HHLLBBHHH", packet[tcp_offset : tcp_offset + 20])
-
+    saddr = int.from_bytes(ip[8], byteorder="little", signed=False)
+    daddr = int.from_bytes(ip[9], byteorder="little", signed=False)
+    incoming = daddr == MY_IP
     sport = tcp[0]
     dport = tcp[1]
 
-    # Only accept packets from ports 9998, 9999, and 10000.
-    # if (sport < 9998 or sport > 10000) or (dport < 9998 or dport > 10000):
-    #     return
+    # Only accept packets on local ports 9998, 9999, and 10000.
+    if (incoming and (dport < 9998 or dport > 10000)) or (
+        not incoming and (sport < 9998 or sport > 10000)
+    ):
+        return
 
     thl = (tcp[4] >> 4) * 4
     total_bytes = header.getlen()
     time_s, time_us = header.getts()
+    time_s = time_s + time_us / 1e6  # arrival time in microseconds
 
-    # (daddr, saddr, dport, sport)
+    # Parse TCP timestamp option.
+    tsval = None
+    tsecr = None
+    offset = tcp_offset + 20
+    while offset < tcp_offset + thl:
+        option_type = unpack("!B", packet[offset : offset + 1])[0]
+        if option_type == 0:
+            break
+        if option_type == 1:
+            offset += 1
+            continue
+        option_length = unpack("!B", packet[offset + 1 : offset + 2])[0]
+        if option_type == 8:
+            tsval, tsecr = unpack("!II", packet[offset + 2 : offset + option_length])
+            break
+        offset += option_length
+
+
     fourtuple = (
-        int.from_bytes(ip[9], byteorder="little", signed=False),
-        int.from_bytes(ip[8], byteorder="little", signed=False),
-        dport,
-        sport)
+        (daddr, saddr, dport, sport) if incoming else (saddr, daddr, sport, dport)
+    )
     with FLOWS_LOCK:
         if fourtuple in FLOWS:
             flow = FLOWS[fourtuple]
@@ -669,13 +679,24 @@ def receive_packet_pcapy(header, packet):
             flow = flow_utils.Flow(fourtuple)
             FLOWS[fourtuple] = flow
     with flow.ingress_lock:
-        flow.packets.append(
+        rtt_s = -1
+        if tsval is not None and tsecr is not None:
+            if incoming:
+                # Use the TCP timestamp option to calculate the RTT.
+                if tsecr in flow.sent_tsvals:
+                    rtt_s = flow.sent_tsvals[tsecr] - time_s
+                    del flow.sent_tsvals[tsecr]
+            else:
+                # Track outgoing tsval for use later.
+                flow.sent_tsvals[tsval] = time_s
+
+        (flow.incoming_packets if incoming else flow.outgoing_packets).append(
             (
                 tcp[2],  # seq
-                0,  # rtt
+                rtt_s,
                 total_bytes,
                 total_bytes - (ehl + ihl + thl),  # payload bytes
-                time_s + time_us / 1e6,  # arrival time in microseconds
+                time_s,
             )
         )
 
@@ -687,15 +708,13 @@ def receive_packet_pcapy(header, packet):
 def sniff_pcapy(interface):
     # sniff packets using pcapy
     pcap = pcapy.open_live(interface, 100, 0, 1000)
-    # pcap.setfilter("tcp")
+    pcap.setfilter("tcp")
 
     # get my ip address for interface
-
-    # get my ip address for interface
-    my_ip = socket.gethostbyname(socket.gethostname())
-    print(my_ip)
-    return
-    my_ip = socket.inet_ntoa(struct.pack("!L", my_ip[0]))
+    my_ip = ni.ifaddresses(interface)[ni.AF_INET][0]["addr"]
+    global MY_IP
+    MY_IP = utils.ip_str_to_int(my_ip)
+    print(MY_IP)
 
     last_time_s = time.time()
     last_num_packets = NUM_PACKETS
@@ -724,10 +743,7 @@ def sniff_pcapy(interface):
     except KeyboardInterrupt:
         pcap.close()
 
-        # pcap.loop(0, receive_packet_pcapy)
-
 
 if __name__ == "__main__":
     # sys.exit(_main())
-    # sniff("ens3")
     sniff_pcapy("ens3")

@@ -60,7 +60,9 @@ class Flow:
         # self.inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
         self.fourtuple = fourtuple
         self.flowkey = FlowKey(*fourtuple)
-        self.packets = []
+        self.outgoing_packets = []
+        self.incoming_packets = []
+        self.sent_tsvals = dict()
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize
