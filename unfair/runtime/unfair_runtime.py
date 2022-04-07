@@ -9,6 +9,8 @@ from os import path
 import pcapy
 import queue
 import scapy
+import socket
+from struct import unpack
 import sys
 import threading
 import time
@@ -530,7 +532,7 @@ def run(args):
         pkt = bpf["pkts"].event(dat)
 
         # drop packets from localhost
-        if pkt.saddr == 0x7f000001 or pkt.daddr == 0x7f000001:
+        if pkt.saddr == 0x7F000001 or pkt.daddr == 0x7F000001:
             return
         # only accept packets from ports 9998, 9999, and 10000
         if pkt.dport not in (9998, 9999, 10000):
@@ -548,7 +550,6 @@ def run(args):
         return
 
     bpf["pkts"].open_perf_buffer(process_event)
-
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -620,18 +621,109 @@ def receive_packet_scapy(packet):
 # def sniff(interface):
 #     scapy.sniff(filter="tcp", iface=interface, prn=receive_packet_scapy)
 
-def receive_packet_pcapy(header, data):
+
+# Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
+def receive_packet_pcapy(header, packet):
+    if header is None:
+        return
+
+    ehl = 14
+    eth = unpack("!6s6sH", packet[:ehl])
+
+    # Network protocol is IP.
+    if socket.ntohs(eth[2]) != 8:
+        return
+
+    ip = unpack("!BBHHHBBH4s4s", packet[ehl : 20 + ehl])
+    version_ihl = ip[0]
+
+    # IP version is 4 and protocol is TCP.
+    if (version_ihl >> 4) != 4 or ip[6] != 6:
+        return
+
+    ihl = (version_ihl & 0xF) * 4
+    tcp_offset = ehl + ihl
+    tcp = unpack("!HHLLBBHHH", packet[tcp_offset : tcp_offset + 20])
+
+    sport = tcp[0]
+    dport = tcp[1]
+
+    # Only accept packets from ports 9998, 9999, and 10000.
+    # if (sport < 9998 or sport > 10000) or (dport < 9998 or dport > 10000):
+    #     return
+
+    thl = (tcp[4] >> 4) * 4
+    total_bytes = header.getlen()
+    time_s, time_us = header.getts()
+
+    # (daddr, saddr, dport, sport)
+    fourtuple = (
+        int.from_bytes(ip[9], byteorder="little", signed=False),
+        int.from_bytes(ip[8], byteorder="little", signed=False),
+        dport,
+        sport)
+    with FLOWS_LOCK:
+        if fourtuple in FLOWS:
+            flow = FLOWS[fourtuple]
+        else:
+            flow = flow_utils.Flow(fourtuple)
+            FLOWS[fourtuple] = flow
+    with flow.ingress_lock:
+        flow.packets.append(
+            (
+                tcp[2],  # seq
+                0,  # rtt
+                total_bytes,
+                total_bytes - (ehl + ihl + thl),  # payload bytes
+                time_s + time_us / 1e6,  # arrival time in microseconds
+            )
+        )
+
     global NUM_PACKETS, TOTAL_BYTES
     NUM_PACKETS += 1
-    TOTAL_BYTES += header.len
+    TOTAL_BYTES += total_bytes
 
 
 def sniff_pcapy(interface):
     # sniff packets using pcapy
-    pcap = pcapy.open_live(interface, 65536, 0, 1000)
-    pcap.setfilter("tcp")
-    while True:
-        receive_packet_pcapy(*pcap.next())
+    pcap = pcapy.open_live(interface, 100, 0, 1000)
+    # pcap.setfilter("tcp")
+
+    # get my ip address for interface
+
+    # get my ip address for interface
+    my_ip = socket.gethostbyname(socket.gethostname())
+    print(my_ip)
+    return
+    my_ip = socket.inet_ntoa(struct.pack("!L", my_ip[0]))
+
+    last_time_s = time.time()
+    last_num_packets = NUM_PACKETS
+    last_total_bytes = TOTAL_BYTES
+
+    try:
+        while True:
+            receive_packet_pcapy(*pcap.next())
+
+            now_s = time.time()
+            delta_time_s = now_s - last_time_s
+            if delta_time_s >= 10:
+                delta_num_packets = NUM_PACKETS - last_num_packets
+                delta_total_bytes = TOTAL_BYTES - last_total_bytes
+                last_time_s = now_s
+                last_num_packets = NUM_PACKETS
+                last_total_bytes = TOTAL_BYTES
+                print(
+                    f"{NUM_PACKETS} packets, {TOTAL_BYTES} bytes, {delta_num_packets / delta_time_s:.2f} pps, {8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+                )
+                with FLOWS_LOCK:
+                    print("Flows:")
+                    for flow in FLOWS.keys():
+                        print(utils.flow_to_str(flow))
+
+    except KeyboardInterrupt:
+        pcap.close()
+
         # pcap.loop(0, receive_packet_pcapy)
 
 
