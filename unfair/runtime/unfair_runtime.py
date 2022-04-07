@@ -3,19 +3,13 @@
 from argparse import ArgumentParser
 import atexit
 import multiprocessing
-import os
 from os import path
 import queue
-import socket
 from struct import unpack
 import sys
 import threading
 import time
 
-from pyroute2 import IPRoute, protocols
-from pyroute2.netlink.exceptions import NetlinkError
-
-from bcc import BPF, BPFAttachType
 import netifaces as ni
 import pcapy
 
@@ -44,44 +38,20 @@ FLOWS_LOCK = threading.RLock()
 NUM_PACKETS = 0
 TOTAL_BYTES = 0
 MY_IP = None
-
-
-def load_bpf(debug=False):
-    """Load the corresponding eBPF program."""
-    # Load BPF text.
-    bpf_flp = path.join(
-        path.abspath(path.dirname(__file__)),
-        path.basename(__file__).strip().split(".")[0] + ".c",
-    )
-    if not path.isfile(bpf_flp):
-        print(f"Could not find BPF program: {bpf_flp}")
-        return 1
-    print(f"Loading BPF program: {bpf_flp}")
-    with open(bpf_flp, "r", encoding="utf-8") as fil:
-        bpf_text = fil.read()
-    if debug:
-        print(bpf_text)
-
-    # Load BPF program.
-    return BPF(text=bpf_text)
+MANAGER = None
 
 
 # Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
 def receive_packet_pcapy(header, packet):
+    # We do not need to check that this packet IPv4 and TCP because we already do that
+    # with a filter.
     if header is None:
         return
 
     # The Ethernet header is 14 bytes.
     ehl = 14
-    eth = unpack("!6s6sH", packet[:ehl])
-    # Skip packet if network protocol is not IP.
-    if socket.ntohs(eth[2]) != 8:
-        return
     ip = unpack("!BBHHHBBH4s4s", packet[ehl : 20 + ehl])
     version_ihl = ip[0]
-    # Skip packer if IP version is not 4 or protocol is not TCP.
-    if (version_ihl >> 4) != 4 or ip[6] != 6:
-        return
 
     ihl = (version_ihl & 0xF) * 4
     tcp_offset = ehl + ihl
@@ -156,7 +126,7 @@ def receive_packet_pcapy(header, packet):
     TOTAL_BYTES += total_bytes
 
 
-def check_loop(flow_to_rwnd, args, que, done):
+def check_loop(flow_to_rwnd, args, que, inference_flags, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -164,8 +134,7 @@ def check_loop(flow_to_rwnd, args, que, done):
     try:
         while not done.is_set():
             last_check = time.time()
-
-            check_flows(flow_to_rwnd, args, que)
+            check_flows(flow_to_rwnd, args, que, inference_flags)
 
             # with FLOWS_LOCK:
             #     # Do not bother acquiring the per-flow locks since we are just reading
@@ -189,7 +158,7 @@ def check_loop(flow_to_rwnd, args, que, done):
         done.set()
 
 
-def check_flows(flow_to_rwnd, args, que):
+def check_flows(flow_to_rwnd, args, que, inference_flags):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -241,9 +210,8 @@ def check_flows(flow_to_rwnd, args, que):
             if flowkey in flow_to_rwnd:
                 del flow_to_rwnd[flowkey]
             del FLOWS[fourtuple]
-            with inference.INFERENCE_FLAGS_LOCK:
-                if fourtuple in inference.INFERENCE_FLAGS:
-                    del inference.INFERENCE_FLAGS[fourtuple]
+            if fourtuple in inference_flags:
+                del inference_flags[fourtuple]
 
     for fourtuple in to_check:
         flow = FLOWS[fourtuple]
@@ -251,30 +219,33 @@ def check_flows(flow_to_rwnd, args, que):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                check_flow(fourtuple, args, que)
+                check_flow(fourtuple, args, que, inference_flags)
             finally:
                 flow.ingress_lock.release()
         else:
             print(f"Could not acquire lock for flow: {flow}")
 
 
-def check_flow(fourtuple, args, que):
+def check_flow(fourtuple, args, que, inference_flags):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
     """
     flow = FLOWS[fourtuple]
-    with flow.ingress_lock and inference.INFERENCE_FLAGS_LOCK:
+    with flow.ingress_lock:
         # Discard all but the most recent few packets.
         if len(flow.incoming_packets) > args.min_packets:
             flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
         # Record the time at which we check this flow.
         flow.latest_time_sec = time.time()
 
+        if fourtuple not in inference_flags:
+            inference_flags[fourtuple] = MANAGER.Value(typecode="i", value=0)
+
         # Only submit new packets for inference if inference is not already running.
-        if inference.INFERENCE_FLAGS[fourtuple].value == 0:
-            inference.INFERENCE_FLAGS[fourtuple].value = 1
+        if inference_flags[fourtuple].value == 0:
+            inference_flags[fourtuple].value = 1
             try:
                 print(
                     f"Scheduling inference on {len(flow.incoming_packets)} "
@@ -289,6 +260,44 @@ def check_flow(fourtuple, args, que):
                 flow.incoming_packets = []
         else:
             print(f"Skipping inference for flow: {flow}")
+
+
+def pcapy_sniff(args):
+    # Sniff the maximum size of the Ethernet, IPv4, and TCP headers.
+    pcap = pcapy.open_live(args.interface, 14 + 60 + 60, 0, 1000)
+
+    def pcapy_cleanup():
+        print("Stopping pcapy sniffing...")
+        pcap.close()
+
+    atexit.register(pcapy_cleanup)
+
+    # Drop non-TCP packets.
+    pcap.setfilter("ip and tcp")
+
+    # get my ip address for interface
+    global MY_IP
+    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
+
+    print("Running...press Control-C to end")
+    last_time_s = time.time()
+    last_num_packets = NUM_PACKETS
+    last_total_bytes = TOTAL_BYTES
+    while True:
+        receive_packet_pcapy(*pcap.next())
+
+        now_s = time.time()
+        delta_time_s = now_s - last_time_s
+        if delta_time_s >= 10:
+            delta_num_packets = NUM_PACKETS - last_num_packets
+            delta_total_bytes = TOTAL_BYTES - last_total_bytes
+            last_time_s = now_s
+            last_num_packets = NUM_PACKETS
+            last_total_bytes = TOTAL_BYTES
+            print(
+                f"{delta_num_packets / delta_time_s:.2f} pps, "
+                f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+            )
 
 
 def parse_args():
@@ -396,121 +405,43 @@ def parse_args():
     return args
 
 
-def run(args):
+def run(args, manager):
     """Core logic."""
-
+    que = manager.Queue()
+    inference_flags = manager.dict()
     # Flag to trigger threads/processes to terminate.
-    done = multiprocessing.Event()
+    done = manager.Event()
     done.clear()
 
-    # Load BPF program.
-    bpf = load_bpf(args.debug)
-    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
-    flow_to_rwnd = bpf["flow_to_rwnd"]
-
-    # Logic for reading the TCP window scale.
-    func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
-    filedesc = os.open(args.cgroup, os.O_RDONLY)
-    bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
-
-    # Configure unfairness mitigation strategy.
-    ipr = IPRoute()
-    ifindex = ipr.link_lookup(ifname=args.interface)
-    assert (
-        len(ifindex) == 1
-    ), f"Trouble looking up index for interface {args.interface}: {ifindex}"
-    ifindex = ifindex[0]
-    # ipr.tc("add", "pfifo", 0, "1:")
-    # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
-
-    # There can also be a chain of actions, which depend on the return
-    # value of the previous action.
-    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
-    try:
-        # Add the action to a u32 match-all filter
-        ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
-        ipr.tc(
-            "add-filter",
-            "u32",
-            ifindex,
-            parent=0x10000,
-            prio=10,
-            protocol=protocols.ETH_P_ALL,  # Every packet
-            target=0x10020,
-            keys=["0x0/0x0+0"],
-            action=action,
-        )
-    except NetlinkError:
-        print("Error: Unable to configure TC.")
-        return 1
-
-    # sniff packets using pcapy
-    pcap = pcapy.open_live(args.interface, 100, 0, 1000)
-    pcap.setfilter("tcp")
-
-    def cleanup():
-        print("Detaching sock_ops hook...")
-        bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
-
-        print("Stopping pcapy sniffing...")
-        pcap.close()
-
-        print("Removing egress TC...")
-        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
-
-    atexit.register(cleanup)
-
-    que = multiprocessing.Queue()
-    # Set up the inference thread.
+    # Create the thread that will monitor flows and decide when to run inference.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(flow_to_rwnd, args, que, done),
+        args=(args, que, inference_flags, done),
     )
     check_thread.start()
 
+    # Create the process that will run inference.
     inference_proc = multiprocessing.Process(
-        target=inference.run, args=(args, que, done, flow_to_rwnd)
+        target=inference.run, args=(args, que, inference_flags, done)
     )
     inference_proc.start()
 
-    # get my ip address for interface
-    global MY_IP
-    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
-
-    print("Running...press Control-C to end")
-    last_time_s = time.time()
-    last_num_packets = NUM_PACKETS
-    last_total_bytes = TOTAL_BYTES
     try:
-        while True:
-            receive_packet_pcapy(*pcap.next())
-
-            now_s = time.time()
-            delta_time_s = now_s - last_time_s
-            if delta_time_s >= 10:
-                delta_num_packets = NUM_PACKETS - last_num_packets
-                delta_total_bytes = TOTAL_BYTES - last_total_bytes
-                last_time_s = now_s
-                last_num_packets = NUM_PACKETS
-                last_total_bytes = TOTAL_BYTES
-                print(
-                    f"{delta_num_packets / delta_time_s:.2f} pps, "
-                    f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
-                )
+        pcapy_sniff(args)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
-
-    # print("\nFlows:")
-    # for flow, pkts in sorted(FLOWS.items()):
-    #     print("\t", flow_to_str(flow), len(pkts))
 
     check_thread.join()
     inference_proc.join()
 
 
 def _main():
-    return run(parse_args())
+    args = parse_args()
+    with multiprocessing.Manager() as manager:
+        global MANAGER
+        MANAGER = manager
+        return run(args, manager)
 
 
 if __name__ == "__main__":

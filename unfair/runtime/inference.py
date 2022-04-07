@@ -1,24 +1,23 @@
 """This module defines a process that will receive packets and run inference on them."""
 
+import atexit
 import collections
 import ctypes
-import multiprocessing
+import os
 from os import path
 import pickle
 import queue
 import sys
 import time
 
+from bcc import BPF, BPFAttachType
+from pyroute2 import IPRoute, protocols
+from pyroute2.netlink.exceptions import NetlinkError
 import torch
 
 from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
-
-INFERENCE_FLAGS_LOCK = multiprocessing.RLock()
-INFERENCE_FLAGS = collections.defaultdict(
-    lambda: multiprocessing.Value(typecode_or_type="i", lock=False)
-)
 
 
 def load_model(model, model_file):
@@ -167,11 +166,86 @@ def packets_to_ndarray(pkts):
     return pkts
 
 
-def run(args, que, done, flow_to_rwnd):
+def load_bpf(debug=False):
+    """Load the corresponding eBPF program."""
+    # Load BPF text.
+    bpf_flp = path.join(
+        path.abspath(path.dirname(__file__)),
+        path.basename(__file__).strip().split(".")[0] + ".c",
+    )
+    if not path.isfile(bpf_flp):
+        print(f"Could not find BPF program: {bpf_flp}")
+        return 1
+    print(f"Loading BPF program: {bpf_flp}")
+    with open(bpf_flp, "r", encoding="utf-8") as fil:
+        bpf_text = fil.read()
+    if debug:
+        print(bpf_text)
+
+    # Load BPF program.
+    return BPF(text=bpf_text)
+
+
+def configure_ebpf(args):
+    # Load BPF program.
+    bpf = load_bpf(args.debug)
+    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    flow_to_rwnd = bpf["flow_to_rwnd"]
+
+    # Logic for reading the TCP window scale.
+    func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
+    filedesc = os.open(args.cgroup, os.O_RDONLY)
+    bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
+    # Configure unfairness mitigation strategy.
+    ipr = IPRoute()
+    ifindex = ipr.link_lookup(ifname=args.interface)
+    assert (
+        len(ifindex) == 1
+    ), f"Trouble looking up index for interface {args.interface}: {ifindex}"
+    ifindex = ifindex[0]
+    # ipr.tc("add", "pfifo", 0, "1:")
+    # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
+
+    # There can also be a chain of actions, which depend on the return
+    # value of the previous action.
+    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+    try:
+        # Add the action to a u32 match-all filter
+        ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
+        ipr.tc(
+            "add-filter",
+            "u32",
+            ifindex,
+            parent=0x10000,
+            prio=10,
+            protocol=protocols.ETH_P_ALL,  # Every packet
+            target=0x10020,
+            keys=["0x0/0x0+0"],
+            action=action,
+        )
+    except NetlinkError:
+        print("Error: Unable to configure TC.")
+        return 1
+
+    def ebpf_cleanup():
+        print("Detaching sock_ops hook...")
+        bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
+        print("Removing egress TC...")
+        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
+
+    atexit.register(ebpf_cleanup)
+    return flow_to_rwnd
+
+
+def run(args, que, inference_flags, done):
     """Receive packets and run inference on them.
 
     This function is designed to be the target of a process.
     """
+    flow_to_rwnd = configure_ebpf(args)
+
     net = load_model(args.model, args.model_file)
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
@@ -209,6 +283,5 @@ def run(args, que, done, flow_to_rwnd):
             args,
         )
 
-        with INFERENCE_FLAGS_LOCK:
-            INFERENCE_FLAGS[fourtuple].value = 0
-        # print(f"Report for flow {flow}: {flow.label}, {flow.decision}")
+        inference_flags[fourtuple].value = 0
+        print("Cleared inference flag for flow:", utils.flow_to_str(fourtuple))
