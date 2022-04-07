@@ -6,6 +6,7 @@ import multiprocessing
 from os import path
 import pickle
 import queue
+import sys
 import time
 
 import torch
@@ -120,7 +121,7 @@ def make_decision(
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
-    print(f"New decision for flow {flowkey}: {new_decision}")
+    print(f"Decision for flow {flowkey}: {new_decision}")
     if decisions[flowkey] != new_decision:
         if new_decision[1] is None:
             del flow_to_rwnd[flowkey]
@@ -172,7 +173,7 @@ def run(args, que, done, flow_to_rwnd):
     This function is designed to be the target of a process.
     """
     net = load_model(args.model, args.model_file)
-    min_rtts_us = collections.defaultdict(lambda: float("inf"))
+    min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
     while not done.is_set():

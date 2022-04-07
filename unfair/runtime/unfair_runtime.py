@@ -2,13 +2,10 @@
 
 from argparse import ArgumentParser
 import atexit
-import collections
 import multiprocessing
 import os
 from os import path
-import pcapy
 import queue
-import scapy
 import socket
 from struct import unpack
 import sys
@@ -20,8 +17,9 @@ from pyroute2.netlink.exceptions import NetlinkError
 
 from bcc import BPF, BPFAttachType
 import netifaces as ni
+import pcapy
 
-from unfair.model import defaults, models, utils
+from unfair.model import models, utils
 from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
 from unfair.runtime.mitigation_strategy import MitigationStrategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
@@ -37,7 +35,7 @@ OLD_THRESH_SEC = 5 * 60
 # packets are appended to the ends of these lists. Periodically, a flow's
 # packets are consumed by the inference engine and that flow's list is
 # reset to empty.
-FLOWS = dict()
+FLOWS = {}
 # Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
 # when adding, removing, or iterating over flows; no need to acquire this lock when
 # updating a flow object.
@@ -68,117 +66,94 @@ def load_bpf(debug=False):
     return BPF(text=bpf_text)
 
 
-def receive_packets(packets, last_epoch):
-    """Ingest new packets, identify their flows, and store them."""
-    # Build a local mapping of flows to packets for this batch so that we do not need
-    # to acquire a flow lock for every packet.
-    #
-    # It is likely that an epoch transition occurred in the middle of the
-    # array. Find this point. Record packets after this transition
-    # point (older packets) separately from packets before the transition
-    # point (newer packets).
-    older_flows_cache = collections.defaultdict(list)
-    newer_flows_cache = collections.defaultdict(list)
-    total_bytes = 0
-    current_epoch = last_epoch
+# Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
+def receive_packet_pcapy(header, packet):
+    if header is None:
+        return
 
-    try:
-        _, first = next(packets)
-        current_epoch = first.epoch
-        if current_epoch == last_epoch:
-            return 0, 0
+    # The Ethernet header is 14 bytes.
+    ehl = 14
+    eth = unpack("!6s6sH", packet[:ehl])
+    # Skip packet if network protocol is not IP.
+    if socket.ntohs(eth[2]) != 8:
+        return
+    ip = unpack("!BBHHHBBH4s4s", packet[ehl : 20 + ehl])
+    version_ihl = ip[0]
+    # Skip packer if IP version is not 4 or protocol is not TCP.
+    if (version_ihl >> 4) != 4 or ip[6] != 6:
+        return
 
-        # First packet
-        if first.total_bytes != 0:
-            total_bytes += first.total_bytes
-            newer_flows_cache[
-                (first.daddr, first.saddr, first.dport, first.sport)
-            ].append(
-                (
-                    first.seq,
-                    first.srtt_us,
-                    first.total_bytes,
-                    first.payload_bytes,
-                    first.time_us,
-                )
-            )
+    ihl = (version_ihl & 0xF) * 4
+    tcp_offset = ehl + ihl
+    tcp = unpack("!HHLLBBHHH", packet[tcp_offset : tcp_offset + 20])
+    saddr = int.from_bytes(ip[8], byteorder="little", signed=False)
+    daddr = int.from_bytes(ip[9], byteorder="little", signed=False)
+    incoming = daddr == MY_IP
+    sport = tcp[0]
+    dport = tcp[1]
 
-        # Newer packets
-        while True:
-            idx, pkt = next(packets)
-            if pkt.total_bytes == 0:
-                continue
-            if pkt.epoch != current_epoch:
-                break
-            total_bytes += pkt.total_bytes
-            newer_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
-                (
-                    pkt.seq,
-                    pkt.srtt_us,
-                    pkt.total_bytes,
-                    pkt.payload_bytes,
-                    pkt.time_us,
-                )
-            )
+    # Only accept packets on local ports 9998, 9999, and 10000.
+    if (incoming and (dport < 9998 or dport > 10000)) or (
+        not incoming and (sport < 9998 or sport > 10000)
+    ):
+        return
 
-        # Middle packet. If this code is reached, then pkt is defined.
-        if pkt.epoch != current_epoch and pkt.total_bytes != 0:
-            print(f"Found epoch transition at index {idx}")
-            total_bytes += pkt.total_bytes
-            older_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
-                (
-                    pkt.seq,
-                    pkt.srtt_us,
-                    pkt.total_bytes,
-                    pkt.payload_bytes,
-                    pkt.time_us,
-                )
-            )
+    thl = (tcp[4] >> 4) * 4
+    total_bytes = header.getlen()
+    time_s, time_us = header.getts()
+    time_s = time_s + time_us / 1e6  # arrival time in microseconds
 
-        # Older packets
-        while True:
-            _, pkt = next(packets)
-            if pkt.total_bytes == 0:
-                continue
-            total_bytes += pkt.total_bytes
-            older_flows_cache[(pkt.daddr, pkt.saddr, pkt.dport, pkt.sport)].append(
-                (
-                    pkt.seq,
-                    pkt.srtt_us,
-                    pkt.total_bytes,
-                    pkt.payload_bytes,
-                    pkt.time_us,
-                )
-            )
-    except StopIteration:
-        pass
+    # Parse TCP timestamp option.
+    tsval = None
+    tsecr = None
+    offset = tcp_offset + 20
+    while offset < tcp_offset + thl:
+        option_type = unpack("!B", packet[offset : offset + 1])[0]
+        if option_type == 0:
+            break
+        if option_type == 1:
+            offset += 1
+            continue
+        option_length = unpack("!B", packet[offset + 1 : offset + 2])[0]
+        if option_type == 8:
+            tsval, tsecr = unpack("!II", packet[offset + 2 : offset + option_length])
+            break
+        offset += option_length
 
-    # Update the master flows database.
-    num_packets = 0
+    fourtuple = (
+        (daddr, saddr, dport, sport) if incoming else (saddr, daddr, sport, dport)
+    )
     with FLOWS_LOCK:
-        # Older flows first this time.
-        for fourtuple, flow_packets in older_flows_cache.items():
-            if fourtuple in FLOWS:
-                flow = FLOWS[fourtuple]
+        if fourtuple in FLOWS:
+            flow = FLOWS[fourtuple]
+        else:
+            flow = flow_utils.Flow(fourtuple)
+            FLOWS[fourtuple] = flow
+    with flow.ingress_lock:
+        rtt_s = -1
+        if tsval is not None and tsecr is not None:
+            if incoming:
+                # Use the TCP timestamp option to calculate the RTT.
+                if tsecr in flow.sent_tsvals:
+                    rtt_s = flow.sent_tsvals[tsecr] - time_s
+                    del flow.sent_tsvals[tsecr]
             else:
-                flow = flow_utils.Flow(fourtuple)
-                FLOWS[fourtuple] = flow
-            with flow.ingress_lock:
-                num_packets += len(flow_packets)
-                flow.packets.extend(flow_packets)
+                # Track outgoing tsval for use later.
+                flow.sent_tsvals[tsval] = time_s
 
-        # Then the newer flows.
-        for fourtuple, flow_packets in newer_flows_cache.items():
-            if fourtuple in FLOWS:
-                flow = FLOWS[fourtuple]
-            else:
-                flow = flow_utils.Flow(fourtuple)
-                FLOWS[fourtuple] = flow
-            with flow.ingress_lock:
-                num_packets += len(flow_packets)
-                flow.packets.extend(flow_packets)
+        (flow.incoming_packets if incoming else flow.outgoing_packets).append(
+            (
+                tcp[2],  # seq
+                rtt_s,
+                total_bytes,
+                total_bytes - (ehl + ihl + thl),  # payload bytes
+                time_s,
+            )
+        )
 
-    return current_epoch, num_packets, total_bytes
+    global NUM_PACKETS, TOTAL_BYTES
+    NUM_PACKETS += 1
+    TOTAL_BYTES += total_bytes
 
 
 def check_loop(flow_to_rwnd, args, que, done):
@@ -230,12 +205,12 @@ def check_flows(flow_to_rwnd, args, que):
             if flow.ingress_lock.acquire(blocking=False):
                 try:
                     if (
-                        len(flow.packets) > 0
+                        len(flow.incoming_packets) > 0
                         # If we have specified a minimum number of packets to run
                         # inference, then check that.
                         and (
                             args.min_packets is None
-                            or len(flow.packets) > args.min_packets
+                            or len(flow.incoming_packets) > args.min_packets
                         )
                         # Skip flows on the loopback interface.
                         and (
@@ -292,8 +267,8 @@ def check_flow(fourtuple, args, que):
     flow = FLOWS[fourtuple]
     with flow.ingress_lock and inference.INFERENCE_FLAGS_LOCK:
         # Discard all but the most recent few packets.
-        if len(flow.packets) > args.min_packets:
-            flow.packets = flow.packets[-args.min_packets :]
+        if len(flow.incoming_packets) > args.min_packets:
+            flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
         # Record the time at which we check this flow.
         flow.latest_time_sec = time.time()
 
@@ -302,54 +277,18 @@ def check_flow(fourtuple, args, que):
             inference.INFERENCE_FLAGS[fourtuple].value = 1
             try:
                 print(
-                    f"Scheduling inference on {len(flow.packets)} "
+                    f"Scheduling inference on {len(flow.incoming_packets)} "
                     f"packets for flow: {flow}"
                 )
                 if not args.disable_inference:
-                    que.put((fourtuple, flow.packets), block=False)
+                    que.put((fourtuple, flow.incoming_packets), block=False)
             except queue.Full:
                 pass
             else:
                 # Clear the flow's packets.
-                flow.packets = []
+                flow.incoming_packets = []
         else:
             print(f"Skipping inference for flow: {flow}")
-
-
-def poll_ringbuffer(ringbuffer, last_epoch):
-    """Poll a custom eBPF ringbuffer."""
-    # Peek at the first element.
-    current_epoch = ringbuffer[0].epoch
-    num_packets = 0
-    total_bytes = 0
-    if current_epoch != last_epoch:
-        last_epoch, num_packets, total_bytes = receive_packets(
-            ringbuffer.items_lookup_batch(), last_epoch
-        )
-
-        print(f"Found {num_packets} new packets")
-        # print(f"Average bytes per packet: {total_bytes / num_packets:.2f}")
-    return last_epoch, num_packets, total_bytes
-
-
-def log_rate(
-    last_time_s,
-    delta_num_packets,
-    delta_total_bytes,
-    target_delta_s=10,
-):
-    """Log the packet processing rate."""
-    cur_time_s = time.time()
-    delta_s = cur_time_s - last_time_s
-    if delta_s > target_delta_s:
-        print(
-            f"Packets per second: {delta_num_packets / delta_s:.2f}, "
-            f"throughput: {delta_total_bytes / delta_s / 1e6:.2f} Mbps"
-        )
-        last_time_s = cur_time_s
-        delta_total_bytes = 0
-        delta_num_packets = 0
-    return last_time_s, delta_total_bytes, delta_num_packets
 
 
 def parse_args():
@@ -459,23 +398,20 @@ def parse_args():
 
 def run(args):
     """Core logic."""
+
+    # Flag to trigger threads/processes to terminate.
+    done = multiprocessing.Event()
+    done.clear()
+
     # Load BPF program.
     bpf = load_bpf(args.debug)
-    bpf.attach_kprobe(event="tcp_rcv_established", fn_name="trace_tcp_rcv")
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     flow_to_rwnd = bpf["flow_to_rwnd"]
-    ringbuffer = bpf["ringbuffer"]
 
     # Logic for reading the TCP window scale.
     func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
     filedesc = os.open(args.cgroup, os.O_RDONLY)
     bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
-
-    def detach_sockops():
-        print("Detaching sock_ops hook...")
-        bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
-
-    atexit.register(detach_sockops)
 
     # Configure unfairness mitigation strategy.
     ipr = IPRoute()
@@ -508,9 +444,21 @@ def run(args):
         print("Error: Unable to configure TC.")
         return 1
 
-    # Flag to trigger threads/processes to terminate.
-    done = multiprocessing.Event()
-    done.clear()
+    # sniff packets using pcapy
+    pcap = pcapy.open_live(args.interface, 100, 0, 1000)
+    pcap.setfilter("tcp")
+
+    def cleanup():
+        print("Detaching sock_ops hook...")
+        bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
+        print("Stopping pcapy sniffing...")
+        pcap.close()
+
+        print("Removing egress TC...")
+        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
+
+    atexit.register(cleanup)
 
     que = multiprocessing.Queue()
     # Set up the inference thread.
@@ -525,201 +473,14 @@ def run(args):
     )
     inference_proc.start()
 
-    # NUM_PACKETS = 0
-    # TOTAL_BYTES = 0
-
-    # This function will be called to process an event from the BPF program.
-    def process_event(cpu, dat, size):
-        # When this is called, it is actually in the same thread.
-        pkt = bpf["pkts"].event(dat)
-
-        # drop packets from localhost
-        if pkt.saddr == 0x7F000001 or pkt.daddr == 0x7F000001:
-            return
-        # only accept packets from ports 9998, 9999, and 10000
-        if pkt.dport not in (9998, 9999, 10000):
-            return
-
-        global NUM_PACKETS, TOTAL_BYTES
-        NUM_PACKETS += 1
-        TOTAL_BYTES += pkt.total_bytes
-
-        # print(pkt.total_bytes)
-        # print current process id and thread id
-        # print(
-        #     f"process_event {multiprocessing.current_process().pid} {threading.current_thread().ident}"
-        # )
-        return
-
-    bpf["pkts"].open_perf_buffer(process_event)
+    # get my ip address for interface
+    global MY_IP
+    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
-    last_epoch = -1
-    # delta_num_packets = 0
-    # delta_total_bytes = 0
     last_num_packets = NUM_PACKETS
     last_total_bytes = TOTAL_BYTES
-    try:
-        while not done.is_set():
-            # if args.poll_interval_ms is not None:
-            #     time.sleep(args.poll_interval_ms / 1e3)
-
-            # print(
-            #    f"main {multiprocessing.current_process().pid} {threading.current_thread().ident}"
-            # )
-            bpf.perf_buffer_poll()
-
-            # print change in NUM_PACKETS and TOTAL_BYTES every 10 seconds
-            now_s = time.time()
-            delta_time_s = now_s - last_time_s
-            if delta_time_s >= 10:
-                delta_num_packets = NUM_PACKETS - last_num_packets
-                delta_total_bytes = TOTAL_BYTES - last_total_bytes
-                last_time_s = now_s
-                last_num_packets = NUM_PACKETS
-                last_total_bytes = TOTAL_BYTES
-                print(
-                    f"{NUM_PACKETS} packets, {TOTAL_BYTES} bytes, {delta_num_packets / delta_time_s:.2f} pps, {8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
-                )
-
-            # last_epoch, num_packets, total_bytes = poll_ringbuffer(
-            #     ringbuffer, last_epoch
-            # )
-
-            # delta_num_packets += num_packets
-            # delta_total_bytes += total_bytes
-            # last_time_s, delta_total_bytes, delta_num_packets = log_rate(
-            #     last_time_s, delta_num_packets, delta_total_bytes
-            # )
-            # if num_packets == 0:
-            #     # If we did not find any new packets, then sleep for a while.
-            #     time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("Cancelled.")
-        done.set()
-    finally:
-        print("Cleaning up...")
-        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
-
-    # print("\nFlows:")
-    # for flow, pkts in sorted(FLOWS.items()):
-    #     print("\t", flow_to_str(flow), len(pkts))
-
-    check_thread.join()
-    inference_proc.join()
-
-
-def _main():
-    return run(parse_args())
-
-
-# Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
-def receive_packet_pcapy(header, packet):
-    if header is None:
-        return
-
-    # The Ethernet header is 14 bytes.
-    ehl = 14
-    eth = unpack("!6s6sH", packet[:ehl])
-    # Skip packet if network protocol is not IP.
-    if socket.ntohs(eth[2]) != 8:
-        return
-    ip = unpack("!BBHHHBBH4s4s", packet[ehl : 20 + ehl])
-    version_ihl = ip[0]
-    # Skip packer if IP version is not 4 or protocol is not TCP.
-    if (version_ihl >> 4) != 4 or ip[6] != 6:
-        return
-
-    ihl = (version_ihl & 0xF) * 4
-    tcp_offset = ehl + ihl
-    tcp = unpack("!HHLLBBHHH", packet[tcp_offset : tcp_offset + 20])
-    saddr = int.from_bytes(ip[8], byteorder="little", signed=False)
-    daddr = int.from_bytes(ip[9], byteorder="little", signed=False)
-    incoming = daddr == MY_IP
-    sport = tcp[0]
-    dport = tcp[1]
-
-    # Only accept packets on local ports 9998, 9999, and 10000.
-    if (incoming and (dport < 9998 or dport > 10000)) or (
-        not incoming and (sport < 9998 or sport > 10000)
-    ):
-        return
-
-    thl = (tcp[4] >> 4) * 4
-    total_bytes = header.getlen()
-    time_s, time_us = header.getts()
-    time_s = time_s + time_us / 1e6  # arrival time in microseconds
-
-    # Parse TCP timestamp option.
-    tsval = None
-    tsecr = None
-    offset = tcp_offset + 20
-    while offset < tcp_offset + thl:
-        option_type = unpack("!B", packet[offset : offset + 1])[0]
-        if option_type == 0:
-            break
-        if option_type == 1:
-            offset += 1
-            continue
-        option_length = unpack("!B", packet[offset + 1 : offset + 2])[0]
-        if option_type == 8:
-            tsval, tsecr = unpack("!II", packet[offset + 2 : offset + option_length])
-            break
-        offset += option_length
-
-
-    fourtuple = (
-        (daddr, saddr, dport, sport) if incoming else (saddr, daddr, sport, dport)
-    )
-    with FLOWS_LOCK:
-        if fourtuple in FLOWS:
-            flow = FLOWS[fourtuple]
-        else:
-            flow = flow_utils.Flow(fourtuple)
-            FLOWS[fourtuple] = flow
-    with flow.ingress_lock:
-        rtt_s = -1
-        if tsval is not None and tsecr is not None:
-            if incoming:
-                # Use the TCP timestamp option to calculate the RTT.
-                if tsecr in flow.sent_tsvals:
-                    rtt_s = flow.sent_tsvals[tsecr] - time_s
-                    del flow.sent_tsvals[tsecr]
-            else:
-                # Track outgoing tsval for use later.
-                flow.sent_tsvals[tsval] = time_s
-
-        (flow.incoming_packets if incoming else flow.outgoing_packets).append(
-            (
-                tcp[2],  # seq
-                rtt_s,
-                total_bytes,
-                total_bytes - (ehl + ihl + thl),  # payload bytes
-                time_s,
-            )
-        )
-
-    global NUM_PACKETS, TOTAL_BYTES
-    NUM_PACKETS += 1
-    TOTAL_BYTES += total_bytes
-
-
-def sniff_pcapy(interface):
-    # sniff packets using pcapy
-    pcap = pcapy.open_live(interface, 100, 0, 1000)
-    pcap.setfilter("tcp")
-
-    # get my ip address for interface
-    my_ip = ni.ifaddresses(interface)[ni.AF_INET][0]["addr"]
-    global MY_IP
-    MY_IP = utils.ip_str_to_int(my_ip)
-    print(MY_IP)
-
-    last_time_s = time.time()
-    last_num_packets = NUM_PACKETS
-    last_total_bytes = TOTAL_BYTES
-
     try:
         while True:
             receive_packet_pcapy(*pcap.next())
@@ -733,17 +494,24 @@ def sniff_pcapy(interface):
                 last_num_packets = NUM_PACKETS
                 last_total_bytes = TOTAL_BYTES
                 print(
-                    f"{NUM_PACKETS} packets, {TOTAL_BYTES} bytes, {delta_num_packets / delta_time_s:.2f} pps, {8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+                    f"{delta_num_packets / delta_time_s:.2f} pps, "
+                    f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
                 )
-                with FLOWS_LOCK:
-                    print("Flows:")
-                    for flow in FLOWS.keys():
-                        print(utils.flow_to_str(flow))
-
     except KeyboardInterrupt:
-        pcap.close()
+        print("Cancelled.")
+        done.set()
+
+    # print("\nFlows:")
+    # for flow, pkts in sorted(FLOWS.items()):
+    #     print("\t", flow_to_str(flow), len(pkts))
+
+    check_thread.join()
+    inference_proc.join()
+
+
+def _main():
+    return run(parse_args())
 
 
 if __name__ == "__main__":
-    # sys.exit(_main())
-    sniff_pcapy("ens3")
+    sys.exit(_main())
