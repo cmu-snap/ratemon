@@ -230,10 +230,6 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     """
     # Unpack the dataloaders.
     ldr_trn, _, ldr_tst = ldrs
-    # Construct the model.
-    print("Building model...")
-    net = models.MODELS[args["model"]](out_dir)
-    net.log(f"\n\nArguments: {args}")
 
     if path.exists(out_flp):
         # The output file already exists with these parameters, so do not
@@ -243,9 +239,14 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
             f"these parameters: {out_flp}")
         print(f"Loading model: {out_flp}")
         with open(out_flp, "rb") as fil:
-            net.net = pickle.load(fil)
+            net = pickle.load(fil)
         tim_trn_s = 0
+        print("Training features:\n" + "\n\t".join(net.in_spc))
     else:
+        # Construct the model.
+        print("Building model...")
+        net = models.MODELS[args["model"]](out_dir)
+        net.log(f"Arguments: {args}")
         net.new(**{param: args[param] for param in net.params})
         # Extract the training data from the training dataloader.
         print("Extracting training data...")
@@ -254,6 +255,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         utils.visualize_classes(net, dat_out)
 
         # Training.
+        print("Training features:\n\t" + "\n\t".join(net.in_spc))
         print("Training...")
         tim_srt_s = time.time()
         net.train(ldr_trn.dataset.fets, dat_in, dat_out)
