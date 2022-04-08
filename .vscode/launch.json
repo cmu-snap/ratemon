@@ -50,10 +50,10 @@
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
+                "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
                 // "--disable-inference"

@@ -23,7 +23,6 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
 
     Returns a structured numpy array.
     """
-    print(net.in_spc)
     fets, min_rtt_us = gen_features.parse_received_acks(
         net.in_spc, flowkey, pkts, min_rtt_us, debug
     )
