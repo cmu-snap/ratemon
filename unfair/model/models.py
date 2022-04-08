@@ -27,22 +27,21 @@ SLIDING_WINDOW_NUM_RTT = 1
 class PytorchModelWrapper:
     """ A wrapper class for PyTorch models. """
 
-    # The name of this model.
-    name = None
-    # The specification of the input tensor format.
-    in_spc = ()
-    # The specification of the output tensor format.
-    out_spc = ()
-    # The number of output classes.
-    num_clss = 0
-    # The loss function to use during training.
-    los_fnc = None
-    # The optimizer to use during training.
-    opt = None
-    # Model-specific parameters. Each model may use these differently.
-    params = []
-
     def __init__(self, out_dir=None):
+        # The name of this model.
+        self.name = None
+        # The specification of the input tensor format.
+        self.in_spc = features.FEATURES
+        # The specification of the output tensor format.
+        self.out_spc = (features.OUT_FET,)
+        # The number of output classes.
+        self.num_clss = 0
+        # The loss function to use during training.
+        self.los_fnc = None
+        # The optimizer to use during training.
+        self.opt = None
+        # Model-specific parameters. Each model may use these differently.
+        self.params = []
         self.net = None
         self.graph = False
         # Create the output directory.
@@ -51,9 +50,8 @@ class PytorchModelWrapper:
             self.out_dir = path.join(self.out_dir, self.name)
             if not path.exists(self.out_dir):
                 os.makedirs(self.out_dir)
-        self.__check()
 
-    def __check(self):
+    def _check(self):
         """
         Verifies that this PytorchModel instance has been initialized properly.
         """
@@ -137,15 +135,12 @@ class PytorchModelWrapper:
                 print(msg, file=fil)
 
 
-
 class BinaryModelWrapper(PytorchModelWrapper):
     """ A base class for binary classification models. """
 
-    num_clss = 2
-
     def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
         super().__init__(out_dir)
-
+        self.num_clss = 2
         self.win = win
         self.rtt_buckets = rtt_buckets
         self.windows = windows
@@ -368,13 +363,13 @@ class BinaryModelWrapper(PytorchModelWrapper):
 class BinaryDnnWrapper(BinaryModelWrapper):
     """ Wraps BinaryDnn. """
 
-    name = "BinaryDnn"
-    in_spc = features.FEATURES
-    out_spc = (features.OUT_FET,)
-
-    los_fnc = torch.nn.CrossEntropyLoss
-    opt = torch.optim.SGD
-    params = ["lr", "momentum"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "BinaryDnn"
+        self.los_fnc = torch.nn.CrossEntropyLoss
+        self.opt = torch.optim.SGD
+        self.params = ["lr", "momentum"]
+        self._check()
 
     def new(self):
         self.net = BinaryDnn(self.num_ins, self.num_clss)
@@ -412,12 +407,15 @@ class BinaryDnn(torch.nn.Module):
 
 
 class SvmWrapper(BinaryModelWrapper):
-    """ Wraps Svm. """
+    """ Wraps Svm."""
 
-    name = "Svm"
-    los_fnc = torch.nn.HingeEmbeddingLoss
-    opt = torch.optim.SGD
-    params = ["lr", "momentum"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "Svm"
+        self.los_fnc = torch.nn.HingeEmbeddingLoss
+        self.opt = torch.optim.SGD
+        self.params = ["lr", "momentum"]
+        self._check()
 
     def new(self):
         self.net = Svm(self.num_ins)
@@ -458,14 +456,15 @@ class Svm(torch.nn.Module):
 class SvmSklearnWrapper(SvmWrapper):
     """ Wraps an sklearn SVM. """
 
-    name = "SvmSklearn"
-    in_spc = features.FEATURES
-    out_spc = (features.OUT_FET,)
-    los_fnc = None
-    opt = None
-    params = ["kernel", "degree", "penalty", "max_iter", "graph"]
-    num_clss = 3
-    multiclass = num_clss > 2
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "SvmSklearn"
+        self.los_fnc = None
+        self.opt = None
+        self.params = ["kernel", "degree", "penalty", "max_iter", "graph"]
+        self.num_clss = 3
+        self.multiclass = self.num_clss > 2
+        self._check()
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -500,13 +499,12 @@ class SvmSklearnWrapper(SvmWrapper):
         # Oftentimes, the training log statements do not end with a newline.
         print()
 
-    @staticmethod
-    def convert_to_class(dat_out):
-        if SvmSklearnWrapper.num_clss == 2:
+    def convert_to_class(self, dat_out):
+        if self.num_clss == 2:
             return BinaryModelWrapper.convert_to_class(dat_out)
-        assert SvmSklearnWrapper.num_clss == 3, \
+        assert self.num_clss == 3, \
             ("Only 2 or 3 classes are supported, not: "
-             f"{SvmSklearnWrapper.num_clss}")
+             f"{self.num_clss}")
         assert dat_out.dtype.names is None or len(dat_out.dtype.names) == 1, \
             ("Can only convert 1D arrays to classes, but dat_out has "
              f"{len(dat_out.dtype.names)} columns.")
@@ -909,7 +907,7 @@ class SvmSklearnWrapper(SvmWrapper):
 
         # # Analyze accuracy of a sliding window method
         # sliding_window_accuracy = self.__evaluate_sliding_window(
-         #     predictions, torch.tensor(raw), torch.tensor(fair),
+        #     predictions, torch.tensor(raw), torch.tensor(fair),
         #     torch.tensor(dat_extra[features.ARRIVAL_TIME_FET].copy()),
         #     torch.tensor(dat_extra[features.RTT_ESTIMATE_FET].copy()))
 
@@ -919,8 +917,11 @@ class SvmSklearnWrapper(SvmWrapper):
 class LrSklearnWrapper(SvmSklearnWrapper):
     """ Wraps an sklearn Logistic Regression model. """
 
-    name = "LrSklearn"
-    params = ["max_iter", "rfe", "graph"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "LrSklearn"
+        self.params = ["max_iter", "rfe", "graph"]
+        self._check()
 
     def rfe(self, net, rfe_type):
         """ Apply recursive feature elimination to the provided net. """
@@ -962,8 +963,11 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
     Wraps an sklearn Logistic Regression model, but uses cross-validation.
     """
 
-    name = "LrCvSklearn"
-    params = ["max_iter", "rfe", "graph", "folds"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "LrCvSklearn"
+        self.params = ["max_iter", "rfe", "graph", "folds"]
+        self._check()
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -986,8 +990,11 @@ class LrCvSklearnWrapper(LrSklearnWrapper):
 
 class GbdtSklearnWrapper(SvmSklearnWrapper):
 
-    name = "GbdtSklearn"
-    params = ["n_estimators", "lr", "max_depth", "graph"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "GbdtSklearn"
+        self.params = ["n_estimators", "lr", "max_depth", "graph"]
+        self._check()
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -999,10 +1006,21 @@ class GbdtSklearnWrapper(SvmSklearnWrapper):
 
 class HistGbdtSklearnWrapper(SvmSklearnWrapper):
 
-    name = "HistGbdtSklearn"
-    params = [
-        "max_iter", "l2_regularization", "early_stop", "lr",
-        "l2_regularization", "graph"]
+    def __init__(self, out_dir=None, win=100, rtt_buckets=False, windows=False):
+        super().__init__(out_dir, win, rtt_buckets, windows)
+        self.name = "HistGbdtSklearn"
+        self.params = [
+            "max_iter", "l2_regularization", "early_stop", "lr",
+            "l2_regularization", "graph"]
+        # self.in_spc = (
+        #     "throughput b/s-windowed-minRtt8",
+        #     "loss rate-windowed-minRtt1024",
+        #     "inverse interarrival time b/s-ewma-alpha0.001",
+        #     "RTT us-windowed-minRtt1024",
+        #     "mathis model throughput b/s-windowed-minRtt1024",
+        #     "RTT ratio us-windowed-minRtt1024"
+        # )
+        self._check()
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
@@ -1038,24 +1056,24 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
 class LstmWrapper(PytorchModelWrapper):
     """ Wraps Lstm. """
 
-    name = "Lstm"
-    # in_spc = [
-    #     features.INTERARR_TIME_FET,
-    #     features.RTT_RATIO_FET,
-    #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
-    out_spc = (features.OUT_FET,)
-    num_clss = 5
-    # Cross-entropy loss is designed for multi-class classification tasks.
-    los_fnc = torch.nn.CrossEntropyLoss
-    opt = torch.optim.Adam
-    params = ["lr"]
 
     def __init__(self, out_dir=None, hid_dim=32, num_lyrs=1, out_dim=5):
         super().__init__(out_dir)
+        self.name = "Lstm"
+        # self.in_spc = [
+        #     features.INTERARR_TIME_FET,
+        #     features.RTT_RATIO_FET,
+        #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)]
+        self.num_clss = 5
+        # Cross-entropy loss is designed for multi-class classification tasks.
+        self.los_fnc = torch.nn.CrossEntropyLoss
+        self.opt = torch.optim.Adam
+        self.params = ["lr"]
         self.in_dim = len(self.in_spc)
         self.hid_dim = hid_dim
         self.num_lyrs = num_lyrs
         self.out_dim = out_dim
+        self._check()
 
     def new(self):
         self.net = Lstm(self.in_dim, self.hid_dim, self.num_lyrs, self.out_dim)
@@ -1200,7 +1218,7 @@ class FcFour(torch.nn.Module):
 #######################################################################
 
 
-MODELS = {mdl.name: mdl for mdl in [
+MODELS = {mdl().name: mdl for mdl in [
     BinaryDnnWrapper,
     SvmWrapper,
     SvmSklearnWrapper,

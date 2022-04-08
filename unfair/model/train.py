@@ -263,6 +263,8 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         print(f"Finished training - time: {tim_trn_s:.2f} seconds")
         # Save the model.
         print(f"Saving final model: {out_flp}")
+
+        print("Features of saved model:\n\t" + "\n\t".join(net.in_spc))
         with open(out_flp, "wb") as fil:
             pickle.dump(net, fil)
 
