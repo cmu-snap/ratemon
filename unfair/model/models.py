@@ -1213,10 +1213,8 @@ MODELS = {mdl.name: mdl for mdl in [
 MODEL_NAMES = sorted(MODELS.keys())
 
 
-def load_model(model_type, model_file):
+def load_model(model_file):
     """Load the provided trained model."""
     assert path.isfile(model_file), f"Model does not exist: {model_file}"
-    net = MODELS[model_type]()
     with open(model_file, "rb") as fil:
-        net.net = pickle.load(fil)
-    return net
+        return pickle.load(fil)

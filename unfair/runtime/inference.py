@@ -230,7 +230,7 @@ def configure_ebpf(args):
 
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
-    net = models.load_model(args.model, args.model_file)
+    net = models.load_model(args.model_file)
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 

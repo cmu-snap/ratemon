@@ -14,7 +14,7 @@ import time
 import netifaces as ni
 import pcapy
 
-from unfair.model import models, utils
+from unfair.model import utils
 from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
 from unfair.runtime.mitigation_strategy import MitigationStrategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
@@ -326,13 +326,6 @@ def parse_args():
         "--disable-inference",
         action="store_true",
         help="Disable periodic inference.",
-    )
-    parser.add_argument(
-        "--model",
-        choices=models.MODEL_NAMES,
-        help="The model to use.",
-        required=True,
-        type=str,
     )
     parser.add_argument(
         "-f", "--model-file", help="The trained model to use.", required=True, type=str

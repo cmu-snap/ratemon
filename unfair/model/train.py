@@ -262,7 +262,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         # Save the model.
         print(f"Saving final model: {out_flp}")
         with open(out_flp, "wb") as fil:
-            pickle.dump(net.net, fil)
+            pickle.dump(net, fil)
 
     # Testing.
     #
