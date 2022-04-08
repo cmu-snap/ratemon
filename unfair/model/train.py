@@ -384,6 +384,8 @@ def run_trials(args):
         defaults.MODEL_PREFIX +
         utils.args_to_str(
             args, order=sorted(defaults.DEFAULTS.keys()), which="model") + (
+                # Add the optional tag.
+                f'-{args["tag"]}' if args["tag"] is not None else "") + (
                 # Determine the proper extension based on the type of model.
                 ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
                 else ".pth"))
@@ -508,6 +510,9 @@ def _main():
         help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
               "and \"--analyze-features\" is specificed, then perform "
               "permutation importance analysis with this many repeats."))
+    psr.add_argument(
+        "--tag", help="A string to append to the name of saved models.",
+        required=False, type=str)
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args["balance"], \

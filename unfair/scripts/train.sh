@@ -3,16 +3,18 @@
 # Execute the entire training process, starting with raw data.
 #
 # Usage:
-#     ./train.sh <experiment data directory> <output directory>
+#     ./train.sh <experiment data directory> <output directory> <tag>
 #
 # Features are generated into the experiment data directory because they may be
 # very large. Sampled training data and the resulting models are stored in the
-# output directory.
+# output directory. The tag is attached to the model filename to help
+# differentiate it.
 
 set -o errexit
 
 exp_dir="$1"
 out_dir="$2"
+tag="$3"
 unfair_dir="$(cd "$(dirname "$0")"/.. && pwd)"
 workspace_dir="$(dirname "$unfair_dir")"
 export PYTHONPATH="$workspace_dir:$PYTHONPATH"
@@ -25,25 +27,24 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 # python "$unfair_dir/model/prepare_data.py" \
 #     --data-dir="$exp_dir" \
 #     --out-dir="$out_dir" \
+#     --model=HistGbdtSklearn \
 #     --train-split=70 \
 #     --val-split=0 \
 #     --test-split=30 \
 #     --warmup-percent=5 \
-#     --sample-percent=5
+#     --sample-percent=25
 python "$unfair_dir/model/train.py" \
     --out-dir="$out_dir" \
-    --data-dir="$out_dir" \
+    --data-dir="$out_dir"\
     --model=HistGbdtSklearn \
     --sample-percent=100 \
     --no-rand \
     --conf-trials=1 \
-    --max-iter=100
-
-    #  \
+    --max-iter=100 \
+    --tag="$tag"
     # --analyze-features \
-    # --clusters=20 \
+    # --clusters=10 \
     # --features-to-pick=10 \
-    # --permutation-importance-repeats=2
-
+    # --permutation-importance-repeats=1
     # --balance \
-    # --drop-popular \
+    # --drop-popular
