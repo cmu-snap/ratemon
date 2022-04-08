@@ -1,11 +1,9 @@
 """This module defines a process that will receive packets and run inference on them."""
 
-import atexit
 import collections
 import ctypes
 import os
 from os import path
-import pickle
 import queue
 import sys
 import time
@@ -20,20 +18,12 @@ from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
-def load_model(model, model_file):
-    """Load the provided trained model."""
-    assert path.isfile(model_file), f"Model does not exist: {model_file}"
-    net = models.MODELS[model]()
-    with open(model_file, "rb") as fil:
-        net.net = pickle.load(fil)
-    return net
-
-
 def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
+    print(net.in_spc)
     fets, min_rtt_us = gen_features.parse_received_acks(
         net.in_spc, flowkey, pkts, min_rtt_us, debug
     )
@@ -171,7 +161,7 @@ def load_bpf(debug=False):
     # Load BPF text.
     bpf_flp = path.join(
         path.abspath(path.dirname(__file__)),
-        path.basename(__file__).strip().split(".")[0] + ".c",
+        "unfair_runtime.c",
     )
     if not path.isfile(bpf_flp):
         print(f"Could not find BPF program: {bpf_flp}")
@@ -187,28 +177,27 @@ def load_bpf(debug=False):
 
 
 def configure_ebpf(args):
-    # Load BPF program.
+    """Set up eBPF hooks."""
     bpf = load_bpf(args.debug)
-    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
-    flow_to_rwnd = bpf["flow_to_rwnd"]
 
-    # Logic for reading the TCP window scale.
+    # Read the TCP window scale on outgoing SYN-ACK packets.
     func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
     filedesc = os.open(args.cgroup, os.O_RDONLY)
     bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
-    # Configure unfairness mitigation strategy.
+    # Overwrite advertised window size in outgoing packets.
+    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    flow_to_rwnd = bpf["flow_to_rwnd"]
+    # Set up a TC egress qdisc, specify a filter the accepts all packets, and attach
+    # our egress function as the action on that filter.
     ipr = IPRoute()
     ifindex = ipr.link_lookup(ifname=args.interface)
     assert (
         len(ifindex) == 1
-    ), f"Trouble looking up index for interface {args.interface}: {ifindex}"
+    ), f'Trouble looking up index for interface "{args.interface}": {ifindex}'
     ifindex = ifindex[0]
     # ipr.tc("add", "pfifo", 0, "1:")
     # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
-
-    # There can also be a chain of actions, which depend on the return
-    # value of the previous action.
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
     try:
         # Add the action to a u32 match-all filter
@@ -226,30 +215,26 @@ def configure_ebpf(args):
         )
     except NetlinkError:
         print("Error: Unable to configure TC.")
-        return 1
+        return None, None
 
     def ebpf_cleanup():
+        """Clean attached eBPF programs."""
         print("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
         print("Removing egress TC...")
         ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
 
-    atexit.register(ebpf_cleanup)
-    return flow_to_rwnd
+    return flow_to_rwnd, ebpf_cleanup
 
 
-def run(args, que, inference_flags, done):
-    """Receive packets and run inference on them.
-
-    This function is designed to be the target of a process.
-    """
-    flow_to_rwnd = configure_ebpf(args)
-
-    net = load_model(args.model, args.model_file)
+def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
+    """Receive packets and run inference on them."""
+    net = models.load_model(args.model, args.model_file)
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
+    print("Inference ready!")
     while not done.is_set():
         try:
             fourtuple, pkts = que.get(timeout=1)
@@ -283,5 +268,25 @@ def run(args, que, inference_flags, done):
             args,
         )
 
+        # TODO: Garbage collect flow_to_rwnd.
+
         inference_flags[fourtuple].value = 0
-        print("Cleared inference flag for flow:", utils.flow_to_str(fourtuple))
+
+
+def run(args, que, inference_flags, done):
+    """Receive packets and run inference on them.
+
+    This function is designed to be the target of a process.
+    """
+    cleanup = None
+    try:
+        flow_to_rwnd, cleanup = configure_ebpf(args)
+        if flow_to_rwnd is None:
+            return
+        inference_loop(args, flow_to_rwnd, que, inference_flags, done)
+    except KeyboardInterrupt:
+        print("Cancelled.")
+        done.set()
+    finally:
+        if cleanup is not None:
+            cleanup()

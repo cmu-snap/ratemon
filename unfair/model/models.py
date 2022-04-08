@@ -4,6 +4,7 @@ import copy
 import math
 import os
 from os import path
+import pickle
 import random
 
 from matplotlib import pyplot as plt
@@ -1210,3 +1211,12 @@ MODELS = {mdl.name: mdl for mdl in [
     LstmWrapper
 ]}
 MODEL_NAMES = sorted(MODELS.keys())
+
+
+def load_model(model_type, model_file):
+    """Load the provided trained model."""
+    assert path.isfile(model_file), f"Model does not exist: {model_file}"
+    net = MODELS[model_type]()
+    with open(model_file, "rb") as fil:
+        net.net = pickle.load(fil)
+    return net

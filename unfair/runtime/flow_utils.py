@@ -1,7 +1,6 @@
 """Defines useful classes for representing flows."""
 
 import ctypes
-import multiprocessing
 import sys
 import threading
 import time
@@ -60,9 +59,8 @@ class Flow:
         # self.inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
         self.fourtuple = fourtuple
         self.flowkey = FlowKey(*fourtuple)
-        self.outgoing_packets = []
         self.incoming_packets = []
-        self.sent_tsvals = dict()
+        self.sent_tsvals = {}
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize
