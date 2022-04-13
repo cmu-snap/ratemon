@@ -71,16 +71,6 @@ def receive_packet_pcapy(header, packet):
     sport = tcp[0]
     dport = tcp[1]
 
-    # Ignore some packets.
-    if (
-        # Ignore packets on the loopback interface.
-        (saddr == LOCALHOST or daddr == LOCALHOST)
-        # Accept packets on local ports 9998, 9999, and 10000 only.
-        or (incoming and (dport < 9998 or dport > 10000))
-        or (not incoming and (sport < 9998 or sport > 10000))
-    ):
-        return
-
     thl = (tcp[4] >> 4) * 4
     total_bytes = header.getlen()
     time_s, time_us = header.getts()
@@ -256,13 +246,13 @@ def check_flow(fourtuple, args, que, inference_flags):
             print(f"Skipping inference for flow: {flow}")
 
 
-def pcapy_sniff(interface):
+def pcapy_sniff(args):
     """Use pcapy to sniff packets from a specific interface."""
     # Set the snapshot length to the maximum size of the Ethernet, IPv4, and TCP
     # headers. Do not put the interface into promiscuous mode. Set the timeout to
     # 1000 ms, which actually allows batching up to 1000 ms
     # of packets from the kernel.
-    pcap = pcapy.open_live(interface, 14 + 60 + 60, 0, 1000)
+    pcap = pcapy.open_live(args.interface, 14 + 60 + 60, 0, 1000)
 
     def pcapy_cleanup():
         """Close the pcapy reader."""
@@ -272,7 +262,15 @@ def pcapy_sniff(interface):
     atexit.register(pcapy_cleanup)
 
     # Drop non-IPv4/TCP packets.
-    pcap.setfilter("ip and tcp")
+    filt = "ip and tcp"
+    # Drop packets that we do not care about.
+    if args.skip_localhost:
+        filt += f" and not host {LOCALHOST}"
+    if args.constrain_port:
+        filt += (
+            f"and ((dst ip host {MY_IP} and dst port>={9998} and dst port<={10000}) or "
+            f"(src ip host {MY_IP} and src port>={9998} and src port<={10000}))")
+    pcap.setfilter(filt)
 
     print("Running...press Control-C to end")
     last_time_s = time.time()
@@ -375,6 +373,16 @@ def parse_args():
         required=False,
         type=int,
     )
+    parser.add_argument(
+        "--skip-localhost",
+        action="store_true",
+        help="Skip packets to/from localhost."
+    )
+    parser.add_argument(
+        "--constrain-port",
+        action="store_true",
+        help="Only consider packets to/from the local port range [9998, 10000]."
+    )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
@@ -423,7 +431,7 @@ def run(args, manager):
 
     # The current thread will sniff packets.
     try:
-        pcapy_sniff(args.interface)
+        pcapy_sniff(args)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
