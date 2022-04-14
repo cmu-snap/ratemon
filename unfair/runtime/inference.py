@@ -280,7 +280,8 @@ def run(args, que, inference_flags, done):
     This function is designed to be the target of a process.
     """
     logging.basicConfig(
-        filename=args.inference_log, format="%(asctime)s %(levelname)s %(message)s"
+        filename=args.inference_log, format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG
     )
     cleanup = None
 

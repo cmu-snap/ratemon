@@ -458,7 +458,8 @@ def run(args, manager):
 def _main():
     args = parse_args()
     logging.basicConfig(
-        filename=args.main_log, format="%(asctime)s %(levelname)s %(message)s"
+        filename=args.main_log, format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG
     )
     with multiprocessing.Manager() as manager:
         global MANAGER
