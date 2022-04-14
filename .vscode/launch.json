@@ -56,6 +56,8 @@
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log"
                 // "--disable-inference"
             ],
             "autoReload": {
@@ -71,7 +73,7 @@
             "name": "(r) runtime, schedule, cprofile",
             "type": "python",
             "request": "launch",
-            "module": "cProfile"
+            "module": "cProfile",
             "console": "integratedTerminal",
             "args": [
                 "-o", "/tmp/tmp.prof",

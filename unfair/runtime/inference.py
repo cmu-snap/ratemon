@@ -280,15 +280,16 @@ def run(args, que, inference_flags, done):
     This function is designed to be the target of a process.
     """
     logging.basicConfig(
-        filename=args.inference_log, format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.DEBUG
+        filename=args.inference_log,
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG,
     )
     cleanup = None
 
     def signal_handler(sig, frame):
-        logging.info("You pressed Ctrl+C!")
+        logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
-        signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
     try:
         flow_to_rwnd, cleanup = configure_ebpf(args)

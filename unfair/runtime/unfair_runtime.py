@@ -276,12 +276,21 @@ def pcapy_sniff(args, done):
 
     logging.info("Running...press Control-C to end")
     last_time_s = time.time()
+    last_exit_check_s = time.time()
     last_num_packets = NUM_PACKETS
     last_total_bytes = TOTAL_BYTES
+    i = 0
     while True:  # not done.is_set():
+        now_s = time.time()
+
+        # Only check done once every 1000 packets or 1 second.
+        if i % 1000 == 0 or now_s - last_exit_check_s > 1:
+            if done.is_set():
+                break
+            last_exit_check_s = time.time()
+
         receive_packet_pcapy(*pcap.next())
 
-        now_s = time.time()
         delta_time_s = now_s - last_time_s
         if delta_time_s >= 10:
             delta_num_packets = NUM_PACKETS - last_num_packets
@@ -293,6 +302,8 @@ def pcapy_sniff(args, done):
                 f"Performance report --- {delta_num_packets / delta_time_s:.2f} pps, "
                 f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
             )
+
+        i += 1
 
 
 def parse_args():
@@ -439,7 +450,7 @@ def run(args, manager):
     MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
 
     def signal_handler(sig, frame):
-        logging.info("You pressed Ctrl+C!")
+        logging.info("Main process: You pressed Ctrl+C!")
         done.set()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -458,8 +469,10 @@ def run(args, manager):
 def _main():
     args = parse_args()
     logging.basicConfig(
-        filename=args.main_log, format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.DEBUG
+        filename=args.main_log,
+        filemode="w",
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG,
     )
     with multiprocessing.Manager() as manager:
         global MANAGER
