@@ -278,6 +278,12 @@ def run(args, que, inference_flags, done):
     This function is designed to be the target of a process.
     """
     cleanup = None
+
+    def signal_handler(sig, frame):
+        print('You pressed Ctrl+C!')
+        done.set()
+        signal.signal(signal.SIGINT, signal_handler)
+
     try:
         flow_to_rwnd, cleanup = configure_ebpf(args)
         if flow_to_rwnd is None:

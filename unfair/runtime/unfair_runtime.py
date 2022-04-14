@@ -246,7 +246,7 @@ def check_flow(fourtuple, args, que, inference_flags):
             print(f"Skipping inference for flow: {flow}")
 
 
-def pcapy_sniff(args):
+def pcapy_sniff(args, done):
     """Use pcapy to sniff packets from a specific interface."""
     # Set the snapshot length to the maximum size of the Ethernet, IPv4, and TCP
     # headers. Do not put the interface into promiscuous mode. Set the timeout to
@@ -276,7 +276,7 @@ def pcapy_sniff(args):
     last_time_s = time.time()
     last_num_packets = NUM_PACKETS
     last_total_bytes = TOTAL_BYTES
-    while True:
+    while True: # not done.is_set():
         receive_packet_pcapy(*pcap.next())
 
         now_s = time.time()
@@ -429,9 +429,14 @@ def run(args, manager):
     global MY_IP
     MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
 
+    def signal_handler(sig, frame):
+        print('You pressed Ctrl+C!')
+        done.set()
+    signal.signal(signal.SIGINT, signal_handler)
+
     # The current thread will sniff packets.
     try:
-        pcapy_sniff(args)
+        pcapy_sniff(args, done)
     except KeyboardInterrupt:
         print("Cancelled.")
         done.set()
