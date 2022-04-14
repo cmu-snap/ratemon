@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser
 import atexit
+import logging
 import multiprocessing
 from os import path
 import queue
@@ -151,7 +152,7 @@ def check_loop(args, que, inference_flags, done):
                     )
                 )
     except KeyboardInterrupt:
-        print("Cancelled.")
+        logging.info("Cancelled.")
         done.set()
 
 
@@ -190,7 +191,7 @@ def check_flows(args, que, inference_flags):
                 finally:
                     flow.ingress_lock.release()
             else:
-                print(f"Could not acquire lock for flow: {flow}")
+                logging.warning(f"Could not acquire lock for flow: {flow}")
         # Garbage collection.
         for fourtuple in to_remove:
             del FLOWS[fourtuple]
@@ -207,7 +208,7 @@ def check_flows(args, que, inference_flags):
             finally:
                 flow.ingress_lock.release()
         else:
-            print(f"Could not acquire lock for flow: {flow}")
+            logging.warning(f"Could not acquire lock for flow: {flow}")
 
 
 def check_flow(fourtuple, args, que, inference_flags):
@@ -231,19 +232,19 @@ def check_flow(fourtuple, args, que, inference_flags):
         if inference_flags[fourtuple].value == 0:
             inference_flags[fourtuple].value = 1
             try:
-                print(
+                logging.info(
                     f"Scheduling inference on most recent {len(flow.incoming_packets)} "
                     f"packets for flow: {flow}"
                 )
                 if not args.disable_inference:
                     que.put((fourtuple, flow.incoming_packets), block=False)
             except queue.Full:
-                print("Warning: Inference queue full!")
+                logging.warning("Warning: Inference queue full!")
             else:
                 # Reset the flow.
                 flow.incoming_packets = []
         else:
-            print(f"Skipping inference for flow: {flow}")
+            logging.info(f"Skipping inference for flow: {flow}")
 
 
 def pcapy_sniff(args, done):
@@ -256,7 +257,7 @@ def pcapy_sniff(args, done):
 
     def pcapy_cleanup():
         """Close the pcapy reader."""
-        print("Stopping pcapy sniffing...")
+        logging.info("Stopping pcapy sniffing...")
         pcap.close()
 
     atexit.register(pcapy_cleanup)
@@ -269,14 +270,15 @@ def pcapy_sniff(args, done):
     if args.constrain_port:
         filt += (
             f"and ((dst ip host {MY_IP} and dst port>={9998} and dst port<={10000}) or "
-            f"(src ip host {MY_IP} and src port>={9998} and src port<={10000}))")
+            f"(src ip host {MY_IP} and src port>={9998} and src port<={10000}))"
+        )
     pcap.setfilter(filt)
 
-    print("Running...press Control-C to end")
+    logging.info("Running...press Control-C to end")
     last_time_s = time.time()
     last_num_packets = NUM_PACKETS
     last_total_bytes = TOTAL_BYTES
-    while True: # not done.is_set():
+    while True:  # not done.is_set():
         receive_packet_pcapy(*pcap.next())
 
         now_s = time.time()
@@ -287,7 +289,7 @@ def pcapy_sniff(args, done):
             last_time_s = now_s
             last_num_packets = NUM_PACKETS
             last_total_bytes = TOTAL_BYTES
-            print(
+            logging.info(
                 f"Performance report --- {delta_num_packets / delta_time_s:.2f} pps, "
                 f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
             )
@@ -374,14 +376,21 @@ def parse_args():
         type=int,
     )
     parser.add_argument(
-        "--skip-localhost",
-        action="store_true",
-        help="Skip packets to/from localhost."
+        "--skip-localhost", action="store_true", help="Skip packets to/from localhost."
     )
     parser.add_argument(
         "--constrain-port",
         action="store_true",
-        help="Only consider packets to/from the local port range [9998, 10000]."
+        help="Only consider packets to/from the local port range [9998, 10000].",
+    )
+    parser.add_argument(
+        "--main-log", help="The main log file to write to.", required=True, type=str
+    )
+    parser.add_argument(
+        "--inference-log",
+        help="The inference log file to write to.",
+        required=True,
+        type=str,
     )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
@@ -430,15 +439,16 @@ def run(args, manager):
     MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
 
     def signal_handler(sig, frame):
-        print('You pressed Ctrl+C!')
+        logging.info("You pressed Ctrl+C!")
         done.set()
+
     signal.signal(signal.SIGINT, signal_handler)
 
     # The current thread will sniff packets.
     try:
         pcapy_sniff(args, done)
     except KeyboardInterrupt:
-        print("Cancelled.")
+        logging.info("Cancelled.")
         done.set()
 
     check_thread.join()
@@ -447,6 +457,9 @@ def run(args, manager):
 
 def _main():
     args = parse_args()
+    logging.basicConfig(
+        filename=args.main_log, format="%(asctime)s %(levelname)s %(message)s"
+    )
     with multiprocessing.Manager() as manager:
         global MANAGER
         MANAGER = manager

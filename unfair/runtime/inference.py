@@ -2,9 +2,11 @@
 
 import collections
 import ctypes
+import logging
 import os
 from os import path
 import queue
+import signal
 import sys
 import time
 
@@ -109,7 +111,7 @@ def make_decision(
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
-    print(f"Decision for flow {flowkey}: {new_decision}")
+    logging.info(f"Decision for flow {flowkey}: {new_decision}")
     if decisions[flowkey] != new_decision:
         if new_decision[1] is None:
             del flow_to_rwnd[flowkey]
@@ -120,7 +122,7 @@ def make_decision(
                 f"but is {new_decision[1]} for flow {flowkey}."
             )
             # if new_decision[1] > 2**16:
-            #     print(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
+            #     logging.info(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
             #     new_decision[1] = 2**16 - 1
 
             flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[1])
@@ -163,13 +165,13 @@ def load_bpf(debug=False):
         "unfair_runtime.c",
     )
     if not path.isfile(bpf_flp):
-        print(f"Could not find BPF program: {bpf_flp}")
+        logging.error(f"Could not find BPF program: {bpf_flp}")
         return 1
-    print(f"Loading BPF program: {bpf_flp}")
+    logging.info(f"Loading BPF program: {bpf_flp}")
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
     if debug:
-        print(bpf_text)
+        logging.debug(bpf_text)
 
     # Load BPF program.
     return BPF(text=bpf_text)
@@ -213,15 +215,15 @@ def configure_ebpf(args):
             action=action,
         )
     except NetlinkError:
-        print("Error: Unable to configure TC.")
+        logging.error("Error: Unable to configure TC.")
         return None, None
 
     def ebpf_cleanup():
         """Clean attached eBPF programs."""
-        print("Detaching sock_ops hook...")
+        logging.info("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
-        print("Removing egress TC...")
+        logging.info("Removing egress TC...")
         ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
 
     return flow_to_rwnd, ebpf_cleanup
@@ -233,7 +235,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
-    print("Inference ready!")
+    logging.info("Inference ready!")
     while not done.is_set():
         try:
             fourtuple, pkts = que.get(timeout=1)
@@ -252,10 +254,10 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             # that causes the arrival times to not be in order even though we sort the
             # packets. If this (or any other assertion error) occurs, then just skip
             # this batch of packets.
-            print(f"Error, skipping batch of packets: {exp}")
+            logging.error(f"Error, skipping batch of packets: {exp}")
             return
         finally:
-            print(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
+            logging.info(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
 
         make_decision(
             flowkey,
@@ -277,10 +279,13 @@ def run(args, que, inference_flags, done):
 
     This function is designed to be the target of a process.
     """
+    logging.basicConfig(
+        filename=args.inference_log, format="%(asctime)s %(levelname)s %(message)s"
+    )
     cleanup = None
 
     def signal_handler(sig, frame):
-        print('You pressed Ctrl+C!')
+        logging.info("You pressed Ctrl+C!")
         done.set()
         signal.signal(signal.SIGINT, signal_handler)
 
@@ -290,7 +295,7 @@ def run(args, que, inference_flags, done):
             return
         inference_loop(args, flow_to_rwnd, que, inference_flags, done)
     except KeyboardInterrupt:
-        print("Cancelled.")
+        logging.info("Cancelled.")
         done.set()
     finally:
         if cleanup is not None:
