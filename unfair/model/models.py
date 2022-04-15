@@ -1157,7 +1157,11 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             max_iter=kwargs["max_iter"],
             l2_regularization=kwargs["l2_regularization"],
             early_stopping=kwargs["early_stop"],
-            validation_fraction=20 / 70,
+            # validation_fraction=20 / 70,
+            # 0.1 is the default
+            validation_fraction=0.1,
+            tol=1e-4,
+            n_iter_no_change=5
         )
         return self.net
 

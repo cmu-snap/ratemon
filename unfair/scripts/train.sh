@@ -40,8 +40,9 @@ python "$unfair_dir/model/train.py" \
     --sample-percent=100 \
     --no-rand \
     --conf-trials=1 \
-    --max-iter=100 \
-    --tag="$tag"
+    --max-iter=10000 \
+    --tag="$tag" \
+    --early-stop
     # --analyze-features \
     # --clusters=10 \
     # --features-to-pick=10 \
