@@ -1561,12 +1561,6 @@ def parse_received_acks(
         logging.warning(
             "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
         )
-
-    msg = f"Features in parse(): {list(in_spc_fet_names)} \n"
-    for i in fets[-10:]:
-        msg += f"{i}\n"
-    logging.info(msg)
-
     return fets, new_min_rtt_sec
 
 

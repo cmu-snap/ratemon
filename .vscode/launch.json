@@ -10,7 +10,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
             "console": "integratedTerminal",
-            "args": ["-h"],
+            "args": [
+                "-h"
+            ],
             "autoReload": {
                 "enable": false
             },
@@ -36,7 +38,8 @@
                 "--main-log=/tmp/unfairness_monitor_main.log",
                 "--inference-log=/tmp/unfairness_monitor_inference.log",
                 "--skip-localhost",
-                "--constrain-port"
+                "--constrain-port",
+                "--debug"
                 // "--disable-inference"
             ],
             "autoReload": {

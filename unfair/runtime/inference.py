@@ -30,8 +30,8 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
         list(net.in_spc), flowkey, pkts, min_rtt_us, debug
     )
 
-    # Drop all but the ten most recent packets.
-    fets = fets[-10:]
+    # # Drop all but the ten most recent packets.
+    # fets = fets[-10:]
 
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return fets, min_rtt_us
@@ -43,25 +43,22 @@ def inference(net, flowkey, pkts, min_rtt_us, debug=False):
     Returns a label: below fair, approximately fair, above fair.
     """
     fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, debug)
-
-    msg = f"Features after featurize: {list(net.in_spc)} \n"
-    for i in fets[-10:]:
-        msg += f"{i}\n"
-    logging.info(msg)
-
-    cleaned = utils.clean(fets)
-
-    msg = f"Features after clean: {list(net.in_spc)} \n"
-    for i in cleaned[-10:]:
-        msg += f"{i}\n"
-    logging.info(msg)
-
-    preds = net.predict(
-        torch.tensor(
-            cleaned,
-            dtype=torch.float,
-        )
+    # Only run inference on the most recent 10 packets.
+    if len(fets) > 10:
+        fets = fets[-10:]
+    fets = torch.tensor(
+        utils.clean(fets),
+        dtype=torch.float,
     )
+
+    # Log the features of the last 10 packets.
+    if debug:
+        logging.debug(
+            "Model input: %s\n%s",
+            net.in_spc,
+            "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in fets),
+        )
+    preds = net.predict(fets)
     return [defaults.Class(pred) for pred in preds], min_rtt_us
 
 
