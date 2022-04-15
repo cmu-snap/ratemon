@@ -27,7 +27,7 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
     Returns a structured numpy array.
     """
     fets, min_rtt_us = gen_features.parse_received_acks(
-        list(net.in_spc), flowkey, pkts, min_rtt_us, debug
+        list(net.in_spc), flowkey, pkts, min_rtt_us, debug=debug
     )
 
     # # Drop all but the ten most recent packets.
@@ -311,11 +311,11 @@ def run(args, que, inference_flags, done):
 
     This function is designed to be the target of a process.
     """
-    logging.basicConfig(
-        filename=args.inference_log,
-        format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.DEBUG,
-    )
+    # logging.basicConfig(
+    #     filename=args.inference_log,
+    #     format="%(asctime)s %(levelname)s %(message)s",
+    #     level=logging.DEBUG,
+    # )
     cleanup = None
 
     def signal_handler(sig, frame):
