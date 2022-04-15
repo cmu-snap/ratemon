@@ -128,7 +128,7 @@ def make_decision(
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
-    logging.info(f"Decision for flow {flowkey}: {new_decision}")
+    logging.info("Decision for flow %s: %s", flowkey, new_decision)
     if decisions[flowkey] != new_decision:
         if new_decision[1] is None:
             del flow_to_rwnd[flowkey]
@@ -182,9 +182,9 @@ def load_bpf(debug=False):
         "unfair_runtime.c",
     )
     if not path.isfile(bpf_flp):
-        logging.error(f"Could not find BPF program: {bpf_flp}")
+        logging.error("Could not find BPF program: %s", bpf_flp)
         return 1
-    logging.info(f"Loading BPF program: {bpf_flp}")
+    logging.info("Loading BPF program: %s", bpf_flp)
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
     if debug:
@@ -249,7 +249,6 @@ def configure_ebpf(args):
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     net = models.load_model(args.model_file)
-    logging.info(f"type(net.in_spc): {type(net.in_spc)}")
 
     # TODO: This is a hack to shorten the number of packets we need to accumulate to
     #       run the model.
@@ -277,31 +276,37 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             labels, min_rtts_us[flowkey] = inference(
                 net, flowkey, pkts_ndarray, min_rtts_us[flowkey], args.debug
             )
-        except AssertionError as exp:
-            # Assertion errors mean that this batch of packets is no good, but we should
-            # not kill the process.
-            logging.error(f"Known error; Inference failed: {exp}")
+        except AssertionError:
+            # Assertion errors mean this batch of packets violated some precondition,
+            # but we are safe to skip them and continue.
+            logging.warning(
+                "Inference failed due to an assertion failure:\n%s",
+                traceback.format_exc(),
+            )
             continue
         except Exception as exp:
             # An unexpected error occurred. It is not safe to continue. Reraise the
             # exception to kill the process.
-            logging.error(f"Unexpected error; Inference failed: {exp}")
-            logging.error(f"{traceback.format_exc()}")
+            logging.error(
+                "Inference failed due to an unexpected error:\n%s",
+                traceback.format_exc(),
+            )
             raise exp
+        else:
+            # Inference succeeded.
+            make_decision(
+                flowkey,
+                condense_labels(labels),
+                pkts_ndarray,
+                min_rtts_us[flowkey],
+                decisions,
+                flow_to_rwnd,
+                args,
+            )
         finally:
-            logging.info(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
-
-        make_decision(
-            flowkey,
-            condense_labels(labels),
-            pkts_ndarray,
-            min_rtts_us[flowkey],
-            decisions,
-            flow_to_rwnd,
-            args,
-        )
-        inference_flags[fourtuple].value = 0
-        # TODO: Garbage collect flow_to_rwnd.
+            logging.info("Inference took: %.2f ms", (time.time() - start_time_s) * 1e3)
+            inference_flags[fourtuple].value = 0
+            # TODO: Garbage collect flow_to_rwnd.
 
 
 def run(args, que, inference_flags, done):
@@ -319,6 +324,7 @@ def run(args, que, inference_flags, done):
     def signal_handler(sig, frame):
         logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
+
     signal.signal(signal.SIGINT, signal_handler)
 
     try:

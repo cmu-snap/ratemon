@@ -37,8 +37,6 @@ FLOWS = {}
 # updating a flow object.
 FLOWS_LOCK = threading.RLock()
 
-NUM_PACKETS = 0
-TOTAL_BYTES = 0
 MY_IP = None
 MANAGER = None
 
@@ -54,7 +52,7 @@ def receive_packet_pcapy(header, packet):
     # Note: We do not need to check that this packet IPv4 and TCP because we already do that
     # with a filter.
     if header is None:
-        return
+        return 0, 0
 
     # The Ethernet header is 14 bytes.
     ehl = 14
@@ -125,12 +123,12 @@ def receive_packet_pcapy(header, packet):
             )
 
             # Only give up credit for processing incoming packets.
-            global NUM_PACKETS, TOTAL_BYTES
-            NUM_PACKETS += 1
-            TOTAL_BYTES += total_bytes
+            return 1, total_bytes
         else:
             # Track outgoing tsval for use later.
             flow.sent_tsvals[tsval] = time_us
+
+    return 0, 0
 
 
 def check_loop(args, que, inference_flags, done):
@@ -184,7 +182,7 @@ def check_flows(args, que, inference_flags):
                 finally:
                     flow.ingress_lock.release()
             else:
-                logging.warning(f"Could not acquire lock for flow: {flow}")
+                logging.warning("Could not acquire lock for flow: %s", flow)
         # Garbage collection.
         for fourtuple in to_remove:
             del FLOWS[fourtuple]
@@ -201,7 +199,7 @@ def check_flows(args, que, inference_flags):
             finally:
                 flow.ingress_lock.release()
         else:
-            logging.warning(f"Could not acquire lock for flow: {flow}")
+            logging.warning("Could not acquire lock for flow: %s", flow)
 
 
 def check_flow(fourtuple, args, que, inference_flags):
@@ -213,7 +211,7 @@ def check_flow(fourtuple, args, que, inference_flags):
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
         # Discard all but the most recent few packets.
-        #logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
+        # logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
         if len(flow.incoming_packets) > args.min_packets:
             flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
         # Record the time when we check this flow.
@@ -227,8 +225,9 @@ def check_flow(fourtuple, args, que, inference_flags):
             inference_flags[fourtuple].value = 1
             try:
                 logging.info(
-                    f"Scheduling inference on most recent {len(flow.incoming_packets)} "
-                    f"packets for flow: {flow}"
+                    "Scheduling inference on most recent %d packets for flow: %s",
+                    len(flow.incoming_packets),
+                    flow,
                 )
                 if not args.disable_inference:
                     que.put((fourtuple, flow.incoming_packets), block=False)
@@ -237,8 +236,6 @@ def check_flow(fourtuple, args, que, inference_flags):
             else:
                 # Reset the flow.
                 flow.incoming_packets = []
-        #else:
-        #    logging.info(f"Skipping inference for flow: {flow}")
 
 
 def pcapy_sniff(args, done):
@@ -266,15 +263,17 @@ def pcapy_sniff(args, done):
             f" and ((dst host {utils.int_to_ip_str(MY_IP)} and dst port 9998) or "
             f"(src host {utils.int_to_ip_str(MY_IP)} and src port 9998))"
         )
-    logging.info(f"Using tcpdump filter: {filt}")
+    logging.info("Using tcpdump filter: %s", filt)
     pcap.setfilter(filt)
 
     logging.info("Running...press Control-C to end")
     print("Running...press Control-C to end")
     last_time_s = time.time()
     last_exit_check_s = time.time()
-    last_num_packets = NUM_PACKETS
-    last_total_bytes = TOTAL_BYTES
+    num_packets = 0
+    num_bytes = 0
+    last_num_packets = 0
+    last_total_bytes = 0
     i = 0
     while True:  # not done.is_set():
         now_s = time.time()
@@ -285,19 +284,24 @@ def pcapy_sniff(args, done):
                 break
             last_exit_check_s = time.time()
 
-        receive_packet_pcapy(*pcap.next())
+        # Note that this is a blocking call. If we do not receive a packet, then this
+        # will never return and we will never check the above exist conditions.
+        new_packets, new_bytes = receive_packet_pcapy(*pcap.next())
 
+        num_packets += new_packets
+        num_bytes += new_bytes
         delta_time_s = now_s - last_time_s
         if delta_time_s >= 10:
-            delta_num_packets = NUM_PACKETS - last_num_packets
-            delta_total_bytes = TOTAL_BYTES - last_total_bytes
-            last_time_s = now_s
-            last_num_packets = NUM_PACKETS
-            last_total_bytes = TOTAL_BYTES
+            delta_num_packets = num_packets - last_num_packets
+            delta_total_bytes = num_bytes - last_total_bytes
             logging.info(
-                f"Performance report --- {delta_num_packets / delta_time_s:.2f} pps, "
-                f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+                "Ingress performance --- %.2f pps, " "%.2f Mbps",
+                delta_num_packets / delta_time_s,
+                8 * delta_total_bytes / delta_time_s / 1e6,
             )
+            last_time_s = now_s
+            last_num_packets = num_packets
+            last_total_bytes = num_bytes
 
         i += 1
 

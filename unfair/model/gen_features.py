@@ -1102,9 +1102,7 @@ def parse_received_acks(
 
     # Transform absolute times into relative times to make life easier.
     recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
-    assert (
-        recv_pkts[features.ARRIVAL_TIME_FET] >= 0
-    ).all(), "Negative arrival times!"
+    assert (recv_pkts[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
 
     # If the in_spc contains any Mathis model features, then we need to be sure to add
     # the corresponding loss event rate features.
@@ -1114,10 +1112,12 @@ def parse_received_acks(
         if features.MATHIS_TPUT_FET in name:
             if "ewma" in name:
                 new_metric = features.make_ewma_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_ewma_metric(name)[1])
+                    features.LOSS_EVENT_RATE_FET, features.parse_ewma_metric(name)[1]
+                )
             else:
                 new_metric = features.make_win_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_win_metric(name)[1])
+                    features.LOSS_EVENT_RATE_FET, features.parse_win_metric(name)[1]
+                )
             to_add.append(new_metric)
     fets_to_use.extend(to_add)
 
@@ -1137,7 +1137,7 @@ def parse_received_acks(
 
     # If this flow does not have any packets, then return immediately.
     if not num_pkts:
-        logging.info(f"Warning: No packets received for flow {flw}")
+        logging.info("Warning: No packets received for flow: %s", flw)
         return fets
 
     # State that the windowed metrics need to track across packets.
@@ -1175,7 +1175,7 @@ def parse_received_acks(
 
     for j, recv_pkt in enumerate(recv_pkts):
         if debug and j % 100 == 0:
-            logging.info(f"\tFlow {flw}: {j}/{num_pkts} packets")
+            logging.debug("\tFlow %s: %d/%d packets", flw, j, num_pkts)
         # Whether this is the first packet.
         first = j == 0
         # Note that Copa and Vivace use packet-level sequence numbers
@@ -1217,8 +1217,6 @@ def parse_received_acks(
         )
 
         # Calculate RTT-related metrics.
-        # TODO: Use TCP timestamp option (requires intercepting outgoing packets as
-        #       well).
         rtt_us = recv_pkt[features.RTT_FET]
         fets[j][features.RTT_FET] = rtt_us
         min_rtt_us = utils.safe_min(
@@ -1255,7 +1253,9 @@ def parse_received_acks(
             )
         )
         if pkt_loss_cur_estimate > 1000:
-            logging.info(f"Warning: High packet loss estimate: {pkt_loss_cur_estimate}")
+            logging.debug(
+                "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
+            )
 
         if pkt_loss_cur_estimate != -1:
             pkt_loss_total_estimate += pkt_loss_cur_estimate
@@ -1338,15 +1338,21 @@ def parse_received_acks(
             win_size_us = win * min_rtt_us
             if recv_time_cur_us < win_size_us:
                 if j == num_pkts - 1:
-                    logging.info(f"Warning: Skipping windowed metric {metric} because we lack a full window ({recv_time_cur_us} < {win_size_us})")
+                    logging.warning(
+                        (
+                            "Warning: Skipping all of windowed metric %s "
+                            "because we lack a full window (%d < %d)"
+                        ),
+                        metric,
+                        recv_time_cur_us,
+                        win_size_us,
+                    )
                 continue
 
             # A window requires at least two packets. Note that this means
             # that the first packet will always be skipped.
             win_start_idx = win_state[win]["window_start_idx"]
             if win_start_idx == j:
-                if j == num_pkts - 1:
-                    logging.info(f"Warning: Skipping windowed metric {metric} because the window spans a single packet")
                 continue
 
             if metric.startswith(features.INTERARR_TIME_FET):
@@ -1487,12 +1493,6 @@ def parse_received_acks(
                 new = utils.safe_div(win_losses, win_losses + (j - win_start_idx))
             elif metric.startswith(features.MATHIS_TPUT_FET):
                 # tput = (MSS / RTT) * (C / sqrt(p))
-                p = fets[j][features.make_win_metric(
-                    features.LOSS_EVENT_RATE_FET, win)]
-                # If the loss is 0, then we cannot calculate the Mathis model rate (it
-                # is theoretically infinite).
-                if p < 1e-10:
-                    continue
                 new = utils.safe_mul(
                     utils.safe_div(
                         utils.safe_mul(8, fets[j][features.PAYLOAD_FET]),
@@ -1500,7 +1500,15 @@ def parse_received_acks(
                     ),
                     utils.safe_div(
                         MATHIS_C,
-                        utils.safe_sqrt(p)))
+                        utils.safe_sqrt(
+                            fets[j][
+                                features.make_win_metric(
+                                    features.LOSS_EVENT_RATE_FET, win
+                                )
+                            ]
+                        ),
+                    ),
+                )
             elif features.is_unknowable(metric):
                 continue
             else:
@@ -1515,7 +1523,9 @@ def parse_received_acks(
         #
         # TODO: Test sequence number wraparound logic.
         if recv_seq != -1 and recv_seq + (1 if packet_seq else payload_bytes) > 2**32:
-            logging.info(f"Warning: Sequence number wraparound detected for flow {flw}")
+            logging.warning(
+                "Warning: Sequence number wraparound detected for flow: %s", flw
+            )
             highest_seq = None
             prev_seq = None
 
@@ -1527,14 +1537,15 @@ def parse_received_acks(
     ), f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
     if debug:
-        logging.info(f"\tFinal window durations in flow: {flw}:")
+        msg = f"Final window durations in flow: {flw}:"
         final_min_rtt_us = fets[-1][features.MIN_RTT_FET]
         for win in features.WINDOWS:
-            logging.info(
-                f"\t\t{win}: {win * final_min_rtt_us} us"
+            msg += (
+                f"\t{win}: {win * final_min_rtt_us} us"
                 if final_min_rtt_us > 0
                 else "unknown"
             )
+        logging.debug(msg)
 
     # Extract the new min RTT before we maybe throw that feature away.
     new_min_rtt_sec = fets[features.MIN_RTT_FET][-1]
@@ -1547,7 +1558,9 @@ def parse_received_acks(
     # set comprehension to remove duplicates.
     bad_fets = {fet for fet in fets.dtype.names if not np.isfinite(fets[fet]).all()}
     if bad_fets:
-        logging.info(f"Warning: Flow {flw} has NaNs of Infs in features: {bad_fets}")
+        logging.warning(
+            "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
+        )
 
     msg = f"Features in parse(): {list(in_spc_fet_names)} \n"
     for i in fets[-10:]:
