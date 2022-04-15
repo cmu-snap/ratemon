@@ -9,6 +9,7 @@ import queue
 import signal
 import sys
 import time
+import traceback
 
 from bcc import BPF, BPFAttachType
 from pyroute2 import IPRoute, protocols
@@ -29,6 +30,9 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
         list(net.in_spc), flowkey, pkts, min_rtt_us, debug
     )
 
+    # Drop all but the ten most recent packets.
+    fets = fets[-10:]
+
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return fets, min_rtt_us
 
@@ -39,9 +43,22 @@ def inference(net, flowkey, pkts, min_rtt_us, debug=False):
     Returns a label: below fair, approximately fair, above fair.
     """
     fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, debug)
+
+    msg = f"Features after featurize: {list(net.in_spc)} \n"
+    for i in fets[-10:]:
+        msg += f"{i}\n"
+    logging.info(msg)
+
+    cleaned = utils.clean(fets)
+
+    msg = f"Features after clean: {list(net.in_spc)} \n"
+    for i in cleaned[-10:]:
+        msg += f"{i}\n"
+    logging.info(msg)
+
     preds = net.predict(
         torch.tensor(
-            utils.clean(fets),
+            cleaned,
             dtype=torch.float,
         )
     )
@@ -232,10 +249,11 @@ def configure_ebpf(args):
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     net = models.load_model(args.model_file)
+    logging.info(f"type(net.in_spc): {type(net.in_spc)}")
 
     # TODO: This is a hack to shorten the number of packets we need to accumulate to
     #       run the model.
-    net.in_spc = (fet.replace("1024", "16") for fet in net.in_spc)
+    net.in_spc = tuple(fet.replace("1024", "16") for fet in net.in_spc)
 
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
@@ -260,12 +278,16 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 net, flowkey, pkts_ndarray, min_rtts_us[flowkey], args.debug
             )
         except AssertionError as exp:
-            # FIXME: There is a strange bug when normalizing the packet arrival times
-            # that causes the arrival times to not be in order even though we sort the
-            # packets. If this (or any other assertion error) occurs, then just skip
-            # this batch of packets.
-            logging.error(f"Error, skipping batch of packets: {exp}")
+            # Assertion errors mean that this batch of packets is no good, but we should
+            # not kill the process.
+            logging.error(f"Known error; Inference failed: {exp}")
             continue
+        except Exception as exp:
+            # An unexpected error occurred. It is not safe to continue. Reraise the
+            # exception to kill the process.
+            logging.error(f"Unexpected error; Inference failed: {exp}")
+            logging.error(f"{traceback.format_exc()}")
+            raise exp
         finally:
             logging.info(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
 

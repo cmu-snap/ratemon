@@ -213,7 +213,7 @@ def check_flow(fourtuple, args, que, inference_flags):
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
         # Discard all but the most recent few packets.
-        logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
+        #logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
         if len(flow.incoming_packets) > args.min_packets:
             flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
         # Record the time when we check this flow.
@@ -237,8 +237,8 @@ def check_flow(fourtuple, args, que, inference_flags):
             else:
                 # Reset the flow.
                 flow.incoming_packets = []
-        else:
-            logging.info(f"Skipping inference for flow: {flow}")
+        #else:
+        #    logging.info(f"Skipping inference for flow: {flow}")
 
 
 def pcapy_sniff(args, done):
@@ -377,7 +377,7 @@ def parse_args():
     )
     parser.add_argument(
         "--min-packets",
-        default=2000,
+        default=5000,
         help="The minimum packets required to run inference on a flow.",
         required=False,
         type=int,
