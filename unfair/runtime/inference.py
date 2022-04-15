@@ -26,7 +26,7 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
     Returns a structured numpy array.
     """
     fets, min_rtt_us = gen_features.parse_received_acks(
-        net.in_spc, flowkey, pkts, min_rtt_us, debug
+        list(net.in_spc), flowkey, pkts, min_rtt_us, debug
     )
 
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
@@ -137,7 +137,7 @@ def packets_to_ndarray(pkts):
     pkts = sorted(pkts, key=lambda pkt: pkt[-1])
     (
         seqs,
-        srtts_us,
+        rtts_us,
         # tsvals,
         # tsecrs,
         totals_bytes,
@@ -146,14 +146,14 @@ def packets_to_ndarray(pkts):
         payloads_bytes,
         times_us,
     ) = zip(*pkts)
-    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
+    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.RTT_FET, "int64")])
     pkts[features.SEQ_FET] = seqs
     pkts[features.ARRIVAL_TIME_FET] = times_us
     # pkts[features.TS_1_FET] = tsvals
     # pkts[features.TS_2_FET] = tsecrs
     pkts[features.PAYLOAD_FET] = payloads_bytes
     pkts[features.WIRELEN_FET] = totals_bytes
-    pkts[features.SRTT_FET] = srtts_us
+    pkts[features.RTT_FET] = rtts_us
     return pkts
 
 
@@ -232,13 +232,23 @@ def configure_ebpf(args):
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     net = models.load_model(args.model_file)
+
+    # TODO: This is a hack to shorten the number of packets we need to accumulate to
+    #       run the model.
+    net.in_spc = (fet.replace("1024", "16") for fet in net.in_spc)
+
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
     logging.info("Inference ready!")
     while not done.is_set():
         try:
-            fourtuple, pkts = que.get(timeout=1)
+            val = que.get(timeout=1)
+            # For some reason, the queue returns True or None when the thread on the
+            # other end dies.
+            if not isinstance(val, tuple):
+                continue
+            fourtuple, pkts = val
         except queue.Empty:
             continue
 
@@ -255,7 +265,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             # packets. If this (or any other assertion error) occurs, then just skip
             # this batch of packets.
             logging.error(f"Error, skipping batch of packets: {exp}")
-            return
+            continue
         finally:
             logging.info(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
 
@@ -268,10 +278,8 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             flow_to_rwnd,
             args,
         )
-
-        # TODO: Garbage collect flow_to_rwnd.
-
         inference_flags[fourtuple].value = 0
+        # TODO: Garbage collect flow_to_rwnd.
 
 
 def run(args, que, inference_flags, done):

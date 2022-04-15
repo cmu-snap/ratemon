@@ -4,6 +4,7 @@
 import argparse
 import collections
 from contextlib import contextmanager
+import copy
 import itertools
 import math
 import multiprocessing
@@ -1102,9 +1103,24 @@ def parse_received_acks(
     recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
     assert (
         recv_pkts[features.ARRIVAL_TIME_FET] >= 0
-    ).all(), "Packets not processed in order!"
+    ).all(), "Negative arrival times!"
 
-    dtype = features.convert_to_float(features.feature_names_to_dtype(in_spc_fet_names))
+    # If the in_spc contains any Mathis model features, then we need to be sure to add
+    # the corresponding loss event rate features.
+    fets_to_use = copy.copy(in_spc_fet_names)
+    to_add = []
+    for name in fets_to_use:
+        if features.MATHIS_TPUT_FET in name:
+            if "ewma" in name:
+                new_metric = features.make_ewma_metric(
+                    features.LOSS_EVENT_RATE_FET, features.parse_ewma_metric(name)[1])
+            else:
+                new_metric = features.make_win_metric(
+                    features.LOSS_EVENT_RATE_FET, features.parse_win_metric(name)[1])
+            to_add.append(new_metric)
+    fets_to_use.extend(to_add)
+
+    dtype = features.convert_to_float(features.feature_names_to_dtype(fets_to_use))
     # print(dtype)
     # in_spc_fet_names = {name for name, _ in dtype}
     num_pkts = len(recv_pkts)
@@ -1202,7 +1218,7 @@ def parse_received_acks(
         # Calculate RTT-related metrics.
         # TODO: Use TCP timestamp option (requires intercepting outgoing packets as
         #       well).
-        rtt_us = recv_pkt[features.SRTT_FET]
+        rtt_us = recv_pkt[features.RTT_FET]
         fets[j][features.RTT_FET] = rtt_us
         min_rtt_us = utils.safe_min(
             previous_min_rtt_us if first else fets[j - 1][features.MIN_RTT_FET], rtt_us
@@ -1255,7 +1271,7 @@ def parse_received_acks(
                 continue
             metric = features.make_ewma_metric(metric, alpha)
             # If this is not a desired feature, then skip it.
-            if metric not in in_spc_fet_names:
+            if metric not in fets_to_use:
                 continue
 
             if metric.startswith(features.INTERARR_TIME_FET):
@@ -1312,7 +1328,7 @@ def parse_received_acks(
                 continue
             metric = features.make_win_metric(metric, win)
             # If this is not a desired feature, then skip it.
-            if metric not in in_spc_fet_names:
+            if metric not in fets_to_use:
                 continue
 
             # Calculate windowed metrics only if an entire window has
@@ -1320,12 +1336,16 @@ def parse_received_acks(
             # have been adjusted so that the first packet starts at time 0.
             win_size_us = win * min_rtt_us
             if recv_time_cur_us < win_size_us:
+                if j == num_pkts - 1:
+                    print(f"Warning: Skipping windowed metric {metric} because we lack a full window ({recv_time_cur_us} < {win_size_us})")
                 continue
 
             # A window requires at least two packets. Note that this means
             # that the first packet will always be skipped.
             win_start_idx = win_state[win]["window_start_idx"]
             if win_start_idx == j:
+                if j == num_pkts - 1:
+                    print(f"Warning: Skipping windowed metric {metric} because the window spans a single packet")
                 continue
 
             if metric.startswith(features.INTERARR_TIME_FET):
@@ -1347,6 +1367,8 @@ def parse_received_acks(
                 )
             elif metric.startswith(features.TPUT_FET):
                 new = utils.safe_tput_bps(fets, win_start_idx, j)
+                # if j == num_pkts - 1:
+                #     print(f"{metric} = {new}")
             elif metric.startswith(features.RTT_FET):
                 new = utils.safe_mean(fets[features.RTT_FET], win_start_idx, j)
             elif metric.startswith(features.RTT_RATIO_FET):
