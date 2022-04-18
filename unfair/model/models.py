@@ -1147,6 +1147,17 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "mathis model throughput b/s-windowed-minRtt1024",
         #     "RTT ratio us-windowed-minRtt1024"
         # )
+        # Get rid of features with large windows...these are not practical.
+        self.in_spc = tuple(
+            fet
+            for fet in features.ALL_FEATURES
+            # Allow regular features.
+            if ("ewma" not in fet and "windowed" not in fet)
+            # Allow EWMA features.
+            or "ewma" in fet
+            # Drop windowed features with windows > 128 minRTT.
+            or features.parse_win_metric(fet)[1] <= 128
+        )
         self._check()
 
     def new(self, **kwargs):
@@ -1161,7 +1172,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             # 0.1 is the default
             validation_fraction=0.1,
             tol=1e-4,
-            n_iter_no_change=5
+            n_iter_no_change=5,
         )
         return self.net
 
