@@ -114,8 +114,8 @@ def replace_unknowns(dat, is_dt):
             float("NaN") if is_dt
             else np.mean(dat[fet][np.logical_not(invalid)]))
         assert (dat[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
-    # assert not bad_fets, \
-    #     f"Features contain only \"-1\" ({len(bad_fets)}): {bad_fets}"
+    assert not bad_fets, \
+        f"Features contain only \"-1\" ({len(bad_fets)}): {bad_fets}"
 
 
 def extract_fets(dat, split_name, net):

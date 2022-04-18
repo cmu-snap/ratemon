@@ -10,7 +10,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
             "console": "integratedTerminal",
-            "args": ["-h"],
+            "args": [
+                "-h"
+            ],
             "autoReload": {
                 "enable": false
             },
@@ -28,10 +30,17 @@
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",
+                "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000"
+                "--inference-interval-ms=1000",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                "--skip-localhost",
+                "--constrain-port",
+                "--debug"
+                // "--disable-inference"
             ],
             "autoReload": {
                 "enable": false

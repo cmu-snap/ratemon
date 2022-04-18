@@ -37,8 +37,6 @@ FLOWS = {}
 # updating a flow object.
 FLOWS_LOCK = threading.RLock()
 
-NUM_PACKETS = 0
-TOTAL_BYTES = 0
 MY_IP = None
 MANAGER = None
 
@@ -54,7 +52,7 @@ def receive_packet_pcapy(header, packet):
     # Note: We do not need to check that this packet IPv4 and TCP because we already do that
     # with a filter.
     if header is None:
-        return
+        return 0, 0
 
     # The Ethernet header is 14 bytes.
     ehl = 14
@@ -74,8 +72,9 @@ def receive_packet_pcapy(header, packet):
 
     thl = (tcp[4] >> 4) * 4
     total_bytes = header.getlen()
-    time_s, time_us = header.getts()
-    time_s = time_s + time_us / 1e6  # arrival time in microseconds
+    # (seconds, microseconds)
+    time_tuple = header.getts()
+    time_us = time_tuple[0] * 1e6 + time_tuple[1]
 
     # Parse the TCP timestamp option.
     tsval = None
@@ -105,31 +104,31 @@ def receive_packet_pcapy(header, packet):
             flow = flow_utils.Flow(fourtuple)
             FLOWS[fourtuple] = flow
     with flow.ingress_lock:
-        rtt_s = -1
+        rtt_us = -1
         if incoming:
             if tsval is not None and tsecr is not None:
                 # Use the TCP timestamp option to calculate the RTT.
                 if tsecr in flow.sent_tsvals:
-                    rtt_s = flow.sent_tsvals[tsecr] - time_s
-                    del flow.sent_tsvals[tsecr]
+                    rtt_us = time_us - flow.sent_tsvals[tsecr]
+                    # del flow.sent_tsvals[tsecr]
 
             flow.incoming_packets.append(
                 (
                     tcp[2],  # seq
-                    rtt_s,
+                    rtt_us,
                     total_bytes,
                     total_bytes - (ehl + ihl + thl),  # payload bytes
-                    time_s,
+                    time_us,
                 )
             )
 
             # Only give up credit for processing incoming packets.
-            global NUM_PACKETS, TOTAL_BYTES
-            NUM_PACKETS += 1
-            TOTAL_BYTES += total_bytes
+            return 1, total_bytes
         else:
             # Track outgoing tsval for use later.
-            flow.sent_tsvals[tsval] = time_s
+            flow.sent_tsvals[tsval] = time_us
+
+    return 0, 0
 
 
 def check_loop(args, que, inference_flags, done):
@@ -171,15 +170,7 @@ def check_flows(args, que, inference_flags):
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
                 try:
-                    if (
-                        len(flow.incoming_packets) > 0
-                        # If we have specified a minimum number of packets to run
-                        # inference, then check that.
-                        and (
-                            args.min_packets is None
-                            or len(flow.incoming_packets) > args.min_packets
-                        )
-                    ):
+                    if len(flow.incoming_packets) > args.min_packets:
                         # Plan to run inference on this flows.
                         to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
@@ -191,7 +182,7 @@ def check_flows(args, que, inference_flags):
                 finally:
                     flow.ingress_lock.release()
             else:
-                logging.warning(f"Could not acquire lock for flow: {flow}")
+                logging.warning("Could not acquire lock for flow: %s", flow)
         # Garbage collection.
         for fourtuple in to_remove:
             del FLOWS[fourtuple]
@@ -208,7 +199,7 @@ def check_flows(args, que, inference_flags):
             finally:
                 flow.ingress_lock.release()
         else:
-            logging.warning(f"Could not acquire lock for flow: {flow}")
+            logging.warning("Could not acquire lock for flow: %s", flow)
 
 
 def check_flow(fourtuple, args, que, inference_flags):
@@ -220,6 +211,7 @@ def check_flow(fourtuple, args, que, inference_flags):
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
         # Discard all but the most recent few packets.
+        # logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
         if len(flow.incoming_packets) > args.min_packets:
             flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
         # Record the time when we check this flow.
@@ -233,8 +225,9 @@ def check_flow(fourtuple, args, que, inference_flags):
             inference_flags[fourtuple].value = 1
             try:
                 logging.info(
-                    f"Scheduling inference on most recent {len(flow.incoming_packets)} "
-                    f"packets for flow: {flow}"
+                    "Scheduling inference on most recent %d packets for flow: %s",
+                    len(flow.incoming_packets),
+                    flow,
                 )
                 if not args.disable_inference:
                     que.put((fourtuple, flow.incoming_packets), block=False)
@@ -243,8 +236,6 @@ def check_flow(fourtuple, args, que, inference_flags):
             else:
                 # Reset the flow.
                 flow.incoming_packets = []
-        else:
-            logging.info(f"Skipping inference for flow: {flow}")
 
 
 def pcapy_sniff(args, done):
@@ -266,19 +257,23 @@ def pcapy_sniff(args, done):
     filt = "ip and tcp"
     # Drop packets that we do not care about.
     if args.skip_localhost:
-        filt += f" and not host {LOCALHOST}"
+        filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
     if args.constrain_port:
         filt += (
-            f"and ((dst ip host {MY_IP} and dst port>={9998} and dst port<={10000}) or "
-            f"(src ip host {MY_IP} and src port>={9998} and src port<={10000}))"
+            f" and ((dst host {utils.int_to_ip_str(MY_IP)} and dst port 9998) or "
+            f"(src host {utils.int_to_ip_str(MY_IP)} and src port 9998))"
         )
+    logging.info("Using tcpdump filter: %s", filt)
     pcap.setfilter(filt)
 
     logging.info("Running...press Control-C to end")
+    print("Running...press Control-C to end")
     last_time_s = time.time()
     last_exit_check_s = time.time()
-    last_num_packets = NUM_PACKETS
-    last_total_bytes = TOTAL_BYTES
+    num_packets = 0
+    num_bytes = 0
+    last_num_packets = 0
+    last_total_bytes = 0
     i = 0
     while True:  # not done.is_set():
         now_s = time.time()
@@ -289,19 +284,24 @@ def pcapy_sniff(args, done):
                 break
             last_exit_check_s = time.time()
 
-        receive_packet_pcapy(*pcap.next())
+        # Note that this is a blocking call. If we do not receive a packet, then this
+        # will never return and we will never check the above exist conditions.
+        new_packets, new_bytes = receive_packet_pcapy(*pcap.next())
 
+        num_packets += new_packets
+        num_bytes += new_bytes
         delta_time_s = now_s - last_time_s
         if delta_time_s >= 10:
-            delta_num_packets = NUM_PACKETS - last_num_packets
-            delta_total_bytes = TOTAL_BYTES - last_total_bytes
-            last_time_s = now_s
-            last_num_packets = NUM_PACKETS
-            last_total_bytes = TOTAL_BYTES
+            delta_num_packets = num_packets - last_num_packets
+            delta_total_bytes = num_bytes - last_total_bytes
             logging.info(
-                f"Performance report --- {delta_num_packets / delta_time_s:.2f} pps, "
-                f"{8 * delta_total_bytes / delta_time_s / 1e6:.2f} Mbps"
+                "Ingress performance --- %.2f pps, " "%.2f Mbps",
+                delta_num_packets / delta_time_s,
+                8 * delta_total_bytes / delta_time_s / 1e6,
             )
+            last_time_s = now_s
+            last_num_packets = num_packets
+            last_total_bytes = num_bytes
 
         i += 1
 
@@ -381,7 +381,7 @@ def parse_args():
     )
     parser.add_argument(
         "--min-packets",
-        default=100,
+        default=5000,
         help="The minimum packets required to run inference on a flow.",
         required=False,
         type=int,
@@ -392,7 +392,7 @@ def parse_args():
     parser.add_argument(
         "--constrain-port",
         action="store_true",
-        help="Only consider packets to/from the local port range [9998, 10000].",
+        help="Only consider packets to/from the local port 9998.",
     )
     parser.add_argument(
         "--main-log", help="The main log file to write to.", required=True, type=str
@@ -452,6 +452,7 @@ def run(args, manager):
     def signal_handler(sig, frame):
         logging.info("Main process: You pressed Ctrl+C!")
         done.set()
+        # raise Exception()
 
     signal.signal(signal.SIGINT, signal_handler)
 

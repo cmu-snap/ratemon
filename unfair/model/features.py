@@ -16,6 +16,18 @@ def make_win_metric(metric, win):
     return f"{metric}-windowed-minRtt{win}"
 
 
+def parse_ewma_metric(metric):
+    """Parse the name and alpha of an EWMA metric."""
+    toks = metric.split("-ewma-alpha")
+    return toks[0], float(toks[1])
+
+
+def parse_win_metric(metric):
+    """Parse the name window size of a windowed metric."""
+    toks = metric.split("-windowed-minRtt")
+    return toks[0], int(toks[1])
+
+
 def make_smoothed_features():
     """Return a dtype for all EWMA and windowed metrics."""
     return [
@@ -80,7 +92,7 @@ REGULAR = [
     # negative (-1). However, int32 is too small, because sequence numbers can
     # be as large as 2**32 - 1. Therefore, we use int64.
     (SEQ_FET, "int64"),
-    (ARRIVAL_TIME_FET, "int32"),
+    (ARRIVAL_TIME_FET, "int64"),
     (RTT_FET, "int32"),
     (MIN_RTT_FET, "int32"),
     (RTT_RATIO_FET, "float64"),
@@ -92,8 +104,8 @@ REGULAR = [
     (RETRANS_RATE_FET, "float64"),
     (PAYLOAD_FET, "int32"),
     (WIRELEN_FET, "int32"),
-    (TOTAL_SO_FAR_FET, "int32"),
-    (PAYLOAD_SO_FAR_FET, "int32"),
+    (TOTAL_SO_FAR_FET, "int64"),
+    (PAYLOAD_SO_FAR_FET, "int64"),
     (ACTIVE_FLOWS_FET, "int32"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
     (BW_FAIR_SHARE_BPS_FET, "float64"),
@@ -171,8 +183,8 @@ EXTRA_FETS = [
 # Features used when parsing packets.
 PARSE_PACKETS_FETS = [
     # See REGULAR for details.
-    (SEQ_FET, "int32"),
-    (ARRIVAL_TIME_FET, "int32"),
+    (SEQ_FET, "int64"),
+    (ARRIVAL_TIME_FET, "int64"),
     # (TS_1_FET, "int64"),
     # (TS_2_FET, "int64"),
     (PAYLOAD_FET, "int32"),

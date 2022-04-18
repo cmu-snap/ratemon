@@ -9,6 +9,7 @@ import queue
 import signal
 import sys
 import time
+import traceback
 
 from bcc import BPF, BPFAttachType
 from pyroute2 import IPRoute, protocols
@@ -26,8 +27,11 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
     Returns a structured numpy array.
     """
     fets, min_rtt_us = gen_features.parse_received_acks(
-        net.in_spc, flowkey, pkts, min_rtt_us, debug
+        list(net.in_spc), flowkey, pkts, min_rtt_us, debug=debug
     )
+
+    # # Drop all but the ten most recent packets.
+    # fets = fets[-10:]
 
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return fets, min_rtt_us
@@ -39,12 +43,22 @@ def inference(net, flowkey, pkts, min_rtt_us, debug=False):
     Returns a label: below fair, approximately fair, above fair.
     """
     fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, debug)
-    preds = net.predict(
-        torch.tensor(
-            utils.clean(fets),
-            dtype=torch.float,
-        )
+    # Only run inference on the most recent 10 packets.
+    if len(fets) > 10:
+        fets = fets[-10:]
+    fets = torch.tensor(
+        utils.clean(fets),
+        dtype=torch.float,
     )
+
+    # Log the features of the last 10 packets.
+    if debug:
+        logging.debug(
+            "Model input: %s\n%s",
+            net.in_spc,
+            "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in fets),
+        )
+    preds = net.predict(fets)
     return [defaults.Class(pred) for pred in preds], min_rtt_us
 
 
@@ -111,7 +125,7 @@ def make_decision(
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
-    logging.info(f"Decision for flow {flowkey}: {new_decision}")
+    logging.info("Decision for flow %s: %s", flowkey, new_decision)
     if decisions[flowkey] != new_decision:
         if new_decision[1] is None:
             del flow_to_rwnd[flowkey]
@@ -137,7 +151,7 @@ def packets_to_ndarray(pkts):
     pkts = sorted(pkts, key=lambda pkt: pkt[-1])
     (
         seqs,
-        srtts_us,
+        rtts_us,
         # tsvals,
         # tsecrs,
         totals_bytes,
@@ -146,14 +160,14 @@ def packets_to_ndarray(pkts):
         payloads_bytes,
         times_us,
     ) = zip(*pkts)
-    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.SRTT_FET, "int32")])
+    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.RTT_FET, "int64")])
     pkts[features.SEQ_FET] = seqs
     pkts[features.ARRIVAL_TIME_FET] = times_us
     # pkts[features.TS_1_FET] = tsvals
     # pkts[features.TS_2_FET] = tsecrs
     pkts[features.PAYLOAD_FET] = payloads_bytes
     pkts[features.WIRELEN_FET] = totals_bytes
-    pkts[features.SRTT_FET] = srtts_us
+    pkts[features.RTT_FET] = rtts_us
     return pkts
 
 
@@ -165,9 +179,9 @@ def load_bpf(debug=False):
         "unfair_runtime.c",
     )
     if not path.isfile(bpf_flp):
-        logging.error(f"Could not find BPF program: {bpf_flp}")
+        logging.error("Could not find BPF program: %s", bpf_flp)
         return 1
-    logging.info(f"Loading BPF program: {bpf_flp}")
+    logging.info("Loading BPF program: %s", bpf_flp)
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
     if debug:
@@ -232,13 +246,23 @@ def configure_ebpf(args):
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     net = models.load_model(args.model_file)
+
+    # TODO: This is a hack to shorten the number of packets we need to accumulate to
+    #       run the model.
+    net.in_spc = tuple(fet.replace("1024", "16") for fet in net.in_spc)
+
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
 
     logging.info("Inference ready!")
     while not done.is_set():
         try:
-            fourtuple, pkts = que.get(timeout=1)
+            val = que.get(timeout=1)
+            # For some reason, the queue returns True or None when the thread on the
+            # other end dies.
+            if not isinstance(val, tuple):
+                continue
+            fourtuple, pkts = val
         except queue.Empty:
             continue
 
@@ -249,29 +273,37 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             labels, min_rtts_us[flowkey] = inference(
                 net, flowkey, pkts_ndarray, min_rtts_us[flowkey], args.debug
             )
-        except AssertionError as exp:
-            # FIXME: There is a strange bug when normalizing the packet arrival times
-            # that causes the arrival times to not be in order even though we sort the
-            # packets. If this (or any other assertion error) occurs, then just skip
-            # this batch of packets.
-            logging.error(f"Error, skipping batch of packets: {exp}")
-            return
+        except AssertionError:
+            # Assertion errors mean this batch of packets violated some precondition,
+            # but we are safe to skip them and continue.
+            logging.warning(
+                "Inference failed due to an assertion failure:\n%s",
+                traceback.format_exc(),
+            )
+            continue
+        except Exception as exp:
+            # An unexpected error occurred. It is not safe to continue. Reraise the
+            # exception to kill the process.
+            logging.error(
+                "Inference failed due to an unexpected error:\n%s",
+                traceback.format_exc(),
+            )
+            raise exp
+        else:
+            # Inference succeeded.
+            make_decision(
+                flowkey,
+                condense_labels(labels),
+                pkts_ndarray,
+                min_rtts_us[flowkey],
+                decisions,
+                flow_to_rwnd,
+                args,
+            )
         finally:
-            logging.info(f"Inference took: {(time.time() - start_time_s) * 1e3:.2f} ms")
-
-        make_decision(
-            flowkey,
-            condense_labels(labels),
-            pkts_ndarray,
-            min_rtts_us[flowkey],
-            decisions,
-            flow_to_rwnd,
-            args,
-        )
-
-        # TODO: Garbage collect flow_to_rwnd.
-
-        inference_flags[fourtuple].value = 0
+            logging.info("Inference took: %.2f ms", (time.time() - start_time_s) * 1e3)
+            inference_flags[fourtuple].value = 0
+            # TODO: Garbage collect flow_to_rwnd.
 
 
 def run(args, que, inference_flags, done):
@@ -279,16 +311,17 @@ def run(args, que, inference_flags, done):
 
     This function is designed to be the target of a process.
     """
-    logging.basicConfig(
-        filename=args.inference_log,
-        format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.DEBUG,
-    )
+    # logging.basicConfig(
+    #     filename=args.inference_log,
+    #     format="%(asctime)s %(levelname)s %(message)s",
+    #     level=logging.DEBUG,
+    # )
     cleanup = None
 
     def signal_handler(sig, frame):
         logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
+
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
