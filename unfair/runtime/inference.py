@@ -249,7 +249,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
     # TODO: This is a hack to shorten the number of packets we need to accumulate to
     #       run the model.
-    net.in_spc = tuple(fet.replace("1024", "16") for fet in net.in_spc)
+    net.in_spc = tuple(fet.replace("1024", "128") for fet in net.in_spc)
 
     min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
     decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
