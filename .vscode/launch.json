@@ -31,16 +31,16 @@
             "args": [
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
-                "--interface=ens3",
+                "--interface=lo",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
                 "--main-log=/tmp/unfairness_monitor_main.log",
                 "--inference-log=/tmp/unfairness_monitor_inference.log",
-                "--skip-localhost",
+                // "--skip-localhost",
                 "--constrain-port",
-                "--debug"
-                // "--disable-inference"
+                "--debug",
+                "--disable-inference"
             ],
             "autoReload": {
                 "enable": false
@@ -88,12 +88,16 @@
                 "-o", "/tmp/tmp.prof",
                 "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn.pickle",
-                "--interface=ens3",
-                "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/rwnd_schedule_static.csv",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
+                "--interface=lo",
+                "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=2000",
+                "--inference-interval-ms=1000",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                // "--skip-localhost",
+                "--constrain-port",
+                "--debug",
                 "--disable-inference"
             ],
             "autoReload": {

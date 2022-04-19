@@ -1,6 +1,7 @@
 """Default values."""
 
 from enum import IntEnum
+import math
 import struct
 
 
@@ -47,7 +48,7 @@ DEFAULTS = {
     "clusters": 30,
     "fets_to_pick": None,
     "perm_imp_repeats": 10,
-    "tag": None
+    "tag": None,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.
@@ -66,7 +67,7 @@ ARGS_TO_IGNORE_MODEL = [
     "clusters",
     "fets_to_pick",
     "perm_imp_repeats",
-    "tag"
+    "tag",
 ]
 ARGS_TO_IGNORE_DATA = ARGS_TO_IGNORE_MODEL + ["max_iter"]
 # String to prepend to processed train/val/test data saved on disk.
@@ -120,3 +121,7 @@ class Decision(IntEnum):
 
     PACED = 0
     NOT_PACED = 1
+
+
+# Mathis model constant.
+MATHIS_C = math.sqrt(3 / 2)

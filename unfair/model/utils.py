@@ -718,6 +718,16 @@ def get_class_popularity(dat, classes):
     return [(dat == cls).sum() for cls in classes]
 
 
+def safe_mathis_tput(mss_bytes, rtt_us, loss_rate):
+    return safe_mul(
+        safe_div(
+            safe_mul(8, mss_bytes),
+            safe_div(rtt_us, 1e6),
+        ),
+        safe_div(defaults.MATHIS_C, safe_sqrt(loss_rate)),
+    )
+
+
 def safe_mathis_label(tput_true, tput_mathis):
     """Return the Mathis model label.
 

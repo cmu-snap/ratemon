@@ -249,8 +249,12 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                     len(flow.incoming_packets),
                     flow,
                 )
-                if not args.disable_inference:
-                    que.put((fourtuple, flow.incoming_packets), block=False)
+                if args.disable_inference:
+                    inference_flags[fourtuple].value = 0
+                else:
+                    que.put(
+                        (fourtuple, flow.incoming_packets, flow.min_rtt_us), block=False
+                    )
             except queue.Full:
                 logging.warning("Warning: Inference queue full!")
             else:
