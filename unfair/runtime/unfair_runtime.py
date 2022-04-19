@@ -223,17 +223,6 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
     """
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
-        # Discard all but the minimum number of packets required to calculate the
-        # longest window's features.
-        end_time_us = flow.incoming_packets[-1][4]
-        for idx in range(1, len(flow.incoming_packets)):
-            if (
-                end_time_us - flow.incoming_packets[idx][4]
-                < flow.min_rtt_us * longest_window
-            ):
-                break
-        flow.incoming_packets = flow.incoming_packets[idx - 1 :]
-
         # Record the time when we check this flow.
         flow.latest_time_sec = time.time()
 
@@ -244,6 +233,17 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
         if inference_flags[fourtuple].value == 0:
             inference_flags[fourtuple].value = 1
             try:
+                # Discard all but the minimum number of packets required to calculate the
+                # longest window's features.
+                end_time_us = flow.incoming_packets[-1][4]
+                for idx in range(1, len(flow.incoming_packets)):
+                    if (
+                        end_time_us - flow.incoming_packets[idx][4]
+                        < flow.min_rtt_us * longest_window
+                    ):
+                        break
+                flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+
                 logging.info(
                     "Scheduling inference on most recent %d packets for flow: %s",
                     len(flow.incoming_packets),
