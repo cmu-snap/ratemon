@@ -440,12 +440,9 @@ def run(args, manager):
     # Need to load the model to check the input features for see the longest window.
     net = models.load_model(args.model_file)
     longest_window = max(
-        features.parse_ewma_metric(fet)[1]
-        if "ewma" in fet
-        else (features.parse_win_metric(fet)[1] if "windowed" in fet else 0)
-        for fet in net.in_spc
+        features.parse_win_metric(fet)[1] for fet in net.in_spc if "windowed" in fet
     )
-    longest_window = min(longest_window, 128)
+    # longest_window = min(longest_window, 128)
     logging.info(f"Longest window: {longest_window}")
 
     # Create sychronized data structures.

@@ -30,17 +30,17 @@
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
-                "--interface=lo",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features_small_windows.pickle",
+                "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
                 "--main-log=/tmp/unfairness_monitor_main.log",
                 "--inference-log=/tmp/unfairness_monitor_inference.log",
-                // "--skip-localhost",
+                "--skip-localhost",
                 "--constrain-port",
                 "--debug",
-                "--disable-inference"
+                // "--disable-inference"
             ],
             "autoReload": {
                 "enable": false
