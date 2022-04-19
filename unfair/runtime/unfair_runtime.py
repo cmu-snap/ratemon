@@ -171,19 +171,19 @@ def check_flows(args, longest_window, que, inference_flags):
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
                 try:
+                    logging.info(
+                        "flow span: %.2f, min_rtt_us: %d, longest window: %d, required span: %d",
+                        flow.incoming_packets[-1][4] - flow.incoming_packets[0][4],
+                        flow.min_rtt_us,
+                        longest_window,
+                        flow.min_rtt_us * longest_window,
+                    )
                     if flow.incoming_packets and (
                         # Check if the time span covered by the packets is greater than
                         # required for the longest windowed input feature.
                         (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                         >= flow.min_rtt_us * longest_window
                     ):
-                        logging.info(
-                            "flow span: %.2f, min_rtt_us: %d, longest window: %d, required span: %d",
-                            flow.incoming_packets[-1][4] - flow.incoming_packets[0][4],
-                            flow.min_rtt_us,
-                            longest_window,
-                            flow.min_rtt_us * longest_window,
-                        )
                         # Plan to run inference on this flows.
                         to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
@@ -303,7 +303,7 @@ def pcapy_sniff(args, done):
         now_s = time.time()
 
         # Only check done once every 1000 packets or 1 second.
-        if i % 1000 == 0 or now_s - last_exit_check_s > 1:
+        if i % 10000 == 0 or now_s - last_exit_check_s > 1:
             if done.is_set():
                 break
             last_exit_check_s = time.time()
