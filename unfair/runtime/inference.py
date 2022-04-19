@@ -21,13 +21,13 @@ from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
-def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
+def featurize(flowkey, net, pkts, min_rtt_us, prev_fets=None, debug=False):
     """Compute features for the provided list of packets.
 
     Returns a structured numpy array.
     """
     fets, min_rtt_us = gen_features.parse_received_acks(
-        list(net.in_spc), flowkey, pkts, min_rtt_us, debug=debug
+        list(net.in_spc), flowkey, pkts, min_rtt_us, prev_fets, debug
     )
 
     # # Drop all but the ten most recent packets.
@@ -37,12 +37,13 @@ def featurize(flowkey, net, pkts, min_rtt_us, debug=False):
     return fets, min_rtt_us
 
 
-def inference(net, flowkey, pkts, min_rtt_us, debug=False):
+def inference(net, flowkey, pkts, min_rtt_us, prev_fets=None, debug=False):
     """Run inference on a flow's packets.
 
-    Returns a label: below fair, approximately fair, above fair.
+    Returns a label (below fair, approximately fair, above fair), the updated
+    min_rtt_us, and the features of the last packet.
     """
-    fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, debug)
+    fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, prev_fets, debug)
     # Only run inference on the most recent 10 packets.
     if len(fets) > 10:
         fets = fets[-10:]
@@ -59,7 +60,7 @@ def inference(net, flowkey, pkts, min_rtt_us, debug=False):
             "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in fets),
         )
     preds = net.predict(fets)
-    return [defaults.Class(pred) for pred in preds], min_rtt_us
+    return [defaults.Class(pred) for pred in preds], min_rtt_us, fets[-1]
 
 
 def condense_labels(labels):
@@ -249,10 +250,13 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
     # TODO: This is a hack to shorten the number of packets we need to accumulate to
     #       run the model.
-    net.in_spc = tuple(fet.replace("1024", "16") for fet in net.in_spc)
+    net.in_spc = tuple(fet.replace("1024", "128") for fet in net.in_spc)
 
-    min_rtts_us = collections.defaultdict(lambda: sys.maxsize)
-    decisions = collections.defaultdict(lambda: (defaults.Decision.NOT_PACED, None))
+    flow_to_min_rtt_us = collections.defaultdict(lambda: sys.maxsize)
+    flow_to_prev_features = {}
+    flow_to_decisions = collections.defaultdict(
+        lambda: (defaults.Decision.NOT_PACED, None)
+    )
 
     logging.info("Inference ready!")
     while not done.is_set():
@@ -270,14 +274,23 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         flowkey = flow_utils.FlowKey(*fourtuple)
         pkts_ndarray = packets_to_ndarray(pkts)
         try:
-            labels, min_rtts_us[flowkey] = inference(
-                net, flowkey, pkts_ndarray, min_rtts_us[flowkey], args.debug
+            (
+                labels,
+                flow_to_min_rtt_us[flowkey],
+                flow_to_prev_features[flowkey],
+            ) = inference(
+                net,
+                flowkey,
+                pkts_ndarray,
+                flow_to_min_rtt_us[flowkey],
+                flow_to_prev_features.get(flowkey),
+                args.debug,
             )
         except AssertionError:
             # Assertion errors mean this batch of packets violated some precondition,
             # but we are safe to skip them and continue.
             logging.warning(
-                "Inference failed due to an assertion failure:\n%s",
+                "Inference failed due to a non-fatal assertion failure:\n%s",
                 traceback.format_exc(),
             )
             continue
@@ -295,8 +308,8 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 flowkey,
                 condense_labels(labels),
                 pkts_ndarray,
-                min_rtts_us[flowkey],
-                decisions,
+                flow_to_min_rtt_us[flowkey],
+                flow_to_decisions,
                 flow_to_rwnd,
                 args,
             )

@@ -15,7 +15,7 @@ import time
 import netifaces as ni
 import pcapy
 
-from unfair.model import utils
+from unfair.model import features, models, utils
 from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
 from unfair.runtime.mitigation_strategy import MitigationStrategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
@@ -110,6 +110,7 @@ def receive_packet_pcapy(header, packet):
                 # Use the TCP timestamp option to calculate the RTT.
                 if tsecr in flow.sent_tsvals:
                     rtt_us = time_us - flow.sent_tsvals[tsecr]
+                    flow.min_rtt_us = min(flow.min_rtt_us, rtt_us)
                     # del flow.sent_tsvals[tsecr]
 
             flow.incoming_packets.append(
@@ -131,7 +132,7 @@ def receive_packet_pcapy(header, packet):
     return 0, 0
 
 
-def check_loop(args, que, inference_flags, done):
+def check_loop(args, longest_window, que, inference_flags, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -139,7 +140,7 @@ def check_loop(args, que, inference_flags, done):
     try:
         while not done.is_set():
             last_check = time.time()
-            check_flows(args, que, inference_flags)
+            check_flows(args, longest_window, que, inference_flags)
 
             if args.inference_interval_ms is not None:
                 time.sleep(
@@ -155,7 +156,7 @@ def check_loop(args, que, inference_flags, done):
         done.set()
 
 
-def check_flows(args, que, inference_flags):
+def check_flows(args, longest_window, que, inference_flags):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -170,7 +171,19 @@ def check_flows(args, que, inference_flags):
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
                 try:
-                    if len(flow.incoming_packets) > args.min_packets:
+                    if flow.incoming_packets and (
+                        # Check if the time span covered by the packets is greater than
+                        # required for the longest windowed input feature.
+                        (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
+                        >= flow.min_rtt_us * longest_window
+                    ):
+                        logging.info(
+                            "flow span: %.2f, min_rtt_us: %d, longest window: %d, required span: %d",
+                            flow.incoming_packets[-1][4] - flow.incoming_packets[0][4],
+                            flow.min_rtt_us,
+                            longest_window,
+                            flow.min_rtt_us * longest_window,
+                        )
                         # Plan to run inference on this flows.
                         to_check.append(fourtuple)
                     elif flow.latest_time_sec and (
@@ -195,14 +208,14 @@ def check_flows(args, que, inference_flags):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                check_flow(fourtuple, args, que, inference_flags)
+                check_flow(fourtuple, args, longest_window, que, inference_flags)
             finally:
                 flow.ingress_lock.release()
         else:
             logging.warning("Could not acquire lock for flow: %s", flow)
 
 
-def check_flow(fourtuple, args, que, inference_flags):
+def check_flow(fourtuple, args, longest_window, que, inference_flags):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
@@ -210,10 +223,17 @@ def check_flow(fourtuple, args, que, inference_flags):
     """
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
-        # Discard all but the most recent few packets.
-        # logging.info(f"Num packets for {flow}: {len(flow.incoming_packets)}")
-        if len(flow.incoming_packets) > args.min_packets:
-            flow.incoming_packets = flow.incoming_packets[-args.min_packets :]
+        # Discard all but the minimum number of packets required to calculate the
+        # longest window's features.
+        end_time_us = flow.incoming_packets[-1][4]
+        for idx in range(1, len(flow.incoming_packets)):
+            if (
+                end_time_us - flow.incoming_packets[idx][4]
+                < flow.min_rtt_us * longest_window
+            ):
+                break
+        flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+
         # Record the time when we check this flow.
         flow.latest_time_sec = time.time()
 
@@ -380,13 +400,6 @@ def parse_args():
         type=str,
     )
     parser.add_argument(
-        "--min-packets",
-        default=5000,
-        help="The minimum packets required to run inference on a flow.",
-        required=False,
-        type=int,
-    )
-    parser.add_argument(
         "--skip-localhost", action="store_true", help="Skip packets to/from localhost."
     )
     parser.add_argument(
@@ -406,9 +419,6 @@ def parse_args():
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
-    assert (
-        args.min_packets > 0
-    ), f'"--min-packets" must be greater than 0 but is: {args.min_packets}'
 
     assert (
         args.reaction_strategy != ReactionStrategy.FILE or args.schedule is not None
@@ -423,6 +433,17 @@ def parse_args():
 
 def run(args, manager):
     """Core logic."""
+    # Need to load the model to check the input features for see the longest window.
+    net = models.load_model(args.model_file)
+    longest_window = max(
+        features.parse_ewma_metric(fet)[1]
+        if "ewma" in fet
+        else (features.parse_win_metric(fet)[1] if "windowed" in fet else 0)
+        for fet in net.in_spc
+    )
+    longest_window = min(longest_window, 128)
+    logging.info(f"Longest window: {longest_window}")
+
     # Create sychronized data structures.
     que = manager.Queue()
     inference_flags = manager.dict()
@@ -433,7 +454,7 @@ def run(args, manager):
     # Create the thread that will monitor flows and decide when to run inference.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(args, que, inference_flags, done),
+        args=(args, longest_window, que, inference_flags, done),
     )
     check_thread.start()
 
