@@ -7,7 +7,6 @@ import os
 from os import path
 import queue
 import signal
-import sys
 import time
 import traceback
 
@@ -26,15 +25,15 @@ def featurize(flowkey, net, pkts, min_rtt_us, prev_fets=None, debug=False):
 
     Returns a structured numpy array.
     """
-    fets, min_rtt_us = gen_features.parse_received_acks(
-        list(net.in_spc), flowkey, pkts, min_rtt_us, prev_fets, debug
+    fets = gen_features.parse_received_acks(
+        list(net.in_spc), flowkey, pkts, min_rtt_us, prev_fets
     )
 
     # # Drop all but the ten most recent packets.
     # fets = fets[-10:]
 
     data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
-    return fets, min_rtt_us
+    return fets
 
 
 def inference(net, flowkey, pkts, min_rtt_us, prev_fets=None, debug=False):
@@ -43,10 +42,8 @@ def inference(net, flowkey, pkts, min_rtt_us, prev_fets=None, debug=False):
     Returns a label (below fair, approximately fair, above fair), the updated
     min_rtt_us, and the features of the last packet.
     """
-    fets, min_rtt_us = featurize(flowkey, net, pkts, min_rtt_us, prev_fets, debug)
-    # Only run inference on the most recent 10 packets.
-    if len(fets) > 10:
-        fets = fets[-10:]
+    fets = featurize(flowkey, net, pkts, min_rtt_us, prev_fets)
+
     fets = torch.tensor(
         utils.clean(fets),
         dtype=torch.float,
@@ -60,7 +57,7 @@ def inference(net, flowkey, pkts, min_rtt_us, prev_fets=None, debug=False):
             "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in fets),
         )
     preds = net.predict(fets)
-    return [defaults.Class(pred) for pred in preds], min_rtt_us, fets[-1]
+    return [defaults.Class(pred) for pred in preds], fets[-1]
 
 
 def condense_labels(labels):
@@ -185,8 +182,8 @@ def load_bpf(debug=False):
     logging.info("Loading BPF program: %s", bpf_flp)
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
-    if debug:
-        logging.debug(bpf_text)
+    # if debug:
+    #     logging.debug(bpf_text)
 
     # Load BPF program.
     return BPF(text=bpf_text)
@@ -252,7 +249,6 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     #       run the model.
     net.in_spc = tuple(fet.replace("1024", "128") for fet in net.in_spc)
 
-    flow_to_min_rtt_us = collections.defaultdict(lambda: sys.maxsize)
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
         lambda: (defaults.Decision.NOT_PACED, None)
@@ -266,7 +262,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             # other end dies.
             if not isinstance(val, tuple):
                 continue
-            fourtuple, pkts = val
+            fourtuple, pkts, min_rtt_us = val
         except queue.Empty:
             continue
 
@@ -274,15 +270,11 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         flowkey = flow_utils.FlowKey(*fourtuple)
         pkts_ndarray = packets_to_ndarray(pkts)
         try:
-            (
-                labels,
-                flow_to_min_rtt_us[flowkey],
-                flow_to_prev_features[flowkey],
-            ) = inference(
+            (labels, flow_to_prev_features[flowkey],) = inference(
                 net,
                 flowkey,
                 pkts_ndarray,
-                flow_to_min_rtt_us[flowkey],
+                min_rtt_us,
                 flow_to_prev_features.get(flowkey),
                 args.debug,
             )
@@ -308,13 +300,20 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 flowkey,
                 condense_labels(labels),
                 pkts_ndarray,
-                flow_to_min_rtt_us[flowkey],
+                min_rtt_us,
                 flow_to_decisions,
                 flow_to_rwnd,
                 args,
             )
         finally:
-            logging.info("Inference took: %.2f ms", (time.time() - start_time_s) * 1e3)
+            dur_s = time.time() - start_time_s
+            pps = len(pkts) / dur_s
+            logging.info(
+                "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
+                dur_s * 1e3,
+                pps,
+                pps * 1514 * 8 / 1e6,
+            )
             inference_flags[fourtuple].value = 0
             # TODO: Garbage collect flow_to_rwnd.
 

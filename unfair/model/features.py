@@ -59,6 +59,7 @@ SRTT_FET = "srtt us"
 INTERARR_TIME_FET = "interarrival time us"
 INV_INTERARR_TIME_FET = "inverse interarrival time b/s"
 PACKETS_LOST_FET = "packets lost since last packet"
+PACKETS_LOST_TOTAL_FET = "packets lost total"
 DROP_RATE_FET = "drop rate at bottleneck queue"
 RETRANS_RATE_FET = "retransmission rate"
 LOSS_RATE_FET = "loss rate"
@@ -99,6 +100,7 @@ REGULAR = [
     (INTERARR_TIME_FET, "int32"),
     (INV_INTERARR_TIME_FET, "float64"),
     (PACKETS_LOST_FET, "int32"),
+    (PACKETS_LOST_TOTAL_FET, "int32"),
     (LOSS_RATE_FET, "float64"),
     (DROP_RATE_FET, "float64"),
     (RETRANS_RATE_FET, "float64"),
