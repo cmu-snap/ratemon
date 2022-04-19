@@ -106,7 +106,11 @@ def replace_unknowns(dat, is_dt):
         return
     bad_fets = []
     for fet in dat.dtype.names:
+        print(fet)
+        print(dat[fet])
         invalid = dat[fet] == -1
+        print(np.where(invalid))
+        print(len(np.where(invalid)[0]))
         if invalid.all():
             bad_fets.append(fet)
             continue

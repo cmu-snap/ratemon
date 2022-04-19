@@ -1150,7 +1150,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         # Get rid of features with large windows...these are not practical.
         self.in_spc = tuple(
             fet
-            for fet in features.ALL_FEATURES
+            for fet in features.FEATURES
             # Allow regular features.
             if ("ewma" not in fet and "windowed" not in fet)
             # Allow EWMA features.
