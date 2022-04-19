@@ -1071,7 +1071,7 @@ def parse_received_acks(
     flw,
     recv_pkts,
     previous_min_rtt_us,
-    skip_smoothed=False,
+    previous_fets,
     debug=False,
 ):
     """Generate features for the inference runtime.
@@ -1085,6 +1085,8 @@ def parse_received_acks(
     Returns a tuple containing a structured numpy array with the resulting features and
     the updated minimum RTT (microseconds).
     """
+    # TODO: Refactor to only calculate features for the last packet.
+
     # Verify that the packets have been received in order (i.e., their
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
@@ -1268,8 +1270,6 @@ def parse_received_acks(
 
         # EWMA metrics.
         for (metric, _), alpha in itertools.product(features.EWMAS, features.ALPHAS):
-            if skip_smoothed:
-                continue
             metric = features.make_ewma_metric(metric, alpha)
             # If this is not a desired feature, then skip it.
             if metric not in fets_to_use:
@@ -1325,7 +1325,7 @@ def parse_received_acks(
         for (metric, _), win in itertools.product(features.WINDOWED, features.WINDOWS):
             # If we cannot estimate the min RTT, then we cannot compute any
             # windowed metrics.
-            if skip_smoothed or min_rtt_us == -1:
+            if min_rtt_us == -1:
                 continue
             metric = features.make_win_metric(metric, win)
             # If this is not a desired feature, then skip it.
