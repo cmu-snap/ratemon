@@ -171,13 +171,15 @@ def check_flows(args, longest_window, que, inference_flags):
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
                 try:
-                    logging.info(
-                        "flow span: %.2f, min_rtt_us: %d, longest window: %d, required span: %d",
-                        flow.incoming_packets[-1][4] - flow.incoming_packets[0][4],
-                        flow.min_rtt_us,
-                        longest_window,
-                        flow.min_rtt_us * longest_window,
-                    )
+                    if flow.incoming_packets:
+                        logging.info(
+                            "flow span: %.2f, min_rtt_us: %.2f, longest window: %d, required span: %.2f",
+                            (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
+                            / 1e6,
+                            flow.min_rtt_us / 1e6,
+                            longest_window,
+                            flow.min_rtt_us * longest_window / 1e6,
+                        )
                     if flow.incoming_packets and (
                         # Check if the time span covered by the packets is greater than
                         # required for the longest windowed input feature.
@@ -201,6 +203,7 @@ def check_flows(args, longest_window, que, inference_flags):
             del FLOWS[fourtuple]
             if fourtuple in inference_flags:
                 del inference_flags[fourtuple]
+            que.put(("remove", fourtuple))
 
     for fourtuple in to_check:
         flow = FLOWS[fourtuple]
@@ -253,7 +256,13 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                     inference_flags[fourtuple].value = 0
                 else:
                     que.put(
-                        (fourtuple, flow.incoming_packets, flow.min_rtt_us), block=False
+                        (
+                            "inference",
+                            fourtuple,
+                            flow.incoming_packets,
+                            flow.min_rtt_us,
+                        ),
+                        block=False,
                     )
             except queue.Full:
                 logging.warning("Warning: Inference queue full!")

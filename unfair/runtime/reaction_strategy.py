@@ -56,7 +56,7 @@ def react_up(strategy, current):
 def react_down(strategy, current):
     """Decrease some current value acording to a ReactionStrategy."""
     if strategy == ReactionStrategy.AIMD:
-        new = current - 10
+        new = current / 2
     elif strategy == ReactionStrategy.MIMD:
         new = current / 2
     elif strategy == ReactionStrategy.FILE:

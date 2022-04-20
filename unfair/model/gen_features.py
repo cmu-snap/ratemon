@@ -4,7 +4,6 @@
 import argparse
 import collections
 from contextlib import contextmanager
-import copy
 import itertools
 import logging
 import multiprocessing
@@ -1063,9 +1062,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(
-    in_spc_fet_names, flw, recv_pkts, min_rtt_us, previous_fets
-):
+def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
     """Generate features for the inference runtime.
 
     Requires the existing minimum RTT (microseconds).
@@ -1078,52 +1075,25 @@ def parse_received_acks(
     Returns a tuple containing a structured numpy array with the resulting features and
     the updated minimum RTT (microseconds).
     """
-    num_pkts = len(recv_pkts)
+    num_pkts = len(fets)
     assert num_pkts, f"No packets provided for flow: {flw}"
     # Verify that the packets have been received in order (i.e., their
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
     # negative.
     assert (
-        (
-            recv_pkts[features.ARRIVAL_TIME_FET][1:]
-            - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
-        )
+        (fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1])
         >= 0
     ).all(), f"Packet arrival times are not monotonically increasing for flow: {flw}"
     # Transform absolute times into relative times to make life easier.
-    recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
-    assert (recv_pkts[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
+    fets[features.ARRIVAL_TIME_FET] -= np.min(fets[features.ARRIVAL_TIME_FET])
+    assert (fets[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
 
-    fets_to_use = get_dependencies(in_spc_fet_names)
-
-    # The final features. -1 implies that a value could not be calculated. Extend the
-    # provided dtype with the regular features, which may be required to compute the
-    # EWMA and windowed features.
-    fets = np.full(
-        num_pkts,
-        -1,
-        dtype=list(
-            set(features.convert_to_float(features.feature_names_to_dtype(fets_to_use)))
-            | set(features.REGULAR_KNOWABLE_FETS)
-        ),
-    )
     if previous_fets is None:
         previous_fets = np.full(1, -1, dtype=fets.dtype)
-    # for name in previous_fets.dtype.names:
-    #     fets[name][0] = previous_fets[name][0]
-
-    # Note that Copa and Vivace use packet-level sequence numbers
-    # instead of TCP's byte-level sequence numbers.
-    fets[features.SEQ_FET] = recv_pkts[features.SEQ_FET]
-    fets[features.RTT_FET] = recv_pkts[features.RTT_FET]
-    fets[features.ARRIVAL_TIME_FET] = recv_pkts[features.ARRIVAL_TIME_FET]
-    fets[features.PAYLOAD_FET] = recv_pkts[features.PAYLOAD_FET]
-    fets[features.WIRELEN_FET] = recv_pkts[features.WIRELEN_FET]
 
     fets[features.INTERARR_TIME_FET][1:] = (
-        recv_pkts[features.ARRIVAL_TIME_FET][1:]
-        - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
+        fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
     )
     fets[features.INV_INTERARR_TIME_FET] = np.divide(
         8 * 1e6 * fets[features.WIRELEN_FET], fets[features.INTERARR_TIME_FET]
@@ -1144,12 +1114,14 @@ def parse_received_acks(
     retrans_pkts = set()
     # TODO: Update with support for Copa and Vivace's packet-based sequence numbers.
     packet_seq = False  # cca in {"copa", "vivace"}
-    highest_seq = recv_pkts[0][features.SEQ_FET]
+    highest_seq = fets[0][features.SEQ_FET]
     for j in range(1, num_pkts):
-        current_seq = recv_pkts[j][features.SEQ_FET]
+        # Note that Copa and Vivace use packet-level sequence numbers
+        # instead of TCP's byte-level sequence numbers.
+        current_seq = fets[j][features.SEQ_FET]
         prev_seq = fets[j - 1][features.SEQ_FET]
         highest_seq = max(highest_seq, prev_seq)
-        payload_bytes = recv_pkts[j][features.PAYLOAD_FET]
+        payload_bytes = fets[j][features.PAYLOAD_FET]
         prev_payload_bytes = fets[j - 1][features.PAYLOAD_FET]
 
         retrans = current_seq in unique_pkts or (
@@ -1204,7 +1176,7 @@ def parse_received_acks(
     for (metric, _), alpha in itertools.product(features.EWMAS, features.ALPHAS):
         metric = features.make_ewma_metric(metric, alpha)
         # If this is not a desired feature, then skip it.
-        if metric not in fets_to_use:
+        if metric not in fets.dtype.names:
             continue
 
         if not metric.startswith(features.MATHIS_TPUT_FET):
@@ -1291,14 +1263,14 @@ def parse_received_acks(
     for (metric, _), win in itertools.product(features.WINDOWED, features.WINDOWS):
         metric = features.make_win_metric(metric, win)
         # If this is not a desired feature, then skip it.
-        if metric not in fets_to_use:
+        if metric not in fets.dtype.names:
             continue
 
         # Calculate windowed metrics only if an entire window has
         # elapsed since the start of the flow. Recall that the timestamps
         # have been adjusted so that the first packet starts at time 0.
         win_size_us = win * min_rtt_us
-        if (recv_time_cur_us - recv_pkts[0][features.ARRIVAL_TIME_FET]) < win_size_us:
+        if (recv_time_cur_us - fets[0][features.ARRIVAL_TIME_FET]) < win_size_us:
             logging.warning(
                 (
                     "Warning: Skipping all of windowed metric %s "
@@ -1397,9 +1369,6 @@ def parse_received_acks(
         used_rows == total_rows
     ), f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
-    # Remove unneeded features that were added as dependencies for the requested
-    # features.
-    fets = fets[list(in_spc_fet_names)]
     # Determine if there are any NaNs/Infs in the results. Just check the last packet.
     bad_fets = {fet for fet in fets.dtype.names if not np.isfinite(fets[-1][fet])}
     if bad_fets:
@@ -1410,36 +1379,6 @@ def parse_received_acks(
     final = np.zeros(1, dtype=fets.dtype)
     final[0] = fets[-1]
     return final
-
-
-def get_dependencies(in_spc_fet_names):
-    # If the in_spc contains any Mathis model features, then we need to be sure to add
-    # the corresponding loss event rate features.
-    fets_to_use = copy.copy(in_spc_fet_names)
-    to_add = []
-    for name in fets_to_use:
-        if features.MATHIS_TPUT_FET in name:
-            if "ewma" in name:
-                new_metric = features.make_ewma_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_ewma_metric(name)[1]
-                )
-            else:
-                new_metric = features.make_win_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_win_metric(name)[1]
-                )
-            to_add.append(new_metric)
-        if features.INV_INTERARR_TIME_FET in name:
-            if "ewma" in name:
-                new_metric = features.make_ewma_metric(
-                    features.INTERARR_TIME_FET, features.parse_ewma_metric(name)[1]
-                )
-            else:
-                new_metric = features.make_win_metric(
-                    features.INTERARR_TIME_FET, features.parse_win_metric(name)[1]
-                )
-            to_add.append(new_metric)
-    fets_to_use.extend(to_add)
-    return fets_to_use
 
 
 def loss_event_rate(win_state, win, fets):

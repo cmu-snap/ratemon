@@ -1,6 +1,6 @@
 """Defines features."""
 
-
+import copy
 import itertools
 
 from unfair.model import defaults
@@ -211,3 +211,32 @@ def convert_to_float(dtype):
     return [
         (fet_name, fet_type.replace("int", "float")) for fet_name, fet_type in dtype
     ]
+
+
+def get_dependencies(in_spc):
+    # If the in_spc contains any Mathis model features, then we need to be sure to add
+    # the corresponding loss event rate features.
+    fets_to_use = set(in_spc)
+    to_add = set()
+    for name in fets_to_use:
+        if MATHIS_TPUT_FET in name:
+            if "ewma" in name:
+                new_metric = make_ewma_metric(
+                    LOSS_EVENT_RATE_FET, parse_ewma_metric(name)[1]
+                )
+            else:
+                new_metric = make_win_metric(
+                    LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
+                )
+            to_add.add(new_metric)
+        if INV_INTERARR_TIME_FET in name:
+            if "ewma" in name:
+                new_metric = make_ewma_metric(
+                    INTERARR_TIME_FET, parse_ewma_metric(name)[1]
+                )
+            else:
+                new_metric = make_win_metric(
+                    INTERARR_TIME_FET, parse_win_metric(name)[1]
+                )
+            to_add.add(new_metric)
+    return tuple(fets_to_use | to_add)

@@ -106,17 +106,14 @@ def replace_unknowns(dat, is_dt):
         return
     bad_fets = []
     for fet in dat.dtype.names:
-        print(fet)
-        print(dat[fet])
         invalid = dat[fet] == -1
-        print(np.where(invalid))
-        print(len(np.where(invalid)[0]))
         if invalid.all():
             bad_fets.append(fet)
             continue
-        dat[fet][invalid] = (
-            float("NaN") if is_dt
-            else np.mean(dat[fet][np.logical_not(invalid)]))
+        if len(invalid) > 0:
+            dat[fet][invalid] = (
+                float("NaN") if is_dt
+                else np.mean(dat[fet][np.logical_not(invalid)]))
         assert (dat[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
     assert not bad_fets, \
         f"Features contain only \"-1\" ({len(bad_fets)}): {bad_fets}"
