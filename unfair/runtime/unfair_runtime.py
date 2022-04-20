@@ -109,8 +109,10 @@ def receive_packet_pcapy(header, packet):
             if tsval is not None and tsecr is not None:
                 # Use the TCP timestamp option to calculate the RTT.
                 if tsecr in flow.sent_tsvals:
-                    rtt_us = time_us - flow.sent_tsvals[tsecr]
-                    flow.min_rtt_us = min(flow.min_rtt_us, rtt_us)
+                    candidate_rtt_us = time_us - flow.sent_tsvals[tsecr]
+                    if candidate_rtt_us > 0:
+                        rtt_us = candidate_rtt_us
+                        flow.min_rtt_us = min(flow.min_rtt_us, rtt_us)
                     # del flow.sent_tsvals[tsecr]
 
             flow.incoming_packets.append(
@@ -173,10 +175,11 @@ def check_flows(args, longest_window, que, inference_flags):
                 try:
                     if flow.incoming_packets:
                         logging.info(
-                            "flow span: %.2f, min_rtt_us: %.2f, longest window: %d, required span: %.2f",
+                            "Flow %s span: %.2f s, min_rtt: %.2f us, longest window: %d, required span: %.2f s",
+                            flow,
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
-                            flow.min_rtt_us / 1e6,
+                            flow.min_rtt_us,
                             longest_window,
                             flow.min_rtt_us * longest_window / 1e6,
                         )
@@ -287,7 +290,7 @@ def pcapy_sniff(args, done):
     atexit.register(pcapy_cleanup)
 
     # Drop non-IPv4/TCP packets.
-    filt = "ip and tcp"
+    filt = "ip and tcp and not port 22"
     # Drop packets that we do not care about.
     if args.skip_localhost:
         filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"

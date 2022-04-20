@@ -125,3 +125,6 @@ class Decision(IntEnum):
 
 # Mathis model constant.
 MATHIS_C = math.sqrt(3 / 2)
+
+# The smallest RWND value to allow.
+MIN_RWND_B = 2000

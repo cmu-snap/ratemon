@@ -1095,12 +1095,11 @@ def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
     fets[features.INTERARR_TIME_FET][1:] = (
         fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
     )
-    fets[features.INV_INTERARR_TIME_FET] = np.divide(
-        8 * 1e6 * fets[features.WIRELEN_FET], fets[features.INTERARR_TIME_FET]
+    fets[features.INV_INTERARR_TIME_FET][1:] = np.divide(
+        8 * 1e6 * fets[features.WIRELEN_FET][1:], fets[features.INTERARR_TIME_FET][1:]
     )
 
     # Calculate RTT-related metrics.
-    fets[features.MIN_RTT_FET] = min_rtt_us
     fets[features.RTT_RATIO_FET] = np.divide(fets[features.RTT_FET], min_rtt_us)
 
     # Track which packets are definitely retransmissions. Ignore these
@@ -1165,9 +1164,6 @@ def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
                 "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
             )
         fets[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
-        fets[j][features.PACKETS_LOST_TOTAL_FET] += utils.safe_add(
-            fets[j - 1][features.PACKETS_LOST_TOTAL_FET], pkt_loss_cur_estimate
-        )
         fets[j][features.LOSS_RATE_FET] = utils.safe_div(
             pkt_loss_cur_estimate, utils.safe_add(pkt_loss_cur_estimate, 1)
         )
@@ -1375,10 +1371,6 @@ def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
         logging.warning(
             "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
         )
-
-    final = np.zeros(1, dtype=fets.dtype)
-    final[0] = fets[-1]
-    return final
 
 
 def loss_event_rate(win_state, win, fets):

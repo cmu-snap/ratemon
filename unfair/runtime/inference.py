@@ -39,7 +39,7 @@ def inference(net, flowkey, min_rtt_us, fets, prev_fets=None, debug=False):
         logging.debug(
             "Model input: %s\n%s",
             net.in_spc,
-            "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in in_fets),
+            "\n".join(", ".join(f"{fet}" for fet in row) for row in in_fets),
         )
 
     pred_start_s = time.time()
@@ -68,6 +68,10 @@ def make_decision(
     Base the decision on the flow's label and existing decision. Use the flow's features
     to calculate any necessary flow metrics, such as the throughput.
     """
+    logging.info("Label for flow %s: %s", flowkey, label)
+
+    logging.info("Num decisions: %d", len(flow_to_decisions))
+    logging.info("Num rwnds: %d", len(flow_to_rwnd))
 
     if args.reaction_strategy == ReactionStrategy.FILE:
         new_decision = (
@@ -78,22 +82,37 @@ def make_decision(
     else:
         tput_bps = utils.safe_tput_bps(fets, 0, len(fets) - 1)
         if label == defaults.Class.ABOVE_FAIR:
+            # if flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
+            #     logging.info("existing_tput_bps: %f", flow_to_decisions[flowkey][1])
             # This flow is sending too fast. Force the sender to slow down.
             new_tput_bps = reaction_strategy.react_down(
-                args.reaction_strategy, tput_bps
+                args.reaction_strategy,
+                # If the flow was already paced, then based the new paced throughput on
+                # the old paced throughput.
+                flow_to_decisions[flowkey][1]
+                if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                else tput_bps,
             )
+            # logging.info(
+            #     "new_tput_bps: %f, current tput_bps: %f", new_tput_bps, tput_bps
+            # )
             new_decision = (
                 defaults.Decision.PACED,
                 new_tput_bps,
                 utils.bdp_B(new_tput_bps, min_rtt_us / 1e6),
             )
-        elif flow_to_decisions[flowkey] == defaults.Decision.PACED:
+        elif flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
             # We are already pacing this flow.
             if label == defaults.Class.BELOW_FAIR:
                 # If we are already pacing this flow but we are being too
                 # aggressive, then let it send faster.
                 new_tput_bps = reaction_strategy.react_up(
-                    args.reaction_strategy, tput_bps
+                    args.reaction_strategy,
+                    # If the flow was already paced, then based the new paced throughput on
+                    # the old paced throughput.
+                    flow_to_decisions[flowkey][1]
+                    if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                    else tput_bps,
                 )
                 new_decision = (
                     defaults.Decision.PACED,
@@ -120,18 +139,29 @@ def make_decision(
         "-" if new_decision[2] is None else f"{new_decision[2] / 1e3:.2f} KB",
     )
     if flow_to_decisions[flowkey] != new_decision:
+        logging.info("Flow %s changed decision.", flowkey)
         if new_decision[2] is None:
-            del flow_to_rwnd[flowkey]
+            if flowkey in flow_to_rwnd:
+                del flow_to_rwnd[flowkey]
         else:
             new_decision = (new_decision[0], new_decision[1], round(new_decision[2]))
-            assert new_decision[2] > 0, (
-                "Error: RWND must be greater than 0, "
-                f"but is {new_decision[2]} for flow {flowkey}."
-            )
-            # if new_decision[1] > 2**16:
+            # if new_decision[2] > 2**16:
             #     logging.info(f"Warning: Asking for RWND >= 2**16: {new_decision[2]}")
             #     new_decision[2] = 2**16 - 1
+            if new_decision[2] < defaults.MIN_RWND_B:
+                logging.info(
+                    ("Warning: Flow %s asking for RWND < %d: %d. " "Overriding to %d."),
+                    flowkey,
+                    defaults.MIN_RWND_B,
+                    new_decision[2],
+                    defaults.MIN_RWND_B,
+                )
+                new_decision = (new_decision[0], new_decision[1], defaults.MIN_RWND_B)
 
+            assert new_decision[2] >= 0, (
+                "Error: RWND must be non-negative, "
+                f"but is {new_decision[2]} for flow {flowkey}."
+            )
             flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[2])
         flow_to_decisions[flowkey] = new_decision
 
@@ -240,22 +270,19 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
-        lambda: (defaults.Decision.NOT_PACED, None)
+        lambda: (defaults.Decision.NOT_PACED, None, None)
     )
 
     # The final features. -1 implies that a value could not be calculated. Extend the
     # provided dtype with the regular features, which may be required to compute the
     # EWMA and windowed features.
-    dtype = list(
-        set(features.PARSE_PACKETS_FETS)
-        | set(
-            features.convert_to_float(
-                features.feature_names_to_dtype(
-                    net.in_spc + features.get_dependencies(net.in_spc)
-                )
+    dtype = sorted(
+        list(
+            set(features.PARSE_PACKETS_FETS)
+            | set(
+                features.feature_names_to_dtype(features.fill_dependencies(net.in_spc))
             )
         )
-        | set(features.REGULAR_KNOWABLE_FETS)
     )
 
     logging.info("Inference ready!")
@@ -275,6 +302,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         if opcode == "inference":
             pkts, min_rtt_us = val[2:]
         elif opcode == "remove":
+            logging.info("Inference process: Removing flow %s", flowkey)
             if flowkey in flow_to_rwnd:
                 del flow_to_rwnd[flowkey]
             if flowkey in flow_to_decisions:

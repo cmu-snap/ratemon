@@ -34,7 +34,7 @@
                 "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000",
+                "--inference-interval-ms=5000",
                 "--main-log=/tmp/unfairness_monitor_main.log",
                 "--inference-log=/tmp/unfairness_monitor_inference.log",
                 "--skip-localhost",
@@ -85,7 +85,8 @@
             "module": "cProfile",
             "console": "integratedTerminal",
             "args": [
-                "-o", "/tmp/tmp.prof",
+                "-o",
+                "/tmp/tmp.prof",
                 "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",

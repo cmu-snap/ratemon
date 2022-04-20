@@ -43,7 +43,7 @@ def choices():
 def react_up(strategy, current):
     """Increase some current value acording to a ReactionStrategy."""
     if strategy == ReactionStrategy.AIMD:
-        new = current + 10
+        new = current + 1e6
     elif strategy == ReactionStrategy.MIMD:
         new = current * 1.5
     elif strategy == ReactionStrategy.FILE:

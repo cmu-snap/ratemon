@@ -42,6 +42,15 @@ class FlowKey(ctypes.Structure):
             (self.local_addr, self.remote_addr, self.local_port, self.remote_port)
         )
 
+    def __eq__(self, other):
+        """Compare this just like a fourtuple."""
+        return (
+            self.local_addr == other.local_addr
+            and self.remote_addr == other.remote_addr
+            and self.local_port == other.local_port
+            and self.remote_port == other.remote_port
+        )
+
 
 class Flow:
     """Represents a single flow, identified by a four-tuple.
