@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from unfair.model import defaults, utils
+from unfair.model import defaults, loss_event_rate, utils
 
 
 class FlowKey(ctypes.Structure):
@@ -62,7 +62,7 @@ class Flow:
     Must acquire self.lock before accessing members.
     """
 
-    def __init__(self, fourtuple):
+    def __init__(self, fourtuple, loss_event_windows):
         """Set up data structures for a flow."""
         self.ingress_lock = threading.RLock()
         # self.inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
@@ -77,6 +77,7 @@ class Flow:
         self.latest_time_sec = time.time()
         self.label = defaults.Class.APPROX_FAIR
         self.decision = (defaults.Decision.NOT_PACED, None)
+        self.loss_tracker = loss_event_rate.LossTracker(loss_event_windows)
 
     def __str__(self):
         """Create a string representation of this flow."""

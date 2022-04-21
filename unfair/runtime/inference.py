@@ -166,7 +166,7 @@ def make_decision(
         flow_to_decisions[flowkey] = new_decision
 
 
-def packets_to_ndarray(pkts, dtype):
+def packets_to_ndarray(pkts, dtype, packets_lost, win_to_loss_event_rate):
     """Reorganize a list of packet metrics into a structured numpy array."""
     # Assume that the packets are in order.
     # # For some reason, the packets tend to get reordered after they are timestamped on
@@ -192,6 +192,14 @@ def packets_to_ndarray(pkts, dtype):
     fets[features.PAYLOAD_FET] = payloads_bytes
     fets[features.WIRELEN_FET] = totals_bytes
     fets[features.RTT_FET] = rtts_us
+    fets[features.PACKETS_LOST_FET] = packets_lost
+
+    # Fill in the loss event rate.
+    for metric in fets.dtype.names:
+        if metric.startswith(features.LOSS_EVENT_RATE_FET) and "windowed" in metric:
+            fets[metric][-1] = win_to_loss_event_rate[
+                features.parse_win_metric(metric)[1]
+            ]
     return fets
 
 
@@ -300,7 +308,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         flowkey = flow_utils.FlowKey(*fourtuple)
 
         if opcode == "inference":
-            pkts, min_rtt_us = val[2:]
+            pkts, packets_lost, min_rtt_us, win_to_loss_event_rate = val[2:]
         elif opcode == "remove":
             logging.info("Inference process: Removing flow %s", flowkey)
             if flowkey in flow_to_rwnd:
@@ -314,7 +322,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
 
         start_time_s = time.time()
-        fets = packets_to_ndarray(pkts, dtype)
+        fets = packets_to_ndarray(pkts, dtype, packets_lost, win_to_loss_event_rate)
         try:
             labels = inference(
                 net,

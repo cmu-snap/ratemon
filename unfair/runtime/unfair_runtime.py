@@ -40,6 +40,8 @@ FLOWS_LOCK = threading.RLock()
 MY_IP = None
 MANAGER = None
 
+LOSS_EVENT_INTERVALS = []
+
 
 def receive_packet_pcapy(header, packet):
     """Process a packet sniffed by pcapy.
@@ -101,7 +103,7 @@ def receive_packet_pcapy(header, packet):
         if fourtuple in FLOWS:
             flow = FLOWS[fourtuple]
         else:
-            flow = flow_utils.Flow(fourtuple)
+            flow = flow_utils.Flow(fourtuple, LOSS_EVENT_INTERVALS)
             FLOWS[fourtuple] = flow
     with flow.ingress_lock:
         rtt_us = -1
@@ -175,7 +177,10 @@ def check_flows(args, longest_window, que, inference_flags):
                 try:
                     if flow.incoming_packets:
                         logging.info(
-                            "Flow %s span: %.2f s, min_rtt: %.2f us, longest window: %d, required span: %.2f s",
+                            (
+                                "Flow %s span: %.2f s, min_rtt: %.2f us, "
+                                "longest window: %d, required span: %.2f s"
+                            ),
                             flow,
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
@@ -239,8 +244,17 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
         if inference_flags[fourtuple].value == 0:
             inference_flags[fourtuple].value = 1
             try:
-                # Discard all but the minimum number of packets required to calculate the
-                # longest window's features.
+                # Calculate packets lost and loss event rate. Do this on all packets
+                # because the loss event rate is based on current RTT, not minRTT, so
+                # just the packets we send to inference will not be enough. Note that
+                # the loss event rate results are just for the last packet.
+                (
+                    packets_lost,
+                    win_to_loss_event_rate,
+                ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
+
+                # Discard all but the minimum number of packets required to calculate
+                # the longest window's features.
                 end_time_us = flow.incoming_packets[-1][4]
                 for idx in range(1, len(flow.incoming_packets)):
                     if (
@@ -249,6 +263,7 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                     ):
                         break
                 flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+                packets_lost = packets_lost[idx - 1 :]
 
                 logging.info(
                     "Scheduling inference on most recent %d packets for flow: %s",
@@ -263,7 +278,9 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                             "inference",
                             fourtuple,
                             flow.incoming_packets,
+                            packets_lost,
                             flow.min_rtt_us,
+                            win_to_loss_event_rate,
                         ),
                         block=False,
                     )
@@ -454,8 +471,18 @@ def run(args, manager):
     longest_window = max(
         features.parse_win_metric(fet)[1] for fet in net.in_spc if "windowed" in fet
     )
-    # longest_window = min(longest_window, 128)
-    logging.info(f"Longest window: {longest_window}")
+    logging.info("Longest minRTT window: %d", longest_window)
+    global LOSS_EVENT_INTERVALS
+    LOSS_EVENT_INTERVALS = [
+        features.parse_win_metric(fet)[1]
+        for fet in net.in_spc
+        if "windowed" in fet
+        and (
+            fet.startswith(features.LOSS_EVENT_RATE_FET)
+            or fet.startswith(features.MATHIS_TPUT_FET)
+        )
+    ]
+    logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
 
     # Create sychronized data structures.
     que = manager.Queue()

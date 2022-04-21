@@ -1,6 +1,5 @@
 """Defines features."""
 
-import copy
 import itertools
 
 from unfair.model import defaults
@@ -13,7 +12,11 @@ def make_ewma_metric(metric, alpha):
 
 def make_win_metric(metric, win):
     """Format the name of a windowed metric."""
-    return f"{metric}-windowed-minRtt{win}"
+    # The loss event rate (and therefore the Mathis model throughput as well) are based
+    # on current RTT not minRTT.
+    # TODO: Change first "minRtt" to "curRtt" eventually.
+    suffix = "minRtt" if metric in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_FET} else "minRtt"
+    return f"{metric}-windowed-{suffix}{win}"
 
 
 def parse_ewma_metric(metric):
@@ -24,8 +27,11 @@ def parse_ewma_metric(metric):
 
 def parse_win_metric(metric):
     """Parse the name window size of a windowed metric."""
-    toks = metric.split("-windowed-minRtt")
-    return toks[0], int(toks[1])
+    toks = metric.split("-windowed-")
+    name = toks[0]
+    # TODO: Change first "minRtt" to "curRtt" eventually.
+    suffix = "minRtt" if name in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_FET} else "minRtt"
+    return name, int(toks[1].split(suffix)[1])
 
 
 def make_smoothed_features():
