@@ -1,6 +1,6 @@
 """Defines features."""
 
-
+import copy
 import itertools
 
 from unfair.model import defaults
@@ -186,11 +186,12 @@ EXTRA_FETS = [
 PARSE_PACKETS_FETS = [
     # See REGULAR for details.
     (SEQ_FET, "int64"),
-    (ARRIVAL_TIME_FET, "int64"),
+    (RTT_FET, "int32"),
     # (TS_1_FET, "int64"),
     # (TS_2_FET, "int64"),
-    (PAYLOAD_FET, "int32"),
     (WIRELEN_FET, "int32"),
+    (PAYLOAD_FET, "int32"),
+    (ARRIVAL_TIME_FET, "int64"),
 ]
 
 REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]
@@ -202,7 +203,7 @@ def feature_names_to_dtype(fet_names):
 
 def feature_name_to_type(target_fet_name):
     for fet_name, fet_type in ALL_FEATURES:
-        if fet_name.startswith(fet_name):
+        if target_fet_name == fet_name:
             return fet_type
     raise Exception(f"Unknown feature: {target_fet_name}")
 
@@ -211,3 +212,37 @@ def convert_to_float(dtype):
     return [
         (fet_name, fet_type.replace("int", "float")) for fet_name, fet_type in dtype
     ]
+
+
+def fill_dependencies(in_spc):
+    # If the in_spc contains any Mathis model features, then we need to be sure to add
+    # the corresponding loss event rate features.
+    fets_to_use = set(in_spc)
+    to_add = set()
+    for name in fets_to_use:
+        if MATHIS_TPUT_FET in name:
+            if "ewma" in name:
+                new_metric = make_ewma_metric(
+                    LOSS_EVENT_RATE_FET, parse_ewma_metric(name)[1]
+                )
+            else:
+                new_metric = make_win_metric(
+                    LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
+                )
+            to_add.add(new_metric)
+        if INV_INTERARR_TIME_FET in name:
+            to_add.add(INV_INTERARR_TIME_FET)
+            to_add.add(INTERARR_TIME_FET)
+        if INTERARR_TIME_FET in name:
+            to_add.add(INTERARR_TIME_FET)
+        if RTT_RATIO_FET in name:
+            to_add.add(RTT_RATIO_FET)
+            to_add.add(RTT_FET)
+        if LOSS_RATE_FET in name:
+            to_add.add(LOSS_RATE_FET)
+            to_add.add(PACKETS_LOST_FET)
+    combined = fets_to_use | to_add
+    if combined == fets_to_use:
+        return in_spc
+    else:
+        return fill_dependencies(tuple(combined))

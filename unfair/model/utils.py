@@ -719,6 +719,12 @@ def get_class_popularity(dat, classes):
 
 
 def safe_mathis_tput(mss_bytes, rtt_us, loss_rate):
+    """Return the Mathis model fair throughput.
+
+    tput = (MSS / RTT) * (C / sqrt(loss_rate))
+
+    Assumes that all packets have the provided mss, which will not be true sometimes.
+    """
     return safe_mul(
         safe_div(
             safe_mul(8, mss_bytes),
@@ -1478,7 +1484,10 @@ def enable_window_scaling():
 def flow_to_str(fourtuple):
     """Convert a flow four-tuple into a string."""
     local_addr, remote_addr, local_port, remote_port = fourtuple
-    return f"{int_to_ip_str(remote_addr)}:{remote_port} -> {int_to_ip_str(local_addr)}:{local_port}"
+    return (
+        f"{int_to_ip_str(remote_addr)}:{remote_port} -> "
+        f"{int_to_ip_str(local_addr)}:{local_port}"
+    )
 
 
 def ebpf_packet_tuple_to_str(dat):

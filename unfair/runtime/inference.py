@@ -11,53 +11,42 @@ import time
 import traceback
 
 from bcc import BPF, BPFAttachType
+import numpy as np
 from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
-import torch
 
 from unfair.model import data, defaults, features, gen_features, models, utils
 from unfair.runtime import flow_utils, reaction_strategy
 from unfair.runtime.reaction_strategy import ReactionStrategy
 
 
-def featurize(flowkey, net, pkts, min_rtt_us, prev_fets=None, debug=False):
-    """Compute features for the provided list of packets.
-
-    Returns a structured numpy array.
-    """
-    fets = gen_features.parse_received_acks(
-        list(net.in_spc), flowkey, pkts, min_rtt_us, prev_fets
-    )
-
-    # # Drop all but the ten most recent packets.
-    # fets = fets[-10:]
-
-    data.replace_unknowns(fets, isinstance(net, models.HistGbdtSklearnWrapper))
-    return fets
-
-
-def inference(net, flowkey, pkts, min_rtt_us, prev_fets=None, debug=False):
+def inference(net, flowkey, min_rtt_us, fets, prev_fets=None, debug=False):
     """Run inference on a flow's packets.
 
     Returns a label (below fair, approximately fair, above fair), the updated
     min_rtt_us, and the features of the last packet.
     """
-    fets = featurize(flowkey, net, pkts, min_rtt_us, prev_fets)
+    gen_features.parse_received_acks(flowkey, min_rtt_us, fets, prev_fets)
 
-    fets = torch.tensor(
-        utils.clean(fets),
-        dtype=torch.float,
-    )
+    # Remove unneeded features that were added as dependencies for the requested
+    # features. Only run prediction on the last packet.
+    in_fets = fets[-1:][list(net.in_spc)]
+    # Replace -1's and with NaNs and convert to an unstructured numpy array.
+    data.replace_unknowns(in_fets, isinstance(net, models.HistGbdtSklearnWrapper))
+    in_fets = utils.clean(in_fets)
 
-    # Log the features of the last 10 packets.
     if debug:
         logging.debug(
             "Model input: %s\n%s",
             net.in_spc,
-            "\n".join(", ".join(f"{fet:.2f}" for fet in row) for row in fets),
+            "\n".join(", ".join(f"{fet}" for fet in row) for row in in_fets),
         )
-    preds = net.predict(fets)
-    return [defaults.Class(pred) for pred in preds], fets[-1]
+
+    pred_start_s = time.time()
+    preds = net.predict(in_fets)
+    logging.info("Prediction time: %.2f ms", (time.time() - pred_start_s) * 1e3)
+
+    return [defaults.Class(pred) for pred in preds]
 
 
 def condense_labels(labels):
@@ -72,81 +61,117 @@ def condense_labels(labels):
 
 
 def make_decision(
-    flowkey, label, pkts_ndarray, min_rtt_us, decisions, flow_to_rwnd, args
+    args, flowkey, min_rtt_us, fets, label, flow_to_decisions, flow_to_rwnd
 ):
     """Make a flow unfairness mitigation decision.
 
-    Base the decision on the flow's label and existing decision. Use the flow's packets
+    Base the decision on the flow's label and existing decision. Use the flow's features
     to calculate any necessary flow metrics, such as the throughput.
-
-    TODO: Instead of passing in using the flow's packets, pass in the features and make
-          sure that they include the necessary columns.
     """
+    logging.info("Label for flow %s: %s", flowkey, label)
+
+    logging.info("Num decisions: %d", len(flow_to_decisions))
+    logging.info("Num rwnds: %d", len(flow_to_rwnd))
+
     if args.reaction_strategy == ReactionStrategy.FILE:
         new_decision = (
             defaults.Decision.PACED,
+            None,
             reaction_strategy.get_scheduled_pacing(args.schedule),
         )
     else:
-        tput_bps = utils.safe_tput_bps(pkts_ndarray, 0, len(pkts_ndarray) - 1)
-
+        tput_bps = utils.safe_tput_bps(fets, 0, len(fets) - 1)
         if label == defaults.Class.ABOVE_FAIR:
-            # This flow is sending too fast. Force the sender to halve its rate.
+            # if flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
+            #     logging.info("existing_tput_bps: %f", flow_to_decisions[flowkey][1])
+            # This flow is sending too fast. Force the sender to slow down.
+            new_tput_bps = reaction_strategy.react_down(
+                args.reaction_strategy,
+                # If the flow was already paced, then based the new paced throughput on
+                # the old paced throughput.
+                flow_to_decisions[flowkey][1]
+                if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                else tput_bps,
+            )
+            # logging.info(
+            #     "new_tput_bps: %f, current tput_bps: %f", new_tput_bps, tput_bps
+            # )
             new_decision = (
                 defaults.Decision.PACED,
-                reaction_strategy.react_down(
-                    args.reaction_strategy,
-                    utils.bdp_B(tput_bps, min_rtt_us / 1e6),
-                ),
+                new_tput_bps,
+                utils.bdp_B(new_tput_bps, min_rtt_us / 1e6),
             )
-        elif decisions[flowkey] == defaults.Decision.PACED:
+        elif flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
             # We are already pacing this flow.
             if label == defaults.Class.BELOW_FAIR:
                 # If we are already pacing this flow but we are being too
                 # aggressive, then let it send faster.
+                new_tput_bps = reaction_strategy.react_up(
+                    args.reaction_strategy,
+                    # If the flow was already paced, then based the new paced throughput on
+                    # the old paced throughput.
+                    flow_to_decisions[flowkey][1]
+                    if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                    else tput_bps,
+                )
                 new_decision = (
                     defaults.Decision.PACED,
-                    reaction_strategy.react_up(
-                        args.reaction_strategy,
-                        utils.bdp_B(tput_bps, min_rtt_us / 1e6),
-                    ),
+                    new_tput_bps,
+                    utils.bdp_B(new_tput_bps, min_rtt_us / 1e6),
                 )
             else:
                 # If we are already pacing this flow and it is behaving as desired,
                 # then all is well. Retain the existing pacing decision.
-                new_decision = decisions[flowkey]
+                new_decision = flow_to_decisions[flowkey]
         else:
             # This flow is not already being paced and is not behaving unfairly, so
             # leave it alone.
-            new_decision = (defaults.Decision.NOT_PACED, None)
+            new_decision = (defaults.Decision.NOT_PACED, None, None)
 
     # FIXME: Why are the BDP calculations coming out so small? Is the throughput
     #        just low due to low application demand?
 
-    logging.info("Decision for flow %s: %s", flowkey, new_decision)
-    if decisions[flowkey] != new_decision:
-        if new_decision[1] is None:
-            del flow_to_rwnd[flowkey]
+    logging.info(
+        "Decision for flow %s: (%s, target tput: %s, rwnd: %s)",
+        flowkey,
+        new_decision[0],
+        "-" if new_decision[1] is None else f"{new_decision[1] / 1e6:.2f} Mbps",
+        "-" if new_decision[2] is None else f"{new_decision[2] / 1e3:.2f} KB",
+    )
+    if flow_to_decisions[flowkey] != new_decision:
+        logging.info("Flow %s changed decision.", flowkey)
+        if new_decision[2] is None:
+            if flowkey in flow_to_rwnd:
+                del flow_to_rwnd[flowkey]
         else:
-            new_decision = (new_decision[0], round(new_decision[1]))
-            assert new_decision[1] > 0, (
-                "Error: RWND must be greater than 0, "
-                f"but is {new_decision[1]} for flow {flowkey}."
+            new_decision = (new_decision[0], new_decision[1], round(new_decision[2]))
+            # if new_decision[2] > 2**16:
+            #     logging.info(f"Warning: Asking for RWND >= 2**16: {new_decision[2]}")
+            #     new_decision[2] = 2**16 - 1
+            if new_decision[2] < defaults.MIN_RWND_B:
+                logging.info(
+                    ("Warning: Flow %s asking for RWND < %d: %d. " "Overriding to %d."),
+                    flowkey,
+                    defaults.MIN_RWND_B,
+                    new_decision[2],
+                    defaults.MIN_RWND_B,
+                )
+                new_decision = (new_decision[0], new_decision[1], defaults.MIN_RWND_B)
+
+            assert new_decision[2] >= 0, (
+                "Error: RWND must be non-negative, "
+                f"but is {new_decision[2]} for flow {flowkey}."
             )
-            # if new_decision[1] > 2**16:
-            #     logging.info(f"Warning: Asking for RWND >= 2**16: {new_decision[1]}")
-            #     new_decision[1] = 2**16 - 1
-
-            flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[1])
-
-        decisions[flowkey] = new_decision
+            flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[2])
+        flow_to_decisions[flowkey] = new_decision
 
 
-def packets_to_ndarray(pkts):
+def packets_to_ndarray(pkts, dtype):
     """Reorganize a list of packet metrics into a structured numpy array."""
-    # For some reason, the packets tend to get reordered after they are timestamped on
-    # arrival. Sort packets by timestamp.
-    pkts = sorted(pkts, key=lambda pkt: pkt[-1])
+    # Assume that the packets are in order.
+    # # For some reason, the packets tend to get reordered after they are timestamped on
+    # # arrival. Sort packets by timestamp.
+    # pkts = sorted(pkts, key=lambda pkt: pkt[-1])
     (
         seqs,
         rtts_us,
@@ -158,18 +183,19 @@ def packets_to_ndarray(pkts):
         payloads_bytes,
         times_us,
     ) = zip(*pkts)
-    pkts = utils.make_empty(len(seqs), additional_dtype=[(features.RTT_FET, "int64")])
-    pkts[features.SEQ_FET] = seqs
-    pkts[features.ARRIVAL_TIME_FET] = times_us
-    # pkts[features.TS_1_FET] = tsvals
-    # pkts[features.TS_2_FET] = tsecrs
-    pkts[features.PAYLOAD_FET] = payloads_bytes
-    pkts[features.WIRELEN_FET] = totals_bytes
-    pkts[features.RTT_FET] = rtts_us
-    return pkts
+    # The final features. -1 implies that a value could not be calculated. Extend the
+    # provided dtype with the regular features, which may be required to compute the
+    # EWMA and windowed features.
+    fets = np.full(len(seqs), -1, dtype=dtype)
+    fets[features.SEQ_FET] = seqs
+    fets[features.ARRIVAL_TIME_FET] = times_us
+    fets[features.PAYLOAD_FET] = payloads_bytes
+    fets[features.WIRELEN_FET] = totals_bytes
+    fets[features.RTT_FET] = rtts_us
+    return fets
 
 
-def load_bpf(debug=False):
+def load_bpf():
     """Load the corresponding eBPF program."""
     # Load BPF text.
     bpf_flp = path.join(
@@ -182,16 +208,13 @@ def load_bpf(debug=False):
     logging.info("Loading BPF program: %s", bpf_flp)
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
-    # if debug:
-    #     logging.debug(bpf_text)
-
     # Load BPF program.
     return BPF(text=bpf_text)
 
 
 def configure_ebpf(args):
     """Set up eBPF hooks."""
-    bpf = load_bpf(args.debug)
+    bpf = load_bpf()
 
     # Read the TCP window scale on outgoing SYN-ACK packets.
     func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
@@ -245,13 +268,21 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     net = models.load_model(args.model_file)
 
-    # TODO: This is a hack to shorten the number of packets we need to accumulate to
-    #       run the model.
-    net.in_spc = tuple(fet.replace("1024", "128") for fet in net.in_spc)
-
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
-        lambda: (defaults.Decision.NOT_PACED, None)
+        lambda: (defaults.Decision.NOT_PACED, None, None)
+    )
+
+    # The final features. -1 implies that a value could not be calculated. Extend the
+    # provided dtype with the regular features, which may be required to compute the
+    # EWMA and windowed features.
+    dtype = sorted(
+        list(
+            set(features.PARSE_PACKETS_FETS)
+            | set(
+                features.feature_names_to_dtype(features.fill_dependencies(net.in_spc))
+            )
+        )
     )
 
     logging.info("Inference ready!")
@@ -262,22 +293,38 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             # other end dies.
             if not isinstance(val, tuple):
                 continue
-            fourtuple, pkts, min_rtt_us = val
         except queue.Empty:
             continue
 
-        start_time_s = time.time()
+        opcode, fourtuple = val[:2]
         flowkey = flow_utils.FlowKey(*fourtuple)
-        pkts_ndarray = packets_to_ndarray(pkts)
+
+        if opcode == "inference":
+            pkts, min_rtt_us = val[2:]
+        elif opcode == "remove":
+            logging.info("Inference process: Removing flow %s", flowkey)
+            if flowkey in flow_to_rwnd:
+                del flow_to_rwnd[flowkey]
+            if flowkey in flow_to_decisions:
+                del flow_to_decisions[flowkey]
+            if flowkey in flow_to_prev_features:
+                del flow_to_prev_features[flowkey]
+            continue
+        else:
+            raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
+
+        start_time_s = time.time()
+        fets = packets_to_ndarray(pkts, dtype)
         try:
-            (labels, flow_to_prev_features[flowkey],) = inference(
+            labels = inference(
                 net,
                 flowkey,
-                pkts_ndarray,
                 min_rtt_us,
+                fets,
                 flow_to_prev_features.get(flowkey),
                 args.debug,
             )
+            flow_to_prev_features[flowkey] = fets[-1]
         except AssertionError:
             # Assertion errors mean this batch of packets violated some precondition,
             # but we are safe to skip them and continue.
@@ -297,13 +344,13 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         else:
             # Inference succeeded.
             make_decision(
+                args,
                 flowkey,
-                condense_labels(labels),
-                pkts_ndarray,
                 min_rtt_us,
+                fets,
+                condense_labels(labels),
                 flow_to_decisions,
                 flow_to_rwnd,
-                args,
             )
         finally:
             dur_s = time.time() - start_time_s
@@ -315,7 +362,6 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 pps * 1514 * 8 / 1e6,
             )
             inference_flags[fourtuple].value = 0
-            # TODO: Garbage collect flow_to_rwnd.
 
 
 def run(args, que, inference_flags, done):
@@ -323,12 +369,6 @@ def run(args, que, inference_flags, done):
 
     This function is designed to be the target of a process.
     """
-    # logging.basicConfig(
-    #     filename=args.inference_log,
-    #     format="%(asctime)s %(levelname)s %(message)s",
-    #     level=logging.DEBUG,
-    # )
-    cleanup = None
 
     def signal_handler(sig, frame):
         logging.info("Inference process: You pressed Ctrl+C!")
@@ -336,13 +376,14 @@ def run(args, que, inference_flags, done):
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    cleanup = None
     try:
         flow_to_rwnd, cleanup = configure_ebpf(args)
         if flow_to_rwnd is None:
             return
         inference_loop(args, flow_to_rwnd, que, inference_flags, done)
     except KeyboardInterrupt:
-        logging.info("Cancelled.")
+        logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
     finally:
         if cleanup is not None:

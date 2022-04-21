@@ -4,7 +4,6 @@
 import argparse
 import collections
 from contextlib import contextmanager
-import copy
 import itertools
 import logging
 import multiprocessing
@@ -1063,9 +1062,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(
-    in_spc_fet_names, flw, recv_pkts, min_rtt_us, previous_fets
-):
+def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
     """Generate features for the inference runtime.
 
     Requires the existing minimum RTT (microseconds).
@@ -1078,59 +1075,31 @@ def parse_received_acks(
     Returns a tuple containing a structured numpy array with the resulting features and
     the updated minimum RTT (microseconds).
     """
-    num_pkts = len(recv_pkts)
+    num_pkts = len(fets)
     assert num_pkts, f"No packets provided for flow: {flw}"
     # Verify that the packets have been received in order (i.e., their
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
     # negative.
     assert (
-        (
-            recv_pkts[features.ARRIVAL_TIME_FET][1:]
-            - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
-        )
+        (fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1])
         >= 0
     ).all(), f"Packet arrival times are not monotonically increasing for flow: {flw}"
     # Transform absolute times into relative times to make life easier.
-    recv_pkts[features.ARRIVAL_TIME_FET] -= np.min(recv_pkts[features.ARRIVAL_TIME_FET])
-    assert (recv_pkts[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
+    fets[features.ARRIVAL_TIME_FET] -= np.min(fets[features.ARRIVAL_TIME_FET])
+    assert (fets[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
 
-    fets_to_use = get_dependencies(in_spc_fet_names)
-
-    # The final features. -1 implies that a value could not be calculated. Extend the
-    # provided dtype with the regular features, which may be required to compute the
-    # EWMA and windowed features.
-    fets = np.full(
-        num_pkts,
-        -1,
-        dtype=list(
-            set(features.convert_to_float(features.feature_names_to_dtype(fets_to_use)))
-            | set(features.REGULAR_KNOWABLE_FETS)
-        ),
-    )
     if previous_fets is None:
         previous_fets = np.full(1, -1, dtype=fets.dtype)
-    # for name in previous_fets.dtype.names:
-    #     fets[name][0] = previous_fets[name][0]
-
-    # Note that Copa and Vivace use packet-level sequence numbers
-    # instead of TCP's byte-level sequence numbers.
-    fets[features.SEQ_FET] = recv_pkts[features.SEQ_FET]
-    fets[features.RTT_FET] = recv_pkts[features.RTT_FET]
-    fets[features.ARRIVAL_TIME_FET] = recv_pkts[features.ARRIVAL_TIME_FET]
-    fets[features.PAYLOAD_FET] = recv_pkts[features.PAYLOAD_FET]
-    fets[features.WIRELEN_FET] = recv_pkts[features.WIRELEN_FET]
 
     fets[features.INTERARR_TIME_FET][1:] = (
-        recv_pkts[features.ARRIVAL_TIME_FET][1:]
-        - recv_pkts[features.ARRIVAL_TIME_FET][:-1]
+        fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
     )
-    fets[features.INV_INTERARR_TIME_FET] = np.divide(
-        8 * 1e6 * fets[features.WIRELEN_FET], fets[features.INTERARR_TIME_FET]
+    fets[features.INV_INTERARR_TIME_FET][1:] = np.divide(
+        8 * 1e6 * fets[features.WIRELEN_FET][1:], fets[features.INTERARR_TIME_FET][1:]
     )
 
     # Calculate RTT-related metrics.
-    fets[features.MIN_RTT_FET] = min_rtt_us
     fets[features.RTT_RATIO_FET] = np.divide(fets[features.RTT_FET], min_rtt_us)
 
     # Track which packets are definitely retransmissions. Ignore these
@@ -1144,12 +1113,14 @@ def parse_received_acks(
     retrans_pkts = set()
     # TODO: Update with support for Copa and Vivace's packet-based sequence numbers.
     packet_seq = False  # cca in {"copa", "vivace"}
-    highest_seq = recv_pkts[0][features.SEQ_FET]
+    highest_seq = fets[0][features.SEQ_FET]
     for j in range(1, num_pkts):
-        current_seq = recv_pkts[j][features.SEQ_FET]
+        # Note that Copa and Vivace use packet-level sequence numbers
+        # instead of TCP's byte-level sequence numbers.
+        current_seq = fets[j][features.SEQ_FET]
         prev_seq = fets[j - 1][features.SEQ_FET]
         highest_seq = max(highest_seq, prev_seq)
-        payload_bytes = recv_pkts[j][features.PAYLOAD_FET]
+        payload_bytes = fets[j][features.PAYLOAD_FET]
         prev_payload_bytes = fets[j - 1][features.PAYLOAD_FET]
 
         retrans = current_seq in unique_pkts or (
@@ -1193,9 +1164,6 @@ def parse_received_acks(
                 "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
             )
         fets[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
-        fets[j][features.PACKETS_LOST_TOTAL_FET] += utils.safe_add(
-            fets[j - 1][features.PACKETS_LOST_TOTAL_FET], pkt_loss_cur_estimate
-        )
         fets[j][features.LOSS_RATE_FET] = utils.safe_div(
             pkt_loss_cur_estimate, utils.safe_add(pkt_loss_cur_estimate, 1)
         )
@@ -1204,7 +1172,7 @@ def parse_received_acks(
     for (metric, _), alpha in itertools.product(features.EWMAS, features.ALPHAS):
         metric = features.make_ewma_metric(metric, alpha)
         # If this is not a desired feature, then skip it.
-        if metric not in fets_to_use:
+        if metric not in fets.dtype.names:
             continue
 
         if not metric.startswith(features.MATHIS_TPUT_FET):
@@ -1291,14 +1259,14 @@ def parse_received_acks(
     for (metric, _), win in itertools.product(features.WINDOWED, features.WINDOWS):
         metric = features.make_win_metric(metric, win)
         # If this is not a desired feature, then skip it.
-        if metric not in fets_to_use:
+        if metric not in fets.dtype.names:
             continue
 
         # Calculate windowed metrics only if an entire window has
         # elapsed since the start of the flow. Recall that the timestamps
         # have been adjusted so that the first packet starts at time 0.
         win_size_us = win * min_rtt_us
-        if (recv_time_cur_us - recv_pkts[0][features.ARRIVAL_TIME_FET]) < win_size_us:
+        if (recv_time_cur_us - fets[0][features.ARRIVAL_TIME_FET]) < win_size_us:
             logging.warning(
                 (
                     "Warning: Skipping all of windowed metric %s "
@@ -1337,8 +1305,8 @@ def parse_received_acks(
             new = utils.safe_mean(
                 fets[features.RTT_RATIO_FET], win_start_idx, num_pkts - 1
             )
-        # elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-        #     new = loss_event_rate(win_state, win, pkt_loss_cur_estimate)
+        elif metric.startswith(features.LOSS_EVENT_RATE_FET):
+            new = loss_event_rate(win_state, win, pkt_loss_cur_estimate)
         elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
             # 1 / sqrt(loss event rate).
             new = utils.safe_div(
@@ -1356,25 +1324,12 @@ def parse_received_acks(
             new = utils.safe_div(
                 win_losses, win_losses + (num_pkts - 1 - win_start_idx)
             )
-        elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-            continue
         elif metric.startswith(features.MATHIS_TPUT_FET):
-            # tput = (MSS / RTT) * (C / sqrt(p))
-            new = 10
-            # new = utils.safe_mul(
-            #     utils.safe_div(
-            #         utils.safe_mul(8, fets[-1][features.PAYLOAD_FET]),
-            #         utils.safe_div(fets[-1][features.RTT_FET], 1e6),
-            #     ),
-            #     utils.safe_div(
-            #         defaults.MATHIS_C,
-            #         utils.safe_sqrt(
-            #             fets[-1][
-            #                 features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
-            #             ]
-            #         ),
-            #     ),
-            # )
+            new = utils.safe_mathis_tput(
+                fets[j][features.PAYLOAD_FET],
+                fets[j][features.RTT_FET],
+                fets[j][features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)],
+            )
         else:
             raise Exception(f"Unknown windowed metric: {metric}")
         fets[-1][metric] = new
@@ -1397,9 +1352,6 @@ def parse_received_acks(
         used_rows == total_rows
     ), f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
-    # Remove unneeded features that were added as dependencies for the requested
-    # features.
-    fets = fets[list(in_spc_fet_names)]
     # Determine if there are any NaNs/Infs in the results. Just check the last packet.
     bad_fets = {fet for fet in fets.dtype.names if not np.isfinite(fets[-1][fet])}
     if bad_fets:
@@ -1407,137 +1359,140 @@ def parse_received_acks(
             "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
         )
 
-    final = np.zeros(1, dtype=fets.dtype)
-    final[0] = fets[-1]
-    return final
 
-
-def get_dependencies(in_spc_fet_names):
-    # If the in_spc contains any Mathis model features, then we need to be sure to add
-    # the corresponding loss event rate features.
-    fets_to_use = copy.copy(in_spc_fet_names)
-    to_add = []
-    for name in fets_to_use:
-        if features.MATHIS_TPUT_FET in name:
-            if "ewma" in name:
-                new_metric = features.make_ewma_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_ewma_metric(name)[1]
-                )
-            else:
-                new_metric = features.make_win_metric(
-                    features.LOSS_EVENT_RATE_FET, features.parse_win_metric(name)[1]
-                )
-            to_add.append(new_metric)
-        if features.INV_INTERARR_TIME_FET in name:
-            if "ewma" in name:
-                new_metric = features.make_ewma_metric(
-                    features.INTERARR_TIME_FET, features.parse_ewma_metric(name)[1]
-                )
-            else:
-                new_metric = features.make_win_metric(
-                    features.INTERARR_TIME_FET, features.parse_win_metric(name)[1]
-                )
-            to_add.append(new_metric)
-    fets_to_use.extend(to_add)
-    return fets_to_use
-
-
-def loss_event_rate(win_state, win, fets):
+def loss_event_rate(win, fets):
+    # Cannot compute loss event rate on a rolling bases...we only have one window's worth of data.
     return 0
 
-    # assert rtt_us != -1, "The RTT estimate is -1 (unknown), so we cannot compute the loss event rate."
 
-    # # Cannot compute loss event rate on a rolling bases...we only have one window's worth of data.
+    num_pkts = len(fets)
+    loss_events = [
+        {
+            "start_idx" : 0,
+            "end_idx" : 0,
+            "total_losses" : 0,
+            "total_packets" : 0
+        } for _ in range(win)]
 
-    # win_start_idx = win_state[win]["window_start_idx"]
-    # cur_start_idx = win_state[win]["current_loss_event_start_idx"]
-    # cur_start_time = win_state[win]["current_loss_event_start_time"]
-    # if pkt_loss_cur_estimate > 0:
-    #     # There was a loss since the last packet.
-    #     #
-    #     # The index of the first packet in the current
-    #     # loss event.
-    #     new_start_idx = j + pkt_loss_total_estimate - pkt_loss_cur_estimate
+    current_loss_event_idx = 0
+    for idx in range(1, num_pkts):
+        prev_arrival_time_us = fets[idx - 1][features.ARRIVAL_TIME_FET]
+        arrival_time_us = fets[idx][features.ARRIVAL_TIME_FET]
 
-    #     if cur_start_idx == 0:
-    #         # This is the first loss event.
-    #         #
-    #         # Naive fix for the loss event rate
-    #         # calculation The described method in the
-    #         # RFC is complicated for the first event
-    #         # handling.
-    #         cur_start_idx = 1
-    #         cur_start_time = 0
-    #         new = 1 / j
-    #     else:
-    #         # This is not the first loss event. See if
-    #         # any of the newly-lost packets start a
-    #         # new loss event.
-    #         #
-    #         # The average time between when packets
-    #         # should have arrived, since we received
-    #         # the last packet.
-    #         loss_interval = (recv_time_cur_us - recv_time_prev_us) / (
-    #             pkt_loss_cur_estimate + 1
-    #         )
+        current_rtt_us = fets[idx][features.RTT_FET]
+        num_losses = fets[idx][features.PACKETS_LOST_FET]
+        for pkt in num_losses:
+            estimated_time_us = prev_arrival_time_us + (arrival_time_us - prev_arrival_time_us) * (pkt + 1) / num_losses
+            if estimated_time_us < prev_arrival_time_us + current_rtt_us:
+                pass
+            else:
+                loss_events[current_loss_event_idx]["end_idx"] = idx - 1
+                current_loss_event_idx += 1
+                # Equivalent to current_loss_event_idx >= win
+                if current_loss_event_idx >= len(loss_events):
+                    raise RuntimeError("Selected too many packets.")
+                loss_events[current_loss_event_idx]["start_idx"] = idx
+            loss_events[current_loss_event_idx]["total_losses"] += 1
+            loss_events[current_loss_event_idx]["total_packets"] += 1
+        loss_events[current_loss_event_idx]["total_packets"] += 1
 
-    #         # Look at each lost packet...
-    #         for k in range(pkt_loss_cur_estimate):
-    #             # FIXME: There is a bug here. pkt_loss_cur_estimate grows
-    #             #        very large, causing this loop to take a long time.
-    #             #
-    #             #        It appears that we were not converting the sequence
-    #             #        number byte order.
 
-    #             # Compute the approximate time at
-    #             # which the packet should have been
-    #             # received if it had not been lost.
-    #             loss_time = recv_time_prev_us + (k + 1) * loss_interval
 
-    #             # If the time of this loss is more
-    #             # than one RTT from the time of the
-    #             # start of the current loss event,
-    #             # then this is a new loss event.
-    #             if loss_time - cur_start_time >= rtt_us:
-    #                 # Record the number of packets
-    #                 # between the start of the new
-    #                 # loss event and the start of the
-    #                 # previous loss event.
-    #                 win_state[win]["loss_event_intervals"].appendleft(
-    #                     new_start_idx - cur_start_idx
-    #                 )
-    #                 # Potentially discard an old event.
-    #                 if len(win_state[win]["loss_event_intervals"]) > win:
-    #                     win_state[win]["loss_event_intervals"].pop()
+    ############
 
-    #                 cur_start_idx = new_start_idx
-    #                 cur_start_time = loss_time
-    #             # Calculate the index at which the
-    #             # new loss event begins.
-    #             new_start_idx += 1
 
-    #         new = compute_weighted_average(
-    #             (j + pkt_loss_total_estimate - cur_start_idx),
-    #             win_state[win]["loss_event_intervals"],
-    #             win_state[win]["loss_interval_weights"],
-    #         )
-    # elif pkt_loss_total_estimate > 0:
-    #     # There have been no losses since the last
-    #     # packet, but the total loss is nonzero.
-    #     # Increase the size of the current loss event.
-    #     new = compute_weighted_average(
-    #         j + pkt_loss_total_estimate - cur_start_idx,
-    #         win_state[win]["loss_event_intervals"],
-    #         win_state[win]["loss_interval_weights"],
-    #     )
-    # else:
-    #     # There have never been any losses, so the
-    #     # loss event rate is 0.
-    #     new = 0
 
-    # # Record the new values of the state variables.
-    # win_state[win]["current_loss_event_start_idx"] = cur_start_idx
-    # win_state[win]["current_loss_event_start_time"] = cur_start_time
+
+
+    win_start_idx = win_state[win]["window_start_idx"]
+    cur_start_idx = win_state[win]["current_loss_event_start_idx"]
+    cur_start_time = win_state[win]["current_loss_event_start_time"]
+    if pkt_loss_cur_estimate > 0:
+        # There was a loss since the last packet.
+        #
+        # The index of the first packet in the current
+        # loss event.
+        new_start_idx = j + pkt_loss_total_estimate - pkt_loss_cur_estimate
+
+        if cur_start_idx == 0:
+            # This is the first loss event.
+            #
+            # Naive fix for the loss event rate
+            # calculation The described method in the
+            # RFC is complicated for the first event
+            # handling.
+            cur_start_idx = 1
+            cur_start_time = 0
+            new = 1 / j
+        else:
+            # This is not the first loss event. See if
+            # any of the newly-lost packets start a
+            # new loss event.
+            #
+            # The average time between when packets
+            # should have arrived, since we received
+            # the last packet.
+            loss_interval = (recv_time_cur_us - recv_time_prev_us) / (
+                pkt_loss_cur_estimate + 1
+            )
+
+            # Look at each lost packet...
+            for k in range(pkt_loss_cur_estimate):
+                # FIXME: There is a bug here. pkt_loss_cur_estimate grows
+                #        very large, causing this loop to take a long time.
+                #
+                #        It appears that we were not converting the sequence
+                #        number byte order.
+
+                # Compute the approximate time at
+                # which the packet should have been
+                # received if it had not been lost.
+                loss_time = recv_time_prev_us + (k + 1) * loss_interval
+
+                # If the time of this loss is more
+                # than one RTT from the time of the
+                # start of the current loss event,
+                # then this is a new loss event.
+                if loss_time - cur_start_time >= rtt_us:
+                    # Record the number of packets
+                    # between the start of the new
+                    # loss event and the start of the
+                    # previous loss event.
+                    win_state[win]["loss_event_intervals"].appendleft(
+                        new_start_idx - cur_start_idx
+                    )
+                    # Potentially discard an old event.
+                    if len(win_state[win]["loss_event_intervals"]) > win:
+                        win_state[win]["loss_event_intervals"].pop()
+
+                    cur_start_idx = new_start_idx
+                    cur_start_time = loss_time
+                # Calculate the index at which the
+                # new loss event begins.
+                new_start_idx += 1
+
+            new = compute_weighted_average(
+                (j + pkt_loss_total_estimate - cur_start_idx),
+                win_state[win]["loss_event_intervals"],
+                win_state[win]["loss_interval_weights"],
+            )
+    elif pkt_loss_total_estimate > 0:
+        # There have been no losses since the last
+        # packet, but the total loss is nonzero.
+        # Increase the size of the current loss event.
+        new = compute_weighted_average(
+            j + pkt_loss_total_estimate - cur_start_idx,
+            win_state[win]["loss_event_intervals"],
+            win_state[win]["loss_interval_weights"],
+        )
+    else:
+        # There have never been any losses, so the
+        # loss event rate is 0.
+        new = 0
+
+    # Record the new values of the state variables.
+    win_state[win]["current_loss_event_start_idx"] = cur_start_idx
+    win_state[win]["current_loss_event_start_time"] = cur_start_time
 
 
 def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
