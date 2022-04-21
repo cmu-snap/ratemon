@@ -1161,6 +1161,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             )
             # Get rid of all loss event rate features.
             and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+            # Get rid of windowed mathis model tput features because they use the loss
+            # event rate.
+            and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
         )
         # self.in_spc = (
         #     "throughput b/s-windowed-minRtt8",
