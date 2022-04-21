@@ -30,12 +30,22 @@ def parse_win_metric(metric):
 
 def make_smoothed_features():
     """Return a dtype for all EWMA and windowed metrics."""
-    return [
+    smoothed_features = [
         (make_ewma_metric(metric, alpha), typ)
         for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)
     ] + [
         (make_win_metric(metric, win), typ)
         for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)
+    ]
+    # Drop features that use loss event rate with a window of less than 4.
+    return [
+        fet
+        for fet in smoothed_features
+        if not (
+            "windowed" in fet
+            and (fet.startswith(LOSS_EVENT_RATE_FET) or fet.startswith(MATHIS_TPUT_FET))
+            and parse_win_metric(fet)[1] < 4
+        )
     ]
 
 
