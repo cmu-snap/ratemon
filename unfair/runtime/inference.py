@@ -26,7 +26,7 @@ def inference(net, flowkey, min_rtt_us, fets, prev_fets=None, debug=False):
     Returns a label (below fair, approximately fair, above fair), the updated
     min_rtt_us, and the features of the last packet.
     """
-    gen_features.parse_received_acks(flowkey, min_rtt_us, fets, prev_fets)
+    gen_features.parse_received_packets(flowkey, min_rtt_us, fets, prev_fets)
 
     # Remove unneeded features that were added as dependencies for the requested
     # features. Only run prediction on the last packet.

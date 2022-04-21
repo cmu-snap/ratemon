@@ -1062,7 +1062,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     return smallest_safe_win
 
 
-def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
+def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
     """Generate features for the inference runtime.
 
     Requires the existing minimum RTT (microseconds).
@@ -1095,16 +1095,20 @@ def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
     fets[features.INTERARR_TIME_FET][1:] = (
         fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
     )
+    # Change any interarrival times of 0 to 1. This is technically incorrect. An
+    # interarrival time of 0 us just means that the timestamping is not fine-grained
+    # enough. It means that the instantaneous throughput is greater than ~12 Gbps. But
+    # that's basically infinite in terms of our context of ~100 Mbps, so just limiting
+    # it to 12 Gbps (by setting interarrival time to 1 us) seems fine.
+    fets[features.INTERARR_TIME_FET][fets[features.INTERARR_TIME_FET] == 0] = 1
     fets[features.INV_INTERARR_TIME_FET][1:] = np.divide(
         8 * 1e6 * fets[features.WIRELEN_FET][1:], fets[features.INTERARR_TIME_FET][1:]
     )
 
-    # Calculate RTT-related metrics.
     fets[features.RTT_RATIO_FET] = np.divide(fets[features.RTT_FET], min_rtt_us)
 
-    fets[-1][features.LOSS_RATE_FET] = utils.safe_div(
-        fets[-1][features.PACKETS_LOST_FET],
-        utils.safe_add(fets[-1][features.PACKETS_LOST_FET], 1),
+    fets[features.LOSS_RATE_FET] = fets[features.PACKETS_LOST_FET] / (
+        fets[features.PACKETS_LOST_FET] + 1
     )
 
     # EWMA metrics.
