@@ -43,30 +43,33 @@ class LossTracker:
         ]
 
     def update_for_new_packet(self, prev_pkt, cur_pkt, packets_lost):
-        prev_arrival_time_us = prev_pkt[4]
-        cur_arrival_time_us = cur_pkt[4]
-        interloss_time_us = (cur_arrival_time_us - prev_arrival_time_us) / packets_lost
-        cur_rtt_us = cur_pkt[1]
+        if packets_lost > 0:
+            prev_arrival_time_us = prev_pkt[4]
+            cur_arrival_time_us = cur_pkt[4]
+            interloss_time_us = (
+                cur_arrival_time_us - prev_arrival_time_us
+            ) / packets_lost
+            cur_rtt_us = cur_pkt[1]
 
-        for pkt in range(packets_lost):
-            loss_time_us = prev_arrival_time_us + (pkt + 1) * interloss_time_us
-            if loss_time_us <= self.loss_events[0]["start_time_us"] + cur_rtt_us:
-                # This loss is within one RTT of the start of the current loss event,
-                # so it is still in the same loss event.
-                pass
-            else:
-                # This loss is more than one RTT later than the start of the current
-                # loss event, so it starts a new loss event.
-                self.loss_events.appendleft(self.new_loss_event())
-                self.loss_events[0]["start_time_us"] = loss_time_us
-                if len(self.loss_events) > self.largest_window + 1:
-                    # Keep around the data for one more loss event than the max because
-                    # the current loss event might not be included in the loss event
-                    # rate calculation.
-                    self.loss_events.pop()
-            # Account for the packet that was lost.
-            # loss_events[0]["total_losses"] += 1
-            self.loss_events[0]["total_packets"] += 1
+            for pkt in range(packets_lost):
+                loss_time_us = prev_arrival_time_us + (pkt + 1) * interloss_time_us
+                if loss_time_us <= self.loss_events[0]["start_time_us"] + cur_rtt_us:
+                    # This loss is within one RTT of the start of the current loss event,
+                    # so it is still in the same loss event.
+                    pass
+                else:
+                    # This loss is more than one RTT later than the start of the current
+                    # loss event, so it starts a new loss event.
+                    self.loss_events.appendleft(self.new_loss_event())
+                    self.loss_events[0]["start_time_us"] = loss_time_us
+                    if len(self.loss_events) > self.largest_window + 1:
+                        # Keep around the data for one more loss event than the max because
+                        # the current loss event might not be included in the loss event
+                        # rate calculation.
+                        self.loss_events.pop()
+                # Account for the packet that was lost.
+                # loss_events[0]["total_losses"] += 1
+                self.loss_events[0]["total_packets"] += 1
         # Account for the packet that was actually received.
         self.loss_events[0]["total_packets"] += 1
 
@@ -78,11 +81,13 @@ class LossTracker:
         self.highest_seq = max(self.highest_seq, prev_seq)
         payload_bytes = cur_pkt[3]
         prev_payload_bytes = prev_pkt[3]
+        if payload_bytes == 0 or prev_payload_bytes == 0:
+            return 0
 
         # Detect sequence number wraparound and adjust the previous sequence number
         # accordingly.
         # TODO: Right now we just skip this packet.
-        estimated_cur_seq = prev_seq + (1 if self.packet_seq else payload_bytes)
+        estimated_cur_seq = prev_seq + (1 if self.packet_seq else prev_payload_bytes)
         if estimated_cur_seq > 2**32:
             logging.warning("Warning: Sequence number wraparound detected")
             # old_prev_seq = prev_seq
@@ -150,10 +155,12 @@ class LossTracker:
 
     def loss_event_rate(self, pkts):
         num_pkts = len(pkts)
-        packets_lost = []
+        # Since we need a previous packet, we cannot calculate anything for the first
+        # packet. Assume no loss.
+        packets_lost = [0]
         for idx in range(1, num_pkts):
             cur_packets_lost = self.get_packets_lost(pkts[idx - 1], pkts[idx])
-            packets_lost.append(packets_lost)
+            packets_lost.append(cur_packets_lost)
             self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
 
         return packets_lost, {
