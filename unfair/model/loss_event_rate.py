@@ -5,7 +5,7 @@ import logging
 class LossTracker:
     def __init__(self, window_sizes=[8]):
         self.window_sizes = window_sizes
-        self.largest_window = max(self.window_sizes)
+        self.largest_window = max(self.window_sizes) if window_sizes else None
         # Track which packets are definitely retransmissions. Ignore these
         # packets when estimating the RTT. Note that because we are doing
         # receiver-side retransmission tracking, it is possible that there are
@@ -164,7 +164,8 @@ class LossTracker:
         for idx in range(1, num_pkts):
             cur_packets_lost = self.get_packets_lost(pkts[idx - 1], pkts[idx])
             packets_lost.append(cur_packets_lost)
-            self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
+            if self.largest_window is not None:
+                self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
 
         return packets_lost, {
             max_loss_events: self.calculate_loss_event_rate(weights)
