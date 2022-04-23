@@ -30,7 +30,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features_small_windows.pickle",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_no-loss-event-rate_selected-features.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
