@@ -42,10 +42,10 @@ python "$unfair_dir/model/train.py" \
     --conf-trials=1 \
     --max-iter=10000 \
     --tag="$tag" \
-    --early-stop \
-    --analyze-features \
-    --clusters=15 \
-    --features-to-pick=10 \
-    --permutation-importance-repeats=1
+    --early-stop
+    # --analyze-features \
+    # --clusters=15 \
+    # --features-to-pick=10 \
+    # --permutation-importance-repeats=1
     # --balance \
     # --drop-popular
