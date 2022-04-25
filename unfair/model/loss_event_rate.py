@@ -5,7 +5,7 @@ import logging
 class LossTracker:
     def __init__(self, window_sizes=[8]):
         self.window_sizes = window_sizes
-        self.largest_window = max(self.window_sizes)
+        self.largest_window = max(self.window_sizes) if window_sizes else None
         # Track which packets are definitely retransmissions. Ignore these
         # packets when estimating the RTT. Note that because we are doing
         # receiver-side retransmission tracking, it is possible that there are
@@ -54,8 +54,8 @@ class LossTracker:
             for pkt in range(packets_lost):
                 loss_time_us = prev_arrival_time_us + (pkt + 1) * interloss_time_us
                 if loss_time_us <= self.loss_events[0]["start_time_us"] + cur_rtt_us:
-                    # This loss is within one RTT of the start of the current loss event,
-                    # so it is still in the same loss event.
+                    # This loss is within one RTT of the start of the current loss
+                    # event, so it is still in the same loss event.
                     pass
                 else:
                     # This loss is more than one RTT later than the start of the current
@@ -63,9 +63,9 @@ class LossTracker:
                     self.loss_events.appendleft(self.new_loss_event())
                     self.loss_events[0]["start_time_us"] = loss_time_us
                     if len(self.loss_events) > self.largest_window + 1:
-                        # Keep around the data for one more loss event than the max because
-                        # the current loss event might not be included in the loss event
-                        # rate calculation.
+                        # Keep around the data for one more loss event than the max
+                        # because the current loss event might not be included in the
+                        # loss event rate calculation.
                         self.loss_events.pop()
                 # Account for the packet that was lost.
                 # loss_events[0]["total_losses"] += 1
@@ -136,19 +136,18 @@ class LossTracker:
             logging.debug(
                 "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
             )
-
         return pkt_loss_cur_estimate
 
-    def calculate_loss_event_rate(self, loss_events, weights):
+    def calculate_loss_event_rate(self, weights):
         """Use to calculate loss event rate."""
         interval_total_0 = 0
         interval_total_1 = 0
         weights_total = 0
-        for i in range(len(weights)):
-            interval_total_0 += loss_events[i]["total_packets"] * weights[i]
+        for i in range(min(len(self.loss_events), len(weights))):
+            interval_total_0 += self.loss_events[i]["total_packets"] * weights[i]
             weights_total += weights[i]
-        for i in range(1, len(weights) + 1):
-            interval_total_1 += loss_events[i]["total_packets"] * weights[i - 1]
+        for i in range(1, min(len(self.loss_events), len(weights) + 1)):
+            interval_total_1 += self.loss_events[i]["total_packets"] * weights[i - 1]
         interval_total = max(interval_total_0, interval_total_1)
         interval_mean = interval_total / weights_total
         return 1 / interval_mean
@@ -161,9 +160,10 @@ class LossTracker:
         for idx in range(1, num_pkts):
             cur_packets_lost = self.get_packets_lost(pkts[idx - 1], pkts[idx])
             packets_lost.append(cur_packets_lost)
-            self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
+            if self.largest_window is not None:
+                self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
 
         return packets_lost, {
-            max_loss_events: self.calculate_loss_event_rate(self.loss_events, weights)
+            max_loss_events: self.calculate_loss_event_rate(weights)
             for max_loss_events, weights in self.weights.items()
         }
