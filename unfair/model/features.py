@@ -97,6 +97,7 @@ TPUT_FAIR_SHARE_BPS_FET = "throughput fair share b/s"
 TPUT_TO_FAIR_SHARE_RATIO_FET = "throughput to fair share ratio"
 LABEL_FET = "class"
 MATHIS_TPUT_FET = "mathis model throughput b/s"
+# JAINS_FAIRNESS_FET = "Jain's fairness index"
 
 # Additional features used when parking packets.
 TS_1_FET = "timestamp 1 us"
@@ -127,6 +128,7 @@ REGULAR = [
     (ACTIVE_FLOWS_FET, "int32"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
     (BW_FAIR_SHARE_BPS_FET, "float64"),
+    # (JAINS_FAIRNESS_FET, "float64")
 ]
 
 # These metrics are exponentially-weighted moving averages (EWMAs),

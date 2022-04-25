@@ -1282,14 +1282,14 @@ def parse_received_acks(flw, min_rtt_us, fets, previous_fets=None):
         )
 
 
-def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed):
+def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed, parse_func=parse_opened_exp):
     """Lock, untar, and parse an experiment."""
     exp = utils.Exp(exp_flp)
     out_flp = path.join(out_dir, f"{exp.name}.npz")
     with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
         if locked and exp_dir is not None:
             try:
-                return parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed)
+                return parse_func(exp, exp_flp, exp_dir, out_flp, skip_smoothed)
             except AssertionError:
                 traceback.print_exc()
                 return -1
@@ -1304,9 +1304,7 @@ def _main():
     )
     psr.add_argument(
         "--exp-dir",
-        help=(
-            "The directory in which the experiment results are stored " "(required)."
-        ),
+        help="The directory in which the experiment results are stored.",
         required=True,
         type=str,
     )
