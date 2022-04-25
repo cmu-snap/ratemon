@@ -80,8 +80,6 @@ def make_decision(
     else:
         tput_bps = utils.safe_tput_bps(fets, 0, len(fets) - 1)
         if label == defaults.Class.ABOVE_FAIR:
-            # if flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
-            #     logging.info("existing_tput_bps: %f", flow_to_decisions[flowkey][1])
             # This flow is sending too fast. Force the sender to slow down.
             new_tput_bps = reaction_strategy.react_down(
                 args.reaction_strategy,
@@ -355,15 +353,19 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             packets_in_batch += len(pkts)
             batch_proc_time_s += time.time() - features_start_time_s
 
-        # If the batch is full (or taking a long time to fill), then run inference.
-        batch_build_time_s = time.time() - batch_start_time_s
+        # If the batch is full, then run inference. Also run inference if it has been a
+        # long time since we ran inference last. A "long time" is defined as the max of
+        # 1 second and the inference interval (if the inference interval is defined).
         if batch and (
             len(batch) >= args.batch_size
-            or batch_build_time_s
-            > (
-                args.inference_interval_ms / 1e3
-                if args.inference_interval_ms is not None
-                else 1
+            or time.time() - batch_start_time_s
+            > max(
+                1,
+                (
+                    args.inference_interval_ms / 1e3
+                    if args.inference_interval_ms is not None
+                    else 1
+                ),
             )
         ):
             logging.info("Running inference on a batch of %d flow(s).", len(batch))
