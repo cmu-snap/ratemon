@@ -178,15 +178,17 @@ def check_flows(args, longest_window, que, inference_flags):
                     if flow.incoming_packets:
                         logging.info(
                             (
-                                "Flow %s span: %.2f s, min_rtt: %.2f us, "
-                                "longest window: %d, required span: %.2f s"
+                                "Flow %s - packets: %d, min_rtt: %.2f us, "
+                                "longest window: %d, required span: %.2f s, "
+                                "span: %.2f s"
                             ),
                             flow,
-                            (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
-                            / 1e6,
+                            len(flow.incoming_packets),
                             flow.min_rtt_us,
                             longest_window,
                             flow.min_rtt_us * longest_window / 1e6,
+                            (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
+                            / 1e6,
                         )
                     if flow.incoming_packets and (
                         # Check if the time span covered by the packets is greater than
@@ -243,36 +245,37 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
         # or running for this flow.
         if inference_flags[fourtuple].value == 0:
             inference_flags[fourtuple].value = 1
-            try:
-                # Calculate packets lost and loss event rate. Do this on all packets
-                # because the loss event rate is based on current RTT, not minRTT, so
-                # just the packets we send to inference will not be enough. Note that
-                # the loss event rate results are just for the last packet.
-                (
-                    packets_lost,
-                    win_to_loss_event_rate,
-                ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
 
-                # Discard all but the minimum number of packets required to calculate
-                # the longest window's features.
-                end_time_us = flow.incoming_packets[-1][4]
-                for idx in range(1, len(flow.incoming_packets)):
-                    if (
-                        end_time_us - flow.incoming_packets[idx][4]
-                        < flow.min_rtt_us * longest_window
-                    ):
-                        break
-                flow.incoming_packets = flow.incoming_packets[idx - 1 :]
-                packets_lost = packets_lost[idx - 1 :]
+            # Calculate packets lost and loss event rate. Do this on all packets
+            # because the loss event rate is based on current RTT, not minRTT, so
+            # just the packets we send to inference will not be enough. Note that
+            # the loss event rate results are just for the last packet.
+            (
+                packets_lost,
+                win_to_loss_event_rate,
+            ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
 
-                logging.info(
-                    "Scheduling inference on most recent %d packets for flow: %s",
-                    len(flow.incoming_packets),
-                    flow,
-                )
-                if args.disable_inference:
-                    inference_flags[fourtuple].value = 0
-                else:
+            # Discard all but the minimum number of packets required to calculate
+            # the longest window's features.
+            end_time_us = flow.incoming_packets[-1][4]
+            for idx in range(1, len(flow.incoming_packets)):
+                if (
+                    end_time_us - flow.incoming_packets[idx][4]
+                    < flow.min_rtt_us * longest_window
+                ):
+                    break
+            flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+            packets_lost = packets_lost[idx - 1 :]
+
+            logging.info(
+                "Scheduling inference on most recent %d packets for flow: %s",
+                len(flow.incoming_packets),
+                flow,
+            )
+            if args.disable_inference:
+                inference_flags[fourtuple].value = 0
+            else:
+                try:
                     que.put(
                         (
                             "inference",
@@ -284,11 +287,12 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                         ),
                         block=False,
                     )
-            except queue.Full:
-                logging.warning("Warning: Inference queue full!")
-            else:
-                # Reset the flow.
+                except queue.Full:
+                    logging.warning("Warning: Inference queue full!")
+
                 flow.incoming_packets = []
+        else:
+            logging.info("Skipping inference for flow: %s", flow)
 
 
 def pcapy_sniff(args, done):
@@ -454,7 +458,8 @@ def parse_args():
         default=10,
         help="The number of flows to run inference on in parallel.",
         required=False,
-        type=int)
+        type=int,
+    )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)

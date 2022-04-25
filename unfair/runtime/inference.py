@@ -38,7 +38,7 @@ def predict(net, in_fets, debug=False):
     preds = net.predict(in_fets)
     logging.info("Prediction time: %.2f ms", (time.time() - pred_start_s) * 1e3)
 
-    return [defaults.Class(pred) for pred in preds][0:1]
+    return [defaults.Class(pred) for pred in preds]
 
 
 def populate_features(net, flowkey, min_rtt_us, fets, prev_fets):
@@ -106,8 +106,8 @@ def make_decision(
                 # aggressive, then let it send faster.
                 new_tput_bps = reaction_strategy.react_up(
                     args.reaction_strategy,
-                    # If the flow was already paced, then based the new paced throughput on
-                    # the old paced throughput.
+                    # If the flow was already paced, then base the new paced
+                    # throughput on the old paced throughput.
                     flow_to_decisions[flowkey][1]
                     if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
                     else tput_bps,
@@ -287,55 +287,88 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     )
 
     logging.info("Inference ready!")
+    packets_in_batch = 0
+    batch_proc_time_s = 0
+    batch = []
+    batch_start_time_s = time.time()
     while not done.is_set():
-        batch = []
-        packets_in_batch = 0
-        batch_proc_time_s = 0
-        batch_start_time_s = time.time()
-
+        val = None
         try:
             val = que.get(timeout=1)
-            # For some reason, the queue returns True or None when the thread on the
-            # other end dies.
-            if not isinstance(val, tuple):
-                continue
         except queue.Empty:
-            continue
+            pass
 
-        opcode, fourtuple = val[:2]
-        flowkey = flow_utils.FlowKey(*fourtuple)
-        if opcode == "inference":
-            pkts, packets_lost, min_rtt_us, win_to_loss_event_rate = val[2:]
-        elif opcode == "remove":
-            logging.info("Inference process: Removing flow %s", flowkey)
-            if flowkey in flow_to_rwnd:
-                del flow_to_rwnd[flowkey]
-            if flowkey in flow_to_decisions:
-                del flow_to_decisions[flowkey]
-            if flowkey in flow_to_prev_features:
-                del flow_to_prev_features[flowkey]
-            continue
-        else:
-            raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
+        # For some reason, the queue returns True or None when the thread on the
+        # other end dies.
+        if isinstance(val, tuple):
+            opcode, fourtuple = val[:2]
+            flowkey = flow_utils.FlowKey(*fourtuple)
+            if opcode == "inference":
+                pkts, packets_lost, min_rtt_us, win_to_loss_event_rate = val[2:]
+            elif opcode == "remove":
+                logging.info("Inference process: Removing flow %s", flowkey)
+                if flowkey in flow_to_rwnd:
+                    del flow_to_rwnd[flowkey]
+                if flowkey in flow_to_decisions:
+                    del flow_to_decisions[flowkey]
+                if flowkey in flow_to_prev_features:
+                    del flow_to_prev_features[flowkey]
+                continue
+            else:
+                raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
 
-        try:
             features_start_time_s = time.time()
-            # Prepare the numpy array in which we will store the features.
-            all_fets = packets_to_ndarray(
-                pkts, dtype, packets_lost, win_to_loss_event_rate
-            )
-            # Populate the above numpy array with features and return a pruned version
-            # containing only the model input features for the last packet.
-            in_fets = populate_features(
-                net, flowkey, min_rtt_us, all_fets, flow_to_prev_features.get(flowkey)
-            )
+            try:
+                # Prepare the numpy array in which we will store the features.
+                all_fets = packets_to_ndarray(
+                    pkts, dtype, packets_lost, win_to_loss_event_rate
+                )
+                # Populate the above numpy array with features and return a pruned
+                # version containing only the model input features for the last packet.
+                in_fets = populate_features(
+                    net,
+                    flowkey,
+                    min_rtt_us,
+                    all_fets,
+                    flow_to_prev_features.get(flowkey),
+                )
+            except AssertionError:
+                # Assertion errors mean this batch of packets violated some
+                # precondition, but we are safe to skip them and continue.
+                logging.warning(
+                    "Inference failed due to a non-fatal assertion failure:\n%s",
+                    traceback.format_exc(),
+                )
+                inference_flags[fourtuple].value = 0
+                continue
+            except Exception as exp:
+                # An unexpected error occurred. It is not safe to continue. Reraise the
+                # exception to kill the process.
+                logging.error(
+                    "Inference failed due to an unexpected error:\n%s",
+                    traceback.format_exc(),
+                )
+                raise exp
+
             batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
+            logging.info("Adding flow %s to batch.", flowkey)
             packets_in_batch += len(pkts)
             batch_proc_time_s += time.time() - features_start_time_s
 
-            # If the batch is full (or taking a long time to fill), then run inference.
-            if len(batch) >= args.batch_size or (time.time() - batch_start_time_s) > 1:
-                inference_start_time_s = time.time()
+        # If the batch is full (or taking a long time to fill), then run inference.
+        batch_build_time_s = time.time() - batch_start_time_s
+        if batch and (
+            len(batch) >= args.batch_size
+            or batch_build_time_s
+            > (
+                args.inference_interval_ms / 1e3
+                if args.inference_interval_ms is not None
+                else 1
+            )
+        ):
+            logging.info("Running inference on a batch of %d flow(s).", len(batch))
+            inference_start_time_s = time.time()
+            try:
                 batch_inference(
                     args,
                     net,
@@ -344,37 +377,40 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                     flow_to_decisions,
                     flow_to_rwnd,
                 )
-
-                batch_proc_time_s += time.time() - inference_start_time_s
-                pps = packets_in_batch / batch_proc_time_s
-                logging.info(
-                    "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
-                    batch_proc_time_s * 1e3,
-                    pps,
-                    pps * 1514 * 8 / 1e6,
+            except AssertionError:
+                # Assertion errors mean this batch of packets violated some
+                # precondition, but we are safe to skip them and continue.
+                logging.warning(
+                    "Inference failed due to a non-fatal assertion failure:\n%s",
+                    traceback.format_exc(),
                 )
+                continue
+            except Exception as exp:
+                # An unexpected error occurred. It is not safe to continue. Reraise the
+                # exception to kill the process.
+                logging.error(
+                    "Inference failed due to an unexpected error:\n%s",
+                    traceback.format_exc(),
+                )
+                raise exp
+            else:
+                batch_proc_time_s += time.time() - inference_start_time_s
+            finally:
+                for fourtuple, _, _, _, _ in batch:
+                    inference_flags[fourtuple].value = 0
 
-                batch = []
-                batch_start_time_s = time.time()
-        except AssertionError:
-            # Assertion errors mean this batch of packets violated some precondition,
-            # but we are safe to skip them and continue.
-            logging.warning(
-                "Inference failed due to a non-fatal assertion failure:\n%s",
-                traceback.format_exc(),
+            pps = packets_in_batch / batch_proc_time_s
+            logging.info(
+                "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
+                batch_proc_time_s * 1e3,
+                pps,
+                pps * 1514 * 8 / 1e6,
             )
-            continue
-        except Exception as exp:
-            # An unexpected error occurred. It is not safe to continue. Reraise the
-            # exception to kill the process.
-            logging.error(
-                "Inference failed due to an unexpected error:\n%s",
-                traceback.format_exc(),
-            )
-            raise exp
-        finally:
-            for fourtuple, _, _, _, _ in batch:
-                inference_flags[fourtuple].value = 0
+
+            batch = []
+            packets_in_batch = 0
+            batch_proc_time_s = 0
+            batch_start_time_s = time.time()
 
 
 def batch_inference(
@@ -385,16 +421,16 @@ def batch_inference(
     flow_to_decisions,
     flow_to_rwnd,
 ):
-    in_fets = np.empty(len(batch), dtype=batch[0][2].dtype)
+    batch_fets = np.empty(len(batch), dtype=batch[0][4].dtype)
     for idx, (_, _, _, _, in_fets) in enumerate(batch):
-        in_fets[idx] = in_fets
+        batch_fets[idx] = in_fets
 
-    labels = predict(net, in_fets, args.debug)
-    for flow_key, fets in batch:
-        flow_to_prev_features[flow_key] = fets[-1]
+    labels = predict(net, batch_fets, args.debug)
+
+    for (_, flowkey, _, _, in_fets) in batch:
+        flow_to_prev_features[flowkey] = in_fets[-1]
 
     for (_, flowkey, min_rtt_us, all_fets, _), label in zip(batch, labels):
-        # Inference succeeded.
         make_decision(
             args,
             flowkey,

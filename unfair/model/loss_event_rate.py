@@ -136,10 +136,6 @@ class LossTracker:
             logging.debug(
                 "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
             )
-
-        if pkt_loss_cur_estimate != 0:
-            print(f"foo: {pkt_loss_cur_estimate}")
-
         return pkt_loss_cur_estimate
 
     def calculate_loss_event_rate(self, weights):
