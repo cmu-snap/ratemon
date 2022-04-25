@@ -449,6 +449,12 @@ def parse_args():
         required=True,
         type=str,
     )
+    parser.add_argument(
+        "--batch-size",
+        default=10,
+        help="The number of flows to run inference on in parallel.",
+        required=False,
+        type=int)
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
@@ -459,6 +465,9 @@ def parse_args():
     if args.schedule is not None:
         assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
         args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
+    assert (
+        args.batch_size > 0
+    ), f'"--batch-size" must be greater than 0, but is: {args.batch_size}'
 
     assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
     return args
