@@ -244,8 +244,7 @@ def main(args):
             (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
             util_disabled * 100,
             util_enabled * 100,
-            (util_enabled - util_disabled) * 100,
-            (util_enabled - util_disabled) / util_disabled * 100,
+            (util_enabled - util_disabled) * 100
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w") as fil:
@@ -258,7 +257,6 @@ def main(args):
         jfi_deltas_percent,
         utils_disabled,
         utils_enabled,
-        _,
         util_deltas_percent,
     ) = list(zip(*matched.values()))
 
@@ -301,7 +299,7 @@ def main(args):
         f"{np.mean(jfis_enabled):.4f}",
     )
     print(
-        "\nOverall link utilization change (percent) "
+        "\nOverall link utilization change "
         "--- higher is better, want to be >= 0%:\n"
         f"\tAvg: {np.mean(util_deltas_percent):.4f} %\n"
         f"\tStddev: {np.std(util_deltas_percent):.4f} %\n"
