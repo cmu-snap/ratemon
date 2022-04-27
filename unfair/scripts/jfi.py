@@ -25,13 +25,14 @@ def plot_hist(args, jfis):
     plt.xlabel("JFI")
     plt.ylabel("Probability (%)")
     plt.title("Histogram of JFI, with and without unfairness monitor")
-    # plt.text(60, .025, r'$\mu=100,\ \sigma=15$')
-    # plt.xlim(40, 160)
-    # plt.ylim(0, 0.03)
-    plt.grid(True)
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
-    plt.savefig(path.join(args.out_dir, "jfi_hist.pdf"))
+
+    hist_flp = path.join(args.out_dir, "jfi_hist.pdf")
+    plt.savefig(hist_flp)
+    plt.close()
+    print("Saved histogram to:", hist_flp)
 
 
 def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
@@ -209,7 +210,7 @@ def main(args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluation.")
+    parser = argparse.ArgumentParser(description="Evaluate Jain's Fairness Index.")
     parser.add_argument(
         "--exp-dir",
         help="The directory in which the experiment results are stored.",
