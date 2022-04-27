@@ -15,27 +15,52 @@ import numpy as np
 from unfair.model import defaults, features, gen_features, utils
 
 
-def plot_jfi_hist(args, jfis_disabled, jfis_enabled):
-    plt.hist(
-        jfis_disabled,
-        bins=50,
-        density=True,
-        facecolor="r",
+def plot_cdf(args, disabled, enabled, x_label, filename):
+    count, bins_count = np.histogram(disabled, bins=len(disabled))
+    plt.plot(
+        bins_count[1:],
+        np.cumsum(count / sum(count)),
         alpha=0.75,
+        color="r",
         label="Disabled",
     )
-    plt.hist(
-        jfis_enabled, bins=50, density=True, facecolor="g", alpha=0.75, label="Enabled"
+
+    count, bins_count = np.histogram(enabled, bins=len(enabled))
+    plt.plot(
+        bins_count[1:],
+        np.cumsum(count / sum(count)),
+        alpha=0.75,
+        color="g",
+        label="Enabled",
     )
 
-    plt.xlabel("JFI")
-    plt.ylabel("Probability (%)")
-    plt.title("Histogram of JFI, with and without unfairness monitor")
+    plt.xlabel(x_label)
+    plt.ylabel("CDF")
+    plt.title(f"CDF of {x_label}, with and without unfairness monitor")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
 
-    hist_flp = path.join(args.out_dir, "jfi_hist.pdf")
+    cdf_flp = path.join(args.out_dir, filename)
+    plt.savefig(cdf_flp)
+    plt.close()
+    print("Saved CDF to:", cdf_flp)
+
+
+def plot_hist(args, disabled, enabled, x_label, filename):
+    plt.hist(
+        disabled, bins=50, density=True, facecolor="r", alpha=0.75, label="Disabled"
+    )
+    plt.hist(enabled, bins=50, density=True, facecolor="g", alpha=0.75, label="Enabled")
+
+    plt.xlabel(x_label)
+    plt.ylabel("probability (%)")
+    plt.title(f"Histogram of {x_label}, with and without unfairness monitor")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    hist_flp = path.join(args.out_dir, filename)
     plt.savefig(hist_flp)
     plt.close()
     print("Saved histogram to:", hist_flp)
@@ -217,24 +242,54 @@ def main(args):
             jfi_enabled,
             jfi_enabled - jfi_disabled,
             (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
-            util_disabled,
-            util_enabled,
-            util_enabled - util_disabled,
+            util_disabled * 100,
+            util_enabled * 100,
+            (util_enabled - util_disabled) * 100,
             (util_enabled - util_disabled) / util_disabled * 100,
         )
-
-    jfis_disabled, jfis_enabled = list(zip(*matched.values()))[:2]
-    plot_jfi_hist(args, jfis_disabled, jfis_enabled)
-
     # Save JFI results.
-    with open(path.join(args.out_dir, "jfi_deltas.json"), "w") as fil:
-        json.dump(
-            {exp.name: results for exp, results in matched.items()}, fil, indent=4
-        )
+    with open(path.join(args.out_dir, "results.json"), "w") as fil:
+        json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
 
-    jfis_enabled = np.array(list(zip(*matched.values()))[1])
-    # Extract the JFI deltas as a numpy array.
-    jfi_deltas_percent = np.array(list(zip(*matched.values()))[3])
+    (
+        jfis_disabled,
+        jfis_enabled,
+        _,
+        jfi_deltas_percent,
+        utils_disabled,
+        utils_enabled,
+        _,
+        util_deltas_percent,
+    ) = list(zip(*matched.values()))
+
+    plot_hist(args, jfis_disabled, jfis_enabled, "JFI", "jfi_hist.pdf")
+    plot_hist(
+        args, utils_disabled, utils_enabled, "link utilization (%)", "util_hist.pdf"
+    )
+    plot_cdf(
+        args,
+        # [1 - x for x in jfis_disabled],
+        # [1 - x for x in jfis_enabled],
+        jfis_disabled,
+        jfis_enabled,
+        "JFI",
+        "jfi_cdf.pdf",
+    )
+    plot_cdf(
+        args,
+        [100 - x for x in utils_disabled],
+        [100 - x for x in utils_enabled],
+        "unused link capacity (%)",
+        "unused_util_cdf.pdf",
+    )
+    plot_cdf(
+        args,
+        utils_disabled,
+        utils_enabled,
+        "link utilization (%)",
+        "util_cdf.pdf",
+    )
+
     print(
         "\nOverall JFI change (percent) --- higher is better:\n"
         f"\tAvg: {np.mean(jfi_deltas_percent):.4f} %\n"
@@ -245,10 +300,6 @@ def main(args):
         "Overall average JFI with monitor enabled:",
         f"{np.mean(jfis_enabled):.4f}",
     )
-
-    utils_enabled = np.array(list(zip(*matched.values()))[5])
-    # Extract the utilization deltas as a numpy array.
-    util_deltas_percent = np.array(list(zip(*matched.values()))[7])
     print(
         "\nOverall link utilization change (percent) "
         "--- higher is better, want to be >= 0%:\n"
