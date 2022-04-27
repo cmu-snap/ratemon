@@ -2,15 +2,36 @@
 
 import argparse
 import json
+import matplotlib.pyplot as plt
 import multiprocessing
 import os
 from os import path
+import pickle
 import sys
 import time
 
 import numpy as np
 
 from unfair.model import defaults, features, gen_features, utils
+
+
+def plot_hist(args, jfis):
+    disabled, enabled, _ = zip(*jfis.values())
+    plt.hist(
+        disabled, bins=50, density=True, facecolor="r", alpha=0.75, label="Disabled"
+    )
+    plt.hist(enabled, bins=50, density=True, facecolor="g", alpha=0.75, label="Enabled")
+
+    plt.xlabel("JFI")
+    plt.ylabel("Probability (%)")
+    plt.title("Histogram of JFI, with and without unfairness monitor")
+    # plt.text(60, .025, r'$\mu=100,\ \sigma=15$')
+    # plt.xlim(40, 160)
+    # plt.ylim(0, 0.03)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(path.join(args.out_dir, "jfi_hist.pdf"))
 
 
 def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
@@ -90,7 +111,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     #         out_flp,
     #         **{str(k + 1): v for k, v in enumerate(flw_results[flw] for flw in flws)},
     #     )
-    return exp.name, jfi
+    return exp, jfi
 
 
 def main(args):
@@ -109,42 +130,75 @@ def main(args):
 
     print(f"Num files: {len(pcaps)}")
     start_time_s = time.time()
-    if defaults.SYNC:
-        jfis = {gen_features.parse_exp(*pcap) for pcap in pcaps}
+
+    data_flp = path.join(args.out_dir, "jfis.pickle")
+    if path.exists(data_flp):
+        print("Loading data from:", data_flp)
+        # Load existing raw JFI results.
+        with open(data_flp, "rb") as fil:
+            jfis = pickle.load(fil)
+        if len(jfis) != len(pcaps):
+            print(
+                f"Error: Expected {len(pcaps)} JFI results, but found {len(jfis)}. "
+                f"Delete {data_flp} and try again."
+            )
+            return
     else:
-        with multiprocessing.Pool(processes=args.parallel) as pol:
-            jfis = set(pol.starmap(gen_features.parse_exp, pcaps))
+        if defaults.SYNC:
+            jfis = {gen_features.parse_exp(*pcap) for pcap in pcaps}
+        else:
+            with multiprocessing.Pool(processes=args.parallel) as pol:
+                jfis = set(pol.starmap(gen_features.parse_exp, pcaps))
+        # Save raw JFI results from parsed experiments.
+        with open(data_flp, "wb") as fil:
+            pickle.dump(jfis, fil)
 
-    # TODO: Use the actual Exp as a key so we can break this down by BW, latency, q size, num flows, etc.
-
-    # Dict mapping experiment name to JFI.
-    jfis = {name: jfi for name, jfi in jfis}
+    # Dict mapping experiment to JFI.
+    jfis = {exp_jfi[0]: exp_jfi[1] for exp_jfi in jfis if isinstance(exp_jfi, tuple)}
     # Experiments in which the unfairness monitor was enabled.
-    enabled = {name for name in jfis.keys() if "unfairTrue" in name}
+    enabled = {exp for exp in jfis.keys() if exp.use_unfairness_monitor}
     # Experiments in which the unfairness monitor was disabled.
-    disabled = {name for name in jfis.keys() if "unfairFalse" in name}
+    disabled = {exp for exp in jfis.keys() if not exp.use_unfairness_monitor}
 
     # Match each enabled experiment with its corresponding disabled experiment and
     # compute the JFI delta. matched is a dict mapping the name of the enabled
     # experiment to a tuple of the form:
     #     ( disabled JFI, enabled JFI, difference in JFI from enabled to disabled )
     matched = {}
-    for name in enabled:
-        target_disabled = name.replace("unfairTrue", "unfairFalse")
-        if target_disabled not in disabled:
+    for enabled_exp in enabled:
+        # Find the corresponding experiment with the unfairness monitor disabled.
+        target_disabled_name = enabled_exp.name.replace("unfairTrue", "unfairFalse")
+        target_disabled_exp = None
+        for disabled_exp in disabled:
+            if disabled_exp.name == target_disabled_name:
+                target_disabled_exp = disabled_exp
+                break
+        if target_disabled_exp is None:
+            print(
+                "Warning: Cannot find experiment with unfairness monitor disabled:",
+                target_disabled_name,
+            )
             continue
 
-        matched[name] = (
-            jfis[target_disabled],
-            jfis[name],
-            jfis[name] - jfis[target_disabled],
+        matched[enabled_exp] = (
+            jfis[target_disabled_exp],
+            jfis[enabled_exp],
+            jfis[enabled_exp] - jfis[target_disabled_exp],
+        )
+
+    plot_hist(args, matched)
+
+    # Save JFI results.
+    with open(path.join(args.out_dir, "jfi_deltas.json"), "w") as fil:
+        json.dump(
+            {exp.name: results for exp, results in matched.items()}, fil, indent=4
         )
 
     # Extract the deltas as a numpy array.
     jfi_deltas = np.array(list(zip(*matched.values()))[2])
 
     print(
-        f"Overall JFI results:\n"
+        f"Overall JFI delta:\n"
         f"\tAvg: {np.mean(jfi_deltas)}\n"
         f"\tStddev: {np.std(jfi_deltas)}\n"
         f"\tVar: {np.var(jfi_deltas)}\n"
