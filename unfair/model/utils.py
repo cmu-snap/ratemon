@@ -782,6 +782,44 @@ def safe_min(val1, val2):
     )
 
 
+def safe_max(val1, val2):
+    """Safely compute the max of two values.
+
+    If either value is -1 or 0, then that value is discarded and the other
+    value becomes the max. If both values are discarded, then the max is -1
+    (unknown).
+    """
+    return (
+        -1
+        if val1 in UNSAFE and val2 in UNSAFE
+        else (
+            val2 if val1 in UNSAFE else (val1 if val2 in UNSAFE else (max(val1, val2)))
+        )
+    )
+
+
+def safe_min_win(dat, start_idx=None, end_idx=None):
+    """Safely compute the min over a window.
+
+    Any values that are -1 (unknown) are discarded. The mean of an empty window
+    is -1 (unknown).
+    """
+    dat_safe = get_safe(dat, start_idx, end_idx)
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_safe.shape[0] == 0 else np.min(dat_safe)
+
+
+def safe_max_win(dat, start_idx=None, end_idx=None):
+    """Safely compute the max over a window.
+
+    Any values that are -1 (unknown) are discarded. The mean of an empty window
+    is -1 (unknown).
+    """
+    dat_safe = get_safe(dat, start_idx, end_idx)
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_safe.shape[0] == 0 else np.max(dat_safe)
+
+
 def safe_add(val1, val2):
     """Safely add two values.
 

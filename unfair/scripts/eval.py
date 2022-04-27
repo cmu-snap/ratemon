@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import matplotlib.pyplot as plt
 import multiprocessing
 import os
 from os import path
@@ -10,17 +9,24 @@ import pickle
 import sys
 import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from unfair.model import defaults, features, gen_features, utils
 
 
-def plot_hist(args, jfis):
-    disabled, enabled, _ = zip(*jfis.values())
+def plot_jfi_hist(args, jfis_disabled, jfis_enabled):
     plt.hist(
-        disabled, bins=50, density=True, facecolor="r", alpha=0.75, label="Disabled"
+        jfis_disabled,
+        bins=50,
+        density=True,
+        facecolor="r",
+        alpha=0.75,
+        label="Disabled",
     )
-    plt.hist(enabled, bins=50, density=True, facecolor="g", alpha=0.75, label="Enabled")
+    plt.hist(
+        jfis_enabled, bins=50, density=True, facecolor="g", alpha=0.75, label="Enabled"
+    )
 
     plt.xlabel("JFI")
     plt.ylabel("Probability (%)")
@@ -95,13 +101,31 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     # zipped_arr_times = zipped_arr_times[idx:]
     # zipped_dat = zipped_dat[idx:]
 
-    flw_to_bits = {
-        flw: np.sum(pkts[features.WIRELEN_FET]) for flw, pkts in flw_to_pkts.items()
+    flw_to_tput_bps = {
+        flw: utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
+        for flw, pkts in flw_to_pkts.items()
     }
 
-    jfi = sum(flw_to_bits.values()) ** 2 / (
-        len(flw_to_bits) * sum(bits**2 for bits in flw_to_bits.values())
+    jfi = sum(flw_to_tput_bps.values()) ** 2 / (
+        len(flw_to_tput_bps) * sum(bits**2 for bits in flw_to_tput_bps.values())
     )
+
+    # Calculate the average combined throughput of all flows by dividing the total bits
+    # received by all flows by the time difference between when the first flow started
+    # and when the last flow finished.
+    bits_times = (
+        (
+            utils.safe_sum(pkts[features.WIRELEN_FET], 0, len(pkts) - 1),
+            utils.safe_min_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
+            utils.safe_max_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
+        )
+        for pkts in flw_to_pkts.values()
+    )
+    bits, start_times_us, end_times_us = zip(*bits_times)
+    avg_total_tput_bps = (
+        sum(bits) * 8 / ((max(end_times_us) - min(start_times_us)) / 1e6)
+    )
+    avg_util = avg_total_tput_bps / exp.bw_bps
 
     # # Save the results.
     # if path.exists(out_flp):
@@ -112,7 +136,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     #         out_flp,
     #         **{str(k + 1): v for k, v in enumerate(flw_results[flw] for flw in flws)},
     #     )
-    return exp, jfi
+    return exp, jfi, avg_util
 
 
 def main(args):
@@ -132,34 +156,38 @@ def main(args):
     print(f"Num files: {len(pcaps)}")
     start_time_s = time.time()
 
-    data_flp = path.join(args.out_dir, "jfis.pickle")
+    data_flp = path.join(args.out_dir, "results.pickle")
     if path.exists(data_flp):
         print("Loading data from:", data_flp)
         # Load existing raw JFI results.
         with open(data_flp, "rb") as fil:
-            jfis = pickle.load(fil)
-        if len(jfis) != len(pcaps):
+            results = pickle.load(fil)
+        if len(results) != len(pcaps):
             print(
-                f"Error: Expected {len(pcaps)} JFI results, but found {len(jfis)}. "
+                f"Error: Expected {len(pcaps)} JFI results, but found {len(results)}. "
                 f"Delete {data_flp} and try again."
             )
             return
     else:
         if defaults.SYNC:
-            jfis = {gen_features.parse_exp(*pcap) for pcap in pcaps}
+            results = {gen_features.parse_exp(*pcap) for pcap in pcaps}
         else:
             with multiprocessing.Pool(processes=args.parallel) as pol:
-                jfis = set(pol.starmap(gen_features.parse_exp, pcaps))
+                results = set(pol.starmap(gen_features.parse_exp, pcaps))
         # Save raw JFI results from parsed experiments.
         with open(data_flp, "wb") as fil:
-            pickle.dump(jfis, fil)
+            pickle.dump(results, fil)
 
     # Dict mapping experiment to JFI.
-    jfis = {exp_jfi[0]: exp_jfi[1] for exp_jfi in jfis if isinstance(exp_jfi, tuple)}
+    results = {
+        exp_jfi_util[0]: (exp_jfi_util[1], exp_jfi_util[2])
+        for exp_jfi_util in results
+        if isinstance(exp_jfi_util, tuple)
+    }
     # Experiments in which the unfairness monitor was enabled.
-    enabled = {exp for exp in jfis.keys() if exp.use_unfairness_monitor}
+    enabled = {exp for exp in results.keys() if exp.use_unfairness_monitor}
     # Experiments in which the unfairness monitor was disabled.
-    disabled = {exp for exp in jfis.keys() if not exp.use_unfairness_monitor}
+    disabled = {exp for exp in results.keys() if not exp.use_unfairness_monitor}
 
     # Match each enabled experiment with its corresponding disabled experiment and
     # compute the JFI delta. matched is a dict mapping the name of the enabled
@@ -181,13 +209,22 @@ def main(args):
             )
             continue
 
+        jfi_disabled, util_disabled = results[target_disabled_exp]
+        jfi_enabled, util_enabled = results[enabled_exp]
+
         matched[enabled_exp] = (
-            jfis[target_disabled_exp],
-            jfis[enabled_exp],
-            jfis[enabled_exp] - jfis[target_disabled_exp],
+            jfi_disabled,
+            jfi_enabled,
+            jfi_enabled - jfi_disabled,
+            (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
+            util_disabled,
+            util_enabled,
+            util_enabled - util_disabled,
+            (util_enabled - util_disabled) / util_disabled * 100,
         )
 
-    plot_hist(args, matched)
+    jfis_disabled, jfis_enabled = list(zip(*matched.values()))[:2]
+    plot_jfi_hist(args, jfis_disabled, jfis_enabled)
 
     # Save JFI results.
     with open(path.join(args.out_dir, "jfi_deltas.json"), "w") as fil:
@@ -195,14 +232,33 @@ def main(args):
             {exp.name: results for exp, results in matched.items()}, fil, indent=4
         )
 
-    # Extract the deltas as a numpy array.
-    jfi_deltas = np.array(list(zip(*matched.values()))[2])
-
+    jfis_enabled = np.array(list(zip(*matched.values()))[1])
+    # Extract the JFI deltas as a numpy array.
+    jfi_deltas_percent = np.array(list(zip(*matched.values()))[3])
     print(
-        f"Overall JFI delta:\n"
-        f"\tAvg: {np.mean(jfi_deltas)}\n"
-        f"\tStddev: {np.std(jfi_deltas)}\n"
-        f"\tVar: {np.var(jfi_deltas)}\n"
+        "\nOverall JFI change (percent) --- higher is better:\n"
+        f"\tAvg: {np.mean(jfi_deltas_percent):.4f} %\n"
+        f"\tStddev: {np.std(jfi_deltas_percent):.4f} %\n"
+        f"\tVar: {np.var(jfi_deltas_percent):.4f} %"
+    )
+    print(
+        "Overall average JFI with monitor enabled:",
+        f"{np.mean(jfis_enabled):.4f}",
+    )
+
+    utils_enabled = np.array(list(zip(*matched.values()))[5])
+    # Extract the utilization deltas as a numpy array.
+    util_deltas_percent = np.array(list(zip(*matched.values()))[7])
+    print(
+        "\nOverall link utilization change (percent) "
+        "--- higher is better, want to be >= 0%:\n"
+        f"\tAvg: {np.mean(util_deltas_percent):.4f} %\n"
+        f"\tStddev: {np.std(util_deltas_percent):.4f} %\n"
+        f"\tVar: {np.var(util_deltas_percent):.4f} %"
+    )
+    print(
+        "Overall average link utilization with monitor enabled:",
+        f"{np.mean(utils_enabled) * 100:.4f} %",
     )
 
     print(f"Done analyzing - time: {time.time() - start_time_s:.2f} seconds")
@@ -210,7 +266,7 @@ def main(args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate Jain's Fairness Index.")
+    parser = argparse.ArgumentParser(description="Evaluation.")
     parser.add_argument(
         "--exp-dir",
         help="The directory in which the experiment results are stored.",
