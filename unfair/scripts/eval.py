@@ -309,7 +309,7 @@ def main(args):
     )
     print(
         "Overall average link utilization with monitor enabled:",
-        f"{np.mean(utils_enabled) * 100:.4f} %",
+        f"{np.mean(utils_enabled):.4f} %",
     )
 
     print(f"Done analyzing - time: {time.time() - start_time_s:.2f} seconds")
