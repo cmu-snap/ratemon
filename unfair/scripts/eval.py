@@ -3,13 +3,12 @@
 import argparse
 import json
 import multiprocessing
-import numpy as np
 import os
 from os import path
 import sys
 import time
-import traceback
 
+import numpy as np
 
 from unfair.model import defaults, features, gen_features, utils
 
@@ -47,10 +46,14 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(server_pcap, flw_to_cca)
+    # Discard the ACK packets.
+    flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
+
+    print(f"\tParsed packets: {server_pcap}")
 
     late_flws = [flw for flw in flws if flw[1] == 50001]
     earliest_late_flow_start_time = min(
-        [flw_to_pkts[flw][0][features.ARRIVAL_TIME_FET] for flw in late_flws]
+        [flw_to_pkts[flw][features.ARRIVAL_TIME_FET][0] for flw in late_flws]
     )
 
     # Remove data from before the late flows start.
@@ -112,8 +115,10 @@ def main(args):
         with multiprocessing.Pool(processes=args.parallel) as pol:
             jfis = set(pol.starmap(gen_features.parse_exp, pcaps))
 
+    # TODO: Use the actual Exp as a key so we can break this down by BW, latency, q size, num flows, etc.
+
     # Dict mapping experiment name to JFI.
-    jfis = {name: jfi for name, jfi in zip(*jfis)}
+    jfis = {name: jfi for name, jfi in jfis}
     # Experiments in which the unfairness monitor was enabled.
     enabled = {name for name in jfis.keys() if "unfairTrue" in name}
     # Experiments in which the unfairness monitor was disabled.
@@ -130,16 +135,16 @@ def main(args):
             continue
 
         matched[name] = (
-            disabled[target_disabled],
-            enabled[name],
-            enabled[name] - disabled[target_disabled],
+            jfis[target_disabled],
+            jfis[name],
+            jfis[name] - jfis[target_disabled],
         )
 
     # Extract the deltas as a numpy array.
     jfi_deltas = np.array(list(zip(*matched.values()))[2])
 
     print(
-        f"Overall:\n"
+        f"Overall JFI results:\n"
         f"\tAvg: {np.mean(jfi_deltas)}\n"
         f"\tStddev: {np.std(jfi_deltas)}\n"
         f"\tVar: {np.var(jfi_deltas)}\n"
@@ -172,8 +177,15 @@ def parse_args():
         help="The number of files to parse in parallel.",
         type=int,
     )
+    parser.add_argument(
+        "--out-dir",
+        help="The directory in which to store the results.",
+        required=True,
+        type=str,
+    )
     args = parser.parse_args()
-    assert path.is_dir(args.exp_dir)
+    assert path.isdir(args.exp_dir)
+    assert path.isdir(args.out_dir)
     return args
 
 

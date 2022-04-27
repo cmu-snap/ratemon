@@ -204,12 +204,12 @@ EXTRA_FETS = [
 PARSE_PACKETS_FETS = [
     # See REGULAR for details.
     (SEQ_FET, "int64"),
-    (RTT_FET, "int32"),
-    # (TS_1_FET, "int64"),
-    # (TS_2_FET, "int64"),
-    (WIRELEN_FET, "int32"),
-    (PAYLOAD_FET, "int32"),
+    # (RTT_FET, "int32"),
     (ARRIVAL_TIME_FET, "int64"),
+    (TS_1_FET, "int64"),
+    (TS_2_FET, "int64"),
+    (PAYLOAD_FET, "int32"),
+    (WIRELEN_FET, "int32"),
 ]
 
 REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]

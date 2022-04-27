@@ -269,6 +269,7 @@ class Exp:
             queue_p,
             cca_1_flws,
             cca_2_flws,
+            use_unfairness_monitor,
             end_time,
             _,
         ) = toks
@@ -298,6 +299,7 @@ class Exp:
         self.target_per_flow_bw_Mbps = self.bw_Mbps / (
             self.cca_1_flws + self.cca_2_flws
         )
+        self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
 
 
 def args_to_str(args, order, which):
