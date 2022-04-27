@@ -259,20 +259,38 @@ class Exp:
             toks[-1] = toks[-1][:-4]
             # Update sim.name.
             self.name = self.name[:-4]
-        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
-        (
-            _,
-            self.cca_1_name,
-            self.cca_2_name,
-            bw_Mbps,
-            rtt_ms,
-            queue_p,
-            cca_1_flws,
-            cca_2_flws,
-            use_unfairness_monitor,
-            end_time,
-            _,
-        ) = toks
+
+        if "unfairTrue" in self.name or "unfairFalse" in self.name:
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-unfairTrue-100s-20201118T114242
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                use_unfairness_monitor,
+                end_time,
+                _,
+            ) = toks
+        else:
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                end_time,
+                _,
+            ) = toks
+            use_unfairness_monitor = "unfairFalse"
+
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
         self.bw_bps = self.bw_Mbps * 1e6
