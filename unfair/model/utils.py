@@ -1190,6 +1190,7 @@ def load_scl_prms(out_dir):
 
 def load_split(split_dir, name):
     """Load a training, validation, and test Split's raw data from disk."""
+    print(f"Loading split data:", name)
     num_pkts, dtype = load_split_metadata(split_dir, name)
     if num_pkts == 0:
         # If the number of packets in this split is 0, then we will not find the
