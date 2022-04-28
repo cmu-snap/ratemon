@@ -259,19 +259,38 @@ class Exp:
             toks[-1] = toks[-1][:-4]
             # Update sim.name.
             self.name = self.name[:-4]
-        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
-        (
-            _,
-            self.cca_1_name,
-            self.cca_2_name,
-            bw_Mbps,
-            rtt_ms,
-            queue_p,
-            cca_1_flws,
-            cca_2_flws,
-            end_time,
-            _,
-        ) = toks
+
+        if "unfairTrue" in self.name or "unfairFalse" in self.name:
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-unfairTrue-100s-20201118T114242
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                use_unfairness_monitor,
+                end_time,
+                _,
+            ) = toks
+        else:
+            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                end_time,
+                _,
+            ) = toks
+            use_unfairness_monitor = "unfairFalse"
+
         # Link bandwidth (Mbps).
         self.bw_Mbps = float(bw_Mbps[:-2])
         self.bw_bps = self.bw_Mbps * 1e6
@@ -298,6 +317,7 @@ class Exp:
         self.target_per_flow_bw_Mbps = self.bw_Mbps / (
             self.cca_1_flws + self.cca_2_flws
         )
+        self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
 
 
 def args_to_str(args, order, which):
@@ -762,6 +782,44 @@ def safe_min(val1, val2):
     )
 
 
+def safe_max(val1, val2):
+    """Safely compute the max of two values.
+
+    If either value is -1 or 0, then that value is discarded and the other
+    value becomes the max. If both values are discarded, then the max is -1
+    (unknown).
+    """
+    return (
+        -1
+        if val1 in UNSAFE and val2 in UNSAFE
+        else (
+            val2 if val1 in UNSAFE else (val1 if val2 in UNSAFE else (max(val1, val2)))
+        )
+    )
+
+
+def safe_min_win(dat, start_idx=None, end_idx=None):
+    """Safely compute the min over a window.
+
+    Any values that are -1 (unknown) are discarded. The mean of an empty window
+    is -1 (unknown).
+    """
+    dat_safe = get_safe(dat, start_idx, end_idx)
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_safe.shape[0] == 0 else np.min(dat_safe)
+
+
+def safe_max_win(dat, start_idx=None, end_idx=None):
+    """Safely compute the max over a window.
+
+    Any values that are -1 (unknown) are discarded. The mean of an empty window
+    is -1 (unknown).
+    """
+    dat_safe = get_safe(dat, start_idx, end_idx)
+    # If the window is empty, then the mean is -1 (unknown).
+    return -1 if dat_safe.shape[0] == 0 else np.max(dat_safe)
+
+
 def safe_add(val1, val2):
     """Safely add two values.
 
@@ -1132,6 +1190,7 @@ def load_scl_prms(out_dir):
 
 def load_split(split_dir, name):
     """Load a training, validation, and test Split's raw data from disk."""
+    print(f"Loading split data:", name)
     num_pkts, dtype = load_split_metadata(split_dir, name)
     if num_pkts == 0:
         # If the number of packets in this split is 0, then we will not find the

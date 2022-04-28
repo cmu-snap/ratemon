@@ -181,6 +181,27 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}"
             }
-        }
+        },
+        {
+            "name": "(r) eval",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/scripts/eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",
+                "--untar-dir=/tmp/untar",
+                "--parallel=40",
+                "--out-dir=/home/ccanel/out/cloudlab/2022-4-21/out/"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": false
+        },
     ]
 }
