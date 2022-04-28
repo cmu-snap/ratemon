@@ -206,7 +206,9 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
             out_dir,
             dtype,
             num_pkts,
-            shuffle=name == "train",
+            # Shuffle all splits so that later attempts to select a range of packets
+            # from the beginning are random.
+            shuffle=True,
         )
         for name, split_frac in split_fracs.items()
     }

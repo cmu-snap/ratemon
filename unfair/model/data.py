@@ -82,13 +82,16 @@ def get_split(data_dir, name, sample_frac, net):
     subsplits = utils.load_subsplits(data_dir, name)
     # Optionally select a fraction of each subsplit. We always use all of the
     # test split.
-    if name in {"train", "val"} and sample_frac < 1:
+    # TODO: Apply sample_frac to the val and test splits as well. This requires that
+    # the val and test splits be shuffled by prepare_data.py, which they are not.
+    if name == "train" and sample_frac < 1:
         subsplits = [
             subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
             for subsplit in subsplits]
     # Merge the subsplits into a split.
     split = np.concatenate(subsplits)
-    # Optionally shuffle the split.
+    # If this is the train split and there is more than one subsplit, then we need to
+    # shuffle the merged split.
     if name == "train" and len(subsplits) > 1:
         np.random.default_rng().shuffle(split)
     # Extract features from the split.
