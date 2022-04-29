@@ -1186,8 +1186,10 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         self.graph = kwargs["graph"]
         self.net = ensemble.HistGradientBoostingClassifier(
             verbose=1,
-            learning_rate=kwargs["lr"],
+            learning_rate=0.1,  # kwargs["lr"],
             max_iter=kwargs["max_iter"],
+            max_leaf_nodes=None,
+            max_depth=None,
             l2_regularization=kwargs["l2_regularization"],
             early_stopping=kwargs["early_stop"],
             # validation_fraction=20 / 70,
