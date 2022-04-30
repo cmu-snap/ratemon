@@ -284,6 +284,15 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         )
     )
 
+    max_batch_time_s = max(
+        0.1,
+        (
+            args.inference_interval_ms / 1e3
+            if args.inference_interval_ms is not None
+            else 1
+        ),
+    )
+
     logging.info("Inference ready!")
     packets_in_batch = 0
     batch_proc_time_s = 0
@@ -292,7 +301,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     while not done.is_set():
         val = None
         try:
-            val = que.get(timeout=1)
+            val = que.get(timeout=0.1)
         except queue.Empty:
             pass
 
@@ -315,6 +324,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             else:
                 raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
 
+            logging.info("Building features for flow: %s", flowkey)
             features_start_time_s = time.time()
             try:
                 # Prepare the numpy array in which we will store the features.
@@ -334,7 +344,8 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 # Assertion errors mean this batch of packets violated some
                 # precondition, but we are safe to skip them and continue.
                 logging.warning(
-                    "Inference failed due to a non-fatal assertion failure:\n%s",
+                    "Skipping flow %s because feature generation failed due to a non-fatal assertion failure:\n%s",
+                    flowkey,
                     traceback.format_exc(),
                 )
                 inference_flags[fourtuple].value = 0
@@ -343,7 +354,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 # An unexpected error occurred. It is not safe to continue. Reraise the
                 # exception to kill the process.
                 logging.error(
-                    "Inference failed due to an unexpected error:\n%s",
+                    "Feature generation failed due to an unexpected error:\n%s",
                     traceback.format_exc(),
                 )
                 raise exp
@@ -356,17 +367,10 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         # If the batch is full, then run inference. Also run inference if it has been a
         # long time since we ran inference last. A "long time" is defined as the max of
         # 1 second and the inference interval (if the inference interval is defined).
+        batch_time_s = time.time() - batch_start_time_s
         if batch and (
             len(batch) >= args.batch_size
-            or time.time() - batch_start_time_s
-            > max(
-                1,
-                (
-                    args.inference_interval_ms / 1e3
-                    if args.inference_interval_ms is not None
-                    else 1
-                ),
-            )
+            or batch_time_s > max_batch_time_s
         ):
             logging.info("Running inference on a batch of %d flow(s).", len(batch))
             inference_start_time_s = time.time()
@@ -413,6 +417,8 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             packets_in_batch = 0
             batch_proc_time_s = 0
             batch_start_time_s = time.time()
+        else:
+            logging.info("Not ready to run batch yet. %d, %.2f >? %.2f", len(batch), batch_time_s, max_batch_time_s)
 
 
 def batch_inference(
