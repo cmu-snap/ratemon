@@ -1180,6 +1180,17 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "loss rate-ewma-alpha0.001",
         #     "RTT ratio us-ewma-alpha0.001",
         # )
+        # Fat decision tree: cubic-reno-vegas-westwood
+        # self.in_spc = (
+        #         "throughput b/s-windowed-minRtt8",
+        #         "inverse interarrival time b/s-ewma-alpha0.001",
+        #         "RTT us-ewma-alpha0.001",
+        #         "RTT ratio us-ewma-alpha0.001",
+        #         "loss rate-ewma-alpha0.001",
+        #         "interarrival time us-ewma-alpha0.001",
+        #         "mathis model throughput b/s-ewma-alpha0.001",
+        #         "1/sqrt loss event rate-windowed-minRtt8",
+        # )
         self._check()
 
     def new(self, **kwargs):
