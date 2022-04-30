@@ -26,20 +26,25 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 #     --parallel=20
 
 prepare() {
-    mkdir -p "/tmp/prepare_data/cubic-$1"
+    # Usage: prepare <other CCA name>
+    cur_exp_dir="$exp_dir/cubic-$1"
+    tmp_dir="/tmp/prepare_data/cubic-$1"
+    mkdir -p "$tmp_dir"
     python "$unfair_dir/model/prepare_data.py" \
-        --data-dir="$exp_dir/cubic-$1" \
-        --out-dir="/tmp/prepare_data/cubic-$1" \
+        --data-dir="$cur_exp_dir" \
+        --out-dir="$tmp_dir" \
         --model=HistGbdtSklearn \
         --train-split=70 \
         --val-split=0 \
         --test-split=30 \
         --warmup-percent=5 \
         --sample-percent=10
-    mv -vf "/tmp/prepare_data/cubic-$1/*" "$exp_dir/cubic-$1"
+    pushd "$tmp_dir"
+    mv -vf ./* "$cur_exp_dir"
+    popd
 }
 
-for cca in "copa" "highspeed" "illinois" "vivace" "bbr"; do
+for cca in "highspeed" "illinois" "vivace"; do
     prepare "$cca"
 done
 
