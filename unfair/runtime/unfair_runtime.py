@@ -486,16 +486,34 @@ def run(args, manager):
         features.parse_win_metric(fet)[1] for fet in net.in_spc if "windowed" in fet
     )
     logging.info("Longest minRTT window: %d", longest_window)
-    global LOSS_EVENT_INTERVALS
-    LOSS_EVENT_INTERVALS = [
-        features.parse_win_metric(fet)[1]
-        for fet in net.in_spc
-        if "windowed" in fet
-        and (
-            fet.startswith(features.LOSS_EVENT_RATE_FET)
-            or fet.startswith(features.MATHIS_TPUT_FET)
+
+    # Fill in feature dependencies.
+    all_features = list(
+        zip(
+            *list(
+                set(features.PARSE_PACKETS_FETS)
+                | set(
+                    features.feature_names_to_dtype(
+                        features.fill_dependencies(net.in_spc)
+                    )
+                )
+            )
         )
-    ]
+    )[0]
+    global LOSS_EVENT_INTERVALS
+    LOSS_EVENT_INTERVALS = list(
+        set(
+            [
+                features.parse_win_metric(fet)[1]
+                for fet in all_features
+                if "windowed" in fet
+                and (
+                    fet.startswith(features.LOSS_EVENT_RATE_FET)
+                    or fet.startswith(features.MATHIS_TPUT_FET)
+                )
+            ]
+        )
+    )
     logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
 
     # Create sychronized data structures.

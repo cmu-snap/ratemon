@@ -200,11 +200,18 @@ EXTRA_FETS = [
     make_win_metric(MATHIS_TPUT_FET, defaults.CHOSEN_WIN),
 ]
 
-# Features used when parsing packets.
+# Features used when parsing received packets.
 PARSE_PACKETS_FETS = [
-    # See REGULAR for details.
     (SEQ_FET, "int64"),
-    # (RTT_FET, "int32"),
+    (RTT_FET, "int32"),
+    (WIRELEN_FET, "int32"),
+    (PAYLOAD_FET, "int32"),
+    (ARRIVAL_TIME_FET, "int64"),
+]
+
+# Features used when parsing packets from a PCAP file.
+PARSE_PCAP_FETS = [
+    (SEQ_FET, "int64"),
     (ARRIVAL_TIME_FET, "int64"),
     (TS_1_FET, "int64"),
     (TS_2_FET, "int64"),
@@ -241,7 +248,7 @@ def fill_dependencies(in_spc):
         if MATHIS_TPUT_FET in name:
             if "ewma" in name:
                 new_metric = make_ewma_metric(
-                    LOSS_EVENT_RATE_FET, parse_ewma_metric(name)[1]
+                    LOSS_RATE_FET, parse_ewma_metric(name)[1]
                 )
             else:
                 new_metric = make_win_metric(
@@ -259,6 +266,10 @@ def fill_dependencies(in_spc):
         if LOSS_RATE_FET in name:
             to_add.add(LOSS_RATE_FET)
             to_add.add(PACKETS_LOST_FET)
+        if SQRT_LOSS_EVENT_RATE_FET in name:
+            to_add.add(make_win_metric(
+                LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
+            ))
     combined = fets_to_use | to_add
     if combined == fets_to_use:
         return in_spc
