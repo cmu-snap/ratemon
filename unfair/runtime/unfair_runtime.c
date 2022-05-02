@@ -125,13 +125,13 @@ int handle_egress(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // u16 to_set = (u16)(*rwnd >> *win_scale);
-    // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
+    u16 to_set = (u16)(*rwnd >> *win_scale);
+    bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, to_set, *win_scale);
     // bpf_trace_printk("Setting RWND to %u (win scale: %u, RWND with win scale: %u)\n", *rwnd, *win_scale, to_set);
 
     // Apply the window scale to the configured RWND value and set it in the packet.
-    // tcp->window = bpf_htons(to_set);
-    tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
+    tcp->window = bpf_htons(to_set);
+    // tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
 
     return TC_ACT_OK;
 }
