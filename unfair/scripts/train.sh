@@ -37,15 +37,15 @@ python "$unfair_dir/model/train.py" \
     --out-dir="$out_dir" \
     --data-dir="$out_dir"\
     --model=HistGbdtSklearn \
-    --sample-percent=40 \
+    --sample-percent=15 \
     --no-rand \
     --conf-trials=1 \
     --max-iter=10000 \
     --tag="$tag" \
-    --early-stop \
-    --analyze-features \
-    --clusters=10 \
-    --features-to-pick=20 \
-    --permutation-importance-repeats=1
+    --early-stop
+    # --analyze-features \
+    # --clusters=10 \
+    # --features-to-pick=20 \
+    # --permutation-importance-repeats=1
     # --balance \
     # --drop-popular
