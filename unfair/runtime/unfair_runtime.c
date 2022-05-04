@@ -115,6 +115,7 @@ int handle_egress(struct __sk_buff *skb)
     if (*rwnd == 0)
     {
         // The RWND is configured to be 0. That does not make sense.
+        bpf_trace_printk("Error: Flow with local port %u, remote port %u, RWND=0D\n", flow.local_port, flow.remote_port);
         return TC_ACT_OK;
     }
 
@@ -122,16 +123,17 @@ int handle_egress(struct __sk_buff *skb)
     if (win_scale == NULL)
     {
         // We do not know the window scale to use for this flow.
+        bpf_trace_printk("Error: Flow with local port %u, remote port %u, no win scale\n", flow.local_port, flow.remote_port);
         return TC_ACT_OK;
     }
 
-    // u16 to_set = (u16)(*rwnd >> *win_scale);
-    // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, *rwnd, *win_scale);
+    u16 to_set = (u16)(*rwnd >> *win_scale);
+    // bpf_trace_printk("Setting RWND for flow with local port %u to %u (win scale: %u)\n", flow.local_port, to_set, *win_scale);
     // bpf_trace_printk("Setting RWND to %u (win scale: %u, RWND with win scale: %u)\n", *rwnd, *win_scale, to_set);
 
     // Apply the window scale to the configured RWND value and set it in the packet.
-    // tcp->window = bpf_htons(to_set);
-    tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
+    tcp->window = bpf_htons(to_set);
+    // tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
 
     return TC_ACT_OK;
 }

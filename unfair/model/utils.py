@@ -378,11 +378,9 @@ def str_to_args(args_str, order, which):
     return parsed
 
 
-def make_empty(num_pkts, additional_dtype=[]):
+def make_empty(num_pkts, dtype):
     """Make an empty numpy array to store the packets."""
-    return np.full(
-        (num_pkts,), -1, dtype=features.PARSE_PACKETS_FETS + additional_dtype
-    )
+    return np.full((num_pkts,), -1, dtype=dtype)
 
 
 def parse_packets(flp, flw_to_cca):
@@ -420,7 +418,10 @@ def parse_packets(flp, flw_to_cca):
     # Format described above. In this form, the arrays will be sparse. Unused
     # rows will be removed later.
     flw_to_pkts = {
-        flw_ports: (make_empty(num_pkts), make_empty(num_pkts))
+        flw_ports: (
+            make_empty(num_pkts, features.PARSE_PCAP_FETS),
+            make_empty(num_pkts, features.PARSE_PCAP_FETS),
+        )
         for flw_ports in flw_to_cca.keys()
     }
     for idx, (pkt_dat, pkt_mdat) in pkts:
