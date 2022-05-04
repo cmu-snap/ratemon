@@ -557,11 +557,13 @@ def parse_packets(flp, flw_to_cca):
         tot_pkts <= num_pkts
     ), f"Found more packets than exist ({tot_pkts} > {num_pkts}): {flp}"
     discarded_pkts = num_pkts - tot_pkts
-    print(
-        f"\tDiscarded packets: {discarded_pkts} "
-        f"({discarded_pkts / num_pkts * 100:.2f}%)"
-    )
-
+    if num_pkts == 0:
+        print(f"No packets found in: {flp}")
+    else:
+        print(
+            f"\tDiscarded packets: {discarded_pkts} "
+            f"({discarded_pkts / num_pkts * 100:.2f}%)"
+        )
     return flw_to_pkts
 
 
@@ -1190,7 +1192,7 @@ def load_scl_prms(out_dir):
 
 def load_split(split_dir, name):
     """Load a training, validation, and test Split's raw data from disk."""
-    print(f"Loading split data:", name)
+    print("Loading split data:", name)
     num_pkts, dtype = load_split_metadata(split_dir, name)
     if num_pkts == 0:
         # If the number of packets in this split is 0, then we will not find the

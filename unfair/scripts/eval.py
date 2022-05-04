@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import multiprocessing
 import os
 from os import path
@@ -44,7 +45,7 @@ def plot_cdf(args, disabled, enabled, x_label, filename):
     cdf_flp = path.join(args.out_dir, filename)
     plt.savefig(cdf_flp)
     plt.close()
-    print("Saved CDF to:", cdf_flp)
+    logging.info("Saved CDF to:", cdf_flp)
 
 
 def plot_hist(args, disabled, enabled, x_label, filename):
@@ -63,27 +64,27 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     hist_flp = path.join(args.out_dir, filename)
     plt.savefig(hist_flp)
     plt.close()
-    print("Saved histogram to:", hist_flp)
+    logging.info("Saved histogram to:", hist_flp)
 
 
 def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
-    print(f"Parsing: {exp_flp}")
+    logging.info("Parsing: %s", exp_flp)
     if exp.name.startswith("FAILED"):
-        print(f"Error: Experimant failed: {exp_flp}")
+        logging.info("Error: Experimant failed: %s", exp_flp)
         return -1
     if exp.tot_flws == 0:
-        print(f"Error: No flows to analyze in: {exp_flp}")
+        logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
     server_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
     if not path.exists(server_pcap):
-        print(f"Warning: Missing server pcap file in: {exp_flp}")
+        logging.info("Warning: Missing server pcap file in: %s", exp_flp)
         return -1
 
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
     if not path.exists(params_flp):
-        print(f"Error: Cannot find params file ({params_flp}) in: {exp_flp}")
+        logging.info("Error: Cannot find params file (%s) in: %s", params_flp, exp_flp)
         return -1
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
@@ -102,15 +103,25 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
 
-    print(f"\tParsed packets: {server_pcap}")
+    logging.info("\tParsed packets: %s", server_pcap)
 
-    late_flws = [flw for flw in flws if flw[1] == 50001]
+    late_flws = [flw for flw in flws if flw[1] == 50001 if len(flw_to_pkts[flw]) > 0]
+    if len(late_flws) == 0:
+        logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
+        return exp, -1, -1
     earliest_late_flow_start_time = min(
-        [flw_to_pkts[flw][features.ARRIVAL_TIME_FET][0] for flw in late_flws]
+        [
+            flw_to_pkts[flw][features.ARRIVAL_TIME_FET][0]
+            for flw in late_flws
+            if len(flw_to_pkts[flw]) > 0
+        ]
     )
 
     # Remove data from before the late flows start.
     for flw in flw_to_pkts.keys():
+        if len(flw_to_pkts[flw]) == 0:
+            flw_to_pkts[flw] = []
+            continue
         for idx, arr_time in enumerate(flw_to_pkts[flw][features.ARRIVAL_TIME_FET]):
             if arr_time >= earliest_late_flow_start_time:
                 break
@@ -127,7 +138,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     # zipped_dat = zipped_dat[idx:]
 
     flw_to_tput_bps = {
-        flw: utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
+        flw: 0 if len(pkts) == 0 else utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
         for flw, pkts in flw_to_pkts.items()
     }
 
@@ -145,6 +156,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             utils.safe_max_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
         )
         for pkts in flw_to_pkts.values()
+        if len(pkts) > 0
     )
     bits, start_times_us, end_times_us = zip(*bits_times)
     avg_total_tput_bps = (
@@ -154,9 +166,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
     # # Save the results.
     # if path.exists(out_flp):
-    #     print(f"\tOutput already exists: {out_flp}")
+    #     logging.info(f"\tOutput already exists: {out_flp}")
     # else:
-    #     print(f"\tSaving: {out_flp}")
+    #     logging.info(f"\tSaving: {out_flp}")
     #     np.savez_compressed(
     #         out_flp,
     #         **{str(k + 1): v for k, v in enumerate(flw_results[flw] for flw in flws)},
@@ -165,6 +177,14 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
 
 def main(args):
+    logging.basicConfig(
+        filename=path.join(args.out_dir, "output.log"),
+        filemode="w",
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG,
+    )
+    logging.info("Evaluating experiments in: %s", args.exp_dir)
+
     # Find all experiments.
     pcaps = [
         (
@@ -178,19 +198,24 @@ def main(args):
         if exp.endswith(".tar.gz")
     ]
 
-    print(f"Num files: {len(pcaps)}")
+    logging.info("Num files: %d", len(pcaps))
     start_time_s = time.time()
 
     data_flp = path.join(args.out_dir, "results.pickle")
     if path.exists(data_flp):
-        print("Loading data from:", data_flp)
+        logging.info("Loading data from:", data_flp)
         # Load existing raw JFI results.
         with open(data_flp, "rb") as fil:
             results = pickle.load(fil)
         if len(results) != len(pcaps):
-            print(
-                f"Error: Expected {len(pcaps)} JFI results, but found {len(results)}. "
-                f"Delete {data_flp} and try again."
+            logging.info(
+                (
+                    "Error: Expected %d JFI results, but found %d. "
+                    "Delete %s and try again."
+                ),
+                len(pcaps),
+                len(results),
+                data_flp,
             )
             return
     else:
@@ -207,7 +232,11 @@ def main(args):
     results = {
         exp_jfi_util[0]: (exp_jfi_util[1], exp_jfi_util[2])
         for exp_jfi_util in results
-        if isinstance(exp_jfi_util, tuple)
+        if (
+            isinstance(exp_jfi_util, tuple)
+            and exp_jfi_util[1] != -1
+            and exp_jfi_util[2] != -1
+        )
     }
     # Experiments in which the unfairness monitor was enabled.
     enabled = {exp for exp in results.keys() if exp.use_unfairness_monitor}
@@ -228,7 +257,7 @@ def main(args):
                 target_disabled_exp = disabled_exp
                 break
         if target_disabled_exp is None:
-            print(
+            logging.info(
                 "Warning: Cannot find experiment with unfairness monitor disabled:",
                 target_disabled_name,
             )
@@ -244,7 +273,7 @@ def main(args):
             (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
             util_disabled * 100,
             util_enabled * 100,
-            (util_enabled - util_disabled) * 100
+            (util_enabled - util_disabled) * 100,
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w") as fil:
@@ -288,29 +317,38 @@ def main(args):
         "util_cdf.pdf",
     )
 
-    print(
-        "\nOverall JFI change (percent) --- higher is better:\n"
-        f"\tAvg: {np.mean(jfi_deltas_percent):.4f} %\n"
-        f"\tStddev: {np.std(jfi_deltas_percent):.4f} %\n"
-        f"\tVar: {np.var(jfi_deltas_percent):.4f} %"
+    logging.info(
+        (
+            "\nOverall JFI change (percent) --- higher is better:\n"
+            "\tAvg: %.4f %\n"
+            "\tStddev: %.4f %\n"
+            "\tVar: %.4f %"
+        ),
+        np.mean(jfi_deltas_percent),
+        np.std(jfi_deltas_percent),
+        np.var(jfi_deltas_percent),
     )
-    print(
-        "Overall average JFI with monitor enabled:",
-        f"{np.mean(jfis_enabled):.4f}",
+    logging.info(
+        "Overall average JFI with monitor enabled: %.4f", np.mean(jfis_enabled)
     )
-    print(
-        "\nOverall link utilization change "
-        "--- higher is better, want to be >= 0%:\n"
-        f"\tAvg: {np.mean(util_deltas_percent):.4f} %\n"
-        f"\tStddev: {np.std(util_deltas_percent):.4f} %\n"
-        f"\tVar: {np.var(util_deltas_percent):.4f} %"
+    logging.info(
+        (
+            "\nOverall link utilization change "
+            "--- higher is better, want to be >= 0%:\n"
+            "\tAvg: %.4f %\n"
+            "\tStddev: %.4f %\n"
+            "\tVar: %.4f %"
+        ),
+        np.mean(util_deltas_percent),
+        np.std(util_deltas_percent),
+        np.var(util_deltas_percent),
     )
-    print(
-        "Overall average link utilization with monitor enabled:",
-        f"{np.mean(utils_enabled):.4f} %",
+    logging.info(
+        "Overall average link utilization with monitor enabled: %.4f} %",
+        np.mean(utils_enabled),
     )
 
-    print(f"Done analyzing - time: {time.time() - start_time_s:.2f} seconds")
+    logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
 
 

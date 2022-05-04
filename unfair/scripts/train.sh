@@ -37,7 +37,7 @@ python "$unfair_dir/model/train.py" \
     --out-dir="$out_dir" \
     --data-dir="$out_dir"\
     --model=HistGbdtSklearn \
-    --sample-percent=15 \
+    --sample-percent=40 \
     --no-rand \
     --conf-trials=1 \
     --max-iter=10000 \
