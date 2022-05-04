@@ -270,6 +270,7 @@ def configure_ebpf(args):
 
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
+    logging.info("Loading model: %s", args.model_file)
     net = models.load_model(args.model_file)
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
