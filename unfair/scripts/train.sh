@@ -33,19 +33,22 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 #     --test-split=30 \
 #     --warmup-percent=5 \
 #     --sample-percent=20
-python "$unfair_dir/model/train.py" \
-    --out-dir="$out_dir" \
-    --data-dir="$out_dir"\
-    --model=HistGbdtSklearn \
-    --sample-percent=40 \
-    --no-rand \
-    --conf-trials=1 \
-    --max-iter=10000 \
-    --tag="$tag" \
-    --early-stop
+for max_leaf_nodes in 31 100 250 500 1000 250 5000 10000; do
+    python "$unfair_dir/model/train.py" \
+        --out-dir="$out_dir/vary_max_leaf_nodes" \
+        --data-dir="$out_dir"\
+        --model=HistGbdtSklearn \
+        --sample-percent=40 \
+        --no-rand \
+        --conf-trials=1 \
+        --max-iter=10000 \
+        --tag="$tag-$max_leaf_nodes" \
+        --max-leaf-nodes="$max_leaf_nodes" \
+        --early-stop
     # --analyze-features \
     # --clusters=10 \
     # --features-to-pick=20 \
     # --permutation-importance-repeats=1
     # --balance \
     # --drop-popular
+done

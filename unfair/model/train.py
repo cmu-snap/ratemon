@@ -48,8 +48,9 @@ def init_hidden(net, bch, dev):
     return hidden
 
 
-def inference_torch(ins, labs, net_raw, dev,
-                    hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None):
+def inference_torch(
+    ins, labs, net_raw, dev, hidden=(torch.zeros(()), torch.zeros(())), los_fnc=None
+):
     """Run a single pytorch inference pass.
 
     Returns the output of net, or the loss if los_fnc is not None.
@@ -78,8 +79,19 @@ def inference_torch(ins, labs, net_raw, dev,
     return los_fnc(out, labs), hidden
 
 
-def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
-                out_flp, val_imp_thresh, tim_out_s, opt_params):
+def train_torch(
+    net,
+    num_epochs,
+    ldr_trn,
+    ldr_val,
+    dev,
+    ely_stp,
+    val_pat_max,
+    out_flp,
+    val_imp_thresh,
+    tim_out_s,
+    opt_params,
+):
     """Train a pytorch model."""
     print("Training...")
     los_fnc = net.los_fnc()
@@ -102,8 +114,9 @@ def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
     else:
         bchs_per_log = math.ceil(num_bchs_trn / LOGS_PER_EPC)
     # Perform a validation pass every few batches.
-    assert not ely_stp or VALS_PER_EPC > 0, \
-        f"Early stopping configured with erroneous VALS_PER_EPC: {VALS_PER_EPC}"
+    assert (
+        not ely_stp or VALS_PER_EPC > 0
+    ), f"Early stopping configured with erroneous VALS_PER_EPC: {VALS_PER_EPC}"
     bchs_per_val = math.ceil(num_bchs_trn / VALS_PER_EPC)
     if ely_stp:
         print(f"Will validate after every {bchs_per_val} batches.")
@@ -113,23 +126,29 @@ def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
     for epoch_idx in range(num_epochs):
         tim_del_s = time.time() - tim_srt_s
         if tim_out_s != 0 and tim_del_s > tim_out_s:
-            print((f"Training timed out after after {epoch_idx} epochs "
-                   f"({tim_del_s:.2f} seconds)."))
+            print(
+                (
+                    f"Training timed out after after {epoch_idx} epochs "
+                    f"({tim_del_s:.2f} seconds)."
+                )
+            )
             break
 
         # For each batch...
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
             if bch_idx_trn % bchs_per_log == 0:
-                print(f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
-                      f"{'?' if ely_stp else num_epochs}, batch: "
-                      f"{bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
-                      f"{num_bchs_trn}", end=" ")
+                print(
+                    f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
+                    f"{'?' if ely_stp else num_epochs}, batch: "
+                    f"{bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
+                    f"{num_bchs_trn}",
+                    end=" ",
+                )
             # Initialize the hidden state for every new sequence.
             hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
             # Zero out the parameter gradients.
             opt.zero_grad()
-            loss, hidden = inference_torch(
-                ins, labs, net.net, dev, hidden, los_fnc)
+            loss, hidden = inference_torch(ins, labs, net.net, dev, hidden, los_fnc)
             # The backward pass.
             loss.backward()
             opt.step()
@@ -146,13 +165,13 @@ def train_torch(net, num_epochs, ldr_trn, ldr_val, dev, ely_stp, val_pat_max,
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
                         print(
-                            "\tValidation batch: "
-                            f"{bch_idx_val + 1}/{len(ldr_val)}")
+                            "\tValidation batch: " f"{bch_idx_val + 1}/{len(ldr_val)}"
+                        )
                         # Initialize the hidden state for every new sequence.
                         hidden = init_hidden(net, bch=ins.size()[0], dev=dev)
                         los_val += inference_torch(
-                            ins_val, labs_val, net.net, dev, hidden,
-                            los_fnc)[0].item()
+                            ins_val, labs_val, net.net, dev, hidden, los_fnc
+                        )[0].item()
                 # Convert the model back to training mode.
                 net.net.train()
 
@@ -202,8 +221,10 @@ def test_torch(net, ldr_tst, dev):
     net.net.eval()
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
-            print(f"Test batch: {bch_idx + 1:{f'0{len(str(num_bchs_tst))}'}}/"
-                  f"{num_bchs_tst}")
+            print(
+                f"Test batch: {bch_idx + 1:{f'0{len(str(num_bchs_tst))}'}}/"
+                f"{num_bchs_tst}"
+            )
             if isinstance(net, models.LstmWrapper):
                 bch_tst, seq_len, _ = ins.size()
             else:
@@ -214,7 +235,8 @@ def test_torch(net, ldr_tst, dev):
             # Run inference. The first element of the output is the
             # number of correct predictions.
             num_correct += inference_torch(
-                ins, labs, net.net, dev, hidden, los_fnc=net.check_output)[0]
+                ins, labs, net.net, dev, hidden, los_fnc=net.check_output
+            )[0]
             total += bch_tst * seq_len
     # Convert the model back to training mode.
     net.net.train()
@@ -236,7 +258,8 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         # retrain the model.
         print(
             "Skipping training because a trained model already exists with "
-            f"these parameters: {out_flp}")
+            f"these parameters: {out_flp}"
+        )
         print(f"Loading model: {out_flp}")
         with open(out_flp, "rb") as fil:
             net = pickle.load(fil)
@@ -278,19 +301,27 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     print("Testing...")
     tim_srt_s = time.time()
     acc_tst = net.test(
-        fets, dat_in, dat_out, dat_extra,
-        graph_prms={
-            "out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None})
+        fets,
+        dat_in,
+        dat_out,
+        dat_extra,
+        graph_prms={"out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None},
+    )
     print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 
     # Optionally perform feature elimination.
     if args["analyze_features"]:
         utils.select_fets(
-            utils.analyze_feature_correlation(
-                net, out_dir, dat_in, args["clusters"]),
+            utils.analyze_feature_correlation(net, out_dir, dat_in, args["clusters"]),
             utils.analyze_feature_importance(
-                net, out_dir, dat_in, dat_out, args["fets_to_pick"],
-                args["perm_imp_repeats"]))
+                net,
+                out_dir,
+                dat_in,
+                dat_out,
+                args["fets_to_pick"],
+                args["perm_imp_repeats"],
+            ),
+        )
     return acc_tst, tim_trn_s
 
 
@@ -322,10 +353,18 @@ def run_torch(args, out_dir, out_flp, ldrs):
     # Training.
     tim_srt_s = time.time()
     net = train_torch(
-        net, args["epochs"], ldr_trn, ldr_val, dev, args["early_stop"],
-        args["val_patience"], out_flp, args["val_improvement_thresh"],
+        net,
+        args["epochs"],
+        ldr_trn,
+        ldr_val,
+        dev,
+        args["early_stop"],
+        args["val_patience"],
+        out_flp,
+        args["val_improvement_thresh"],
         args["timeout_s"],
-        opt_params={param: args[param] for param in net.params})
+        opt_params={param: args[param] for param in net.params},
+    )
     tim_trn_s = time.time() - tim_srt_s
     print(f"Finished training - time: {tim_trn_s:.2f} seconds")
 
@@ -381,18 +420,25 @@ def run_trials(args):
     net_tmp = models.MODELS[args["model"]]()
     # Verify that the necessary supplemental parameters are present.
     for param in net_tmp.params:
-        assert param in args, f"\"{param}\" not in args: {args}"
+        assert param in args, f'"{param}" not in args: {args}'
     # Assemble the output filepath.
     out_flp = path.join(
         args["out_dir"],
-        defaults.MODEL_PREFIX +
-        utils.args_to_str(
-            args, order=sorted(defaults.DEFAULTS.keys()), which="model") + (
-                # Add the optional tag.
-                f'-{args["tag"]}' if args["tag"] is not None else "") + (
-                # Determine the proper extension based on the type of model.
-                ".pickle" if isinstance(net_tmp, models.SvmSklearnWrapper)
-                else ".pth"))
+        defaults.MODEL_PREFIX
+        + utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()), which="model")
+        + (
+            # Add the optional tag.
+            f'-{args["tag"]}'
+            if args["tag"] is not None
+            else ""
+        )
+        + (
+            # Determine the proper extension based on the type of model.
+            ".pickle"
+            if isinstance(net_tmp, models.SvmSklearnWrapper)
+            else ".pth"
+        ),
+    )
     # If custom features are specified, then overwrite the model's
     # default features.
     fets = args["features"]
@@ -412,18 +458,17 @@ def run_trials(args):
     while trls > 0 and apts < apts_max:
         apts += 1
         res = (
-            run_sklearn
-            if isinstance(net_tmp, models.SvmSklearnWrapper)
-            else run_torch)(args, out_dir, out_flp, ldrs)
+            run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch
+        )(args, out_dir, out_flp, ldrs)
         if res[0] == 100:
-            print(
-                (f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
+            print((f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
         else:
             ress.append(res)
             trls -= 1
     if ress:
-        print(("Resulting accuracies: "
-               f"{', '.join([f'{acc:.2f}' for acc, _ in ress])}"))
+        print(
+            ("Resulting accuracies: " f"{', '.join([f'{acc:.2f}' for acc, _ in ress])}")
+        )
         max_acc, tim_s = max(ress, key=lambda p: p[0])
         print(f"Maximum accuracy: {max_acc:.2f}")
         # Return the minimum error instead of the maximum accuracy.
@@ -459,10 +504,19 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     # and only if sync is False or the configuration is explicity
     # configured to run synchronously.
     cnfs = zip(
-        [{**cnf,
-          "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
-         for cnf in cnfs],
-        [gate_func, ] * num_cnfs, [post_func, ] * num_cnfs)
+        [
+            {**cnf, "sync": (not sync) or cnf.get("sync", defaults.DEFAULTS["sync"])}
+            for cnf in cnfs
+        ],
+        [
+            gate_func,
+        ]
+        * num_cnfs,
+        [
+            post_func,
+        ]
+        * num_cnfs,
+    )
 
     if defaults.SYNC:
         res = [run_cnf(*cnf) for cnf in cnfs]
@@ -475,62 +529,113 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
 def _main():
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
-        description="Train a model on the output of gen_features.py.")
+        description="Train a model on the output of gen_features.py."
+    )
     psr.add_argument(
-        "--graph", action="store_true",
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\", "
-              "then analyze and graph the testing results."))
+        "--graph",
+        action="store_true",
+        help=(
+            f'If the model is of type "{models.SvmSklearnWrapper().name}", '
+            "then analyze and graph the testing results."
+        ),
+    )
     psr.add_argument(
-        "--balance", action="store_true",
-        help="Balance the training data classes")
+        "--balance", action="store_true", help="Balance the training data classes"
+    )
     psr.add_argument(
-        "--drop-popular", action="store_true",
-        help=("Drop samples from popular classes instead of adding samples to "
-              "unpopular classes. Must be used with \"--balance\"."))
+        "--drop-popular",
+        action="store_true",
+        help=(
+            "Drop samples from popular classes instead of adding samples to "
+            'unpopular classes. Must be used with "--balance".'
+        ),
+    )
     psr.add_argument(
-        "--analyze-features", action="store_true",
-        help="Analyze feature importance.")
+        "--analyze-features", action="store_true", help="Analyze feature importance."
+    )
     psr.add_argument(
-        "--l2-regularization", default=defaults.DEFAULTS["l2_regularization"],
-        required=False, type=float,
-        help=("If the model is of type "
-              f"\"{models.HistGbdtSklearnWrapper().name}\", then use this as "
-              "the L2 regularization parameter."))
+        "--l2-regularization",
+        default=defaults.DEFAULTS["l2_regularization"],
+        required=False,
+        type=float,
+        help=(
+            "If the model is of type "
+            f'"{models.HistGbdtSklearnWrapper().name}", then use this as '
+            "the L2 regularization parameter."
+        ),
+    )
     psr.add_argument(
-        "--clusters", default=defaults.DEFAULTS["clusters"],
-        required=False, type=int,
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
-              "and \"--analyze-features\" is specified, then pick this many "
-              "clusters."))
+        "--clusters",
+        default=defaults.DEFAULTS["clusters"],
+        required=False,
+        type=int,
+        help=(
+            f'If the model is of type "{models.SvmSklearnWrapper().name}" '
+            'and "--analyze-features" is specified, then pick this many '
+            "clusters."
+        ),
+    )
     psr.add_argument(
-        "--features-to-pick", default=defaults.DEFAULTS["fets_to_pick"],
-        required=False, type=int, dest="fets_to_pick",
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
-              "and \"--analyze-features\" is specified, then pick this many of "
-              "the top features."))
+        "--features-to-pick",
+        default=defaults.DEFAULTS["fets_to_pick"],
+        required=False,
+        type=int,
+        dest="fets_to_pick",
+        help=(
+            f'If the model is of type "{models.SvmSklearnWrapper().name}" '
+            'and "--analyze-features" is specified, then pick this many of '
+            "the top features."
+        ),
+    )
     psr.add_argument(
-        "--permutation-importance-repeats", dest="perm_imp_repeats",
-        default=defaults.DEFAULTS["perm_imp_repeats"], required=False, type=int,
-        help=(f"If the model is of type \"{models.SvmSklearnWrapper().name}\" "
-              "and \"--analyze-features\" is specificed, then perform "
-              "permutation importance analysis with this many repeats."))
+        "--permutation-importance-repeats",
+        dest="perm_imp_repeats",
+        default=defaults.DEFAULTS["perm_imp_repeats"],
+        required=False,
+        type=int,
+        help=(
+            f'If the model is of type "{models.SvmSklearnWrapper().name}" '
+            'and "--analyze-features" is specificed, then perform '
+            "permutation importance analysis with this many repeats."
+        ),
+    )
     psr.add_argument(
-        "--tag", help="A string to append to the name of saved models.",
-        required=False, type=str)
+        "--max-leaf-nodes",
+        help=(
+            "If the model is a HistGbdt, then use this as the maximum "
+            'number of leaf nodes. Use "-1" to indicate no limit.'
+        ),
+        default=defaults.DEFAULTS["max_leaf_nodes"],
+        type=int,
+    )
+    psr.add_argument(
+        "--tag",
+        help="A string to append to the name of saved models.",
+        required=False,
+        type=str,
+    )
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
-    assert (not args["drop_popular"]) or args["balance"], \
-        "\"--drop-popular\" must be used with \"--balance\"."
-    assert ((not args["analyze_features"]) or
-            ((not args["balance"]) or args["drop_popular"])), \
-        ("Refusing to use \"--analyze-features\" with \"--balance\" but without "
-         "\"--drop-popular\".")
-    assert args["clusters"] >= 1, \
-        f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
+    assert (not args["drop_popular"]) or args[
+        "balance"
+    ], '"--drop-popular" must be used with "--balance".'
+    assert (not args["analyze_features"]) or (
+        (not args["balance"]) or args["drop_popular"]
+    ), (
+        'Refusing to use "--analyze-features" with "--balance" but without '
+        '"--drop-popular".'
+    )
+    assert (
+        args["clusters"] >= 1
+    ), f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
+    assert args["max_leaf_nodes"] >= -1
+    if args["max_leaf_nodes"] == -1:
+        args["max_leaf_nodes"] = None
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
-        assert arg in defaults.DEFAULTS, \
-            f"Argument {arg} missing from defaults.DEFAULTS!"
+        assert (
+            arg in defaults.DEFAULTS
+        ), f"Argument {arg} missing from defaults.DEFAULTS!"
     run_trials(prepare_args(args))
 
 

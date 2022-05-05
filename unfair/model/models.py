@@ -1138,6 +1138,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "lr",
             "l2_regularization",
             "graph",
+            "max_leaf_nodes",
         ]
         # self.in_spc = (
         #     "throughput b/s-windowed-minRtt8",
@@ -1182,14 +1183,14 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         # )
         # Fat decision tree: cubic-reno-vegas-westwood
         self.in_spc = (
-                "throughput b/s-windowed-minRtt8",
-                "inverse interarrival time b/s-ewma-alpha0.001",
-                "RTT us-ewma-alpha0.001",
-                "RTT ratio us-ewma-alpha0.001",
-                "loss rate-ewma-alpha0.001",
-                "interarrival time us-ewma-alpha0.001",
-                "mathis model throughput b/s-ewma-alpha0.001",
-                "1/sqrt loss event rate-windowed-minRtt8",
+            "throughput b/s-windowed-minRtt8",
+            "inverse interarrival time b/s-ewma-alpha0.001",
+            "RTT us-ewma-alpha0.001",
+            "RTT ratio us-ewma-alpha0.001",
+            "loss rate-ewma-alpha0.001",
+            "interarrival time us-ewma-alpha0.001",
+            "mathis model throughput b/s-ewma-alpha0.001",
+            "1/sqrt loss event rate-windowed-minRtt8",
         )
         self._check()
 
@@ -1199,8 +1200,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             verbose=1,
             learning_rate=0.1,  # kwargs["lr"],
             max_iter=kwargs["max_iter"],
-            max_leaf_nodes=None,
-            # max_leaf_nodes=10000,
+            max_leaf_nodes=kwargs["max_leaf_nodes"],
             max_depth=None,
             l2_regularization=kwargs["l2_regularization"],
             early_stopping=kwargs["early_stop"],

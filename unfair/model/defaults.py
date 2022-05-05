@@ -49,6 +49,7 @@ DEFAULTS = {
     "fets_to_pick": None,
     "perm_imp_repeats": 10,
     "tag": None,
+    "max_leaf_nodes": -1,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.
