@@ -645,11 +645,12 @@ def _main():
     log_flp = path.join(out_dir, "output.log")
     logging.basicConfig(
         filename=log_flp,
-        filemode="w",
+        filemode="a",
         format="%(asctime)s %(levelname)s %(message)s",
         level=logging.DEBUG,
     )
     print("Logging to:", log_flp)
+    print("Starting training.")
 
     run_trials(prepare_args(args))
 
