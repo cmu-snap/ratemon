@@ -14,7 +14,11 @@ def parse_args():
     )
     parser.add_argument(
         "--in-dir",
-        help="Contains a directory for each number of leaf nodes.",
+        help=(
+            "Contains a directory for each number of leaf nodes. "
+            'E.g., "100", "500", "200000", etc. '
+            '"-1" Means no limit.'
+        ),
         required=True,
         type=str,
     )
