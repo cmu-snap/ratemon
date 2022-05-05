@@ -1,6 +1,7 @@
 """ Models."""
 
 import copy
+import logging
 import math
 import os
 from os import path
@@ -131,7 +132,7 @@ class PytorchModelWrapper:
 
     def log(self, msg):
         """Print a log message and write it to a model-specific log file."""
-        print(msg)
+        logging.info(msg)
         if self.out_dir is not None and path.exists(self.out_dir):
             with open(path.join(self.out_dir, "results.txt"), "a+") as fil:
                 print(msg, file=fil)
@@ -546,8 +547,6 @@ class SvmSklearnWrapper(SvmWrapper):
         utils.check_fets(fets, self.in_spc)
 
         self.net.fit(dat_in, dat_out)
-        # Oftentimes, the training log statements do not end with a newline.
-        print()
 
     def convert_to_class(self, dat_out):
         if self.num_clss == 2:
@@ -1230,8 +1229,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         sample_weights = torch.Tensor([weights[label] for label in dat_out])
 
         self.net.fit(dat_in, dat_out, sample_weight=sample_weights)
-        # Oftentimes, the training log statements do not end with a newline.
-        print()
+        self.log(f"Model fit in iterations: {self.net.n_iter_}")
 
 
 class LstmWrapper(PytorchModelWrapper):

@@ -9,6 +9,7 @@ https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 import argparse
 import copy
 import functools
+import logging
 import math
 import multiprocessing
 import os
@@ -93,7 +94,7 @@ def train_torch(
     opt_params,
 ):
     """Train a pytorch model."""
-    print("Training...")
+    logging.info("Training...")
     los_fnc = net.los_fnc()
     opt = net.opt(net.net.parameters(), **opt_params)
     # If using early stopping, then this is the lowest validation loss
@@ -119,14 +120,14 @@ def train_torch(
     ), f"Early stopping configured with erroneous VALS_PER_EPC: {VALS_PER_EPC}"
     bchs_per_val = math.ceil(num_bchs_trn / VALS_PER_EPC)
     if ely_stp:
-        print(f"Will validate after every {bchs_per_val} batches.")
+        logging.info(f"Will validate after every {bchs_per_val} batches.")
 
     tim_srt_s = time.time()
     # Loop over the dataset multiple times...
     for epoch_idx in range(num_epochs):
         tim_del_s = time.time() - tim_srt_s
         if tim_out_s != 0 and tim_del_s > tim_out_s:
-            print(
+            logging.info(
                 (
                     f"Training timed out after after {epoch_idx} epochs "
                     f"({tim_del_s:.2f} seconds)."
@@ -137,7 +138,7 @@ def train_torch(
         # For each batch...
         for bch_idx_trn, (ins, labs) in enumerate(ldr_trn, 0):
             if bch_idx_trn % bchs_per_log == 0:
-                print(
+                logging.info(
                     f"Epoch: {epoch_idx + 1:{f'0{len(str(num_epochs))}'}}/"
                     f"{'?' if ely_stp else num_epochs}, batch: "
                     f"{bch_idx_trn + 1:{f'0{len(str(num_bchs_trn))}'}}/"
@@ -153,18 +154,18 @@ def train_torch(
             loss.backward()
             opt.step()
             if bch_idx_trn % bchs_per_log == 0:
-                print(f"\tTraining loss: {loss:.5f}")
+                logging.info(f"\tTraining loss: {loss:.5f}")
 
             # Run on validation set, print statistics, and (maybe) checkpoint
             # every VAL_PER batches.
             if ely_stp and not bch_idx_trn % bchs_per_val:
-                print("\tValidation pass:")
+                logging.info("\tValidation pass:")
                 # For efficiency, convert the model to evaluation mode.
                 net.net.eval()
                 with torch.no_grad():
                     los_val = 0
                     for bch_idx_val, (ins_val, labs_val) in enumerate(ldr_val):
-                        print(
+                        logging.info(
                             "\tValidation batch: " f"{bch_idx_val + 1}/{len(ldr_val)}"
                         )
                         # Initialize the hidden state for every new sequence.
@@ -179,7 +180,7 @@ def train_torch(
                     los_val_min = los_val
                 # Calculate the percent improvement in the validation loss.
                 prc = (los_val_min - los_val) / los_val_min * 100
-                print(f"\tValidation error improvement: {prc:.2f}%")
+                logging.info(f"\tValidation error improvement: {prc:.2f}%")
 
                 # If the percent improvement in the validation loss is greater
                 # than a small threshold, then take this as the new best version
@@ -199,19 +200,19 @@ def train_torch(
                         net.net = torch.jit.load(out_flp)
                         net.net.to(dev)
                 if val_pat <= 0:
-                    print(f"Stopped after {epoch_idx + 1} epochs")
+                    logging.info(f"Stopped after {epoch_idx + 1} epochs")
                     return net
     if not ely_stp:
         # Save the final version of the model. Convert the model to Torch Script
         # first.
-        print(f"Saving final model: {out_flp}")
+        logging.info(f"Saving final model: {out_flp}")
         torch.jit.save(torch.jit.script(net.net), out_flp)
     return net
 
 
 def test_torch(net, ldr_tst, dev):
     """Test a pytorch model."""
-    print("Testing...")
+    logging.info("Testing...")
     # The number of testing samples that were predicted correctly.
     num_correct = 0
     # Total testing samples.
@@ -221,7 +222,7 @@ def test_torch(net, ldr_tst, dev):
     net.net.eval()
     with torch.no_grad():
         for bch_idx, (ins, labs) in enumerate(ldr_tst):
-            print(
+            logging.info(
                 f"Test batch: {bch_idx + 1:{f'0{len(str(num_bchs_tst))}'}}/"
                 f"{num_bchs_tst}"
             )
@@ -241,7 +242,7 @@ def test_torch(net, ldr_tst, dev):
     # Convert the model back to training mode.
     net.net.train()
     acc_tst = num_correct / total
-    print(f"Test accuracy: {acc_tst * 100:.2f}%")
+    logging.info(f"Test accuracy: {acc_tst * 100:.2f}%")
     return acc_tst
 
 
@@ -256,38 +257,38 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     if path.exists(out_flp):
         # The output file already exists with these parameters, so do not
         # retrain the model.
-        print(
+        logging.info(
             "Skipping training because a trained model already exists with "
             f"these parameters: {out_flp}"
         )
-        print(f"Loading model: {out_flp}")
+        logging.info(f"Loading model: {out_flp}")
         with open(out_flp, "rb") as fil:
             net = pickle.load(fil)
         tim_trn_s = 0
-        print("Training features:\n" + "\n\t".join(net.in_spc))
+        logging.info("Training features:\n" + "\n\t".join(net.in_spc))
     else:
         # Construct the model.
-        print("Building model...")
+        logging.info("Building model...")
         net = models.MODELS[args["model"]](out_dir)
         net.log(f"Arguments: {args}")
         net.new(**{param: args[param] for param in net.params})
         # Extract the training data from the training dataloader.
-        print("Extracting training data...")
+        logging.info("Extracting training data...")
         dat_in, dat_out = list(ldr_trn)[0]
-        print("Training data:")
+        logging.info("Training data:")
         utils.visualize_classes(net, dat_out)
 
         # Training.
-        print("Training features:\n\t" + "\n\t".join(net.in_spc))
-        print("Training...")
+        logging.info("Training features:\n\t" + "\n\t".join(net.in_spc))
+        logging.info("Training...")
         tim_srt_s = time.time()
         net.train(ldr_trn.dataset.fets, dat_in, dat_out)
         tim_trn_s = time.time() - tim_srt_s
-        print(f"Finished training - time: {tim_trn_s:.2f} seconds")
+        logging.info(f"Finished training - time: {tim_trn_s:.2f} seconds")
         # Save the model.
-        print(f"Saving final model: {out_flp}")
+        logging.info(f"Saving final model: {out_flp}")
 
-        print("Features of saved model:\n\t" + "\n\t".join(net.in_spc))
+        logging.info("Features of saved model:\n\t" + "\n\t".join(net.in_spc))
         with open(out_flp, "wb") as fil:
             pickle.dump(net, fil)
 
@@ -295,10 +296,10 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     #
     # Use .raw() instead of loading the dataloader because we need dat_extra.
     fets, dat_in, dat_out, dat_extra = ldr_tst.dataset.raw()
-    print("Test data:")
+    logging.info("Test data:")
     utils.visualize_classes(net, dat_out)
 
-    print("Testing...")
+    logging.info("Testing...")
     tim_srt_s = time.time()
     acc_tst = net.test(
         fets,
@@ -307,7 +308,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         dat_extra,
         graph_prms={"out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None},
     )
-    print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    logging.info(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 
     # Optionally perform feature elimination.
     if args["analyze_features"]:
@@ -366,7 +367,7 @@ def run_torch(args, out_dir, out_flp, ldrs):
         opt_params={param: args[param] for param in net.params},
     )
     tim_trn_s = time.time() - tim_srt_s
-    print(f"Finished training - time: {tim_trn_s:.2f} seconds")
+    logging.info(f"Finished training - time: {tim_trn_s:.2f} seconds")
 
     # Explicitly delete the training and validation data to save
     # memory on the target device.
@@ -383,7 +384,7 @@ def run_torch(args, out_dir, out_flp, ldrs):
     ldr_tst.dataset.to(dev)
     tim_srt_s = time.time()
     acc_tst = test_torch(net, ldr_tst, dev)
-    print(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
+    logging.info(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 
     # Explicitly delete the test data to save memory on the target device.
     del ldr_tst
@@ -406,15 +407,11 @@ def prepare_args(args_):
 
 def run_trials(args):
     """Run many trials and survive many failed training attempts."""
-    print(f"Arguments: {args}")
+    logging.info(f"Arguments: {args}")
 
     if args["no_rand"]:
         utils.set_rand_seed()
-    # Prepare the output directory.
-    out_dir = args["out_dir"]
-    if not path.isdir(out_dir):
-        print(f"Output directory does not exist. Creating it: {out_dir}")
-        os.makedirs(out_dir)
+
     # Create a temporary model to use during the data preparation
     # process. Another model will be created for the actual training.
     net_tmp = models.MODELS[args["model"]]()
@@ -459,21 +456,23 @@ def run_trials(args):
         apts += 1
         res = (
             run_sklearn if isinstance(net_tmp, models.SvmSklearnWrapper) else run_torch
-        )(args, out_dir, out_flp, ldrs)
+        )(args, args["out_dir"], out_flp, ldrs)
         if res[0] == 100:
-            print((f"Training failed (attempt {apts}/{apts_max}). Trying again!"))
+            logging.info(
+                (f"Training failed (attempt {apts}/{apts_max}). Trying again!")
+            )
         else:
             ress.append(res)
             trls -= 1
     if ress:
-        print(
+        logging.info(
             ("Resulting accuracies: " f"{', '.join([f'{acc:.2f}' for acc, _ in ress])}")
         )
         max_acc, tim_s = max(ress, key=lambda p: p[0])
-        print(f"Maximum accuracy: {max_acc:.2f}")
+        logging.info(f"Maximum accuracy: {max_acc:.2f}")
         # Return the minimum error instead of the maximum accuracy.
         return 1 - max_acc, tim_s
-    print(f"Model cannot be trained with args: {args}")
+    logging.info(f"Model cannot be trained with args: {args}")
     return float("NaN"), float("NaN")
 
 
@@ -499,7 +498,7 @@ def run_cnfs(cnfs, sync=False, gate_func=None, post_func=None):
     Assumes that the arguments have already been processed with prepare_args().
     """
     num_cnfs = len(cnfs)
-    print(f"Training {num_cnfs} configurations.")
+    logging.info(f"Training {num_cnfs} configurations.")
     # The configurations themselves should execute synchronously if
     # and only if sync is False or the configuration is explicity
     # configured to run synchronously.
@@ -636,6 +635,22 @@ def _main():
         assert (
             arg in defaults.DEFAULTS
         ), f"Argument {arg} missing from defaults.DEFAULTS!"
+
+    # Prepare the output directory.
+    out_dir = args["out_dir"]
+    if not path.isdir(out_dir):
+        logging.info(f"Output directory does not exist. Creating it: {out_dir}")
+        os.makedirs(out_dir)
+
+    log_flp = path.join(out_dir, "output.log")
+    logging.basicConfig(
+        filename=log_flp,
+        filemode="w",
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG,
+    )
+    print("Logging to:", log_flp)
+
     run_trials(prepare_args(args))
 
 

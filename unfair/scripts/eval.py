@@ -45,7 +45,7 @@ def plot_cdf(args, disabled, enabled, x_label, filename):
     cdf_flp = path.join(args.out_dir, filename)
     plt.savefig(cdf_flp)
     plt.close()
-    logging.info("Saved CDF to:", cdf_flp)
+    logging.info("Saved CDF to: %s", cdf_flp)
 
 
 def plot_hist(args, disabled, enabled, x_label, filename):
@@ -64,7 +64,7 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     hist_flp = path.join(args.out_dir, filename)
     plt.savefig(hist_flp)
     plt.close()
-    logging.info("Saved histogram to:", hist_flp)
+    logging.info("Saved histogram to: %s", hist_flp)
 
 
 def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
@@ -203,7 +203,7 @@ def main(args):
 
     data_flp = path.join(args.out_dir, "results.pickle")
     if path.exists(data_flp):
-        logging.info("Loading data from:", data_flp)
+        logging.info("Loading data from: %s", data_flp)
         # Load existing raw JFI results.
         with open(data_flp, "rb") as fil:
             results = pickle.load(fil)
@@ -258,7 +258,7 @@ def main(args):
                 break
         if target_disabled_exp is None:
             logging.info(
-                "Warning: Cannot find experiment with unfairness monitor disabled:",
+                "Warning: Cannot find experiment with unfairness monitor disabled: %s",
                 target_disabled_name,
             )
             continue
@@ -320,8 +320,8 @@ def main(args):
     logging.info(
         (
             "\nOverall JFI change (percent) --- higher is better:\n"
-            "\tAvg: %.4f %\n"
-            "\tStddev: %.4f %\n"
+            "\tAvg: %.4f /%\n"
+            "\tStddev: %.4f %\\n"
             "\tVar: %.4f %"
         ),
         np.mean(jfi_deltas_percent),
@@ -344,7 +344,7 @@ def main(args):
         np.var(util_deltas_percent),
     )
     logging.info(
-        "Overall average link utilization with monitor enabled: %.4f} %",
+        "Overall average link utilization with monitor enabled: %.4f %",
         np.mean(utils_enabled),
     )
 

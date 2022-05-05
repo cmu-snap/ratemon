@@ -1,5 +1,6 @@
 """ Creates training, validation, and test data. """
 
+import logging
 import math
 from os import path
 
@@ -27,10 +28,10 @@ def get_dataloaders(args, net):
     # proper scaling parameters.
     if (not args["regen_data"] and path.exists(dat_flp) and
             path.exists(scl_prms_flp)):
-        print("Found existing data!")
+        logging.info("Found existing data!")
         trn, val, tst = utils.load_parsed_data(dat_flp)
     else:
-        print("Regenerating data...")
+        logging.info("Regenerating data...")
         trn, val, tst, scl_prms = get_bulk_data(args, net)
         # Save the processed data so that we do not need to process it again.
         utils.save_parsed_data(dat_flp, trn, val, tst)
@@ -144,7 +145,7 @@ def extract_fets(dat, split_name, net):
     dat = dat[dat[list(net.out_spc)] != -1][0]
     removed = dat.shape[0] - len_before
     if removed > 0:
-        print(
+        logging.info(
             f"Removed {removed} rows with unknown out_spc from split "
             f"\"{split_name}\".")
 
