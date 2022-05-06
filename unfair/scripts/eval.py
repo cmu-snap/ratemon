@@ -177,12 +177,14 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
 
 def main(args):
+    log_flp = path.join(args.out_dir, "output.log")
     logging.basicConfig(
-        filename=path.join(args.out_dir, "output.log"),
+        filename=log_flp,
         filemode="w",
         format="%(asctime)s %(levelname)s %(message)s",
         level=logging.DEBUG,
     )
+    print("Logging to:", log_flp)
     logging.info("Evaluating experiments in: %s", args.exp_dir)
 
     # Find all experiments.
@@ -320,9 +322,9 @@ def main(args):
     logging.info(
         (
             "\nOverall JFI change (percent) --- higher is better:\n"
-            "\tAvg: %.4f /%\n"
-            "\tStddev: %.4f %\\n"
-            "\tVar: %.4f %"
+            "\tAvg: %.4f %%\n"
+            "\tStddev: %.4f %%\n"
+            "\tVar: %.4f %%"
         ),
         np.mean(jfi_deltas_percent),
         np.std(jfi_deltas_percent),
@@ -334,17 +336,17 @@ def main(args):
     logging.info(
         (
             "\nOverall link utilization change "
-            "--- higher is better, want to be >= 0%:\n"
-            "\tAvg: %.4f %\n"
-            "\tStddev: %.4f %\n"
-            "\tVar: %.4f %"
+            "--- higher is better, want to be >= 0%%:\n"
+            "\tAvg: %.4f %%\n"
+            "\tStddev: %.4f %%\n"
+            "\tVar: %.4f %%"
         ),
         np.mean(util_deltas_percent),
         np.std(util_deltas_percent),
         np.var(util_deltas_percent),
     )
     logging.info(
-        "Overall average link utilization with monitor enabled: %.4f %",
+        "Overall average link utilization with monitor enabled: %.4f %%",
         np.mean(utils_enabled),
     )
 
