@@ -44,6 +44,7 @@ DEFAULTS = {
     "balance": False,
     "drop_popular": True,
     "analyze_features": False,
+    "feature_selection_type": "naive",
     "l2_regularization": 0,
     "clusters": 30,
     "fets_to_pick": None,

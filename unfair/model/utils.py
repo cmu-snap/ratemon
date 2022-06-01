@@ -1444,7 +1444,11 @@ def zip_timeseries(xs, ys):
     return xs_o, ys_o
 
 
-def select_fets(cluster_to_fets, top_fets):
+def select_fets_naive(net):
+    print(net.net.feature_importances_)
+
+
+def select_fets_perm(cluster_to_fets, top_fets):
     """Select the most important features.
 
     Picks the most important feature from each cluster in cluster_to_fets,

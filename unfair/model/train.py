@@ -312,17 +312,26 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
 
     # Optionally perform feature elimination.
     if args["analyze_features"]:
-        utils.select_fets(
-            utils.analyze_feature_correlation(net, out_dir, dat_in, args["clusters"]),
-            utils.analyze_feature_importance(
-                net,
-                out_dir,
-                dat_in,
-                dat_out,
-                args["fets_to_pick"],
-                args["perm_imp_repeats"],
-            ),
-        )
+        if args["feature_selection_type"] == "naive":
+            utils.select_fets_naive(net)
+        elif args["feature_selection_type"] == "perm":
+            utils.select_fets_perm(
+                utils.analyze_feature_correlation(
+                    net, out_dir, dat_in, args["clusters"]
+                ),
+                utils.analyze_feature_importance(
+                    net,
+                    out_dir,
+                    dat_in,
+                    dat_out,
+                    args["fets_to_pick"],
+                    args["perm_imp_repeats"],
+                ),
+            )
+        else:
+            raise RuntimeError(
+                f"Unknown feature selection type: {args['feature_selection_type']}"
+            )
     return acc_tst, tim_trn_s
 
 
@@ -611,6 +620,13 @@ def _main():
         "--tag",
         help="A string to append to the name of saved models.",
         required=False,
+        type=str,
+    )
+    psr.add_argument(
+        "--feature-selection-type",
+        choices=["perm", "naive"],
+        default=defaults.DEFAULTS["feature_selection_type"],
+        help="The feature selection algorithm to use.",
         type=str,
     )
     psr, psr_verify = cl_args.add_training(psr)
