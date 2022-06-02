@@ -406,11 +406,11 @@ def _main():
         }
 
         do_prepare(
-            args, {"train": 100, "val": 0, "test": 0}, exp_flps_per_split["train"]
+            args, {"train": 1, "val": 0, "test": 0}, exp_flps_per_split["train"]
         )
-        do_prepare(args, {"train": 0, "val": 100, "test": 0}, exp_flps_per_split["val"])
+        do_prepare(args, {"train": 0, "val": 1, "test": 0}, exp_flps_per_split["val"])
         do_prepare(
-            args, {"train": 0, "val": 0, "test": 100}, exp_flps_per_split["test"]
+            args, {"train": 0, "val": 0, "test": 1}, exp_flps_per_split["test"]
         )
     else:
         do_prepare(args, split_fracs, exp_flps)
