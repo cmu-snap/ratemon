@@ -1348,14 +1348,22 @@ def analyze_feature_importance(
         else:
             qualifier = "Best"
             if isinstance(net.net, ensemble.HistGradientBoostingClassifier):
-                count = math.ceil(len(dat_in) * feature_selection_percent / 100)
+                if feature_selection_percent < 100:
+                    logging.info(
+                        "Using a random %d%% of test data for feature selection.",
+                        feature_selection_percent,
+                    )
+                    count = math.ceil(len(dat_in) * feature_selection_percent / 100)
+                    indices = torch.randperm(len(dat_in))[:count]
+                    dat_in = dat_in[indices]
+                    dat_out = dat_out[indices]
                 imps = inspection.permutation_importance(
                     net.net,
-                    dat_in[:count],
-                    dat_out[:count],
+                    dat_in,
+                    dat_out,
                     n_repeats=perm_imp_repeats,
                     random_state=0,
-                    n_jobs=-1,
+                    n_jobs=-1,  # -1
                 ).importances_mean
             else:
                 imps = net.net.coef_[0]
