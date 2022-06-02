@@ -150,13 +150,14 @@
             "program": "${workspaceFolder}/unfair/model/prepare_data.py",
             "console": "integratedTerminal",
             "args": [
-                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--train-split=70",
-                "--val-split=0",
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--train-split=60",
+                "--val-split=10",
                 "--test-split=30",
                 "--warmup-percent=5",
-                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--sample-percent=15"
+                "--out-dir=/home/ccanel/out/foobar",
+                "--sample-percent=1",
+                "--disjoint-splits"
             ],
             "autoReload": {
                 "enable": false

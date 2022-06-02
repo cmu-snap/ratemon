@@ -6,6 +6,7 @@ training, validation, and test sets.
 """
 
 import argparse
+import logging
 import math
 import os
 from os import path
@@ -29,13 +30,21 @@ class Split:
         self.shuffle = shuffle
         self.fets = [name for name, typ in dtype]
 
+        if self.frac == 0:
+            logging.info("Skipping split %s because it will select no packets.", name)
+            self.finished = True
+            return
+
         flp = utils.get_split_data_flp(out_dir, name)
         if path.exists(flp):
             raise Exception(f"Split already exists: {flp}")
-        print(
-            f'\tInitializing split "{self.name}" '
-            f"({split_frac * 100}%, sampling {sample_frac * 100}%"
-            f"{', shuffled' if self.shuffle else ''}) at: {flp}"
+        logging.info(
+            '\tInitializing split "%s" (%d%%, sampling %d%%%s) at: %s',
+            self.name,
+            split_frac * 100,
+            sample_frac * 100,
+            ", shuffled" if self.shuffle else "",
+            flp,
         )
 
         # Track where this Split has been finalized, in which case it
@@ -96,7 +105,7 @@ class Split:
         )
         # dat_new_idxs = list(range(start_idx, self.idx))
 
-        self.dat[start_idx:self.idx] = exp_dat[exp_new_idxs]
+        self.dat[start_idx : self.idx] = exp_dat[exp_new_idxs]
         # self.dat_available_idxs -= set(dat_new_idxs)
         return exp_available_idxs
 
@@ -105,6 +114,9 @@ class Split:
 
         A finalized Split cannot have methods called on it.
         """
+        if self.finished:
+            return
+
         self.finished = True
         if self.dat is None:
             # This split does not contain any packets.
@@ -112,17 +124,18 @@ class Split:
 
         # Mark any unused indices as invalid by filling their values with -1.
         # self.dat[list(self.dat_available_idxs)].fill(-1)
-        self.dat[self.idx:].fill(-1)
+        self.dat[self.idx :].fill(-1)
 
         # Shuffle in-place at the end. This is only okay because I plan to
         # always store the output in a tmpfs.
         if self.shuffle:
-            print(f'Shuffling split "{self.name}"...')
+            logging.info('Shuffling split "%s"...', self.name)
             tim_srt_s = time.time()
             np.random.default_rng().shuffle(self.dat)
-            print(
-                f'Done shuffling split "{self.name}" '
-                f"(took {time.time() - tim_srt_s:.2f} seconds)"
+            logging.info(
+                'Done shuffling split "%s" (took %0.2f seconds)',
+                self.name,
+                time.time() - tim_srt_s,
             )
 
         self.dat.flush()
@@ -136,7 +149,7 @@ def survey(exp_flps, warmup_frac):
     to remove those whose output file is invalid.
     """
     num_exps = len(exp_flps)
-    print(f"Surveying {num_exps} experiments...")
+    logging.info("Surveying %d experiments...", num_exps)
     assert exp_flps, "Must provide at least one experiment."
 
     # Produces a nested list of the form:
@@ -157,14 +170,14 @@ def survey(exp_flps, warmup_frac):
     exp_flps = list(zip(*exp_headers))[0]
     num_exps_invalid = num_exps_original - len(exp_flps)
     if num_exps_invalid:
-        print(f"Warning: Removed {num_exps_invalid} invalid experiments!")
+        logging.info("Warning: Removed %d invalid experiments!", num_exps_invalid)
     assert exp_headers, "Error: No valid experiments!"
 
     # Drop experiments that do not contain any flows.
     to_drop = set()
     for idx, (exp_flp, flw_headers) in enumerate(exp_headers):
         if not flw_headers:
-            print(f'Experiment "{exp_flp}" does not contain any flows!')
+            logging.info('Experiment "%s" does not contain any flows!', exp_flp)
             to_drop.add(idx)
     exp_headers = [
         exp_header for idx, exp_header in enumerate(exp_headers) if idx not in to_drop
@@ -197,7 +210,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
     in out_dir. The experiments contain a total of num_pkts packets and have the
     provided dtype.
     """
-    print("Preparing split files...")
+    logging.info("Preparing split files...")
     splits = {
         name: Split(
             name,
@@ -222,7 +235,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
             exp_flp, msg=f"{idx + 1:{f'0{len(str(num_exps))}'}}/{num_exps}"
         )
         if dat is None:
-            print(f"\tError loading {exp_flp}")
+            logging.info("\tError loading %s", exp_flp)
             continue
 
         # Combine flows.
@@ -232,7 +245,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
             if warmup_frac != 0:
                 # Remove a percentage of packets from the beginning of the
                 # experiment.
-                dat_flw = dat_flw[math.floor(dat_flw.shape[0] * warmup_frac):]
+                dat_flw = dat_flw[math.floor(dat_flw.shape[0] * warmup_frac) :]
             if dat_combined is None:
                 dat_combined = dat_flw
             else:
@@ -247,11 +260,12 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
         all_idxs = set(range(dat.shape[0]))
         # For each split, take a fraction of the experiment packets.
         for split in splits.values():
-            all_idxs = split.take(dat, all_idxs)
+            if not split.finished:
+                all_idxs = split.take(dat, all_idxs)
         # Record how many packets are not being moved to one of the
         # merged files.
         pkts_forgotten += len(all_idxs)
-    print(
+    logging.info(
         f"Forgot {pkts_forgotten}/{num_pkts} packets "
         f"({pkts_forgotten / num_pkts * 100:.2f}%)"
     )
@@ -264,7 +278,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
     # process of flushing the tables to disk (which occurs when the
     # memory-mapped ndarray object inside each Split object is
     # deleted) may take a long time, we explicitly do so here.
-    print("Flushing splits to disk...")
+    logging.info("Flushing splits to disk...")
     del splits
 
 
@@ -276,9 +290,7 @@ def splits_exist(out_dir):
     return True
 
 
-def _main():
-    utils.set_rand_seed()
-
+def parse_args():
     psr = argparse.ArgumentParser(
         description=(
             "Merges parsed experiment files into unified training, validation, "
@@ -319,6 +331,11 @@ def _main():
         required=False,
         type=str,
     )
+    psr.add_argument(
+        "--disjoint-splits",
+        action="store_true",
+        help="If set, splits will be taken from disjoint sets of experiments.",
+    )
     psr, psr_verify = cl_args.add_sample_percent(
         *cl_args.add_out(*cl_args.add_warmup(*cl_args.add_num_exps(psr)))
     )
@@ -335,9 +352,19 @@ def _main():
         f"not {tot_split * 100}"
     )
 
-    if splits_exist(args.out_dir):
-        print(f"Not regenerating splits because they already exist in: {args.out_dir}")
-        return 0
+    assert not splits_exist(args.out_dir), \
+        f"Not regenerating splits because they already exist in: {args.out_dir}"
+
+    return args, split_fracs
+
+
+def _main():
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.DEBUG,
+    )
+    utils.set_rand_seed()
+    args, split_fracs = parse_args()
 
     tim_srt_s = time.time()
     # Determine the experiment filepaths.
@@ -347,14 +374,60 @@ def _main():
         for fln in os.listdir(exps_dir)
         if not fln.startswith(defaults.DATA_PREFIX) and fln.endswith(".npz")
     ]
+
+    if args.disjoint_splits:
+        # Split the experiments into disjoint sets of experiments. Split based on the
+        # number of experiments and not the number of packets because the number of
+        # experiments is directly tied to the diversisty of a set of experiments.
+        logging.info("Building disjoint splits")
+
+        # Determine the number of experiments in each split. Since we are using ceil(),
+        # these values may sum to more than the total number of experiments.
+        num_exps_tot = len(exp_flps)
+        num_exps_per_split = {
+            split: math.ceil(num_exps_tot * split_frac)
+            for split, split_frac in split_fracs.items()
+        }
+        for split, num_exps in num_exps_per_split.items():
+            assert 0 <= num_exps < num_exps_tot, (
+                f"Number of exps per split must be in the range [0, {num_exps_tot}], "
+                f"but for split {split} is: {num_exps}"
+            )
+
+        # Shuffle the experiments and divide them between the splits. Select test,
+        # validation, and training experiments in that order so that any border
+        # conditions from using ceil() end up decreasing the number of training
+        # experiments only.
+        random.shuffle(exp_flps)
+        exp_flps_per_split = {
+            "test": exp_flps[: num_exps_per_split["test"]],
+            "val": exp_flps[: num_exps_per_split["test"] + num_exps_per_split["val"]],
+            "train": exp_flps[num_exps_per_split["test"] + num_exps_per_split["val"] :],
+        }
+
+        do_prepare(
+            args, {"train": 100, "val": 0, "test": 0}, exp_flps_per_split["train"]
+        )
+        do_prepare(args, {"train": 0, "val": 100, "test": 0}, exp_flps_per_split["val"])
+        do_prepare(
+            args, {"train": 0, "val": 0, "test": 100}, exp_flps_per_split["test"]
+        )
+    else:
+        do_prepare(args, split_fracs, exp_flps)
+
+    logging.info(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
+    return 0
+
+
+def do_prepare(args, split_fracs, exp_flps):
     random.shuffle(exp_flps)
     num_exps = len(exp_flps) if args.num_exps is None else args.num_exps
     exp_flps = exp_flps[:num_exps]
-    print(f"Selected {num_exps} experiments")
+    logging.info(f"Selected {num_exps} experiments")
     warmup_frac = args.warmup_percent / 100
     sample_frac = args.sample_percent / 100
     exp_flps, num_pkts, dtype = survey(exp_flps, warmup_frac)
-    print(
+    logging.info(
         f"Total packets: {num_pkts}\nAll found features ({len(dtype.names)}):\n\t"
         + "\n\t".join(sorted(dtype.names))
     )
@@ -375,14 +448,14 @@ def _main():
             len(required) == 0
         ), f"Did not find all required features in surveyed files. Missing: {required}"
         dtype = new_dtype
-    print("Using minimum dtype: \n\t" + "\n\t".join(sorted(str(fet) for fet in dtype)))
+    logging.info(
+        "Using minimum dtype: \n\t" + "\n\t".join(sorted(str(fet) for fet in dtype))
+    )
 
     # Create the merged training, validation, and test files.
     merge(
         exp_flps, args.out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_frac
     )
-    print(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
-    return 0
 
 
 if __name__ == "__main__":
