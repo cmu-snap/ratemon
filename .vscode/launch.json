@@ -176,7 +176,7 @@
             "args": [
                 "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
                 "--untar-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--out-dir=~/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
                 "--parallel=20"
             ],
             "autoReload": {
