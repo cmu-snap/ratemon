@@ -1316,7 +1316,13 @@ def analyze_feature_correlation(net, out_dir, dat_in, clusters):
 
 
 def analyze_feature_importance(
-    net, out_dir, dat_in, dat_out, num_fets_to_pick, perm_imp_repeats
+    net,
+    out_dir,
+    dat_in,
+    dat_out,
+    num_fets_to_pick,
+    perm_imp_repeats,
+    feature_selection_percent,
 ):
     """Analyze the importance of features to a trained net."""
     # Analyze feature coefficients. The underlying model's .coef_
@@ -1342,8 +1348,14 @@ def analyze_feature_importance(
         else:
             qualifier = "Best"
             if isinstance(net.net, ensemble.HistGradientBoostingClassifier):
+                count = math.ceil(len(dat_in) * feature_selection_percent / 100)
                 imps = inspection.permutation_importance(
-                    net.net, dat_in, dat_out, n_repeats=perm_imp_repeats, random_state=0
+                    net.net,
+                    dat_in[:count],
+                    dat_out[:count],
+                    n_repeats=perm_imp_repeats,
+                    random_state=0,
+                    n_jobs=-1,
                 ).importances_mean
             else:
                 imps = net.net.coef_[0]
@@ -1486,11 +1498,11 @@ def select_fets_perm(cluster_to_fets, top_fets):
         + "\n\t".join(f"{fet}: {coeff:.4f}" for fet, coeff in chosen_fets)
     )
     logging.info(
-        "New in_spc:",
-        "\tin_spc = (",
-        "\t\t" + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets[:10]),
-        "\t)",
-        sep="\n",
+        "New in_spc:\n"
+        + "\tin_spc = (\n"
+        + "\t\t"
+        + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets[:10])
+        + "\t)"
     )
     return chosen_fets
 

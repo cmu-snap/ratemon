@@ -326,6 +326,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
                     dat_out,
                     args["fets_to_pick"],
                     args["perm_imp_repeats"],
+                    args["feature_selection_percent"]
                 ),
             )
         else:
@@ -629,6 +630,13 @@ def _main():
         help="The feature selection algorithm to use.",
         type=str,
     )
+    psr.add_argument(
+        "--feature-selection-percent",
+        default=defaults.DEFAULTS["feature_selection_percent"],
+        help="The percentage of test data to use for feature selection.",
+        required=False,
+        type=float,
+    )
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args[
@@ -646,6 +654,11 @@ def _main():
     assert args["max_leaf_nodes"] >= -1
     if args["max_leaf_nodes"] == -1:
         args["max_leaf_nodes"] = None
+    if args["feature_selection_percent"] is not None:
+        assert 0 < args["feature_selection_percent"] <= 100, (
+            '"--feature-selection-percent" must be in the range (0, 100], '
+            f'but is: {args["feature_selection_percent"]}'
+        )
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
         assert (

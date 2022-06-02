@@ -112,7 +112,7 @@
             "sudo": true
         },
         {
-            "name": "(r) train cubic cubic",
+            "name": "(r) train cubic bbr",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/unfair/model/train.py",
@@ -123,13 +123,17 @@
                 "--model=HistGbdtSklearn",
                 "--balance",
                 "--drop-popular",
+                "--max-leaf-nodes=10000",
+                "--max-iter=10",
                 "--analyze-features",
-                "--clusters=20",
-                "--features-to-pick=10",
-                "--permutation-importance-repeats=2",
-                "--sample-percent=100",
-                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic"
+                "--feature-selection-percent=5",
+                "--clusters=3",
+                "--features-to-pick=3",
+                "--permutation-importance-repeats=1",
+                "--sample-percent=1",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--tag=debugging"
             ],
             "autoReload": {
                 "enable": false
