@@ -6,11 +6,21 @@ https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
 https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 """
 
+import logging
+
+log_flp = "train.log"
+print(f"Logging to: {log_flp}")
+logging.basicConfig(
+    filename=log_flp,
+    filemode="a",
+    format="%(asctime)s %(levelname)s %(message)s",
+    level=logging.DEBUG,
+)
+
 import argparse
 import copy
 import functools
 import json
-import logging
 import math
 import multiprocessing
 import os
@@ -695,14 +705,15 @@ def _main():
         logging.info(f"Output directory does not exist. Creating it: {out_dir}")
         os.makedirs(out_dir)
 
-    log_flp = path.join(out_dir, "output.log")
-    logging.basicConfig(
-        filename=log_flp,
-        filemode="a",
-        format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.DEBUG,
-    )
-    print("Logging to:", log_flp)
+    # log_flp = path.join(out_dir, "output.log")
+    # TODO: https://stackoverflow.com/questions/20240464/python-logging-file-is-not-working-when-using-logging-basicconfig
+    # logging.basicConfig(
+    #     filename=log_flp,
+    #     filemode="a",
+    #     format="%(asctime)s %(levelname)s %(message)s",
+    #     level=logging.DEBUG,
+    # )
+    # print("Logging to:", log_flp)
     print("Starting training.")
 
     run_trials(prepare_args(args))
