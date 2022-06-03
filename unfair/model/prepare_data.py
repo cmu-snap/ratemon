@@ -352,8 +352,9 @@ def parse_args():
         f"not {tot_split * 100}"
     )
 
-    assert not splits_exist(args.out_dir), \
-        f"Not regenerating splits because they already exist in: {args.out_dir}"
+    assert not splits_exist(
+        args.out_dir
+    ), f"Not regenerating splits because they already exist in: {args.out_dir}"
 
     return args, split_fracs
 
@@ -401,17 +402,16 @@ def _main():
         random.shuffle(exp_flps)
         exp_flps_per_split = {
             "test": exp_flps[: num_exps_per_split["test"]],
-            "val": exp_flps[: num_exps_per_split["test"] + num_exps_per_split["val"]],
+            "val": exp_flps[
+                num_exps_per_split["test"] : num_exps_per_split["test"]
+                + num_exps_per_split["val"]
+            ],
             "train": exp_flps[num_exps_per_split["test"] + num_exps_per_split["val"] :],
         }
 
-        do_prepare(
-            args, {"train": 1, "val": 0, "test": 0}, exp_flps_per_split["train"]
-        )
+        do_prepare(args, {"train": 1, "val": 0, "test": 0}, exp_flps_per_split["train"])
         do_prepare(args, {"train": 0, "val": 1, "test": 0}, exp_flps_per_split["val"])
-        do_prepare(
-            args, {"train": 0, "val": 0, "test": 1}, exp_flps_per_split["test"]
-        )
+        do_prepare(args, {"train": 0, "val": 0, "test": 1}, exp_flps_per_split["test"])
     else:
         do_prepare(args, split_fracs, exp_flps)
 
