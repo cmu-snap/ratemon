@@ -1,4 +1,4 @@
-""" Creates training, validation, and test data. """
+"""Creates training, validation, and test data."""
 
 import logging
 import math
@@ -41,9 +41,9 @@ def get_dataloaders(args, net):
 
     # Select the specific columns that we want to use as input features.
     # trn[0] is the input data.
-    trn = (trn[0][list(args["features"])], trn[1], trn[2])
-    val = (val[0][list(args["features"])], val[1], val[2])
-    tst = (tst[0][list(args["features"])], tst[1], tst[2])
+    trn = (trn[0][list(net.in_spc)], trn[1], trn[2])
+    val = (val[0][list(net.in_spc)], val[1], val[2])
+    tst = (tst[0][list(net.in_spc)], tst[1], tst[2])
 
     return create_dataloaders(args, trn, val, tst)
 

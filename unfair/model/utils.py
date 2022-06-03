@@ -1232,6 +1232,7 @@ def log_feature_analysis(out_dir, msg):
 
 def analyze_feature_correlation(net, out_dir, dat_in, clusters):
     """Analyze correlation among features of a net."""
+    logging.info("Analyzing feature correlation...")
     assert_tensor(dat_in=dat_in)
     # Convert all unknown values (-1) and NaNs to the mean of their column
     # because calculating the correlation using unknown values does not make
@@ -1466,6 +1467,7 @@ def zip_timeseries(xs, ys):
 
 def select_fets_naive(net):
     print(net.net.feature_importances_)
+    raise NotImplementedError()
 
 
 def select_fets_perm(cluster_to_fets, top_fets):
@@ -1505,14 +1507,16 @@ def select_fets_perm(cluster_to_fets, top_fets):
         f"Chosen features ({len(chosen_fets)}):\n\t"
         + "\n\t".join(f"{fet}: {coeff:.4f}" for fet, coeff in chosen_fets)
     )
+    chosen_fets_names = list(zip(*chosen_fets))[0]
+    # TODO: What is that 10?
     logging.info(
         "New in_spc:\n"
         + "\tin_spc = (\n"
         + "\t\t"
-        + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets[:10])
-        + "\t)"
+        + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets[:10])[:-1]
+        + "\n\t)"
     )
-    return chosen_fets
+    return chosen_fets_names
 
 
 def find_bound(vals, target, min_idx, max_idx, which):

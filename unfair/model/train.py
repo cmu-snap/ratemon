@@ -9,6 +9,7 @@ https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 import argparse
 import copy
 import functools
+import json
 import logging
 import math
 import multiprocessing
@@ -272,6 +273,10 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         net = models.MODELS[args["model"]](out_dir)
         net.log(f"Arguments: {args}")
         net.new(**{param: args[param] for param in net.params})
+        # "selected_features" has already been populated with either the selected
+        # features or all of the features.
+        net.in_spc = tuple(args["selected_features"])
+
         # Extract the training data from the training dataloader.
         logging.info("Extracting training data...")
         dat_in, dat_out = list(ldr_trn)[0]
@@ -313,9 +318,9 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
     # Optionally perform feature elimination.
     if args["analyze_features"]:
         if args["feature_selection_type"] == "naive":
-            utils.select_fets_naive(net)
+            fets = utils.select_fets_naive(net)
         elif args["feature_selection_type"] == "perm":
-            utils.select_fets_perm(
+            fets = utils.select_fets_perm(
                 utils.analyze_feature_correlation(
                     net, out_dir, dat_in, args["clusters"]
                 ),
@@ -324,15 +329,20 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
                     out_dir,
                     dat_in,
                     dat_out,
-                    args["fets_to_pick"],
+                    args["num_fets_to_pick"],
                     args["perm_imp_repeats"],
-                    args["feature_selection_percent"]
+                    args["feature_selection_percent"],
                 ),
             )
         else:
             raise RuntimeError(
                 f"Unknown feature selection type: {args['feature_selection_type']}"
             )
+
+        fets_flp = out_flp.replace(".pickle", "-selected_features.json")
+        with open(fets_flp, "w", encoding="utf-8") as fil:
+            json.dump(fets, fil, indent=4)
+        logging.info("Saved selected features to: %s", fets_flp)
     return acc_tst, tim_trn_s
 
 
@@ -448,11 +458,10 @@ def run_trials(args):
     )
     # If custom features are specified, then overwrite the model's
     # default features.
-    fets = args["features"]
-    if fets:
-        net_tmp.in_spc = tuple(fets)
+    if args["selected_features"] is None:
+        args["selected_features"] = list(net_tmp.in_spc)
     else:
-        args["features"] = net_tmp.in_spc
+        net_tmp.in_spc = tuple(args["selected_features"])
 
     # Load the training, validation, and test data.
     ldrs = data.get_dataloaders(args, net_tmp)
@@ -585,11 +594,11 @@ def _main():
         ),
     )
     psr.add_argument(
-        "--features-to-pick",
-        default=defaults.DEFAULTS["fets_to_pick"],
+        "--num-features-to-pick",
+        default=defaults.DEFAULTS["num_fets_to_pick"],
         required=False,
         type=int,
-        dest="fets_to_pick",
+        dest="num_fets_to_pick",
         help=(
             f'If the model is of type "{models.SvmSklearnWrapper().name}" '
             'and "--analyze-features" is specified, then pick this many of '
@@ -637,6 +646,12 @@ def _main():
         required=False,
         type=float,
     )
+    psr.add_argument(
+        "--selected-features",
+        help="A JSON file of features to use.",
+        required=False,
+        type=str,
+    )
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
     assert (not args["drop_popular"]) or args[
@@ -659,6 +674,15 @@ def _main():
             '"--feature-selection-percent" must be in the range (0, 100], '
             f'but is: {args["feature_selection_percent"]}'
         )
+    assert args["selected_features"] is None or path.exists(
+        args["selected_features"]
+    ), f"The file \"{args['selected_features']}\" does not exist."
+
+    if args["selected_features"] is not None:
+        logging.info("Loading selected features from: %s", args["selected_features"])
+        with open(args["selected_features"], "r", encoding="utf-8") as fil:
+            args["selected_features"] = json.load(fil)
+
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
         assert (

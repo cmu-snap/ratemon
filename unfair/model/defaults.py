@@ -12,6 +12,7 @@ DEFAULTS = {
     "sample_percent": 100,
     "num_exps": None,
     "exps": [],
+    # Cannot determine this dynamically because of import loop.
     "model": "HistGbdtSklearn",
     "features": [],
     "epochs": 100,
@@ -33,7 +34,7 @@ DEFAULTS = {
     "val_improvement_thresh": 0.1,
     "conf_trials": 1,
     "max_attempts": 10,
-    "no_rand": False,
+    "no_rand": True,
     "timeout_s": 0,
     "out_dir": ".",
     "tmp_dir": None,
@@ -48,10 +49,11 @@ DEFAULTS = {
     "feature_selection_percent": 100,
     "l2_regularization": 0,
     "clusters": 30,
-    "fets_to_pick": None,
+    "num_fets_to_pick": None,
     "perm_imp_repeats": 10,
     "tag": None,
     "max_leaf_nodes": -1,
+    "selected_features": None,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.
@@ -68,9 +70,10 @@ ARGS_TO_IGNORE_MODEL = [
     "test_batch",
     "regen_data",
     "clusters",
-    "fets_to_pick",
+    "num_fets_to_pick",
     "perm_imp_repeats",
     "tag",
+    "selected_features",
 ]
 ARGS_TO_IGNORE_DATA = ARGS_TO_IGNORE_MODEL + ["max_iter"]
 # String to prepend to processed train/val/test data saved on disk.

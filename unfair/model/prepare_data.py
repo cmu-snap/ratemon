@@ -266,8 +266,10 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
         # merged files.
         pkts_forgotten += len(all_idxs)
     logging.info(
-        f"Forgot {pkts_forgotten}/{num_pkts} packets "
-        f"({pkts_forgotten / num_pkts * 100:.2f}%)"
+        "Forgot %d/%d packets (%0.2f%%)",
+        pkts_forgotten,
+        num_pkts,
+        pkts_forgotten / num_pkts * 100,
     )
 
     for split in splits.values():

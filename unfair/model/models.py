@@ -1148,23 +1148,23 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "RTT ratio us-windowed-minRtt1024"
         # )
         # Get rid of features with large windows...these are not practical.
-        # self.in_spc = tuple(
-        #     fet
-        #     for fet in features.FEATURES
-        #     if (
-        #         # Allow regular features.
-        #         ("ewma" not in fet and "windowed" not in fet)
-        #         # Allow EWMA features.
-        #         or "ewma" in fet
-        #         # Drop windowed features with windows > 128 minRTT.
-        #         or features.parse_win_metric(fet)[1] <= 128
-        #     )
-        #     # # Get rid of all loss event rate features.
-        #     # and not fet.startswith(features.LOSS_EVENT_RATE_FET)
-        #     # # Get rid of windowed mathis model tput features because they use the loss
-        #     # # event rate.
-        #     # and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
-        # )
+        self.in_spc = tuple(
+            fet
+            for fet in features.FEATURES
+            if (
+                # Allow regular features.
+                ("ewma" not in fet and "windowed" not in fet)
+                # Allow EWMA features.
+                or "ewma" in fet
+                # Drop windowed features with windows > 128 minRTT.
+                or features.parse_win_metric(fet)[1] <= 128
+            )
+            # # Get rid of all loss event rate features.
+            # and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+            # # Get rid of windowed mathis model tput features because they use the loss
+            # # event rate.
+            # and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
+        )
         # self.in_spc = (
         #     "throughput b/s-windowed-minRtt8",
         #     "RTT us-ewma-alpha0.001",
@@ -1181,16 +1181,16 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "RTT ratio us-ewma-alpha0.001",
         # )
         # Fat decision tree: cubic-reno-vegas-westwood
-        self.in_spc = (
-            "throughput b/s-windowed-minRtt8",
-            "inverse interarrival time b/s-ewma-alpha0.001",
-            "RTT us-ewma-alpha0.001",
-            "RTT ratio us-ewma-alpha0.001",
-            "loss rate-ewma-alpha0.001",
-            "interarrival time us-ewma-alpha0.001",
-            "mathis model throughput b/s-ewma-alpha0.001",
-            "1/sqrt loss event rate-windowed-minRtt8",
-        )
+        # self.in_spc = (
+        #     "throughput b/s-windowed-minRtt8",
+        #     "inverse interarrival time b/s-ewma-alpha0.001",
+        #     "RTT us-ewma-alpha0.001",
+        #     "RTT ratio us-ewma-alpha0.001",
+        #     "loss rate-ewma-alpha0.001",
+        #     "interarrival time us-ewma-alpha0.001",
+        #     "mathis model throughput b/s-ewma-alpha0.001",
+        #     "1/sqrt loss event rate-windowed-minRtt8",
+        # )
         self._check()
 
     def new(self, **kwargs):
