@@ -19,6 +19,9 @@ import numpy as np
 from unfair.model import cl_args, defaults, features, models, utils
 
 
+SPLIT_NAMES = ["train", "val", "test"]
+
+
 class Split:
     """Represents either the training, validation, or test split."""
 
@@ -286,7 +289,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
 
 def splits_exist(out_dir):
     """Check if all splits exist in out_dir."""
-    for name in ["train", "val", "test"]:
+    for name in SPLIT_NAMES:
         if not path.exists(utils.get_split_data_flp(out_dir, name)):
             return False
     return True
@@ -411,27 +414,39 @@ def _main():
             "train": exp_flps[num_exps_per_split["test"] + num_exps_per_split["val"] :],
         }
 
-        do_prepare(args, {"train": 1, "val": 0, "test": 0}, exp_flps_per_split["train"])
-        do_prepare(args, {"train": 0, "val": 1, "test": 0}, exp_flps_per_split["val"])
-        do_prepare(args, {"train": 0, "val": 0, "test": 1}, exp_flps_per_split["test"])
+        for split_name in SPLIT_NAMES:
+            logging.info("Creating disjoint %s split", split_name)
+            do_prepare(
+                args,
+                {
+                    split_name_: (1 if split_name_ == split_name else 0)
+                    for split_name_ in SPLIT_NAMES
+                },
+                exp_flps_per_split[split_name],
+            )
     else:
         do_prepare(args, split_fracs, exp_flps)
 
-    logging.info(f"Finished - time: {time.time() - tim_srt_s:.2f} seconds")
+    logging.info("Finished - time: %0.2f seconds", time.time() - tim_srt_s)
     return 0
 
 
 def do_prepare(args, split_fracs, exp_flps):
+    if not exp_flps:
+        logging.info("No experiments found.")
+        return
     random.shuffle(exp_flps)
     num_exps = len(exp_flps) if args.num_exps is None else args.num_exps
     exp_flps = exp_flps[:num_exps]
-    logging.info(f"Selected {num_exps} experiments")
+    logging.info("Selected %d experiments", num_exps)
     warmup_frac = args.warmup_percent / 100
     sample_frac = args.sample_percent / 100
     exp_flps, num_pkts, dtype = survey(exp_flps, warmup_frac)
     logging.info(
-        f"Total packets: {num_pkts}\nAll found features ({len(dtype.names)}):\n\t"
-        + "\n\t".join(sorted(dtype.names))
+        "Total packets: %d\nAll found features (%d):\n\t%s",
+        num_pkts,
+        len(dtype.names),
+        "\n\t".join(sorted(dtype.names)),
     )
 
     # Assemble the minimum dtype.
@@ -451,7 +466,7 @@ def do_prepare(args, split_fracs, exp_flps):
         ), f"Did not find all required features in surveyed files. Missing: {required}"
         dtype = new_dtype
     logging.info(
-        "Using minimum dtype: \n\t" + "\n\t".join(sorted(str(fet) for fet in dtype))
+        "Using minimum dtype: \n\t%s", "\n\t".join(sorted(str(fet) for fet in dtype))
     )
 
     # Create the merged training, validation, and test files.
