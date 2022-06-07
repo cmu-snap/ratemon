@@ -1,0 +1,212 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(d) runtime",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-h"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": true
+        },
+        {
+            "name": "(r) runtime",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model=HistGbdtSklearn",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_no-loss-event-rate_selected-features.pickle",
+                "--interface=ens3",
+                "--reaction-strategy=aimd",
+                "--cgroup=${workspaceFolder}/test/test_cgroup",
+                "--inference-interval-ms=3000",
+                "--batch-size=5",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                "--skip-localhost",
+                "--constrain-port",
+                "--debug",
+                // "--disable-inference"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": true
+        },
+        {
+            "name": "(r) runtime, schedule",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model=HistGbdtSklearn",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
+                "--interface=ens3",
+                "--reaction-strategy=file",
+                "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
+                "--cgroup=${workspaceFolder}/test/test_cgroup",
+                "--inference-interval-ms=1000",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log"
+                // "--disable-inference"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": true
+        },
+        {
+            "name": "(r) runtime, cprofile",
+            "type": "python",
+            "request": "launch",
+            "module": "cProfile",
+            "console": "integratedTerminal",
+            "args": [
+                "-o",
+                "/tmp/tmp.prof",
+                "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+                "--model=HistGbdtSklearn",
+                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
+                "--interface=ens3",
+                "--reaction-strategy=aimd",
+                "--cgroup=${workspaceFolder}/test/test_cgroup",
+                "--inference-interval-ms=1000",
+                "--main-log=/tmp/unfairness_monitor_main.log",
+                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                // "--skip-localhost",
+                "--constrain-port",
+                "--debug",
+                // "--disable-inference"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": true
+        },
+        {
+            "name": "(r) train cubic bbr",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--no-rand",
+                "--conf-trials=1",
+                "--model=HistGbdtSklearn",
+                "--balance",
+                "--drop-popular",
+                "--max-leaf-nodes=10000",
+                "--max-iter=10",
+                "--analyze-features",
+                "--feature-selection-percent=5",
+                "--clusters=3",
+                "--features-to-pick=3",
+                "--permutation-importance-repeats=1",
+                "--sample-percent=1",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--tag=debugging"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "(r) prepare_data",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/prepare_data.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--train-split=60",
+                "--val-split=10",
+                "--test-split=30",
+                "--warmup-percent=5",
+                "--out-dir=/home/ccanel/out/foobar",
+                "--sample-percent=1",
+                "--disjoint-splits"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "(r) gen_features",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/model/gen_features.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--untar-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--parallel=20"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "(r) eval",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/unfair/scripts/eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",
+                "--untar-dir=/tmp/untar",
+                "--parallel=40",
+                "--out-dir=/home/ccanel/out/cloudlab/2022-4-21/out/"
+            ],
+            "autoReload": {
+                "enable": false
+            },
+            "redirectOutput": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "sudo": false
+        },
+    ]
+}

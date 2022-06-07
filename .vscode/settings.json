@@ -1,0 +1,10 @@
+{
+    "python.analysis.extraPaths": [
+        "./model"
+    ],
+    "python.linting.enabled": true,
+    "cmake.configureOnOpen": false,
+    "files.associations": {
+        "types.h": "c"
+    }
+}

@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"array": "c",
+			"string_view": "c",
+			"*.tcc": "c",
+			"deque": "c",
+			"list": "c",
+			"string": "c",
+			"unordered_map": "c",
+			"unordered_set": "c",
+			"vector": "c"
+		}
+	}
+}
