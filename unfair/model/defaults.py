@@ -53,6 +53,8 @@ DEFAULTS = {
     "perm_imp_repeats": 10,
     "tag": None,
     "max_leaf_nodes": -1,
+    "max_depth": -1,
+    "min_samples_leaf": 20,
     "selected_features": None,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do

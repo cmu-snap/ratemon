@@ -1138,6 +1138,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "l2_regularization",
             "graph",
             "max_leaf_nodes",
+            "max_depth",
+            "min_samples_leaf",
+            "min_samples_leaf"
         ]
         # self.in_spc = (
         #     "throughput b/s-windowed-minRtt8",
@@ -1200,7 +1203,8 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             learning_rate=0.1,  # kwargs["lr"],
             max_iter=kwargs["max_iter"],
             max_leaf_nodes=kwargs["max_leaf_nodes"],
-            max_depth=None,
+            max_depth=kwargs["max_depth"],
+            min_samples_leaf=kwargs["min_samples_leaf"],
             l2_regularization=kwargs["l2_regularization"],
             early_stopping=kwargs["early_stop"],
             # validation_fraction=20 / 70,

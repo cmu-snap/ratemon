@@ -635,6 +635,27 @@ def _main():
         ),
         default=defaults.DEFAULTS["max_leaf_nodes"],
         type=int,
+        required=False,
+    )
+    psr.add_argument(
+        "--max-depth",
+        help=(
+            "If the model is a HistGbdt, then use this as the maximum "
+            'depth of each tree. Use "-1" to indicate no limit.'
+        ),
+        default=defaults.DEFAULTS["max_depth"],
+        type=int,
+        required=False
+    )
+    psr.add_argument(
+        "--min-samples-leaf",
+        help=(
+            "If the model is a HistGbdt, then use this as the minimum "
+            'number of samples a leaf node may represent.'
+        ),
+        default=defaults.DEFAULTS["min_samples_leaf"],
+        type=int,
+        required=False
     )
     psr.add_argument(
         "--tag",
@@ -676,9 +697,13 @@ def _main():
     assert (
         args["clusters"] >= 1
     ), f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
-    assert args["max_leaf_nodes"] >= -1
+    assert args["max_leaf_nodes"] >= -1 and args["max_leaf_nodes"] != 0
     if args["max_leaf_nodes"] == -1:
         args["max_leaf_nodes"] = None
+    assert args["max_depth"] >= -1 and args["max_depth"] != 0
+    if args["max_depth"] == -1:
+        args["max_depth"] = None
+    assert args["min_samples_leaf"] > 0
     if args["feature_selection_percent"] is not None:
         assert 0 < args["feature_selection_percent"] <= 100, (
             '"--feature-selection-percent" must be in the range (0, 100], '
