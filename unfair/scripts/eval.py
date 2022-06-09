@@ -105,7 +105,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
     logging.info("\tParsed packets: %s", server_pcap)
 
-    late_flws = [flw for flw in flws if flw[1] == 50001 if len(flw_to_pkts[flw]) > 0]
+    late_flows_port = max(flw[4] for flw in params["flowsets"])
+    late_flws = [flw for flw in flws if flw[1] == late_flows_port if len(flw_to_pkts[flw]) > 0]
     if len(late_flws) == 0:
         logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
         return exp, -1, -1

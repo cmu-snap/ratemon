@@ -316,10 +316,11 @@ def pcapy_sniff(args, done):
     if args.skip_localhost:
         filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
     if args.constrain_port:
-        filt += (
-            f" and ((dst host {utils.int_to_ip_str(MY_IP)} and dst port 9998) or "
-            f"(src host {utils.int_to_ip_str(MY_IP)} and src port 9998))"
-        )
+        port_filt_l = [
+            f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
+            f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
+            for port in args.server_ports]
+        filt += f" and ({' or '.join(port_filt_l)})"
     logging.info("Using tcpdump filter: %s", filt)
     pcap.setfilter(filt)
 
@@ -457,6 +458,14 @@ def parse_args():
         "--batch-size",
         default=10,
         help="The number of flows to run inference on in parallel.",
+        required=False,
+        type=int,
+    )
+    parser.add_argument(
+        "--server-ports",
+        nargs="+",
+        default=[9998],
+        help="List of ports to which inference will be limited",
         required=False,
         type=int,
     )
