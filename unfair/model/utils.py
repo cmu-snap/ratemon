@@ -1356,7 +1356,7 @@ def analyze_feature_importance(
                     dat_out,
                     n_repeats=perm_imp_repeats,
                     random_state=0,
-                    n_jobs=-1,  # -1
+                    n_jobs=1,  # -1
                 ).importances_mean
             else:
                 imps = net.net.coef_[0]
