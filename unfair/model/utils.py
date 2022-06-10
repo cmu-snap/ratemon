@@ -702,8 +702,10 @@ def clean(arr):
 
     num_cols = len(arr.dtype.names)
     new = np.empty((arr.shape[0], num_cols), dtype=float)
+
+    sorted_names = sorted(arr.dtype.names)
     for col in range(num_cols):
-        new[:, col] = arr[arr.dtype.names[col]]
+        new[:, col] = arr[sorted_names[col]]
     return new
 
 

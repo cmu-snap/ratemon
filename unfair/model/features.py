@@ -274,4 +274,4 @@ def fill_dependencies(in_spc):
     if combined == fets_to_use:
         return in_spc
     else:
-        return fill_dependencies(tuple(combined))
+        return fill_dependencies(sorted(tuple(combined)))
