@@ -330,18 +330,29 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         if args["feature_selection_type"] == "naive":
             fets = utils.select_fets_naive(net)
         elif args["feature_selection_type"] == "perm":
+            dat_in_sampled = dat_in
+            dat_out_sampled = dat_out
+            if args["feature_selection_percent"] < 100:
+                logging.info(
+                    "Using a random %d%% of test data for feature selection.",
+                    args["feature_selection_percent"],
+                )
+                count = math.ceil(len(dat_in_sampled) * args["feature_selection_percent"] / 100)
+                indices = torch.randperm(len(dat_in_sampled))[:count]
+                dat_in_sampled = dat_in_sampled[indices]
+                dat_out_sampled = dat_out_sampled[indices]
+
             fets = utils.select_fets_perm(
                 utils.analyze_feature_correlation(
-                    net, out_dir, dat_in, args["clusters"]
+                    net, out_dir, dat_in_sampled, args["clusters"]
                 ),
                 utils.analyze_feature_importance(
                     net,
                     out_dir,
-                    dat_in,
-                    dat_out,
+                    dat_in_sampled,
+                    dat_out_sampled,
                     args["num_fets_to_pick"],
                     args["perm_imp_repeats"],
-                    args["feature_selection_percent"],
                 ),
             )
         else:

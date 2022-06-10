@@ -1324,8 +1324,7 @@ def analyze_feature_importance(
     dat_in,
     dat_out,
     num_fets_to_pick,
-    perm_imp_repeats,
-    feature_selection_percent,
+    perm_imp_repeats
 ):
     """Analyze the importance of features to a trained net."""
     # Analyze feature coefficients. The underlying model's .coef_
@@ -1351,15 +1350,6 @@ def analyze_feature_importance(
         else:
             qualifier = "Best"
             if isinstance(net.net, ensemble.HistGradientBoostingClassifier):
-                if feature_selection_percent < 100:
-                    logging.info(
-                        "Using a random %d%% of test data for feature selection.",
-                        feature_selection_percent,
-                    )
-                    count = math.ceil(len(dat_in) * feature_selection_percent / 100)
-                    indices = torch.randperm(len(dat_in))[:count]
-                    dat_in = dat_in[indices]
-                    dat_out = dat_out[indices]
                 imps = inspection.permutation_importance(
                     net.net,
                     dat_in,
