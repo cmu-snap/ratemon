@@ -285,7 +285,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         net.new(**{param: args[param] for param in net.params})
         # "selected_features" has already been populated with either the selected
         # features or all of the features.
-        net.in_spc = sorted(tuple(args["selected_features"]))
+        net.in_spc = tuple(sorted(args["selected_features"]))
 
         # Extract the training data from the training dataloader.
         logging.info("Extracting training data...")
@@ -471,7 +471,7 @@ def run_trials(args):
     if args["selected_features"] is None:
         args["selected_features"] = list(net_tmp.in_spc)
     else:
-        net_tmp.in_spc = sorted(tuple(args["selected_features"]))
+        net_tmp.in_spc = tuple(sorted(args["selected_features"]))
 
     # Load the training, validation, and test data.
     ldrs = data.get_dataloaders(args, net_tmp)

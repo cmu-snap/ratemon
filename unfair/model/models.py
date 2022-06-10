@@ -32,7 +32,7 @@ class PytorchModelWrapper:
         # The name of this model.
         self.name = None
         # The specification of the input tensor format.
-        self.in_spc = sorted(features.FEATURES)
+        self.in_spc = tuple(sorted(features.FEATURES))
         # The specification of the output tensor format.
         self.out_spc = (features.OUT_FET,)
         # The number of output classes.
@@ -1142,16 +1142,16 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "min_samples_leaf",
             "min_samples_leaf"
         ]
-        # self.in_spc = sorted((
+        # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
         #     "loss rate-windowed-minRtt1024",
         #     "inverse interarrival time b/s-ewma-alpha0.001",
         #     "RTT us-windowed-minRtt1024",
         #     "mathis model throughput b/s-windowed-minRtt1024",
         #     "RTT ratio us-windowed-minRtt1024"
-        # ))
+        # )))
         # Get rid of features with large windows...these are not practical.
-        self.in_spc = sorted(tuple(
+        self.in_spc = tuple(sorted(
             fet
             for fet in features.FEATURES
             if (
@@ -1168,23 +1168,23 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             # # event rate.
             # and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
         ))
-        # self.in_spc = sorted((
+        # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
         #     "RTT us-ewma-alpha0.001",
         #     "inverse interarrival time b/s-ewma-alpha0.001",
         #     "loss rate-ewma-alpha0.001",
         #     "RTT ratio us-ewma-alpha0.001",
         #     "mathis model throughput b/s-windowed-minRtt1",
-        # ))
-        # self.in_spc = sorted((
+        # )))
+        # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
         #     "inverse interarrival time b/s-ewma-alpha0.001",
         #     "RTT us-ewma-alpha0.001",
         #     "loss rate-ewma-alpha0.001",
         #     "RTT ratio us-ewma-alpha0.001",
-        # ))
+        # )))
         # Fat decision tree: cubic-reno-vegas-westwood
-        # self.in_spc = sorted((
+        # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
         #     "inverse interarrival time b/s-ewma-alpha0.001",
         #     "RTT us-ewma-alpha0.001",
@@ -1193,7 +1193,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "interarrival time us-ewma-alpha0.001",
         #     "mathis model throughput b/s-ewma-alpha0.001",
         #     "1/sqrt loss event rate-windowed-minRtt8",
-        # ))
+        # )))
         self._check()
 
     def new(self, **kwargs):
@@ -1242,10 +1242,10 @@ class LstmWrapper(PytorchModelWrapper):
     def __init__(self, out_dir=None, hid_dim=32, num_lyrs=1, out_dim=5):
         super().__init__(out_dir)
         self.name = "Lstm"
-        # self.in_spc = sorted((
+        # self.in_spc = tuple(sorted((
         #     features.INTERARR_TIME_FET,
         #     features.RTT_RATIO_FET,
-        #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01)))
+        #     features.make_ewma_metric(features.LOSS_RATE_FET, 0.01))))
         self.num_clss = 5
         # Cross-entropy loss is designed for multi-class classification tasks.
         self.los_fnc = torch.nn.CrossEntropyLoss
