@@ -1140,7 +1140,8 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "max_leaf_nodes",
             "max_depth",
             "min_samples_leaf",
-            "min_samples_leaf"
+            "min_samples_leaf",
+            "balance_weighted",
         ]
         # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
@@ -1151,23 +1152,25 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "RTT ratio us-windowed-minRtt1024"
         # )))
         # Get rid of features with large windows...these are not practical.
-        self.in_spc = tuple(sorted(
-            fet
-            for fet in features.FEATURES
-            if (
-                # Allow regular features.
-                ("ewma" not in fet and "windowed" not in fet)
-                # Allow EWMA features.
-                or "ewma" in fet
-                # Drop windowed features with windows > 128 minRTT.
-                or features.parse_win_metric(fet)[1] <= 128
+        self.in_spc = tuple(
+            sorted(
+                fet
+                for fet in features.FEATURES
+                if (
+                    # Allow regular features.
+                    ("ewma" not in fet and "windowed" not in fet)
+                    # Allow EWMA features.
+                    or "ewma" in fet
+                    # Drop windowed features with windows > 128 minRTT.
+                    or features.parse_win_metric(fet)[1] <= 128
+                )
+                # # Get rid of all loss event rate features.
+                # and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+                # # Get rid of windowed mathis model tput features because they use the loss
+                # # event rate.
+                # and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
             )
-            # # Get rid of all loss event rate features.
-            # and not fet.startswith(features.LOSS_EVENT_RATE_FET)
-            # # Get rid of windowed mathis model tput features because they use the loss
-            # # event rate.
-            # and not ("windowed" in fet and fet.startswith(features.MATHIS_TPUT_FET))
-        ))
+        )
         # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
         #     "RTT us-ewma-alpha0.001",
@@ -1213,6 +1216,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             tol=1e-4,
             n_iter_no_change=5,
         )
+        self.balance_weighted = kwargs["balance_weighted"]
         return self.net
 
     def train(self, fets, dat_in, dat_out):
@@ -1220,17 +1224,21 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         utils.assert_tensor(dat_in=dat_in, dat_out=dat_out)
         utils.check_fets(fets, self.in_spc)
 
-        # Calculate a weight for each class. Note that the weights do not need
-        # to sum to 1. Avoid very large numbers to prevent overflow. Avoid very
-        # small numbers to prevent floating point errors.
-        tots = utils.get_class_popularity(dat_out, self.get_classes())
-        tot = sum(tots)
-        # Each class's weight is 1 minus its popularity ratio.
-        weights = torch.Tensor([1 - tot_cls / tot for tot_cls in tots])
-        # Average each weight with a weight of 1, which serves to smooth the
-        # weights.
-        weights = (weights + 1) / 2
-        sample_weights = torch.Tensor([weights[label] for label in dat_out])
+        # Balance the dataset using weights.
+        if self.balance_weighted:
+            # Calculate a weight for each class. Note that the weights do not need
+            # to sum to 1. Avoid very large numbers to prevent overflow. Avoid very
+            # small numbers to prevent floating point errors.
+            tots = utils.get_class_popularity(dat_out, self.get_classes())
+            tot = sum(tots)
+            # Each class's weight is 1 minus its popularity ratio.
+            weights = torch.Tensor([1 - tot_cls / tot for tot_cls in tots])
+            # Average each weight with a weight of 1, which serves to smooth the
+            # weights.
+            weights = (weights + 1) / 2
+            sample_weights = torch.Tensor([weights[label] for label in dat_out])
+        else:
+            sample_weights = None
 
         self.net.fit(dat_in, dat_out, sample_weight=sample_weights)
         self.log(f"Model fit in iterations: {self.net.n_iter_}")

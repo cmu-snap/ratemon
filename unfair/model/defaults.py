@@ -56,6 +56,7 @@ DEFAULTS = {
     "max_depth": -1,
     "min_samples_leaf": 20,
     "selected_features": None,
+    "balance_weighted": False,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.

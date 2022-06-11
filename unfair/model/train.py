@@ -705,6 +705,11 @@ def _main():
         'Refusing to use "--analyze-features" with "--balance" but without '
         '"--drop-popular".'
     )
+    if args["model"] == models.HistGbdtSklearnWrapper().name and args["balance"]:
+        args["balance"] = False
+        args["drop_popular"] = False
+        args["balance_weighted"] = True
+
     assert (
         args["clusters"] >= 1
     ), f"\"--clusters\" must be at least 1, but is: {args['clusters']}"
