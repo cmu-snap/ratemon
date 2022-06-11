@@ -699,12 +699,12 @@ def _main():
     assert (not args["drop_popular"]) or args[
         "balance"
     ], '"--drop-popular" must be used with "--balance".'
-    assert (not args["analyze_features"]) or (
-        (not args["balance"]) or args["drop_popular"]
-    ), (
-        'Refusing to use "--analyze-features" with "--balance" but without '
-        '"--drop-popular".'
-    )
+    #assert (not args["analyze_features"]) or (
+    #    (not args["balance"]) or args["drop_popular"]
+    #), (
+    #    'Refusing to use "--analyze-features" with "--balance" but without '
+    #    '"--drop-popular".'
+    #)
     if args["model"] == models.HistGbdtSklearnWrapper().name and args["balance"]:
         args["balance"] = False
         args["drop_popular"] = False
