@@ -45,7 +45,8 @@ def populate_features(net, flowkey, min_rtt_us, fets, prev_fets):
     gen_features.parse_received_packets(flowkey, min_rtt_us, fets, prev_fets)
     # Remove unneeded features that were added as dependencies for the requested
     # features. Only run prediction on the last packet.
-    in_fets = fets[-1:][list(net.in_spc)]
+    # in_fets = fets[-1:][list(net.in_spc)]
+    in_fets = fets[-1:]  # [list(net.in_spc)]
     # Replace -1's and with NaNs and convert to an unstructured numpy array.
     data.replace_unknowns(in_fets, isinstance(net, models.HistGbdtSklearnWrapper))
     return in_fets
@@ -239,14 +240,17 @@ def configure_ebpf(args):
     # ipr.tc("add", "pfifo", 0, "1:")
     # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+
+    handle = 0x10000 + args.server_ports[0] - 50000
+    logging.info("Attempting to use handle: %d", handle)
     try:
         # Add the action to a u32 match-all filter
-        ipr.tc("add", "htb", ifindex, 0x10000, default=0x200000)
+        ipr.tc("add", "htb", ifindex, handle, default=0x200000)
         ipr.tc(
             "add-filter",
             "u32",
             ifindex,
-            parent=0x10000,
+            parent=handle,
             prio=10,
             protocol=protocols.ETH_P_ALL,  # Every packet
             target=0x10020,
@@ -263,7 +267,7 @@ def configure_ebpf(args):
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
         logging.info("Removing egress TC...")
-        ipr.tc("del", "htb", ifindex, 0x10000, default=0x200000)
+        ipr.tc("del", "htb", ifindex, handle, default=0x200000)
 
     return flow_to_rwnd, ebpf_cleanup
 
@@ -272,18 +276,19 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     logging.info("Loading model: %s", args.model_file)
     net = models.load_model(args.model_file)
+    logging.info("Model features:\n\t%s", "\n\t".join(net.in_spc))
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
         lambda: (defaults.Decision.NOT_PACED, None, None)
     )
-    dtype = sorted(
+    dtype = features.convert_to_float(sorted(
         list(
             set(features.PARSE_PACKETS_FETS)
             | set(
                 features.feature_names_to_dtype(features.fill_dependencies(net.in_spc))
             )
         )
-    )
+    ))
 
     max_batch_time_s = max(
         0.1,
@@ -349,6 +354,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                     flowkey,
                     traceback.format_exc(),
                 )
+                logging.info("Clearing inference flag due to error for flow: %s", flowkey)
                 inference_flags[fourtuple].value = 0
                 continue
             except Exception as exp:
@@ -404,6 +410,9 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 batch_proc_time_s += time.time() - inference_start_time_s
             finally:
                 for fourtuple, _, _, _, _ in batch:
+                    logging.info(
+                        "Clearing inference flag due to finished inference for flow: %s",
+                        utils.flow_to_str(fourtuple))
                     inference_flags[fourtuple].value = 0
 
             pps = packets_in_batch / batch_proc_time_s
@@ -430,16 +439,18 @@ def batch_inference(
     flow_to_decisions,
     flow_to_rwnd,
 ):
+    # Assemble the batch into a single numpy array.
     batch_fets = np.empty(len(batch), dtype=batch[0][4].dtype)
     for idx, (_, _, _, _, in_fets) in enumerate(batch):
         batch_fets[idx] = in_fets
 
-    labels = predict(net, batch_fets, args.debug)
+    # Batch predict! Select only required features.
+    labels = predict(net, batch_fets[list(net.in_spc)], args.debug)
 
-    for (_, flowkey, _, _, in_fets) in batch:
+    for (_, flowkey, min_rtt_us, all_fets, in_fets), label in zip(batch, labels):
+        # Update previous fets for this flow.
         flow_to_prev_features[flowkey] = in_fets[-1]
-
-    for (_, flowkey, min_rtt_us, all_fets, _), label in zip(batch, labels):
+        # Make a decision for this flow.
         make_decision(
             args,
             flowkey,

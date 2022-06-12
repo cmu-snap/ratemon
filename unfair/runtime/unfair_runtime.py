@@ -105,6 +105,11 @@ def receive_packet_pcapy(header, packet):
         else:
             flow = flow_utils.Flow(fourtuple, LOSS_EVENT_INTERVALS)
             FLOWS[fourtuple] = flow
+
+
+    if tsecr is None or tsval is None:
+        logging.warning("Could not determine tsval and tsecr for flow: %s", flow)
+
     with flow.ingress_lock:
         rtt_us = -1
         if incoming:
@@ -114,7 +119,12 @@ def receive_packet_pcapy(header, packet):
                     candidate_rtt_us = time_us - flow.sent_tsvals[tsecr]
                     if candidate_rtt_us > 0:
                         rtt_us = candidate_rtt_us
+                        old_min_rtt_us = flow.min_rtt_us
                         flow.min_rtt_us = min(flow.min_rtt_us, rtt_us)
+                        if old_min_rtt_us != flow.min_rtt_us:
+                            logging.info(
+                                "Updated min RTT for flow %s from %d us to %d us",
+                                flow, old_min_rtt_us, flow.min_rtt_us)
                     # del flow.sent_tsvals[tsecr]
 
             flow.incoming_packets.append(
@@ -210,6 +220,7 @@ def check_flows(args, longest_window, que, inference_flags):
                 logging.warning("Could not acquire lock for flow: %s", flow)
         # Garbage collection.
         for fourtuple in to_remove:
+            logging.info("Removing flow: %s", utils.flow_to_str(fourtuple))
             del FLOWS[fourtuple]
             if fourtuple in inference_flags:
                 del inference_flags[fourtuple]
