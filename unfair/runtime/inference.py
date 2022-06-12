@@ -241,19 +241,41 @@ def configure_ebpf(args):
     # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
 
-    handle = 0x10000 + args.server_ports[0] - 50000
+    base_handle = 0x10000
+    base_default = 0x200000
+    handle = base_handle + 1 + args.server_ports[0] - 50000
+    default = base_default + 1 + args.server_ports[0] - 50000
     logging.info("Attempting to use handle: %d", handle)
+
+    logging.info("Attempting to create central qdisc")
+    try:
+        ipr.tc("add", "htb", ifindex, base_handle, default=base_default)
+    except NetlinkError:
+        logging.info("Unable to create central qdisc. Does it already exist?")
+
     try:
         # Add the action to a u32 match-all filter
-        ipr.tc("add", "htb", ifindex, handle, default=0x200000)
+        # ipr.tc("add", "htb", ifindex, handle, default=default)
+        # ipr.tc("add-class", "htb", ifindex, handle, default=default)
+        # ipr.tc(
+        #     "add-filter",
+        #     "u32",
+        #     ifindex,
+        #     parent=handle,
+        #     prio=10,
+        #     protocol=protocols.ETH_P_ALL,  # Every packet
+        #     target=0x10020,
+        #     keys=["0x0/0x0+0"],
+        #     action=action,
+        # )
         ipr.tc(
             "add-filter",
             "u32",
             ifindex,
-            parent=handle,
+            parent=base_handle,
             prio=10,
             protocol=protocols.ETH_P_ALL,  # Every packet
-            target=0x10020,
+            target=handle, # 0x10020,
             keys=["0x0/0x0+0"],
             action=action,
         )
@@ -267,7 +289,7 @@ def configure_ebpf(args):
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
         logging.info("Removing egress TC...")
-        ipr.tc("del", "htb", ifindex, handle, default=0x200000)
+        ipr.tc("del", "htb", ifindex, base_handle, default=base_default)
 
     return flow_to_rwnd, ebpf_cleanup
 
