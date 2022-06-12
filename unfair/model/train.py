@@ -732,7 +732,7 @@ def _main():
     if args["selected_features"] is not None:
         logging.info("Loading selected features from: %s", args["selected_features"])
         with open(args["selected_features"], "r", encoding="utf-8") as fil:
-            args["selected_features"] = json.load(fil)
+            args["selected_features"] = tuple(sorted(json.load(fil)))
 
     # Verify that all arguments are reflected in defaults.DEFAULTS.
     for arg in args.keys():
