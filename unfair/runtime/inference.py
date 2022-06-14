@@ -248,10 +248,14 @@ def configure_ebpf(args):
     logging.info("Attempting to use handle: %d", handle)
 
     logging.info("Attempting to create central qdisc")
+    responsible_for_central_tc = False
     try:
         ipr.tc("add", "htb", ifindex, base_handle, default=base_default)
     except NetlinkError:
         logging.info("Unable to create central qdisc. Does it already exist?")
+    else:
+        logging.info("Responsible for central TC")
+        responsible_for_central_tc = True
 
     try:
         # Add the action to a u32 match-all filter
@@ -268,6 +272,7 @@ def configure_ebpf(args):
         #     keys=["0x0/0x0+0"],
         #     action=action,
         # )
+        logging.info("Attempting to create filter")
         ipr.tc(
             "add-filter",
             "u32",
@@ -283,13 +288,18 @@ def configure_ebpf(args):
         logging.error("Error: Unable to configure TC.")
         return None, None
 
+    logging.info("Configured TC")
+
     def ebpf_cleanup():
         """Clean attached eBPF programs."""
         logging.info("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
 
-        logging.info("Removing egress TC...")
-        ipr.tc("del", "htb", ifindex, base_handle, default=base_default)
+        if responsible_for_central_tc:
+            logging.info("Removing egress TC...")
+            ipr.tc("del", "htb", ifindex, base_handle, default=base_default)
+        else:
+            logging.info("Someone else is responsible for removing the central TC qdisc.")
 
     return flow_to_rwnd, ebpf_cleanup
 
