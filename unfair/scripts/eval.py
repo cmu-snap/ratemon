@@ -282,6 +282,7 @@ def main(args):
     with open(path.join(args.out_dir, "results.json"), "w") as fil:
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
 
+    logging.info("Matched experiments: %d", len(matched))
     (
         jfis_disabled,
         jfis_enabled,
