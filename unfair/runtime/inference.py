@@ -215,6 +215,7 @@ def load_bpf():
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
     # Load BPF program.
+    # logging.info("BPF program:\n%s", bpf_text)
     return BPF(text=bpf_text)
 
 
@@ -222,7 +223,9 @@ def configure_ebpf(args):
     """Set up eBPF hooks."""
     # Sleep for a random amount of time, up to 2 seconds, so that multiple instances of
     # this program do not try to configure themselves at the same time.
-    time.sleep(random.randint(0, 2000) / 1000)
+    rand_sleep = random.randint(0, 10)  #  / 1000
+    logging.info("Waiting %f seconds to prevent race conditions...", rand_sleep)
+    time.sleep(rand_sleep)
 
     try:
         bpf = load_bpf()
@@ -267,8 +270,6 @@ def configure_ebpf(args):
     egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
 
-    logging.info("Attempting to create central qdisc")
-
     try:
         # Add the action to a u32 match-all filter
         ipr.tc(
@@ -282,38 +283,8 @@ def configure_ebpf(args):
             keys=["0x0/0x0+0"],
             action=action,
         )
-        # logging.info("Attempting to create filter")
-        # ipr.tc(
-        #     "add-filter",
-        #     "u32",
-        #     ifindex,
-        #     parent=base_handle,
-        #     prio=10,
-        #     protocol=protocols.ETH_P_ALL,  # Every packet
-        #     target=handle, # 0x10020,
-        #     keys=["0x0/0x0+0"],
-        #     action=action,
-        # )
-        # ip dport 22 0xffff flowid 10:1
-        # key1 = f"{args.server_ports[0]}/0xffff0000+20"
-        # keys = [f"{server_port}/0xffff0000+20" for server_port in args.server_ports]
-        # logging.info("TC filter keys: %s", keys)
-        # ipr.tc(
-        #     "add-filter",
-        #     "u32",
-        #     ifindex,
-        #     parent=base_handle,
-        #     prio=10,
-        #     protocol=protocols.ETH_P_IP,  # IP packets
-        #     target=base_handle, # 0x10020,
-        #     keys=keys,
-        #     action=action,
-        # )
-    except NetlinkError:
-        logging.error("Error: Unable to configure TC.")
-        return None, None
     except:
-        logging.exception("TC error!")
+        logging.exception("Error: Unable to configure TC.")
         return None, None
 
     def ebpf_cleanup():
