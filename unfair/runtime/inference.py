@@ -223,7 +223,9 @@ def configure_ebpf(args):
     """Set up eBPF hooks."""
     # Sleep for a random amount of time, up to 2 seconds, so that multiple instances of
     # this program do not try to configure themselves at the same time.
-    rand_sleep = random.randint(0, 10)  #  / 1000
+    # rand_sleep = random.randint(0, 10)  #  / 1000
+    # Use the server ports to determine the wait time.
+    rand_sleep = (min(args.server_ports) - 50000)
     logging.info("Waiting %f seconds to prevent race conditions...", rand_sleep)
     time.sleep(rand_sleep)
 
