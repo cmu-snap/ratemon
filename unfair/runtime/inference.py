@@ -7,6 +7,7 @@ import os
 from os import path
 import queue
 import signal
+import random
 import time
 import traceback
 
@@ -219,16 +220,17 @@ def load_bpf():
 
 def configure_ebpf(args):
     """Set up eBPF hooks."""
-    bpf = load_bpf()
+    # Sleep for a random amount of time, up to 2 seconds, so that multiple instances of
+    # this program do not try to configure themselves at the same time.
+    time.sleep(random.randint(0, 2000) / 1000)
 
-    # Read the TCP window scale on outgoing SYN-ACK packets.
-    func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
-    filedesc = os.open(args.cgroup, os.O_RDONLY)
-    bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
-
-    # Overwrite advertised window size in outgoing packets.
-    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    try:
+        bpf = load_bpf()
+    except:
+        logging.exception("Error loading BPF program!")
+        return None, None
     flow_to_rwnd = bpf["flow_to_rwnd"]
+
     # Set up a TC egress qdisc, specify a filter the accepts all packets, and attach
     # our egress function as the action on that filter.
     ipr = IPRoute()
@@ -237,70 +239,91 @@ def configure_ebpf(args):
         len(ifindex) == 1
     ), f'Trouble looking up index for interface "{args.interface}": {ifindex}'
     ifindex = ifindex[0]
-    # ipr.tc("add", "pfifo", 0, "1:")
-    # ipr.tc("add-filter", "bpf", 0, ":1", fd=egress_fn.fd, name=egress_fn.name, parent="1:")
-    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
-
-    base_handle = 0x10000
-    base_default = 0x200000
-    handle = base_handle + 1 + args.server_ports[0] - 50000
-    default = base_default + 1 + args.server_ports[0] - 50000
-    logging.info("Attempting to use handle: %d", handle)
 
     logging.info("Attempting to create central qdisc")
+    handle = 0x10000
+    default = 0x200000
     responsible_for_central_tc = False
     try:
-        ipr.tc("add", "htb", ifindex, base_handle, default=base_default)
+        ipr.tc("add", "htb", ifindex, handle, default=default)
     except NetlinkError:
-        logging.info("Unable to create central qdisc. Does it already exist?")
+        logging.warning("Unable to create central qdisc. It probably already exists.")
     else:
         logging.info("Responsible for central TC")
         responsible_for_central_tc = True
 
+    if not responsible_for_central_tc:
+        # If someone else is responsible for the egress action, then we will just let
+        # them do the work.
+        logging.warning("Not configuring TC")
+        return flow_to_rwnd, None
+
+    # Read the TCP window scale on outgoing SYN-ACK packets.
+    func_sock_ops = bpf.load_func("read_win_scale", bpf.SOCK_OPS)  # sock_stuff
+    filedesc = os.open(args.cgroup, os.O_RDONLY)
+    bpf.attach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+
+    # Overwrite advertised window size in outgoing packets.
+    egress_fn = bpf.load_func("handle_egress", BPF.SCHED_ACT)
+    action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+
+    logging.info("Attempting to create central qdisc")
+
     try:
         # Add the action to a u32 match-all filter
-        # ipr.tc("add", "htb", ifindex, handle, default=default)
-        # ipr.tc("add-class", "htb", ifindex, handle, default=default)
-        # ipr.tc(
-        #     "add-filter",
-        #     "u32",
-        #     ifindex,
-        #     parent=handle,
-        #     prio=10,
-        #     protocol=protocols.ETH_P_ALL,  # Every packet
-        #     target=0x10020,
-        #     keys=["0x0/0x0+0"],
-        #     action=action,
-        # )
-        logging.info("Attempting to create filter")
         ipr.tc(
             "add-filter",
             "u32",
             ifindex,
-            parent=base_handle,
+            parent=handle,
             prio=10,
             protocol=protocols.ETH_P_ALL,  # Every packet
-            target=handle, # 0x10020,
+            target=0x10020,
             keys=["0x0/0x0+0"],
             action=action,
         )
+        # logging.info("Attempting to create filter")
+        # ipr.tc(
+        #     "add-filter",
+        #     "u32",
+        #     ifindex,
+        #     parent=base_handle,
+        #     prio=10,
+        #     protocol=protocols.ETH_P_ALL,  # Every packet
+        #     target=handle, # 0x10020,
+        #     keys=["0x0/0x0+0"],
+        #     action=action,
+        # )
+        # ip dport 22 0xffff flowid 10:1
+        # key1 = f"{args.server_ports[0]}/0xffff0000+20"
+        # keys = [f"{server_port}/0xffff0000+20" for server_port in args.server_ports]
+        # logging.info("TC filter keys: %s", keys)
+        # ipr.tc(
+        #     "add-filter",
+        #     "u32",
+        #     ifindex,
+        #     parent=base_handle,
+        #     prio=10,
+        #     protocol=protocols.ETH_P_IP,  # IP packets
+        #     target=base_handle, # 0x10020,
+        #     keys=keys,
+        #     action=action,
+        # )
     except NetlinkError:
         logging.error("Error: Unable to configure TC.")
         return None, None
-
-    logging.info("Configured TC")
+    except:
+        logging.exception("TC error!")
+        return None, None
 
     def ebpf_cleanup():
         """Clean attached eBPF programs."""
         logging.info("Detaching sock_ops hook...")
         bpf.detach_func(func_sock_ops, filedesc, BPFAttachType.CGROUP_SOCK_OPS)
+        logging.info("Removing egress TC...")
+        ipr.tc("del", "htb", ifindex, handle, default=default)
 
-        if responsible_for_central_tc:
-            logging.info("Removing egress TC...")
-            ipr.tc("del", "htb", ifindex, base_handle, default=base_default)
-        else:
-            logging.info("Someone else is responsible for removing the central TC qdisc.")
-
+    logging.info("Configured TC and BPF!")
     return flow_to_rwnd, ebpf_cleanup
 
 

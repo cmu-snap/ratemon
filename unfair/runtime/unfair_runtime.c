@@ -49,9 +49,13 @@ struct tcp_opt
 // Read RWND limit for flow, as set by userspace. Even though the advertised window
 // is only 16 bits in the TCP header, use 32 bits here because we have not taken
 // window scaling into account yet.
-BPF_HASH(flow_to_rwnd, struct flow_t, u32);
+// BPF_HASH(flow_to_rwnd, struct flow_t, u32);
+BPF_TABLE_PINNED("hash", struct flow_t, u32, flow_to_rwnd, 1024, "/sys/fs/bpf/flow_to_rwnd");
 // Read RWND limit for flow, as set by userspace.
-BPF_HASH(flow_to_win_scale, struct flow_t, u8);
+// BPF_HASH(flow_to_win_scale, struct flow_t, u8);
+BPF_TABLE_PINNED("hash", struct flow_t, u8, flow_to_win_scale, 1024, "/sys/fs/bpf/flow_to_win_scale");
+
+// BPF_TABLE_PINNED(_table_type, _key_type, _leaf_type, _name, _max_entries, "/sys/fs/bpf/xyz");
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 int handle_egress(struct __sk_buff *skb)
