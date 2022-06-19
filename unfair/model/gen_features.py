@@ -18,7 +18,7 @@ import traceback
 import json
 import numpy as np
 
-from unfair.model import cl_args, defaults, features, utils
+from unfair.model import cl_args, defaults, features, loss_event_rate, utils
 
 
 def get_time_bounds(pkts, direction="data"):
@@ -601,7 +601,23 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
         # Fill in loss event rate--related metrics: LOSS_EVENT_RATE_FET and
         # MATHIS_TPUT_LOSS_EVENT_RATE_FET.
-
+        for win, loss_event_rates in loss_event_rate.LossTracker(
+            features.WINDOWS
+        ).loss_event_rate(output, all_pkts=True):
+            # Fill in loss event rate.
+            output[
+                features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
+            ] = loss_event_rates
+            mathis_tput_loss_event_rate_metric = features.make_win_metric(
+                features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win
+            )
+            # Fill in mathis tput based on loss event rate.
+            for j in range(len(output)):
+                output[j][mathis_tput_loss_event_rate_metric] = utils.safe_mathis_tput(
+                    output[j][features.PAYLOAD_FET],
+                    output[j][features.RTT_FET],
+                    loss_event_rates[j],
+                )
 
         # Get the sequence number of the last received packet.
         last_seq = output[-1][features.SEQ_FET]
