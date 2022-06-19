@@ -1,5 +1,9 @@
+"""Calculate loss event rate and manage associated metadata."""
+
 import collections
 import logging
+
+from unfair.model import features
 
 
 class LossTracker:
@@ -152,18 +156,46 @@ class LossTracker:
         interval_mean = interval_total / weights_total
         return 1 / interval_mean
 
-    def loss_event_rate(self, pkts):
+    def loss_event_rate(self, pkts, all_pkts=False):
+        """
+        Each packet is a tuple of the form specified by features.PARSE_PACKETS_FETS:
+            (
+                seq,
+                rtt_us,
+                total_bytes,
+                payload bytes,
+                time_us,
+            )
+        """
+        # Check if pkts is not a list of tuples, in which case it is probably a numpy
+        # array, so convert it to a list of lists.
+        if not (
+            isinstance(pkts, list) and (len(pkts) == 0 or isinstance(pkts[0], tuple))
+        ):
+            pkts = pkts[features.PARSE_PACKETS_FETS].tolist()
+
         num_pkts = len(pkts)
         # Since we need a previous packet, we cannot calculate anything for the first
         # packet. Assume no loss.
         packets_lost = [0]
+
+        per_packet_loss_event_rate = {win: [] for win in self.window_sizes}
         for idx in range(1, num_pkts):
             cur_packets_lost = self.get_packets_lost(pkts[idx - 1], pkts[idx])
             packets_lost.append(cur_packets_lost)
             if self.largest_window is not None:
                 self.update_for_new_packet(pkts[idx - 1], pkts[idx], cur_packets_lost)
 
-        return packets_lost, {
-            max_loss_events: self.calculate_loss_event_rate(weights)
-            for max_loss_events, weights in self.weights.items()
-        }
+            if all_pkts:
+                for max_loss_events, weights in self.weights.items():
+                    per_packet_loss_event_rate[max_loss_events].append(
+                        self.calculate_loss_event_rate(weights)
+                    )
+
+        if all_pkts:
+            return packets_lost, per_packet_loss_event_rate
+        else:
+            return packets_lost, {
+                max_loss_events: self.calculate_loss_event_rate(weights)
+                for max_loss_events, weights in self.weights.items()
+            }

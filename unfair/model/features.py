@@ -14,8 +14,12 @@ def make_win_metric(metric, win):
     """Format the name of a windowed metric."""
     # The loss event rate (and therefore the Mathis model throughput as well) are based
     # on current RTT not minRTT.
-    # TODO: Change first "minRtt" to "curRtt" eventually.
-    suffix = "minRtt" if metric in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_FET} else "minRtt"
+    # TODO: Change "minRtt" to "curRtt" for loss event rate--based metrics eventually.
+    suffix = (
+        "minRtt"
+        if metric in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
+        else "minRtt"
+    )
     return f"{metric}-windowed-{suffix}{win}"
 
 
@@ -29,8 +33,12 @@ def parse_win_metric(metric):
     """Parse the name window size of a windowed metric."""
     toks = metric.split("-windowed-")
     name = toks[0]
-    # TODO: Change first "minRtt" to "curRtt" eventually.
-    suffix = "minRtt" if name in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_FET} else "minRtt"
+    # TODO: Change "minRtt" to "curRtt" for loss event rate--based metrics eventually.
+    suffix = (
+        "minRtt"
+        if name in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
+        else "minRtt"
+    )
     return name, int(toks[1].split(suffix)[1])
 
 
@@ -43,13 +51,17 @@ def make_smoothed_features():
         (make_win_metric(metric, win), typ)
         for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)
     ]
-    # Drop features that use loss event rate with a window of less than 4.
+    # Drop features that use loss event rate with a window of less than 4. Loss even
+    # rate is defined for a window of 8, so 4 is already a bit small.
     return [
         fet
         for fet in smoothed_features
         if not (
             "windowed" in fet
-            and (fet.startswith(LOSS_EVENT_RATE_FET) or fet.startswith(MATHIS_TPUT_FET))
+            and (
+                fet.startswith(LOSS_EVENT_RATE_FET)
+                or fet.startswith(MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+            )
             and parse_win_metric(fet)[1] < 4
         )
     ]
@@ -57,6 +69,9 @@ def make_smoothed_features():
 
 def is_unknowable(metric):
     """Return whether a metric is unknowable by a receiver."""
+    # Support both "metric" and ("metric", "type").
+    if isinstance(metric, tuple):
+        metric = metric[0]
     for fet in UNKNOWABLE_FETS:
         if metric.startswith(fet):
             return True
@@ -96,7 +111,8 @@ TOTAL_TPUT_FET = "total throughput b/s"
 TPUT_FAIR_SHARE_BPS_FET = "throughput fair share b/s"
 TPUT_TO_FAIR_SHARE_RATIO_FET = "throughput to fair share ratio"
 LABEL_FET = "class"
-MATHIS_TPUT_FET = "mathis model throughput b/s"
+MATHIS_TPUT_LOSS_RATE_FET = "mathis model throughput b/s; loss rate"
+MATHIS_TPUT_LOSS_EVENT_RATE_FET = "mathis model throughput b/s; loss event rate"
 # JAINS_FAIRNESS_FET = "Jain's fairness index"
 
 # Additional features used when parking packets.
@@ -128,6 +144,7 @@ REGULAR = [
     (ACTIVE_FLOWS_FET, "int32"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
     (BW_FAIR_SHARE_BPS_FET, "float64"),
+    (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
     # (JAINS_FAIRNESS_FET, "float64")
 ]
 
@@ -139,7 +156,7 @@ EWMAS = [
     (RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
-    (MATHIS_TPUT_FET, "float64"),
+    (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
 ]
 
 # These metrics are calculated over an window of packets, for varies
@@ -157,7 +174,8 @@ WINDOWED = [
     (LOSS_EVENT_RATE_FET, "float64"),
     (SQRT_LOSS_EVENT_RATE_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
-    (MATHIS_TPUT_FET, "float64"),
+    (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
+    (MATHIS_TPUT_LOSS_EVENT_RATE_FET, "float64"),
 ]
 
 # The alpha values at which to evaluate the EWMA metrics.
@@ -182,11 +200,11 @@ UNKNOWABLE_FETS = [
     LABEL_FET,
 ]
 
+# Every possible features.
 ALL_FEATURES = REGULAR + make_smoothed_features()
 
-# Construct the list of all features that an isolated receiver may use. Do not
-# include any unknowable features.
-FEATURES = tuple(fet for fet, _ in make_smoothed_features() if is_knowable(fet))
+# All features that an isolated receiver may use.
+ALL_KNOWABLE_FEATURES = [fet for fet in ALL_FEATURES if is_knowable(fet)]
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
@@ -200,15 +218,6 @@ EXTRA_FETS = [
     make_win_metric(MATHIS_TPUT_FET, defaults.CHOSEN_WIN),
 ]
 
-# Features used when parsing received packets.
-PARSE_PACKETS_FETS = [
-    (SEQ_FET, "int64"),
-    (RTT_FET, "int32"),
-    (WIRELEN_FET, "int32"),
-    (PAYLOAD_FET, "int32"),
-    (ARRIVAL_TIME_FET, "int64"),
-]
-
 # Features used when parsing packets from a PCAP file.
 PARSE_PCAP_FETS = [
     (SEQ_FET, "int64"),
@@ -219,7 +228,14 @@ PARSE_PCAP_FETS = [
     (WIRELEN_FET, "int32"),
 ]
 
-REGULAR_KNOWABLE_FETS = [fet for fet in REGULAR if is_knowable(fet[0])]
+# Features used when parsing received packets.
+PARSE_PACKETS_FETS = [
+    (SEQ_FET, "int64"),
+    (RTT_FET, "int32"),
+    (WIRELEN_FET, "int32"),
+    (PAYLOAD_FET, "int32"),
+    (ARRIVAL_TIME_FET, "int64"),
+]
 
 
 def feature_names_to_dtype(fet_names):
@@ -245,11 +261,16 @@ def fill_dependencies(in_spc):
     fets_to_use = set(in_spc)
     to_add = set()
     for name in fets_to_use:
-        if MATHIS_TPUT_FET in name:
+        if MATHIS_TPUT_LOSS_RATE_FET in name:
             if "ewma" in name:
-                new_metric = make_ewma_metric(
-                    LOSS_RATE_FET, parse_ewma_metric(name)[1]
-                )
+                new_metric = make_ewma_metric(LOSS_RATE_FET, parse_ewma_metric(name)[1])
+            else:
+                new_metric = make_win_metric(LOSS_RATE_FET, parse_win_metric(name)[1])
+            to_add.add(new_metric)
+        if MATHIS_TPUT_LOSS_EVENT_RATE_FET in name:
+            if "ewma" in name:
+                # This should not happen.
+                continue
             else:
                 new_metric = make_win_metric(
                     LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
@@ -267,9 +288,7 @@ def fill_dependencies(in_spc):
             to_add.add(LOSS_RATE_FET)
             to_add.add(PACKETS_LOST_FET)
         if SQRT_LOSS_EVENT_RATE_FET in name:
-            to_add.add(make_win_metric(
-                LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
-            ))
+            to_add.add(make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]))
     combined = fets_to_use | to_add
     if combined == fets_to_use:
         return in_spc

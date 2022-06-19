@@ -2,7 +2,6 @@
 """Parses the output of CloudLab experiments."""
 
 import argparse
-import collections
 from contextlib import contextmanager
 import itertools
 import logging
@@ -20,71 +19,6 @@ import json
 import numpy as np
 
 from unfair.model import cl_args, defaults, features, utils
-
-
-def make_interval_weight(num_intervals):
-    """Use to calculate loss event rate."""
-    return [
-        (1 if i < num_intervals / 2 else 2 * (num_intervals - i) / (num_intervals + 2))
-        for i in range(num_intervals)
-    ]
-
-
-def compute_weighted_average(
-    curr_event_size, loss_event_intervals, loss_interval_weights
-):
-    """Use to calculate loss event rate."""
-    weight_total = 1 + sum(loss_interval_weights[1:])
-    interval_total_0 = curr_event_size + sum(
-        interval * weight
-        for interval, weight in zip(
-            list(loss_event_intervals)[:-1], loss_interval_weights[1:]
-        )
-    )
-    interval_total_1 = sum(
-        interval * weight
-        for interval, weight in zip(loss_event_intervals, loss_interval_weights)
-    )
-    return weight_total / max(interval_total_0, interval_total_1)
-
-
-def loss_rate(
-    loss_q,
-    win_start_idx,
-    pkt_loss_cur,
-    recv_time_cur_us,
-    recv_time_prev_us,
-    win_size_us,
-    pkt_idx,
-):
-    """Calculate the loss rate over a window."""
-    # If there were packet losses since the last received packet, then
-    # add them to the loss queue.
-    if pkt_loss_cur > 0 and pkt_idx > 0:
-        # The average time between when packets should have arrived,
-        # since we received the last packet.
-        loss_interval = (recv_time_cur_us - recv_time_prev_us) / (pkt_loss_cur + 1)
-        # Look at each lost packet...
-        for k in range(pkt_loss_cur):
-            # Record the time at which this packet should have
-            # arrived.
-            loss_q.append(recv_time_prev_us + (k + 1) * loss_interval)
-
-    # Discard old losses.
-    while loss_q and (loss_q[0] < recv_time_cur_us - win_size_us):
-        loss_q.popleft()
-
-    # The loss rate is the number of losses in the window divided by
-    # the total number of packets in the window.
-    win_losses = len(loss_q)
-    return (
-        loss_q,
-        (
-            (win_losses / (pkt_idx + win_losses - win_start_idx))
-            if pkt_idx - win_start_idx > 0
-            else 0
-        ),
-    )
 
 
 def get_time_bounds(pkts, direction="data"):
@@ -271,18 +205,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
             continue
 
         # State that the windowed metrics need to track across packets.
-        win_state = {
-            win: {
-                # The index at which this window starts.
-                "window_start_idx": 0,
-                # The "loss event rate".
-                "loss_interval_weights": make_interval_weight(8),
-                "loss_event_intervals": collections.deque(),
-                "current_loss_event_start_idx": 0,
-                "current_loss_event_start_time": 0,
-            }
-            for win in features.WINDOWS
-        }
+        win_to_start_idx = {win: 0 for win in features.WINDOWS}
         # Total number of packet losses up to the current received
         # packet.
         pkt_loss_total_estimate = 0
@@ -530,15 +453,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 elif metric.startswith(features.LOSS_RATE_FET):
                     new = loss_rate_cur
                 elif metric.startswith(features.MATHIS_TPUT_FET):
-                    # tput = (MSS / RTT) * (C / sqrt(p))
-                    new = utils.safe_mul(
-                        utils.safe_div(
-                            utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                            utils.safe_div(output[j][features.RTT_FET], 1e6),
-                        ),
-                        utils.safe_div(
-                            defaults.MATHIS_C, utils.safe_sqrt(loss_rate_cur)
-                        ),
+                    new = utils.safe_mathis_tput(
+                        output[j][features.PAYLOAD_FET],
+                        output[j][features.RTT_FET],
+                        output[j][features.LOSS_RATE_FET],
                     )
                 else:
                     raise Exception(f"Unknown EWMA metric: {metric}")
@@ -555,10 +473,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 # estimate will never increase, so we do not need to investigate
                 # whether the start of the window moved earlier in time.
                 for win in features.WINDOWS:
-                    win_state[win]["window_start_idx"] = utils.find_bound(
+                    win_to_start_idx[win] = utils.find_bound(
                         output[features.ARRIVAL_TIME_FET],
                         target=recv_time_cur_us - (win * min_rtt_us),
-                        min_idx=win_state[win]["window_start_idx"],
+                        min_idx=win_to_start_idx[win],
                         max_idx=j,
                         which="after",
                     )
@@ -580,7 +498,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
 
                 # A window requires at least two packets. Note that this means
                 # the the first packet will always be skipped.
-                win_start_idx = win_state[win]["window_start_idx"]
+                win_start_idx = win_to_start_idx[win]
                 if win_start_idx == j:
                     continue
 
@@ -632,99 +550,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                         output[features.RTT_RATIO_FET], win_start_idx, j
                     )
                 elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-                    rtt_us = output[j][features.make_win_metric(features.RTT_FET, win)]
-                    if rtt_us == -1:
-                        # The RTT estimate is -1 (unknown), so we
-                        # cannot compute the loss event rate.
-                        continue
-
-                    cur_start_idx = win_state[win]["current_loss_event_start_idx"]
-                    cur_start_time = win_state[win]["current_loss_event_start_time"]
-                    if pkt_loss_cur_estimate > 0:
-                        # There was a loss since the last packet.
-                        #
-                        # The index of the first packet in the current
-                        # loss event.
-                        new_start_idx = (
-                            j + pkt_loss_total_estimate - pkt_loss_cur_estimate
-                        )
-
-                        if cur_start_idx == 0:
-                            # This is the first loss event.
-                            #
-                            # Naive fix for the loss event rate
-                            # calculation The described method in the
-                            # RFC is complicated for the first event
-                            # handling.
-                            cur_start_idx = 1
-                            cur_start_time = 0
-                            new = 1 / j
-                        else:
-                            # This is not the first loss event. See if
-                            # any of the newly-lost packets start a
-                            # new loss event.
-                            #
-                            # The average time between when packets
-                            # should have arrived, since we received
-                            # the last packet.
-                            loss_interval = (recv_time_cur_us - recv_time_prev_us) / (
-                                pkt_loss_cur_estimate + 1
-                            )
-
-                            # Look at each lost packet...
-                            for k in range(pkt_loss_cur_estimate):
-                                # Compute the approximate time at
-                                # which the packet should have been
-                                # received if it had not been lost.
-                                loss_time = recv_time_prev_us + (k + 1) * loss_interval
-
-                                # If the time of this loss is more
-                                # than one RTT from the time of the
-                                # start of the current loss event,
-                                # then this is a new loss event.
-                                if loss_time - cur_start_time >= rtt_us:
-                                    # Record the number of packets
-                                    # between the start of the new
-                                    # loss event and the start of the
-                                    # previous loss event.
-                                    win_state[win]["loss_event_intervals"].appendleft(
-                                        new_start_idx - cur_start_idx
-                                    )
-                                    # Potentially discard an old event.
-                                    if (
-                                        len(win_state[win]["loss_event_intervals"])
-                                        > win
-                                    ):
-                                        win_state[win]["loss_event_intervals"].pop()
-
-                                    cur_start_idx = new_start_idx
-                                    cur_start_time = loss_time
-                                # Calculate the index at which the
-                                # new loss event begins.
-                                new_start_idx += 1
-
-                            new = compute_weighted_average(
-                                (j + pkt_loss_total_estimate - cur_start_idx),
-                                win_state[win]["loss_event_intervals"],
-                                win_state[win]["loss_interval_weights"],
-                            )
-                    elif pkt_loss_total_estimate > 0:
-                        # There have been no losses since the last
-                        # packet, but the total loss is nonzero.
-                        # Increase the size of the current loss event.
-                        new = compute_weighted_average(
-                            j + pkt_loss_total_estimate - cur_start_idx,
-                            win_state[win]["loss_event_intervals"],
-                            win_state[win]["loss_interval_weights"],
-                        )
-                    else:
-                        # There have never been any losses, so the
-                        # loss event rate is 0.
-                        new = 0
-
-                    # Record the new values of the state variables.
-                    win_state[win]["current_loss_event_start_idx"] = cur_start_idx
-                    win_state[win]["current_loss_event_start_time"] = cur_start_time
+                    continue
                 elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
                     # Use the loss event rate to compute
                     # 1 / sqrt(loss event rate).
@@ -744,22 +570,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                     )
                     new = utils.safe_div(win_losses, win_losses + (j - win_start_idx))
                 elif metric.startswith(features.MATHIS_TPUT_FET):
-                    # tput = (MSS / RTT) * (C / sqrt(p))
-                    new = utils.safe_mul(
-                        utils.safe_div(
-                            utils.safe_mul(8, output[j][features.PAYLOAD_FET]),
-                            utils.safe_div(output[j][features.RTT_FET], 1e6),
-                        ),
-                        utils.safe_div(
-                            defaults.MATHIS_C,
-                            utils.safe_sqrt(
-                                output[j][
-                                    features.make_win_metric(
-                                        features.LOSS_EVENT_RATE_FET, win
-                                    )
-                                ]
-                            ),
-                        ),
+                    new = utils.safe_mathis_tput(
+                        output[j][features.PAYLOAD_FET],
+                        output[j][features.RTT_FET],
+                        output[j][features.LOSS_RATE_FET],
                     )
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
@@ -784,6 +598,10 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 )
                 highest_seq = None
                 prev_seq = None
+
+        # Fill in loss event rate--related metrics: LOSS_EVENT_RATE_FET and
+        # MATHIS_TPUT_LOSS_EVENT_RATE_FET.
+
 
         # Get the sequence number of the last received packet.
         last_seq = output[-1][features.SEQ_FET]
@@ -1175,18 +993,15 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
         else:
             raise Exception(f"Unknown EWMA metric: {metric}")
 
-    # State that the windowed metrics need to track across packets.
-    win_state = {
-        win: {
-            # The index at which this window starts.
-            "window_start_idx": utils.find_bound(
-                fets[features.ARRIVAL_TIME_FET],
-                target=fets[-1][features.ARRIVAL_TIME_FET] - (win * min_rtt_us),
-                min_idx=0,
-                max_idx=num_pkts - 1,
-                which="after",
-            )
-        }
+    # The index at which this window starts.
+    win_to_start_idx = {
+        win: utils.find_bound(
+            fets[features.ARRIVAL_TIME_FET],
+            target=fets[-1][features.ARRIVAL_TIME_FET] - (win * min_rtt_us),
+            min_idx=0,
+            max_idx=num_pkts - 1,
+            which="after",
+        )
         for win in features.WINDOWS
     }
 
@@ -1217,7 +1032,7 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
 
         # A window requires at least two packets. Note that this means
         # that the first packet will always be skipped.
-        win_start_idx = win_state[win]["window_start_idx"]
+        win_start_idx = win_to_start_idx[win]
         assert (
             win_start_idx < num_pkts - 1
         ), "Window does not contain at least two packtes."
