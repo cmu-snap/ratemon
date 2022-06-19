@@ -6,6 +6,7 @@ training, validation, and test sets.
 """
 
 import argparse
+import json
 import logging
 import math
 import os
@@ -414,6 +415,22 @@ def _main():
             "train": exp_flps[num_exps_per_split["test"] + num_exps_per_split["val"] :],
         }
 
+        # Record which experiments are used for each split so that we do not reuse any
+        # of these for evaluation later.
+        with open(
+            path.join(args.out_dir, "disjoint_splits.json"), "w", encoding="utf-8"
+        ) as fil:
+            json.dump(
+                # Extract the filename from each filepath.
+                {
+                    key: [path.basename(fln) for fln in val]
+                    for key, val in exp_flps_per_split.items()
+                },
+                fil,
+                indent=4,
+            )
+
+        # Do the actual splitting.
         for split_name in SPLIT_NAMES:
             logging.info("Creating disjoint %s split", split_name)
             do_prepare(
