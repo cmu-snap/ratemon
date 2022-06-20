@@ -94,6 +94,7 @@ PACKETS_LOST_TOTAL_FET = "packets lost total"
 DROP_RATE_FET = "drop rate at bottleneck queue"
 RETRANS_RATE_FET = "retransmission rate"
 LOSS_RATE_FET = "loss rate"
+SQRT_LOSS_RATE_FET = "1/sqrt loss rate"
 LOSS_EVENT_RATE_FET = "loss event rate"
 SQRT_LOSS_EVENT_RATE_FET = "1/sqrt loss event rate"
 PAYLOAD_FET = "payload B"
@@ -135,6 +136,7 @@ REGULAR = [
     (PACKETS_LOST_FET, "int32"),
     (PACKETS_LOST_TOTAL_FET, "int32"),
     (LOSS_RATE_FET, "float64"),
+    (SQRT_LOSS_RATE_FET, "float64"),
     (DROP_RATE_FET, "float64"),
     (RETRANS_RATE_FET, "float64"),
     (PAYLOAD_FET, "int32"),
@@ -156,6 +158,7 @@ EWMAS = [
     (RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
+    (SQRT_LOSS_RATE_FET, "float64"),
     (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
 ]
 
@@ -174,6 +177,7 @@ WINDOWED = [
     (LOSS_EVENT_RATE_FET, "float64"),
     (SQRT_LOSS_EVENT_RATE_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
+    (SQRT_LOSS_RATE_FET, "float64"),
     (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
     (MATHIS_TPUT_LOSS_EVENT_RATE_FET, "float64"),
 ]
@@ -287,6 +291,13 @@ def fill_dependencies(in_spc):
         if LOSS_RATE_FET in name:
             to_add.add(LOSS_RATE_FET)
             to_add.add(PACKETS_LOST_FET)
+        if SQRT_LOSS_RATE_FET in name:
+            if "ewma" in name:
+                to_add.add(make_ewma_metric(LOSS_RATE_FET, parse_ewma_metric(name)[1]))
+            elif "windowed" in name:
+                to_add.add(make_win_metric(LOSS_RATE_FET, parse_win_metric(name)[1]))
+            else:
+                to_add.add(LOSS_RATE_FET)
         if SQRT_LOSS_EVENT_RATE_FET in name:
             to_add.add(make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]))
     combined = fets_to_use | to_add

@@ -179,7 +179,7 @@ class LossTracker:
         # packet. Assume no loss.
         packets_lost = [0]
 
-        per_packet_loss_event_rate = {win: [] for win in self.window_sizes}
+        per_packet_loss_event_rate = {win: [0] for win in self.window_sizes}
         for idx in range(1, num_pkts):
             cur_packets_lost = self.get_packets_lost(pkts[idx - 1], pkts[idx])
             packets_lost.append(cur_packets_lost)

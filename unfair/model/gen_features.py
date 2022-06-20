@@ -552,18 +552,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 elif metric.startswith(features.LOSS_EVENT_RATE_FET):
                     continue
                 elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
-                    # Use the loss event rate to compute
-                    # 1 / sqrt(loss event rate).
-                    new = utils.safe_div(
-                        1,
-                        utils.safe_sqrt(
-                            output[j][
-                                features.make_win_metric(
-                                    features.LOSS_EVENT_RATE_FET, win
-                                )
-                            ]
-                        ),
-                    )
+                    continue
                 elif metric.startswith(features.LOSS_RATE_FET):
                     win_losses = utils.safe_sum(
                         output[features.PACKETS_LOST_FET], win_start_idx + 1, j
@@ -599,20 +588,36 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
                 highest_seq = None
                 prev_seq = None
 
-        # Fill in loss event rate--related metrics: LOSS_EVENT_RATE_FET and
-        # MATHIS_TPUT_LOSS_EVENT_RATE_FET.
+        # Fill in loss event rate--related metrics: LOSS_EVENT_RATE_FET,
+        # SQRT_LOSS_EVENT_RATE, and MATHIS_TPUT_LOSS_EVENT_RATE_FET.
         for win, loss_event_rates in loss_event_rate.LossTracker(
             features.WINDOWS
         ).loss_event_rate(output, all_pkts=True):
+            if len(loss_event_rates) != len(output):
+                print(
+                    f"Error: Number of loss event rates ({len(loss_event_rates)}) "
+                    f"does not equal number of packets ({len(output)}) "
+                    f"for window size {win} in flow {flw} in: {exp_flp}"
+                )
+                continue
             # Fill in loss event rate.
             output[
                 features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
             ] = loss_event_rates
+
+            # Fill in the sqrt of the loss event rate and the mathis tput based on loss
+            # event rate.
+            sqrt_loss_event_rate_metric = features.make_win_metric(
+                features.LOSS_EVENT_RATE_FET, win
+            )
             mathis_tput_loss_event_rate_metric = features.make_win_metric(
                 features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win
             )
-            # Fill in mathis tput based on loss event rate.
             for j in range(len(output)):
+                # Use the loss event rate to compute 1 / sqrt(loss event rate).
+                output[j][sqrt_loss_event_rate_metric] = utils.safe_div(
+                    1, utils.safe_sqrt(loss_event_rates[j])
+                )
                 output[j][mathis_tput_loss_event_rate_metric] = utils.safe_mathis_tput(
                     output[j][features.PAYLOAD_FET],
                     output[j][features.RTT_FET],
