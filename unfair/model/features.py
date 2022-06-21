@@ -14,9 +14,8 @@ def make_win_metric(metric, win):
     """Format the name of a windowed metric."""
     # The loss event rate (and therefore the Mathis model throughput as well) are based
     # on current RTT not minRTT.
-    # TODO: Change "minRtt" to "curRtt" for loss event rate--based metrics eventually.
     suffix = (
-        "minRtt"
+        "curRtt"
         if metric in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
         else "minRtt"
     )
@@ -33,9 +32,8 @@ def parse_win_metric(metric):
     """Parse the name window size of a windowed metric."""
     toks = metric.split("-windowed-")
     name = toks[0]
-    # TODO: Change "minRtt" to "curRtt" for loss event rate--based metrics eventually.
     suffix = (
-        "minRtt"
+        "curRtt"
         if name in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
         else "minRtt"
     )
