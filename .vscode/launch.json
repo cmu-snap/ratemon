@@ -157,7 +157,8 @@
                 "--warmup-percent=5",
                 "--out-dir=/home/ccanel/out/foobar",
                 "--sample-percent=1",
-                "--disjoint-splits"
+                "--disjoint-splits",
+                "--num-exps=10"
             ],
             "autoReload": {
                 "enable": false

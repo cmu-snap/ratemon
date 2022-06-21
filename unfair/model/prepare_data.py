@@ -382,6 +382,11 @@ def _main():
         if not fln.startswith(defaults.DATA_PREFIX) and fln.endswith(".npz")
     ]
 
+    random.shuffle(exp_flps)
+    num_exps = len(exp_flps) if args.num_exps is None else args.num_exps
+    exp_flps = exp_flps[:num_exps]
+    logging.info("Selected %d experiments", num_exps)
+
     if args.disjoint_splits:
         # Split the experiments into disjoint sets of experiments. Split based on the
         # number of experiments and not the number of packets because the number of
@@ -451,10 +456,7 @@ def do_prepare(args, split_fracs, exp_flps):
     if not exp_flps:
         logging.info("No experiments found.")
         return
-    random.shuffle(exp_flps)
-    num_exps = len(exp_flps) if args.num_exps is None else args.num_exps
-    exp_flps = exp_flps[:num_exps]
-    logging.info("Selected %d experiments", num_exps)
+
     warmup_frac = args.warmup_percent / 100
     sample_frac = args.sample_percent / 100
     exp_flps, num_pkts, dtype = survey(exp_flps, warmup_frac)

@@ -32,7 +32,7 @@ class PytorchModelWrapper:
         # The name of this model.
         self.name = None
         # The specification of the input tensor format.
-        self.in_spc = tuple(sorted(features.FEATURES))
+        self.in_spc = tuple(sorted(features.ALL_FEATURES))
         # The specification of the output tensor format.
         self.out_spc = (features.OUT_FET,)
         # The number of output classes.
@@ -1155,7 +1155,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         self.in_spc = tuple(
             sorted(
                 fet
-                for fet in features.FEATURES
+                for fet in features.ALL_FEATURES
                 if (
                     # Allow regular features.
                     ("ewma" not in fet and "windowed" not in fet)
