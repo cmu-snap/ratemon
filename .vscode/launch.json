@@ -176,9 +176,11 @@
             "console": "integratedTerminal",
             "args": [
                 "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--untar-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
-                "--parallel=20"
+                "--untar-dir=/tmp/untar",
+                "--out-dir=/home/ccanel/out/foobar",
+                "--parallel=20",
+                "--random-order",
+                "--num-exps=10",
             ],
             "autoReload": {
                 "enable": false
