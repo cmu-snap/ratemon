@@ -172,7 +172,7 @@ class LossTracker:
         if not (
             isinstance(pkts, list) and (len(pkts) == 0 or isinstance(pkts[0], tuple))
         ):
-            pkts = pkts[features.PARSE_PACKETS_FETS].tolist()
+            pkts = pkts[tuple(features.PARSE_PACKETS_FETS)].tolist()
 
         num_pkts = len(pkts)
         # Since we need a previous packet, we cannot calculate anything for the first

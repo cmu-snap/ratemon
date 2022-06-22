@@ -67,7 +67,7 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def parse_opened_exp(exp, exp_flp, exp_dir):
+def parse_opened_exp(exp, exp_flp, exp_dir, select_tail_percent):
     logging.info("Parsing: %s", exp_flp)
     if exp.name.startswith("FAILED"):
         logging.info("Error: Experimant failed: %s", exp_flp)
@@ -99,7 +99,7 @@ def parse_opened_exp(exp, exp_flp, exp_dir):
         for client_port in flw[3]
     }
     flws = list(flw_to_cca.keys())
-    flw_to_pkts = utils.parse_packets(server_pcap, flw_to_cca)
+    flw_to_pkts = utils.parse_packets(server_pcap, flw_to_cca, select_tail_percent)
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
 
@@ -386,6 +386,12 @@ def parse_args():
         help="The directory in which to store the results.",
         required=True,
         type=str,
+    )
+    parser.add_argument(
+        "--select-tail-percent",
+        help="The percentage (by time) of the tail of the PCAPs to select.",
+        required=False,
+        type=float
     )
     args = parser.parse_args()
     assert path.isdir(args.exp_dir)

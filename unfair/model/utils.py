@@ -403,9 +403,25 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
           TCP payload size (B), total packet size (B))
     """
     logging.info(f"\tParsing PCAP: {flp}")
+
     # Use list() to read the pcap file all at once (minimize seeks).
-    pkts = list(enumerate(scapy.utils.RawPcapReader(flp)))
-    num_pkts = len(pkts)
+    pkts = list(scapy.utils.RawPcapReader(flp))
+
+    # Optionally select a percentage of the tail of the PCAP file.
+    if select_tail_percent is not None and select_tail_percent != 100:
+        assert 0 < select_tail_percent <= 100, (
+            '"select_tail_percent" must be in the range (0, 100], '
+            f"but is: {select_tail_percent}"
+        )
+        times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, (_, pkt_mdat) in pkts]
+        assert times_us, "No packets."
+        total_time_us = times_us[-1] - times_us[0]
+        start_time_us = times_us + (total_time_us * select_tail_percent / 100)
+        start_idx = 0
+        for start_idx, time_us in enumerate(times_us):
+            if time_us > start_time_us:
+                break
+        pkts = pkts[start_idx:]
 
     def remove_unused_rows(arr):
         """Return a filtered array with unused rows removed.
@@ -416,6 +432,7 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
         """
         return arr[arr[features.ARRIVAL_TIME_FET] != -1]
 
+    num_pkts = len(pkts)
     # Format described above. In this form, the arrays will be sparse. Unused
     # rows will be removed later.
     flw_to_pkts = {
@@ -426,21 +443,7 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
         for flw_ports in flw_to_cca.keys()
     }
 
-    # Optionally select a percentage of the tail of the PCAP file.
-    if select_tail_percent is not None and select_tail_percent != 100:
-        assert (
-            0 < select_tail_percent <= 100
-        ), f'"select_tail_percent" must be in the range (0, 100], but is: {select_tail_percent}'
-        times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, pkt_mdat in pkts]
-        assert times_us, "No packets."
-        total_time_us = times_us[-1] - times_us[0]
-        start_time_us = times_us + (total_time_us * select_tail_percent / 100)
-        for start_idx, time_us in enumerate(times_us):
-            if time_us > start_time_us:
-                break
-        pkts = pkts[start_idx:]
-
-    for idx, (pkt_dat, pkt_mdat) in pkts:
+    for idx, (pkt_dat, pkt_mdat) in enumerate(pkts):
         ether = scapy.layers.l2.Ether(pkt_dat)
         # Assume that this is a TCP/IP packet.
         ip = ether[scapy.layers.inet.IP]

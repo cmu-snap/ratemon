@@ -455,6 +455,8 @@ def parse_opened_exp(
 
             output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
             output[j][features.LOSS_RATE_FET] = loss_rate_cur
+            sqrt_loss_rate_cur = utils.safe_div(1, utils.safe_sqrt(loss_rate_cur))
+            output[j][features.SQRT_LOSS_RATE_FET] = sqrt_loss_rate_cur
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(
@@ -478,6 +480,8 @@ def parse_opened_exp(
                     new = rtt_estimate_ratio
                 elif metric.startswith(features.LOSS_RATE_FET):
                     new = loss_rate_cur
+                elif metric.startswith(features.SQRT_LOSS_RATE_FET):
+                    new = sqrt_loss_rate_cur
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
                     new = utils.safe_mathis_tput(
                         output[j][features.PAYLOAD_FET],
@@ -575,21 +579,32 @@ def parse_opened_exp(
                     new = utils.safe_mean(
                         output[features.RTT_RATIO_FET], win_start_idx, j
                     )
-                elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-                    continue
-                elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
-                    continue
                 elif metric.startswith(features.LOSS_RATE_FET):
                     win_losses = utils.safe_sum(
                         output[features.PACKETS_LOST_FET], win_start_idx + 1, j
                     )
                     new = utils.safe_div(win_losses, win_losses + (j - win_start_idx))
+                elif metric.startswith(features.SQRT_LOSS_RATE_FET):
+                    new = utils.safe_div(
+                        1,
+                        utils.safe_sqrt(
+                            output[j][
+                                features.make_win_metric(features.LOSS_RATE_FET, win)
+                            ]
+                        ),
+                    )
+                elif metric.startswith(features.LOSS_EVENT_RATE_FET):
+                    continue
+                elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
+                    continue
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
                     new = utils.safe_mathis_tput(
                         output[j][features.PAYLOAD_FET],
                         output[j][features.RTT_FET],
                         output[j][features.LOSS_RATE_FET],
                     )
+                elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
+                    continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
@@ -1236,6 +1251,12 @@ def _main():
 
     if num_exps is not None:
         assert num_exps > 0, f'"--num-exps" must be greater than 0, but is: {num_exps}'
+        if len(pcaps) < num_exps:
+            print(
+                f"Warning: Only found {len(pcaps)} experiments, "
+                f'but "--num-exps" is: {num_exps}'
+            )
+        num_exps = min(num_exps, len(pcaps))
         print(f"Selecting {num_exps}/{len(pcaps)} experiments.")
         pcaps = pcaps[:num_exps]
 
