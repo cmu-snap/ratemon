@@ -384,7 +384,7 @@ def make_empty(num_pkts, dtype):
     return np.full((num_pkts,), -1, dtype=dtype)
 
 
-def parse_packets(flp, flw_to_cca):
+def parse_packets(flp, flw_to_cca, select_tail_percent=None):
     """Parse a PCAP file.
 
     Considers packets between a specified client and server using specified
@@ -425,6 +425,21 @@ def parse_packets(flp, flw_to_cca):
         )
         for flw_ports in flw_to_cca.keys()
     }
+
+    # Optionally select a percentage of the tail of the PCAP file.
+    if select_tail_percent is not None and select_tail_percent != 100:
+        assert (
+            0 < select_tail_percent <= 100
+        ), f'"select_tail_percent" must be in the range (0, 100], but is: {select_tail_percent}'
+        times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, pkt_mdat in pkts]
+        assert times_us, "No packets."
+        total_time_us = times_us[-1] - times_us[0]
+        start_time_us = times_us + (total_time_us * select_tail_percent / 100)
+        for start_idx, time_us in enumerate(times_us):
+            if time_us > start_time_us:
+                break
+        pkts = pkts[start_idx:]
+
     for idx, (pkt_dat, pkt_mdat) in pkts:
         ether = scapy.layers.l2.Ether(pkt_dat)
         # Assume that this is a TCP/IP packet.
@@ -1319,12 +1334,7 @@ def analyze_feature_correlation(net, out_dir, dat_in, clusters):
 
 
 def analyze_feature_importance(
-    net,
-    out_dir,
-    dat_in,
-    dat_out,
-    num_fets_to_pick,
-    perm_imp_repeats
+    net, out_dir, dat_in, dat_out, num_fets_to_pick, perm_imp_repeats
 ):
     """Analyze the importance of features to a trained net."""
     # Analyze feature coefficients. The underlying model's .coef_

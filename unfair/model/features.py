@@ -174,10 +174,10 @@ WINDOWED = [
     (TPUT_TO_FAIR_SHARE_RATIO_FET, "float64"),
     (RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
-    (LOSS_EVENT_RATE_FET, "float64"),
-    (SQRT_LOSS_EVENT_RATE_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
     (SQRT_LOSS_RATE_FET, "float64"),
+    (LOSS_EVENT_RATE_FET, "float64"),
+    (SQRT_LOSS_EVENT_RATE_FET, "float64"),
     (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
     (MATHIS_TPUT_LOSS_EVENT_RATE_FET, "float64"),
 ]

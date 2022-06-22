@@ -86,7 +86,7 @@ MODEL_PREFIX = "model_"
 # The maximum number of epochs when using early stopping.
 EPCS_MAX = 10_000
 # Whether to execute synchronously or in parallel.
-SYNC = False
+SYNC = True
 # The random seed.
 SEED = 1337
 # Name to use for lock files.

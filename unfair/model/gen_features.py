@@ -88,7 +88,9 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
             os.remove(lock_flp)
 
 
-def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
+def parse_opened_exp(
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent=None
+):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
     if exp.name.startswith("FAILED"):
@@ -124,7 +126,9 @@ def parse_opened_exp(exp, exp_flp, exp_dir, out_flp, skip_smoothed):
     # NOTE: Disabled because not used.
     #
     # flw_to_pkts_client = utils.parse_packets(client_pcap, flw_to_cca)
-    flw_to_pkts_server = utils.parse_packets(server_pcap, flw_to_cca)
+    flw_to_pkts_server = utils.parse_packets(
+        server_pcap, flw_to_cca, select_tail_percent
+    )
 
     # NOTE: Disabled because not used.
     #
