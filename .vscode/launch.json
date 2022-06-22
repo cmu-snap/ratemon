@@ -175,12 +175,13 @@
             "program": "${workspaceFolder}/unfair/model/gen_features.py",
             "console": "integratedTerminal",
             "args": [
-                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-cubic",
+                "--exp-dir=/home/ccanel/out/foobar",
                 "--untar-dir=/tmp/untar",
                 "--out-dir=/home/ccanel/out/foobar",
                 "--parallel=20",
                 "--random-order",
                 "--num-exps=10",
+                "--select-tail-percent=5"
             ],
             "autoReload": {
                 "enable": false

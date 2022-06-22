@@ -130,6 +130,12 @@ def parse_opened_exp(
         server_pcap, flw_to_cca, select_tail_percent
     )
 
+    # Log and drop empty flows.
+    for flw, pkts in flw_to_pkts_server.items():
+        if not pkts:
+            print(f"\tWarning: No packets for flow {flw} in: {exp_flp}")
+    flw_to_pkts_server = {flw: pkts for flw, pkts in flw_to_pkts_server.items() if pkts}
+
     # NOTE: Disabled because not used.
     #
     # # Determine the path to the bottleneck queue log file.
@@ -631,9 +637,11 @@ def parse_opened_exp(
 
         # Fill in loss event rate--related metrics: LOSS_EVENT_RATE_FET,
         # SQRT_LOSS_EVENT_RATE, and MATHIS_TPUT_LOSS_EVENT_RATE_FET.
-        for win, loss_event_rates in loss_event_rate.LossTracker(
-            features.WINDOWS
-        ).loss_event_rate(output, all_pkts=True):
+        for win, loss_event_rates in (
+            loss_event_rate.LossTracker(features.WINDOWS)
+            .loss_event_rate(output, all_pkts=True)[1]
+            .items()
+        ):
             if len(loss_event_rates) != len(output):
                 print(
                     f"Error: Number of loss event rates ({len(loss_event_rates)}) "
@@ -1178,14 +1186,23 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
         )
 
 
-def parse_exp(exp_flp, untar_dir, out_dir, skip_smoothed, parse_func=parse_opened_exp):
+def parse_exp(
+    exp_flp,
+    untar_dir,
+    out_dir,
+    skip_smoothed,
+    select_tail_percent,
+    parse_func=parse_opened_exp,
+):
     """Lock, untar, and parse an experiment."""
     exp = utils.Exp(exp_flp)
     out_flp = path.join(out_dir, f"{exp.name}.npz")
     with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
         if locked and exp_dir is not None:
             try:
-                return parse_func(exp, exp_flp, exp_dir, out_flp, skip_smoothed)
+                return parse_func(
+                    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
+                )
             except AssertionError:
                 traceback.print_exc()
                 return -1
@@ -1232,6 +1249,12 @@ def _main():
     psr.add_argument(
         "--num-exps", default=None, help="The number of experiments to parse.", type=int
     )
+    psr.add_argument(
+        "--select-tail-percent",
+        help="The percentage (by time) of the tail of the PCAPs to select.",
+        required=False,
+        type=float,
+    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
@@ -1242,7 +1265,13 @@ def _main():
 
     # Find all experiments.
     pcaps = [
-        (path.join(exp_dir, exp), untar_dir, out_dir, skip_smoothed)
+        (
+            path.join(exp_dir, exp),
+            untar_dir,
+            out_dir,
+            skip_smoothed,
+            args.select_tail_percent,
+        )
         for exp in sorted(os.listdir(exp_dir))
         if exp.endswith(".tar.gz")
     ]

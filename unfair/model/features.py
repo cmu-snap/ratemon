@@ -242,6 +242,14 @@ PARSE_PACKETS_FETS = [
 ]
 
 
+def get_names(fets):
+    if len(fets) > 0:
+        assert isinstance(
+            fets[0], tuple
+        ), "Input to get_names() must be feature tuples: (name, type)."
+    return [fet[0] for fet in fets]
+
+
 def feature_names_to_dtype(fet_names):
     return [(fet_name, feature_name_to_type(fet_name)) for fet_name in fet_names]
 

@@ -391,7 +391,7 @@ def parse_args():
         "--select-tail-percent",
         help="The percentage (by time) of the tail of the PCAPs to select.",
         required=False,
-        type=float
+        type=float,
     )
     args = parser.parse_args()
     assert path.isdir(args.exp_dir)

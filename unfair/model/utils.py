@@ -413,10 +413,11 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
             '"select_tail_percent" must be in the range (0, 100], '
             f"but is: {select_tail_percent}"
         )
-        times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, (_, pkt_mdat) in pkts]
+        print(f"\tSelecting last {select_tail_percent}% of pcap file by time")
+        times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, pkt_mdat in pkts]
         assert times_us, "No packets."
         total_time_us = times_us[-1] - times_us[0]
-        start_time_us = times_us + (total_time_us * select_tail_percent / 100)
+        start_time_us = times_us[-1] - (total_time_us * select_tail_percent / 100)
         start_idx = 0
         for start_idx, time_us in enumerate(times_us):
             if time_us > start_time_us:
