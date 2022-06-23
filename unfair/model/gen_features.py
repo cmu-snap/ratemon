@@ -130,11 +130,24 @@ def parse_opened_exp(
         server_pcap, flw_to_cca, select_tail_percent
     )
 
-    # Log and drop empty flows.
+    # Log and drop flows with no data packets.
+    flws_to_remove = []
     for flw, pkts in flw_to_pkts_server.items():
-        if not pkts:
+        if len(pkts[0]) == 0:
             print(f"\tWarning: No packets for flow {flw} in: {exp_flp}")
-    flw_to_pkts_server = {flw: pkts for flw, pkts in flw_to_pkts_server.items() if pkts}
+            flws_to_remove.append(flw)
+    flw_to_pkts_server = {
+        flw: pkts
+        for flw, pkts in flw_to_pkts_server.items()
+        if flw not in flws_to_remove
+    }
+    flw_to_cca = {
+        flw: cca for flw, cca in flw_to_cca.items() if flw not in flws_to_remove
+    }
+    flws = [flw for flw in flws if flw not in flws_to_remove]
+    if not flws:
+        print(f"Warning: No flows with packets in: {exp_flp}")
+        return -1
 
     # NOTE: Disabled because not used.
     #
@@ -1206,6 +1219,9 @@ def parse_exp(
             except AssertionError:
                 traceback.print_exc()
                 return -1
+            except:
+                traceback.print_exc()
+                raise
 
     return -1
 
