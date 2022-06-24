@@ -81,19 +81,15 @@ def get_split(data_dir, name, sample_frac, net):
     """ Constructs a split from many subsplits on disk. """
     # Load the split's subsplits.
     subsplits = utils.load_subsplits(data_dir, name)
-    # Optionally select a fraction of each subsplit. We always use all of the
-    # test split.
-    # TODO: Apply sample_frac to the val and test splits as well. This requires that
-    # the val and test splits be shuffled by prepare_data.py, which they are not.
-    if name == "train" and sample_frac < 1:
+    # Optionally select a fraction of each subsplit.
+    if sample_frac < 1:
         subsplits = [
             subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
             for subsplit in subsplits]
     # Merge the subsplits into a split.
     split = np.concatenate(subsplits)
-    # If this is the train split and there is more than one subsplit, then we need to
-    # shuffle the merged split.
-    if name == "train" and len(subsplits) > 1:
+    # If there is more than one subsplit, then we need to shuffle the merged split.
+    if len(subsplits) > 1:
         np.random.default_rng().shuffle(split)
     # Extract features from the split.
     return extract_fets(split, name, net)
@@ -115,6 +111,7 @@ def replace_unknowns(dat, is_dt):
             bad_fets.append(fet)
             continue
         if len(invalid) > 0:
+            logging.debug(fet)
             dat[fet][invalid] = (
                 float("NaN") if is_dt
                 else np.mean(dat[fet][np.logical_not(invalid)]))
@@ -125,7 +122,7 @@ def replace_unknowns(dat, is_dt):
 
 def extract_fets(dat, split_name, net):
     """
-    Extracts net's the input and output features from dat. Returns a tuple of
+    Extracts net's input and output features from dat. Returns a tuple of
     the form:
         (dat_in, dat_out, dat_extra, scaling groups).
     """
@@ -149,11 +146,12 @@ def extract_fets(dat, split_name, net):
             f"Removed {removed} rows with unknown out_spc from split "
             f"\"{split_name}\".")
 
+    logging.debug(f"in_spc = {list(net.in_spc)}")
     dat_in = recfunctions.repack_fields(dat[list(net.in_spc)])
     dat_out = recfunctions.repack_fields(dat[list(net.out_spc)])
     # Create a structured array to hold extra data that will not be used as
     # features but may be needed by the training/testing process.
-    dtype_extra = (
+    dtype_extra = features.convert_to_float(
         # The "raw" entry is the unconverted out_spc.
         [("raw",
           [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1])] +

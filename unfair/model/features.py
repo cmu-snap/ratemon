@@ -65,11 +65,36 @@ def make_smoothed_features():
     ]
 
 
+def get_names(fets):
+    if len(fets) > 0:
+        assert isinstance(
+            fets[0], tuple
+        ), "Input to get_names() must be feature tuples: (name, type)."
+    return [fet[0] for fet in fets]
+
+
+def feature_names_to_dtype(fet_names):
+    return [(fet_name, feature_name_to_type(fet_name)) for fet_name in fet_names]
+
+
+def feature_name_to_type(target_fet_name):
+    for fet_name, fet_type in ALL_FEATURES:
+        if target_fet_name == fet_name:
+            return fet_type
+    raise Exception(f"Unknown feature: {target_fet_name}")
+
+
+def convert_to_float(dtype):
+    return [
+        (fet_name, fet_type.replace("int", "float")) for fet_name, fet_type in dtype
+    ]
+
+
 def is_unknowable(metric):
     """Return whether a metric is unknowable by a receiver."""
     # Support both "metric" and ("metric", "type").
     if isinstance(metric, tuple):
-        metric = metric[0]
+        metric = get_names([metric])[0]
     for fet in UNKNOWABLE_FETS:
         if metric.startswith(fet):
             return True
@@ -219,7 +244,7 @@ EXTRA_FETS = [
     RTT_FET,
     ACTIVE_FLOWS_FET,
     make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
-    make_win_metric(MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN),
+    # make_win_metric(MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN),
 ]
 
 # Features used when parsing packets from a PCAP file.
@@ -240,31 +265,6 @@ PARSE_PACKETS_FETS = [
     (PAYLOAD_FET, "int32"),
     (ARRIVAL_TIME_FET, "int64"),
 ]
-
-
-def get_names(fets):
-    if len(fets) > 0:
-        assert isinstance(
-            fets[0], tuple
-        ), "Input to get_names() must be feature tuples: (name, type)."
-    return [fet[0] for fet in fets]
-
-
-def feature_names_to_dtype(fet_names):
-    return [(fet_name, feature_name_to_type(fet_name)) for fet_name in fet_names]
-
-
-def feature_name_to_type(target_fet_name):
-    for fet_name, fet_type in ALL_FEATURES:
-        if target_fet_name == fet_name:
-            return fet_type
-    raise Exception(f"Unknown feature: {target_fet_name}")
-
-
-def convert_to_float(dtype):
-    return [
-        (fet_name, fet_type.replace("int", "float")) for fet_name, fet_type in dtype
-    ]
 
 
 def fill_dependencies(in_spc):
