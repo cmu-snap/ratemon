@@ -145,28 +145,28 @@ TS_2_FET = "timestamp 2 us"
 
 # These metrics do not change.
 REGULAR = [
-    # Use int64 even though sequence numbers are actually uint32 because we need
+    # Use float64 even though sequence numbers are actually ufloat64 because we need
     # to be able to support our special value for unknown values, which is
-    # negative (-1). However, int32 is too small, because sequence numbers can
-    # be as large as 2**32 - 1. Therefore, we use int64.
-    (SEQ_FET, "int64"),
-    (ARRIVAL_TIME_FET, "int64"),
-    (RTT_FET, "int32"),
-    (MIN_RTT_FET, "int32"),
+    # negative (-1). However, float64 is too small, because sequence numbers can
+    # be as large as 2**32 - 1. Therefore, we use float64.
+    (SEQ_FET, "float64"),
+    (ARRIVAL_TIME_FET, "float64"),
+    (RTT_FET, "float64"),
+    (MIN_RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
-    (INTERARR_TIME_FET, "int32"),
+    (INTERARR_TIME_FET, "float64"),
     (INV_INTERARR_TIME_FET, "float64"),
-    (PACKETS_LOST_FET, "int32"),
-    (PACKETS_LOST_TOTAL_FET, "int32"),
+    (PACKETS_LOST_FET, "float64"),
+    (PACKETS_LOST_TOTAL_FET, "float64"),
     (LOSS_RATE_FET, "float64"),
     (SQRT_LOSS_RATE_FET, "float64"),
     # (DROP_RATE_FET, "float64"),
     # (RETRANS_RATE_FET, "float64"),
-    (PAYLOAD_FET, "int32"),
-    (WIRELEN_FET, "int32"),
-    (TOTAL_SO_FAR_FET, "int64"),
-    (PAYLOAD_SO_FAR_FET, "int64"),
-    (ACTIVE_FLOWS_FET, "int32"),
+    (PAYLOAD_FET, "float64"),
+    (WIRELEN_FET, "float64"),
+    (TOTAL_SO_FAR_FET, "float64"),
+    (PAYLOAD_SO_FAR_FET, "float64"),
+    (ACTIVE_FLOWS_FET, "float64"),
     (BW_FAIR_SHARE_FRAC_FET, "float64"),
     (BW_FAIR_SHARE_BPS_FET, "float64"),
     (MATHIS_TPUT_LOSS_RATE_FET, "float64"),
@@ -249,21 +249,21 @@ EXTRA_FETS = [
 
 # Features used when parsing packets from a PCAP file.
 PARSE_PCAP_FETS = [
-    (SEQ_FET, "int64"),
-    (ARRIVAL_TIME_FET, "int64"),
-    (TS_1_FET, "int64"),
-    (TS_2_FET, "int64"),
-    (PAYLOAD_FET, "int32"),
-    (WIRELEN_FET, "int32"),
+    (SEQ_FET, "float64"),
+    (ARRIVAL_TIME_FET, "float64"),
+    (TS_1_FET, "float64"),
+    (TS_2_FET, "float64"),
+    (PAYLOAD_FET, "float64"),
+    (WIRELEN_FET, "float64"),
 ]
 
 # Features used when parsing received packets.
 PARSE_PACKETS_FETS = [
-    (SEQ_FET, "int64"),
-    (RTT_FET, "int32"),
-    (WIRELEN_FET, "int32"),
-    (PAYLOAD_FET, "int32"),
-    (ARRIVAL_TIME_FET, "int64"),
+    (SEQ_FET, "float64"),
+    (RTT_FET, "float64"),
+    (WIRELEN_FET, "float64"),
+    (PAYLOAD_FET, "float64"),
+    (ARRIVAL_TIME_FET, "float64"),
 ]
 
 

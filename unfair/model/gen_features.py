@@ -818,11 +818,11 @@ def parse_opened_exp(
             merged = np.empty(
                 (num_pkts,),
                 dtype=[
-                    (features.WIRELEN_FET, "int32"),
-                    (features.MIN_RTT_FET, "int32"),
-                    ("client port", "int32"),
-                    ("server port", "int32"),
-                    ("index", "int32"),
+                    (features.WIRELEN_FET, "float64"),
+                    (features.MIN_RTT_FET, "float64"),
+                    ("client port", "float64"),
+                    ("server port", "float64"),
+                    ("index", "float64"),
                 ],
             )
             merged[features.WIRELEN_FET] = flw_results[flw][features.WIRELEN_FET]
