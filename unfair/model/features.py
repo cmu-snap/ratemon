@@ -233,7 +233,7 @@ UNKNOWABLE_FETS = [
 ALL_FEATURES = REGULAR + make_smoothed_features()
 
 # All features that an isolated receiver may use.
-ALL_KNOWABLE_FEATURES = [fet for fet in ALL_FEATURES if is_knowable(fet)]
+ALL_KNOWABLE_FEATURES = tuple(fet for fet, _ in ALL_FEATURES if is_knowable(fet))
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
