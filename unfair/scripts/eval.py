@@ -102,8 +102,8 @@ def parse_opened_exp(exp, exp_flp, exp_dir, select_tail_percent):
     flw_to_pkts = utils.parse_packets(server_pcap, flw_to_cca, select_tail_percent)
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
-
     logging.info("\tParsed packets: %s", server_pcap)
+    flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
     late_flows_port = max(flw[4] for flw in params["flowsets"])
     late_flws = [
@@ -197,6 +197,7 @@ def main(args):
             args.untar_dir,
             args.out_dir,
             False,
+            args.select_tail_percent,
             parse_opened_exp,
         )
         for exp in sorted(os.listdir(args.exp_dir))
@@ -222,7 +223,7 @@ def main(args):
                 len(results),
                 data_flp,
             )
-            return
+            return 1
     else:
         if defaults.SYNC:
             results = {gen_features.parse_exp(*pcap) for pcap in pcaps}
@@ -281,7 +282,7 @@ def main(args):
             (util_enabled - util_disabled) * 100,
         )
     # Save JFI results.
-    with open(path.join(args.out_dir, "results.json"), "w") as fil:
+    with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
 
     logging.info("Matched experiments: %d", len(matched))

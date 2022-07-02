@@ -1606,3 +1606,20 @@ def ebpf_packet_tuple_to_str(dat):
         f"TCP header: {thl_bytes} B, payload: {payload_bytes} B, "
         f"time: {time.ctime(time_us / 1e3)}"
     )
+
+
+def drop_packets_after_first_flow_finishes(flw_to_pkts):
+    # Cut off the traces at the point where the first flow finishes.
+    first_finish_time_us = min(
+        [pkts[features.ARRIVAL_TIME_FET] for pkts in flw_to_pkts.values()])
+    trimmed = {}
+    for flow, pkts in flw_to_pkts.items():
+        # First idx that is past when the first flow finished. So do not include
+        # cutoff_idx in the selected span.
+        cutoff_idx = None
+        for idx, arrival_time_us in enumerate(pkts[features.ARRIVAL_TIME_FET]):
+            if arrival_time_us > first_finish_time_us:
+                cutoff_idx = idx
+                break
+        trimmed[flow] = pkts if cutoff_idx is None else pkts[:cutoff_idx]
+    return trimmed

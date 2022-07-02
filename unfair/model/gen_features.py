@@ -141,6 +141,9 @@ def parse_opened_exp(
         for flw, pkts in flw_to_pkts_server.items()
         if flw not in flws_to_remove
     }
+    flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
+        flw_to_pkts_server)
+
     flw_to_cca = {
         flw: cca for flw, cca in flw_to_cca.items() if flw not in flws_to_remove
     }
