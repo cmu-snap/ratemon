@@ -1609,11 +1609,10 @@ def ebpf_packet_tuple_to_str(dat):
 
 
 def drop_packets_after_first_flow_finishes(flw_to_pkts):
-    """
-    Cut off the traces at the point where the first flow finishes.
-    """
+    """Trim the traces when the first flow finishes."""
     first_finish_time_us = min(
-        [pkts[-1][features.ARRIVAL_TIME_FET] for pkts in flw_to_pkts.values()])
+        [pkts[-1][features.ARRIVAL_TIME_FET] for pkts in flw_to_pkts.values()]
+    )
     trimmed = {}
     for flow, pkts in flw_to_pkts.items():
         # First idx that is past when the first flow finished. So do not include
