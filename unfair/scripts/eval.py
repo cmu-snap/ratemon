@@ -67,7 +67,12 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def parse_opened_exp(exp, exp_flp, exp_dir, select_tail_percent):
+def parse_opened_exp(
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
+):
+    # out_flp and skip_smoothed are not used but are kept to maintain API compatibility
+    # with gen_features.parse_opened_exp().
+
     logging.info("Parsing: %s", exp_flp)
     if exp.name.startswith("FAILED"):
         logging.info("Error: Experimant failed: %s", exp_flp)
