@@ -1,54 +1,69 @@
-#! /bin/bash
-#
-# Execute the entire training process, starting with raw data.
-#
-# Usage:
-#     ./train.sh <experiment data directory> <output directory> <tag>
-#
-# Features are generated into the experiment data directory because they may be
-# very large. Sampled training data and the resulting models are stored in the
-# output directory. The tag is attached to the model filename to help
-# differentiate it.
+#!/bin/bash
 
-set -o errexit
+set -eou pipefail
 
-exp_dir="$1"
-out_dir="$2"
-tag="$3"
-unfair_dir="$(cd "$(dirname "$0")"/.. && pwd)"
-workspace_dir="$(dirname "$unfair_dir")"
-export PYTHONPATH="$workspace_dir:$PYTHONPATH"
+model_tag="$1"
+train_data_dir="$2"
+full_models_dir="$3"
+small_models_dir="$4"
+sample_percent="$5"
+max_iter="$6"
+max_leaf_nodes="$7"
+max_depth="$8"
+min_samples_leaf="$9"
+feature_selection_percent="${10}"
+num_clusters="${11}"
+num_features_to_pick="${12}"
 
-# python "$unfair_dir/model/gen_features.py" \
-#     --exp-dir="$exp_dir" \
-#     --untar-dir="$exp_dir" \
-#     --out-dir="$exp_dir" \
-#     --parallel=20
-# python "$unfair_dir/model/prepare_data.py" \
-#     --data-dir="$exp_dir" \
-#     --out-dir="$out_dir" \
-#     --model=HistGbdtSklearn \
-#     --train-split=70 \
-#     --val-split=0 \
-#     --test-split=30 \
-#     --warmup-percent=5 \
-#     --sample-percent=20
-for max_leaf_nodes in 100 250 500 1000 250 5000 10000 31 -1; do
-    python "$unfair_dir/model/train.py" \
-        --out-dir="${out_dir}/vary_max_leaf_nodes/${max_leaf_nodes}" \
-        --data-dir="${out_dir}" \
-        --model=HistGbdtSklearn \
-        --sample-percent=100 \
-        --no-rand \
-        --conf-trials=1 \
-        --max-iter=10000 \
-        --tag="${tag}_${max_leaf_nodes}" \
-        --max-leaf-nodes="${max_leaf_nodes}" \
-        --early-stop
-    # --analyze-features \
-    # --clusters=10 \
-    # --features-to-pick=20 \
-    # --permutation-importance-repeats=1
-    # --balance \
-    # --drop-popular
-done
+unfair_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/../.."
+
+pushd /tmp
+
+# Step 4: Select features from initial model
+echo "Training model with all features. Progress: tail -f /tmp/train.log"
+PYTHONPATH="$unfair_dir" python "$unfair_dir/unfair/model/train.py" \
+    --tag="$model_tag" \
+    --data-dir="$train_data_dir" \
+    --out-dir="$full_models_dir" \
+    --model=HistGbdtSklearn \
+    --balance \
+    --sample-percent="$sample_percent" \
+    --max-iter="$max_iter" \
+    --max-leaf-nodes="$max_leaf_nodes" \
+    --max-depth="$max_depth" \
+    --min-samples-leaf="$min_samples_leaf" \
+    --early-stop \
+    --analyze-features \
+    --feature-selection-type="perm" \
+    --feature-selection-percent="$feature_selection_percent" \
+    --clusters="$num_clusters" \
+    --num-features-to-pick="$num_features_to_pick" \
+    --permutation-importance-repeats=1 ||
+    {
+        echo 'Error encountered during full model training and feature selection, quitting!'
+        exit 4
+    }
+mv "/tmp/train.log" "$full_models_dir/${model_tag}_train.log"
+
+# Step 5: Train model with selected features
+echo "Training model with selected features. Progress: tail -f /tmp/train.log"
+PYTHONPATH="$unfair_dir" python "$unfair_dir/unfair/model/train.py" \
+    --tag="${model_tag}_selected-features" \
+    --data-dir="$train_data_dir" \
+    --out-dir="$small_models_dir" \
+    --model=HistGbdtSklearn \
+    --balance \
+    --sample-percent="$sample_percent" \
+    --max-iter="$max_iter" \
+    --max-leaf-nodes="$max_leaf_nodes" \
+    --max-depth="$max_depth" \
+    --min-samples-leaf="$min_samples_leaf" \
+    --early-stop \
+    --selected-features="$(ls "$full_models_dir"/model_*-"$model_tag"-selected_features.json)" ||
+    {
+        echo 'Error encountered while training with selected features, quitting!'
+        exit 5
+    }
+mv "/tmp/train.log" "$small_models_dir/${model_tag}_selected-features_train.log"
+
+popd
