@@ -1609,18 +1609,27 @@ def ebpf_packet_tuple_to_str(dat):
 
 
 def drop_packets_after_first_flow_finishes(flw_to_pkts):
-    """Trim the traces when the first flow finishes."""
+    """Trim the traces when the first flow to finish finishes."""
     first_finish_time_us = min(
         [pkts[-1][features.ARRIVAL_TIME_FET] for pkts in flw_to_pkts.values()]
     )
     trimmed = {}
+    total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
-        # First idx that is past when the first flow finished. So do not include
-        # cutoff_idx in the selected span.
+        # Last idx that is before when the first flow to finish finished. So make sure to
+        # include cutoff_idx in the selected span.
         cutoff_idx = None
-        for idx, arrival_time_us in enumerate(pkts[features.ARRIVAL_TIME_FET]):
-            if arrival_time_us > first_finish_time_us:
-                cutoff_idx = idx
+        for idx, arrival_time_us in enumerate(
+            reversed(pkts[features.ARRIVAL_TIME_FET])
+        ):
+            if arrival_time_us <= first_finish_time_us:
+                # idx is actually counting from the end of the list, so change it to
+                # count from the beginning.
+                cutoff_idx = len(pkts) - idx - 1
                 break
-        trimmed[flow] = pkts if cutoff_idx is None else pkts[:cutoff_idx]
+        trimmed[flow] = pkts if cutoff_idx is None else pkts[: cutoff_idx + 1]
+        total_dropped += len(pkts) - cutoff_idx - 1
+    logging.info(
+        f"Dropped {total_dropped} packets from after the first flow to finish finished."
+    )
     return trimmed
