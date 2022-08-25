@@ -142,7 +142,8 @@ def parse_opened_exp(
         if flw not in flws_to_remove
     }
     flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
-        flw_to_pkts_server)
+        flw_to_pkts_server
+    )
 
     flw_to_cca = {
         flw: cca for flw, cca in flw_to_cca.items() if flw not in flws_to_remove
@@ -206,7 +207,7 @@ def parse_opened_exp(
 
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
-    dtype = features.REGULAR + (
+    dtype = features.REGULAR_FETS + (
         [] if skip_smoothed else features.make_smoothed_features()
     )
 
@@ -482,7 +483,7 @@ def parse_opened_exp(
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(
-                features.EWMAS, features.ALPHAS
+                features.EWMA_FETS, features.ALPHAS
             ):
                 if skip_smoothed:
                     continue
@@ -535,7 +536,7 @@ def parse_opened_exp(
 
             # Windowed metrics.
             for (metric, _), win in itertools.product(
-                features.WINDOWED, features.WINDOWS
+                features.WINDOWED_FETS, features.WINDOWS
             ):
                 # If we cannot estimate the min RTT, then we cannot compute any
                 # windowed metrics.
@@ -1025,7 +1026,7 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
     )
 
     # EWMA metrics.
-    for (metric, _), alpha in itertools.product(features.EWMAS, features.ALPHAS):
+    for (metric, _), alpha in itertools.product(features.EWMA_FETS, features.ALPHAS):
         metric = features.make_ewma_metric(metric, alpha)
         # If this is not a desired feature, then skip it.
         if metric not in fets.dtype.names:
@@ -1103,7 +1104,7 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
     recv_time_cur_us = fets[-1][features.ARRIVAL_TIME_FET]
 
     # Windowed metrics.
-    for (metric, _), win in itertools.product(features.WINDOWED, features.WINDOWS):
+    for (metric, _), win in itertools.product(features.WINDOWED_FETS, features.WINDOWS):
         metric = features.make_win_metric(metric, win)
         # If this is not a desired feature, then skip it.
         if metric not in fets.dtype.names:

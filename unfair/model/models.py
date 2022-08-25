@@ -32,7 +32,7 @@ class PytorchModelWrapper:
         # The name of this model.
         self.name = None
         # The specification of the input tensor format.
-        self.in_spc = tuple(sorted(features.get_names(features.ALL_FEATURES)))
+        self.in_spc = tuple(sorted(features.get_names(features.ALL_FETS)))
         # The specification of the output tensor format.
         self.out_spc = (features.OUT_FET,)
         # The number of output classes.
@@ -1155,24 +1155,24 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         self.in_spc = tuple(
             sorted(
                 fet
-                for fet in features.get_names(features.ALL_FEATURES)
+                for fet in features.get_names(features.ALL_FETS)
                 if (
-                        (
-                            # Allow regular features.
-                            ("ewma" not in fet and "windowed" not in fet)
-                            # Allow EWMA features.
-                            or "ewma" in fet
-                            # Drop windowed features with windows > 128 minRTT.
-                            or features.parse_win_metric(fet)[1] <= 128
-                        )
-                        and (
-                            not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
-                            and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
-                            and not fet.startswith(features.SQRT_LOSS_RATE_FET)
-                            and not fet.startswith(features.LOSS_EVENT_RATE_FET)
-                            and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
-                            and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
-                        )
+                    (
+                        # Allow regular features.
+                        ("ewma" not in fet and "windowed" not in fet)
+                        # Allow EWMA features.
+                        or "ewma" in fet
+                        # Drop windowed features with windows > 128 minRTT.
+                        or features.parse_win_metric(fet)[1] <= 128
+                    )
+                    and (
+                        not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
+                        and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+                        and not fet.startswith(features.SQRT_LOSS_RATE_FET)
+                        and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+                        and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                        and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
+                    )
                 )
                 # # Get rid of all loss event rate features.
                 # and not fet.startswith(features.LOSS_EVENT_RATE_FET)

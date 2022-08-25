@@ -44,10 +44,10 @@ def make_smoothed_features():
     """Return a dtype for all EWMA and windowed metrics."""
     smoothed_features = [
         (make_ewma_metric(metric, alpha), typ)
-        for (metric, typ), alpha in itertools.product(EWMAS, ALPHAS)
+        for (metric, typ), alpha in itertools.product(EWMA_FETS, ALPHAS)
     ] + [
         (make_win_metric(metric, win), typ)
-        for (metric, typ), win in itertools.product(WINDOWED, WINDOWS)
+        for (metric, typ), win in itertools.product(WINDOWED_FETS, WINDOWS)
     ]
     # Drop features that use loss event rate with a window of less than 4. Loss even
     # rate is defined for a window of 8, so 4 is already a bit small.
@@ -78,7 +78,7 @@ def feature_names_to_dtype(fet_names):
 
 
 def feature_name_to_type(target_fet_name):
-    for fet_name, fet_type in ALL_FEATURES:
+    for fet_name, fet_type in ALL_FETS:
         if target_fet_name == fet_name:
             return fet_type
     raise Exception(f"Unknown feature: {target_fet_name}")
@@ -144,7 +144,7 @@ TS_1_FET = "timestamp 1 us"
 TS_2_FET = "timestamp 2 us"
 
 # These metrics do not change.
-REGULAR = [
+REGULAR_FETS = [
     # Use float64 even though sequence numbers are actually ufloat64 because we need
     # to be able to support our special value for unknown values, which is
     # negative (-1). However, float64 is too small, because sequence numbers can
@@ -175,7 +175,7 @@ REGULAR = [
 
 # These metrics are exponentially-weighted moving averages (EWMAs),
 # that are recorded for various values of alpha.
-EWMAS = [
+EWMA_FETS = [
     (INTERARR_TIME_FET, "float64"),
     (INV_INTERARR_TIME_FET, "float64"),
     (RTT_FET, "float64"),
@@ -187,7 +187,7 @@ EWMAS = [
 
 # These metrics are calculated over an window of packets, for varies
 # window sizes.
-WINDOWED = [
+WINDOWED_FETS = [
     (INTERARR_TIME_FET, "float64"),
     (INV_INTERARR_TIME_FET, "float64"),
     (TPUT_FET, "float64"),
@@ -230,10 +230,10 @@ UNKNOWABLE_FETS = [
 ]
 
 # Every possible features.
-ALL_FEATURES = REGULAR + make_smoothed_features()
+ALL_FETS = REGULAR_FETS + make_smoothed_features()
 
 # All features that an isolated receiver may use.
-ALL_KNOWABLE_FEATURES = tuple(fet for fet, _ in ALL_FEATURES if is_knowable(fet))
+ALL_KNOWABLE_FETS = tuple(fet for fet, _ in ALL_FETS if is_knowable(fet))
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
@@ -257,7 +257,7 @@ PARSE_PCAP_FETS = [
     (WIRELEN_FET, "float64"),
 ]
 
-# Features used when parsing received packets.
+# Features used when parsing received packets at runtime.
 PARSE_PACKETS_FETS = [
     (SEQ_FET, "float64"),
     (RTT_FET, "float64"),
