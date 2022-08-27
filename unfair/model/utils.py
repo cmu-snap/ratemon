@@ -1607,28 +1607,61 @@ def ebpf_packet_tuple_to_str(dat):
     )
 
 
-def drop_packets_after_first_flow_finishes(flw_to_pkts):
-    """Trim the traces when the first flow to finish finishes."""
+def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
+    """Trim the traces when the first flow to finish finishes.
+
+    If include_acks is True, then the format of flw_to_pkts is:
+        { flow : ( [data packets], [ack packets] ) }
+    If include_acks is False, the format of flw_to_pkts is:
+        { flow : [data packets] }
+    """
+
+    def get_data_packets(pkts):
+        """
+        If include_acks is True, then pkts[0] is the data packets and pkts[1] is
+        the ACK packets, otherwise pkts is the data packets.
+        """
+        return pkts[0] if includes_acks else pkts
+
+    def get_ack_packets(pkts):
+        """
+        If include_acks is True, then pkts[0] is the data packets and pkts[1] is
+        the ACK packets, otherwise we do not have the ACK packets.
+        """
+        return pkts[1] if includes_acks else None
+
     first_finish_time_us = min(
-        [pkts[-1][features.ARRIVAL_TIME_FET] for pkts in flw_to_pkts.values()]
+        [
+            get_data_packets(pkts)[-1][features.ARRIVAL_TIME_FET]
+            for pkts in flw_to_pkts.values()
+        ]
     )
     trimmed = {}
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
+        data_pkts = get_data_packets(pkts)
         # Last idx that is before when the first flow to finish finished. So make sure
         # to include cutoff_idx in the selected span.
         cutoff_idx = None
         for idx, arrival_time_us in enumerate(
-            reversed(pkts[features.ARRIVAL_TIME_FET])
+            reversed(data_pkts[features.ARRIVAL_TIME_FET])
         ):
             if arrival_time_us <= first_finish_time_us:
                 # idx is actually counting from the end of the list, so change it to
                 # count from the beginning.
-                cutoff_idx = len(pkts) - idx - 1
+                cutoff_idx = len(data_pkts) - idx - 1
                 break
-        trimmed[flow] = pkts if cutoff_idx is None else pkts[: cutoff_idx + 1]
-        total_dropped += len(pkts) - cutoff_idx - 1
+        trimmed_data_pkts = (
+            data_pkts if cutoff_idx is None else data_pkts[: cutoff_idx + 1]
+        )
+        trimmed[flow] = (
+            (trimmed_data_pkts, get_ack_packets(pkts))
+            if includes_acks
+            else trimmed_data_pkts
+        )
+        total_dropped += len(data_pkts) - cutoff_idx - 1
     logging.info(
-        f"Dropped {total_dropped} packets from after the first flow to finish finished."
+        "Dropped %d packets from after the first flow to finish finished.",
+        total_dropped,
     )
     return trimmed

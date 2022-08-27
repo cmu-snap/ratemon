@@ -142,7 +142,7 @@ def parse_opened_exp(
         if flw not in flws_to_remove
     }
     flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
-        flw_to_pkts_server
+        flw_to_pkts_server, includes_acks=True
     )
 
     flw_to_cca = {
