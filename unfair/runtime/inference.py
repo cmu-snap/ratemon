@@ -7,7 +7,6 @@ import os
 from os import path
 import queue
 import signal
-import random
 import time
 import traceback
 
@@ -225,7 +224,7 @@ def configure_ebpf(args):
     # this program do not try to configure themselves at the same time.
     # rand_sleep = random.randint(0, 10)  #  / 1000
     # Use the server ports to determine the wait time.
-    rand_sleep = (min(args.server_ports) - 50000)
+    rand_sleep = min(args.server_ports) - 50000
     logging.info("Waiting %f seconds to prevent race conditions...", rand_sleep)
     time.sleep(rand_sleep)
 
@@ -309,14 +308,18 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     flow_to_decisions = collections.defaultdict(
         lambda: (defaults.Decision.NOT_PACED, None, None)
     )
-    dtype = features.convert_to_float(sorted(
-        list(
-            set(features.PARSE_PACKETS_FETS)
-            | set(
-                features.feature_names_to_dtype(features.fill_dependencies(net.in_spc))
+    dtype = features.convert_to_float(
+        sorted(
+            list(
+                set(features.PARSE_PACKETS_FETS)
+                | set(
+                    features.feature_names_to_dtype(
+                        features.fill_dependencies(net.in_spc)
+                    )
+                )
             )
         )
-    ))
+    )
 
     max_batch_time_s = max(
         0.1,
@@ -378,11 +381,16 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 # Assertion errors mean this batch of packets violated some
                 # precondition, but we are safe to skip them and continue.
                 logging.warning(
-                    "Skipping flow %s because feature generation failed due to a non-fatal assertion failure:\n%s",
+                    (
+                        "Skipping flow %s because feature generation failed "
+                        "due to a non-fatal assertion failure:\n%s"
+                    ),
                     flowkey,
                     traceback.format_exc(),
                 )
-                logging.info("Clearing inference flag due to error for flow: %s", flowkey)
+                logging.info(
+                    "Clearing inference flag due to error for flow: %s", flowkey
+                )
                 inference_flags[fourtuple].value = 0
                 continue
             except Exception as exp:
@@ -403,10 +411,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         # long time since we ran inference last. A "long time" is defined as the max of
         # 1 second and the inference interval (if the inference interval is defined).
         batch_time_s = time.time() - batch_start_time_s
-        if batch and (
-            len(batch) >= args.batch_size
-            or batch_time_s > max_batch_time_s
-        ):
+        if batch and (len(batch) >= args.batch_size or batch_time_s > max_batch_time_s):
             logging.info("Running inference on a batch of %d flow(s).", len(batch))
             inference_start_time_s = time.time()
             try:
@@ -439,8 +444,12 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             finally:
                 for fourtuple, _, _, _, _ in batch:
                     logging.info(
-                        "Clearing inference flag due to finished inference for flow: %s",
-                        utils.flow_to_str(fourtuple))
+                        (
+                            "Clearing inference flag due to finished inference for "
+                            "flow: %s"
+                        ),
+                        utils.flow_to_str(fourtuple),
+                    )
                     inference_flags[fourtuple].value = 0
 
             pps = packets_in_batch / batch_proc_time_s
@@ -456,7 +465,12 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             batch_proc_time_s = 0
             batch_start_time_s = time.time()
         else:
-            logging.info("Not ready to run batch yet. %d, %.2f >? %.2f", len(batch), batch_time_s, max_batch_time_s)
+            logging.info(
+                "Not ready to run batch yet. %d, %.2f >? %.2f",
+                len(batch),
+                batch_time_s,
+                max_batch_time_s,
+            )
 
 
 def batch_inference(

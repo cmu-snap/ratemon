@@ -51,8 +51,8 @@ def receive_packet_pcapy(header, packet):
 
     Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
     """
-    # Note: We do not need to check that this packet IPv4 and TCP because we already do that
-    # with a filter.
+    # Note: We do not need to check that this packet IPv4 and TCP because we already do
+    #       that with a filter.
     if header is None:
         return 0, 0
 
@@ -106,7 +106,6 @@ def receive_packet_pcapy(header, packet):
             flow = flow_utils.Flow(fourtuple, LOSS_EVENT_INTERVALS)
             FLOWS[fourtuple] = flow
 
-
     if tsecr is None or tsval is None:
         logging.warning("Could not determine tsval and tsecr for flow: %s", flow)
 
@@ -124,7 +123,10 @@ def receive_packet_pcapy(header, packet):
                         if old_min_rtt_us != flow.min_rtt_us:
                             logging.info(
                                 "Updated min RTT for flow %s from %d us to %d us",
-                                flow, old_min_rtt_us, flow.min_rtt_us)
+                                flow,
+                                old_min_rtt_us,
+                                flow.min_rtt_us,
+                            )
                     # del flow.sent_tsvals[tsecr]
 
             flow.incoming_packets.append(
@@ -330,7 +332,8 @@ def pcapy_sniff(args, done):
         port_filt_l = [
             f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
             f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
-            for port in args.server_ports]
+            for port in args.server_ports
+        ]
         filt += f" and ({' or '.join(port_filt_l)})"
     logging.info("Using tcpdump filter: %s", filt)
     pcap.setfilter(filt)
@@ -529,7 +532,8 @@ def run(args, manager):
                 if "windowed" in fet
                 and (
                     fet.startswith(features.LOSS_EVENT_RATE_FET)
-                    or fet.startswith(features.MATHIS_TPUT_FET)
+                    or fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                    or fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
                 )
             ]
         )

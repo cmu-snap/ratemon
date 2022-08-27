@@ -1,4 +1,4 @@
-""" Models."""
+"""Models."""
 
 import copy
 import logging
@@ -960,7 +960,7 @@ class SvmSklearnWrapper(SvmWrapper):
         # throughput, computed at the same granularity as the ground truth, by
         # the fair throughput. Then convert these fairness ratios into labels.
         mathis_tput = dat_extra[
-            features.make_win_metric(features.MATHIS_TPUT_FET, defaults.CHOSEN_WIN)
+            features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN)
         ]
         mathis_raw = mathis_tput / fair
         mathis_preds = self.convert_to_class(mathis_raw)[features.LABEL_FET]
@@ -1165,14 +1165,15 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
                         # Drop windowed features with windows > 128 minRTT.
                         or features.parse_win_metric(fet)[1] <= 128
                     )
-                    and (
-                        not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
-                        and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
-                        and not fet.startswith(features.SQRT_LOSS_RATE_FET)
-                        and not fet.startswith(features.LOSS_EVENT_RATE_FET)
-                        and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
-                        and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
-                    )
+                    # Get rid of features with known mistakes.
+                    # and (
+                    #     not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
+                    #     and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+                    #     and not fet.startswith(features.SQRT_LOSS_RATE_FET)
+                    #     and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+                    #     and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                    #     and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
+                    # )
                 )
                 # # Get rid of all loss event rate features.
                 # and not fet.startswith(features.LOSS_EVENT_RATE_FET)
@@ -1318,10 +1319,10 @@ class Lstm(torch.nn.Module):
         return out, hidden
 
 
-#######################################################################
-#### Old models. Present for archival purposes only. These are not ####
-#### guaranteed to function.                                       ####
-#######################################################################
+#################################################################
+# Old models. Present for archival purposes only. These are not #
+# guaranteed to function.                                       #
+#################################################################
 
 
 class SimpleOne(torch.nn.Module):

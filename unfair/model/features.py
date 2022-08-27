@@ -16,7 +16,12 @@ def make_win_metric(metric, win):
     # on current RTT not minRTT.
     suffix = (
         "curRtt"
-        if metric in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
+        if metric
+        in {
+            LOSS_EVENT_RATE_FET,
+            SQRT_LOSS_EVENT_RATE_FET,
+            MATHIS_TPUT_LOSS_EVENT_RATE_FET,
+        }
         else "minRtt"
     )
     return f"{metric}-windowed-{suffix}{win}"
@@ -34,7 +39,12 @@ def parse_win_metric(metric):
     name = toks[0]
     suffix = (
         "curRtt"
-        if name in {LOSS_EVENT_RATE_FET, MATHIS_TPUT_LOSS_EVENT_RATE_FET}
+        if name
+        in {
+            LOSS_EVENT_RATE_FET,
+            SQRT_LOSS_EVENT_RATE_FET,
+            MATHIS_TPUT_LOSS_EVENT_RATE_FET,
+        }
         else "minRtt"
     )
     return name, int(toks[1].split(suffix)[1])
@@ -58,6 +68,7 @@ def make_smoothed_features():
             "windowed" in fet
             and (
                 fet.startswith(LOSS_EVENT_RATE_FET)
+                or fet.startswith(SQRT_LOSS_EVENT_RATE_FET)
                 or fet.startswith(MATHIS_TPUT_LOSS_EVENT_RATE_FET)
             )
             and parse_win_metric(fet)[1] < 4
@@ -244,7 +255,7 @@ EXTRA_FETS = [
     RTT_FET,
     ACTIVE_FLOWS_FET,
     make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
-    # make_win_metric(MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN),
+    make_win_metric(MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN),
 ]
 
 # Features used when parsing packets from a PCAP file.
@@ -284,10 +295,12 @@ def fill_dependencies(in_spc):
                 # This should not happen.
                 continue
             else:
-                new_metric = make_win_metric(
-                    LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]
+                to_add.add(
+                    make_win_metric(SQRT_LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
                 )
-            to_add.add(new_metric)
+                to_add.add(
+                    make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
+                )
         if INV_INTERARR_TIME_FET in name:
             to_add.add(INV_INTERARR_TIME_FET)
             to_add.add(INTERARR_TIME_FET)

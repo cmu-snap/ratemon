@@ -477,9 +477,19 @@ def parse_opened_exp(
             )
 
             output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
+            output[j][features.PACKETS_LOST_TOTAL_FET] = utils.safe_sum(
+                0 if first else output[j - 1][features.PACKETS_LOST_TOTAL_FET],
+                pkt_loss_cur_estimate,
+            )
             output[j][features.LOSS_RATE_FET] = loss_rate_cur
             sqrt_loss_rate_cur = utils.safe_div(1, utils.safe_sqrt(loss_rate_cur))
             output[j][features.SQRT_LOSS_RATE_FET] = sqrt_loss_rate_cur
+            mathis_tput_raw = utils.safe_mathis_tput(
+                output[j][features.PAYLOAD_FET],
+                output[j][features.RTT_FET],
+                output[j][features.LOSS_RATE_FET],
+            )
+            output[j][features.MATHIS_TPUT_LOSS_RATE_FET] = mathis_tput_raw
 
             # EWMA metrics.
             for (metric, _), alpha in itertools.product(
@@ -506,11 +516,7 @@ def parse_opened_exp(
                 elif metric.startswith(features.SQRT_LOSS_RATE_FET):
                     new = sqrt_loss_rate_cur
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
-                    new = utils.safe_mathis_tput(
-                        output[j][features.PAYLOAD_FET],
-                        output[j][features.RTT_FET],
-                        output[j][features.LOSS_RATE_FET],
-                    )
+                    new = mathis_tput_raw
                 else:
                     raise Exception(f"Unknown EWMA metric: {metric}")
                 # Update the EWMA. If this is the first value, then use 0 are
@@ -617,8 +623,10 @@ def parse_opened_exp(
                         ),
                     )
                 elif metric.startswith(features.LOSS_EVENT_RATE_FET):
+                    # Populated below.
                     continue
                 elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
+                    # Populated below.
                     continue
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
                     new = utils.safe_mathis_tput(
@@ -627,6 +635,7 @@ def parse_opened_exp(
                         output[j][features.LOSS_RATE_FET],
                     )
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
+                    # Populated below.
                     continue
                 else:
                     raise Exception(f"Unknown windowed metric: {metric}")
@@ -674,7 +683,7 @@ def parse_opened_exp(
             # Fill in the sqrt of the loss event rate and the mathis tput based on loss
             # event rate.
             sqrt_loss_event_rate_metric = features.make_win_metric(
-                features.LOSS_EVENT_RATE_FET, win
+                features.SQRT_LOSS_EVENT_RATE_FET, win
             )
             mathis_tput_loss_event_rate_metric = features.make_win_metric(
                 features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win
@@ -1032,7 +1041,7 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
         if metric not in fets.dtype.names:
             continue
 
-        if not metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
+        if not metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
                 previous_fets[metric],
                 fets[0][features.parse_ewma_metric(metric)[0]],
@@ -1104,6 +1113,8 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
     recv_time_cur_us = fets[-1][features.ARRIVAL_TIME_FET]
 
     # Windowed metrics.
+    #
+    # We only calculate windowed metrics for the last packet (-1).
     for (metric, _), win in itertools.product(features.WINDOWED_FETS, features.WINDOWS):
         metric = features.make_win_metric(metric, win)
         # If this is not a desired feature, then skip it.
@@ -1154,6 +1165,7 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
                 fets[features.RTT_RATIO_FET], win_start_idx, num_pkts - 1
             )
         elif metric.startswith(features.LOSS_EVENT_RATE_FET):
+            # Filled in already.
             continue
         elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
             # 1 / sqrt(loss event rate).
@@ -1174,15 +1186,15 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
             )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             new = utils.safe_mathis_tput(
-                fets[j][features.PAYLOAD_FET],
-                fets[j][features.RTT_FET],
-                fets[j][features.make_win_metric(features.LOSS_RATE_FET, win)],
+                fets[-1][features.PAYLOAD_FET],
+                fets[-1][features.RTT_FET],
+                fets[-1][features.make_win_metric(features.LOSS_RATE_FET, win)],
             )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
             new = utils.safe_mathis_tput(
-                fets[j][features.PAYLOAD_FET],
-                fets[j][features.RTT_FET],
-                fets[j][features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)],
+                fets[-1][features.PAYLOAD_FET],
+                fets[-1][features.RTT_FET],
+                fets[-1][features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)],
             )
         else:
             raise Exception(f"Unknown windowed metric: {metric}")

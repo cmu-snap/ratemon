@@ -80,7 +80,7 @@ class Dataset(torch.utils.data.Dataset):
             self.dat_in = self.dat_in.to(dev)
             self.dat_out = self.dat_out.to(dev)
         except RuntimeError:
-            logging.info(f"Warning:: Unable to move dataset to device: {dev}")
+            logging.info("Warning:: Unable to move dataset to device: %s", dev)
             # In case the input data was moved successfully but there
             # was insufficient device memory for the output data, move
             # the input data back to main memory.
@@ -1514,12 +1514,11 @@ def select_fets_perm(cluster_to_fets, top_fets):
         + "\n\t".join(f"{fet}: {coeff:.4f}" for fet, coeff in chosen_fets)
     )
     chosen_fets_names = list(zip(*chosen_fets))[0]
-    # TODO: What is that 10?
     logging.info(
         "New in_spc:\n"
         + "\tin_spc = (\n"
         + "\t\t"
-        + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets[:10])[:-1]
+        + "\n\t\t".join(f'"{fet}",' for fet, _ in chosen_fets)[:-1]
         + "\n\t)"
     )
     return chosen_fets_names
@@ -1616,8 +1615,8 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts):
     trimmed = {}
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
-        # Last idx that is before when the first flow to finish finished. So make sure to
-        # include cutoff_idx in the selected span.
+        # Last idx that is before when the first flow to finish finished. So make sure
+        # to include cutoff_idx in the selected span.
         cutoff_idx = None
         for idx, arrival_time_us in enumerate(
             reversed(pkts[features.ARRIVAL_TIME_FET])

@@ -41,7 +41,6 @@ DEFAULTS = {
     "regen_data": False,
     "sync": False,
     "n_estimators": 100,
-    "max_depth": 10,
     "balance": False,
     "drop_popular": True,
     "analyze_features": False,
