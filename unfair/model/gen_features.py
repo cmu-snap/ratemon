@@ -894,7 +894,7 @@ def parse_opened_exp(
                     # Extract the flow to which this packet belongs, as well as
                     # its index in its flow.
                     flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
-                    index = zipped_dat[j]["index"]
+                    index = int(zipped_dat[j]["index"])
                     # NOTE: Disabled because not used.
                     #
                     # flw_results[flw][index][
