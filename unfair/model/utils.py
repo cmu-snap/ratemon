@@ -1660,7 +1660,8 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
             if includes_acks
             else trimmed_data_pkts
         )
-        total_dropped += len(data_pkts) - cutoff_idx - 1
+        if cutoff_idx is not None:
+            total_dropped += len(data_pkts) - cutoff_idx - 1
     logging.info(
         "Dropped %d packets from after the first flow to finish finished.",
         total_dropped,
