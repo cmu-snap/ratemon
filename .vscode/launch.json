@@ -175,9 +175,9 @@
             "program": "${workspaceFolder}/unfair/model/gen_features.py",
             "console": "integratedTerminal",
             "args": [
-                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/experiments",
                 "--untar-dir=/tmp/untar",
-                "--out-dir=/data/out/foobar",
+                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/features",
                 "--parallel=38",
                 "--random-order",
                 // "--num-exps=400",
