@@ -1655,6 +1655,7 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
             data_pkts if cutoff_idx is None else data_pkts[: cutoff_idx + 1]
         )
         trimmed[flow] = (
+            # We do not trim the ACK packets because we do not need to.
             (trimmed_data_pkts, get_ack_packets(pkts))
             if includes_acks
             else trimmed_data_pkts
