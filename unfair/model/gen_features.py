@@ -477,7 +477,7 @@ def parse_opened_exp(
             )
 
             output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
-            output[j][features.PACKETS_LOST_TOTAL_FET] = utils.safe_sum(
+            output[j][features.PACKETS_LOST_TOTAL_FET] = utils.safe_add(
                 0 if first else output[j - 1][features.PACKETS_LOST_TOTAL_FET],
                 pkt_loss_cur_estimate,
             )
