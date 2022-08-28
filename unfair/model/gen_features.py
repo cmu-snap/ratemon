@@ -202,8 +202,11 @@ def parse_opened_exp(
     flw_results = {}
 
     # Keep track of the number of erroneous throughputs (i.e., higher than the
-    # experiment bandwidth) for each window size.
-    win_to_errors = {win: 0 for win in features.WINDOWS}
+    # experiment bandwidth) for each window size. Each value is a pair where the first
+    # entry is the number of erroneous throughputs originating from a single flow and
+    # the second entry is the number of erroneous throughputs originating from the
+    # combined throughput of all flows.
+    win_to_errors = {win: [0, 0] for win in features.WINDOWS}
 
     # Create the (super-complicated) dtype. The dtype combines each metric at
     # multiple granularities.
@@ -584,10 +587,10 @@ def parse_opened_exp(
                     )
                 elif metric.startswith(features.TPUT_FET):
                     tput_bps = utils.safe_tput_bps(output, win_start_idx, j)
-                    # If the throughput exceeds the bandwidth, then record a
+                    # If the throughput exceeds the bandwidth, then print a
                     # warning and do not record this throughput.
                     if tput_bps != -1 and tput_bps > exp.bw_bps:
-                        win_to_errors[win] += 1
+                        win_to_errors[win][0] += 1
                         continue
                     new = tput_bps
                 elif metric.startswith(features.TPUT_SHARE_FRAC_FET):
@@ -887,48 +890,46 @@ def parse_opened_exp(
                         zipped_arr_times[j], zipped_arr_times[win_to_start_idx[win]]
                     ),
                 )
-                # Check if this throughput is erroneous.
+                # Check if the total throughput is erroneous, and if so, then do not
+                # fill in features related to the total throughput.
                 if total_tput_bps > exp.bw_bps:
-                    win_to_errors[win] += 1
-                else:
-                    # Extract the flow to which this packet belongs, as well as
-                    # its index in its flow.
-                    flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
-                    index = int(zipped_dat[j]["index"])
-                    # NOTE: Disabled because not used.
-                    #
-                    # flw_results[flw][index][
-                    #     features.make_win_metric(features.TOTAL_TPUT_FET, win)
-                    # ] = total_tput_bps
-                    # # Use the total throughput and the number of active flows to
-                    # # calculate the throughput fair share.
-                    # flw_results[flw][index][
-                    #     features.make_win_metric(features.TPUT_FAIR_SHARE_BPS_FET, win)
-                    # ] = utils.safe_div(
-                    #     total_tput_bps,
-                    #     flw_results[flw][index][features.ACTIVE_FLOWS_FET],
-                    # )
-                    # Divide the flow's throughput by the total throughput.
-                    tput_share = utils.safe_div(
-                        flw_results[flw][index][
-                            features.make_win_metric(features.TPUT_FET, win)
-                        ],
-                        total_tput_bps,
-                    )
-                    # NOTE: Disabled because not used.
-                    #
-                    # flw_results[flw][index][
-                    #     features.make_win_metric(features.TPUT_SHARE_FRAC_FET, win)
-                    # ] = tput_share
-                    # Calculate the ratio of tput share to bandwidth fair share.
+                    win_to_errors[win][1] += 1
+                    continue
+
+                # Extract the flow to which this packet belongs, as well as
+                # its index in its flow.
+                flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
+                index = int(zipped_dat[j]["index"])
+                flw_results[flw][index][
+                    features.make_win_metric(features.TOTAL_TPUT_FET, win)
+                ] = total_tput_bps
+                # Use the total throughput and the number of active flows to
+                # calculate the throughput fair share.
+                flw_results[flw][index][
+                    features.make_win_metric(features.TPUT_FAIR_SHARE_BPS_FET, win)
+                ] = utils.safe_div(
+                    total_tput_bps,
+                    flw_results[flw][index][features.ACTIVE_FLOWS_FET],
+                )
+                # Divide the flow's throughput by the total throughput.
+                tput_share = utils.safe_div(
                     flw_results[flw][index][
-                        features.make_win_metric(
-                            features.TPUT_TO_FAIR_SHARE_RATIO_FET, win
-                        )
-                    ] = utils.safe_div(
-                        tput_share,
-                        flw_results[flw][index][features.BW_FAIR_SHARE_FRAC_FET],
+                        features.make_win_metric(features.TPUT_FET, win)
+                    ],
+                    total_tput_bps,
+                )
+                flw_results[flw][index][
+                    features.make_win_metric(features.TPUT_SHARE_FRAC_FET, win)
+                ] = tput_share
+                # Calculate the ratio of tput share to bandwidth fair share.
+                flw_results[flw][index][
+                    features.make_win_metric(
+                        features.TPUT_TO_FAIR_SHARE_RATIO_FET, win
                     )
+                ] = utils.safe_div(
+                    tput_share,
+                    flw_results[flw][index][features.BW_FAIR_SHARE_FRAC_FET],
+                )
 
     print(f"\tFinal window durations in: {exp_flp}:")
     for win in features.WINDOWS:
@@ -946,10 +947,12 @@ def parse_opened_exp(
         )
     print(f"\tWindow errors in: {exp_flp}")
     for win in features.WINDOWS:
-        print(f"\t\t{win}:", win_to_errors[win])
+        print(
+            f"\t\t{win}: per-flow: {win_to_errors[win][0]}, overall: {win_to_errors[win][1]}"
+        )
     smallest_safe_win = 0
     for win in sorted(features.WINDOWS):
-        if win_to_errors[win] == 0:
+        if sum(win_to_errors[win]) == 0:
             print(f"\tSmallest safe window size is {win} in: {exp_flp}")
             smallest_safe_win = win
             break
