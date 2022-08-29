@@ -202,11 +202,9 @@ WINDOWED_FETS = [
     (INTERARR_TIME_FET, "float64"),
     (INV_INTERARR_TIME_FET, "float64"),
     (TPUT_FET, "float64"),
-    # NOTE: Disabled because not used.
-    #
-    # (TPUT_SHARE_FRAC_FET, "float64"),
-    # (TOTAL_TPUT_FET, "float64"),
-    # (TPUT_FAIR_SHARE_BPS_FET, "float64"),
+    (TPUT_SHARE_FRAC_FET, "float64"),
+    (TOTAL_TPUT_FET, "float64"),
+    (TPUT_FAIR_SHARE_BPS_FET, "float64"),
     (TPUT_TO_FAIR_SHARE_RATIO_FET, "float64"),
     (RTT_FET, "float64"),
     (RTT_RATIO_FET, "float64"),
