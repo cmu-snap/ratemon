@@ -40,7 +40,7 @@ class Split:
             return
 
         flp = utils.get_split_data_flp(out_dir, name)
-        if path.exists(flp):
+        if split_exists(out_dir, name):
             raise Exception(f"Split already exists: {flp}")
         logging.info(
             '\tInitializing split "%s" (%d%%, sampling %d%%%s) at: %s',
@@ -291,9 +291,18 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
 def splits_exist(out_dir):
     """Check if all splits exist in out_dir."""
     for name in SPLIT_NAMES:
-        if not path.exists(utils.get_split_data_flp(out_dir, name)):
+        if not split_exists(out_dir, name):
             return False
     return True
+
+
+def split_exists(out_dir, split_name):
+    """Check if a particular split exists in out_dir."""
+    exists = path.exists(utils.get_split_data_flp(out_dir, split_name)) and path.exists(
+        utils.get_split_metadata_flp(out_dir, split_name)
+    )
+    print("Split %s exists: %s" % (split_name, exists))
+    return exists
 
 
 def parse_args():
@@ -341,6 +350,14 @@ def parse_args():
         "--disjoint-splits",
         action="store_true",
         help="If set, splits will be taken from disjoint sets of experiments.",
+    )
+    psr.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "If set, assume that splits already found on disk are complete and do "
+            "not signify an error or need to be regenerated."
+        ),
     )
     psr, psr_verify = cl_args.add_sample_percent(
         *cl_args.add_out(*cl_args.add_warmup(*cl_args.add_num_exps(psr)))
@@ -422,6 +439,11 @@ def _main():
 
         # Do the actual splitting.
         for split_name in SPLIT_NAMES:
+            if args.resume and split_exists(args.out_dir, split_name):
+                # If we are resuming, do not attempt to regenerate splits that
+                # already exist.
+                logging.info("Skipping split %s", split_name)
+                continue
             logging.info("Creating disjoint %s split", split_name)
             do_prepare(
                 args,
@@ -433,7 +455,17 @@ def _main():
             )
     else:
         exp_flps_per_split = {"all": exp_flps}
-        do_prepare(args, split_fracs, exp_flps)
+        do_prepare(
+            args,
+            {
+                split_name: split_frac
+                for split_name, split_frac in split_fracs
+                # If we are resuming, do not attempt to regenerate splits that already
+                # exist.
+                if not args.resume or not split_exists(args.out_dir, split_name)
+            },
+            exp_flps,
+        )
 
     # Record which experiments are used for each split so that we do not reuse any
     # of these for evaluation later.
