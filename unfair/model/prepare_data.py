@@ -34,11 +34,6 @@ class Split:
         self.shuffle = shuffle
         self.fets = [name for name, typ in dtype]
 
-        if self.frac == 0:
-            logging.info("Skipping split %s because it will select no packets.", name)
-            self.finished = True
-            return
-
         flp = utils.get_split_data_flp(out_dir, name)
         if split_exists(out_dir, name):
             raise Exception(f"Split already exists: {flp}")
@@ -51,19 +46,11 @@ class Split:
             flp,
         )
 
-        # Track where this Split has been finalized, in which case it
-        # cannot have methods called on it.
-        self.finished = False
-
         num_pkts = math.ceil(num_pkts_tot * self.frac)
-        if num_pkts == 0:
-            self.dat = None
-        else:
-            # Create an empty file for each split. Features values that cannot
-            # be computed are replaced with -1. When reading the splits later,
-            # we can detect incomplete feature values by looking for -1s.
-            self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
-
+        # Create an empty file for each split. Features values that cannot
+        # be computed are replaced with -1. When reading the splits later,
+        # we can detect incomplete feature values by looking for -1s.
+        self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
         # The next available index in self.dat.
         self.idx = 0
         # # List of all available indices in this split. This set is
@@ -72,6 +59,14 @@ class Split:
 
         # Save this Split's metadata so that its data file can be read later.
         utils.save_split_metadata(out_dir, self.name, dat=(num_pkts, dtype))
+
+        # Track where this Split has been finalized, in which case it cannot have
+        # methods called on it.
+        if self.frac == 0:
+            logging.info("Skipping split %s because it will select no packets.", name)
+            self.finished = True
+        else:
+            self.finished = False
 
     def take(self, exp_dat, exp_available_idxs):
         """Bring additional samples into this Split.
@@ -298,11 +293,9 @@ def splits_exist(out_dir):
 
 def split_exists(out_dir, split_name):
     """Check if a particular split exists in out_dir."""
-    exists = path.exists(utils.get_split_data_flp(out_dir, split_name)) and path.exists(
+    return path.exists(utils.get_split_data_flp(out_dir, split_name)) and path.exists(
         utils.get_split_metadata_flp(out_dir, split_name)
     )
-    print("Split %s exists: %s" % (split_name, exists))
-    return exists
 
 
 def parse_args():

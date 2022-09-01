@@ -480,9 +480,15 @@ def parse_opened_exp(
             )
 
             output[j][features.PACKETS_LOST_FET] = pkt_loss_cur_estimate
-            output[j][features.PACKETS_LOST_TOTAL_FET] = utils.safe_add(
-                0 if first else output[j - 1][features.PACKETS_LOST_TOTAL_FET],
-                pkt_loss_cur_estimate,
+            prev_packets_lost_total = (
+                0 if first else output[j - 1][features.PACKETS_LOST_TOTAL_FET]
+            )
+            # This feature is different, because we want to skip the current value if
+            # it's -1.
+            output[j][features.PACKETS_LOST_TOTAL_FET] = (
+                prev_packets_lost_total
+                if pkt_loss_cur_estimate == -1
+                else utils.safe_add(prev_packets_lost_total, pkt_loss_cur_estimate)
             )
             output[j][features.LOSS_RATE_FET] = loss_rate_cur
             sqrt_loss_rate_cur = utils.safe_div(1, utils.safe_sqrt(loss_rate_cur))
@@ -923,9 +929,7 @@ def parse_opened_exp(
                 ] = tput_share
                 # Calculate the ratio of tput share to bandwidth fair share.
                 flw_results[flw][index][
-                    features.make_win_metric(
-                        features.TPUT_TO_FAIR_SHARE_RATIO_FET, win
-                    )
+                    features.make_win_metric(features.TPUT_TO_FAIR_SHARE_RATIO_FET, win)
                 ] = utils.safe_div(
                     tput_share,
                     flw_results[flw][index][features.BW_FAIR_SHARE_FRAC_FET],

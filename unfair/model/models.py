@@ -32,7 +32,7 @@ class PytorchModelWrapper:
         # The name of this model.
         self.name = None
         # The specification of the input tensor format.
-        self.in_spc = tuple(sorted(features.get_names(features.ALL_FETS)))
+        self.in_spc = tuple(sorted(features.get_names(features.ALL_KNOWABLE_FETS)))
         # The specification of the output tensor format.
         self.out_spc = (features.OUT_FET,)
         # The number of output classes.
@@ -960,7 +960,9 @@ class SvmSklearnWrapper(SvmWrapper):
         # throughput, computed at the same granularity as the ground truth, by
         # the fair throughput. Then convert these fairness ratios into labels.
         mathis_tput = dat_extra[
-            features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN)
+            features.make_win_metric(
+                features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN
+            )
         ]
         mathis_raw = mathis_tput / fair
         mathis_preds = self.convert_to_class(mathis_raw)[features.LABEL_FET]
@@ -1151,29 +1153,31 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "mathis model throughput b/s-windowed-minRtt1024",
         #     "RTT ratio us-windowed-minRtt1024"
         # )))
-        # Get rid of features with large windows...these are not practical.
         self.in_spc = tuple(
             sorted(
                 fet
-                for fet in features.get_names(features.ALL_FETS)
+                for fet in features.get_names(features.ALL_KNOWABLE_FETS)
                 if (
-                    (
+                    # There was a bug in PACKETS_LOST_TOTAL_FET.
+                    (fet != features.PACKETS_LOST_TOTAL_FET)
+                    and (
                         # Allow regular features.
                         ("ewma" not in fet and "windowed" not in fet)
                         # Allow EWMA features.
                         or "ewma" in fet
+                        # Get rid of features with large windows...these are not practical.
                         # Drop windowed features with windows > 128 minRTT.
                         or features.parse_win_metric(fet)[1] <= 128
+                        # Get rid of features with known mistakes.
+                        # and (
+                        #     not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
+                        #     and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+                        #     and not fet.startswith(features.SQRT_LOSS_RATE_FET)
+                        #     and not fet.startswith(features.LOSS_EVENT_RATE_FET)
+                        #     and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                        #     and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
+                        # )
                     )
-                    # Get rid of features with known mistakes.
-                    # and (
-                    #     not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
-                    #     and not fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
-                    #     and not fet.startswith(features.SQRT_LOSS_RATE_FET)
-                    #     and not fet.startswith(features.LOSS_EVENT_RATE_FET)
-                    #     and not fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
-                    #     and not fet.startswith(features.PACKETS_LOST_TOTAL_FET)
-                    # )
                 )
                 # # Get rid of all loss event rate features.
                 # and not fet.startswith(features.LOSS_EVENT_RATE_FET)

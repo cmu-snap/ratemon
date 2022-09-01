@@ -13,7 +13,7 @@ print(f"Logging to: {log_flp}")
 logging.basicConfig(
     filename=log_flp,
     filemode="a",
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s %(levelname)s | %(message)s",
     level=logging.DEBUG,
 )
 
@@ -337,7 +337,9 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
                     "Using a random %d%% of test data for feature selection.",
                     args["feature_selection_percent"],
                 )
-                count = math.ceil(len(dat_in_sampled) * args["feature_selection_percent"] / 100)
+                count = math.ceil(
+                    len(dat_in_sampled) * args["feature_selection_percent"] / 100
+                )
                 indices = torch.randperm(len(dat_in_sampled))[:count]
                 dat_in_sampled = dat_in_sampled[indices]
                 dat_out_sampled = dat_out_sampled[indices]
@@ -656,17 +658,17 @@ def _main():
         ),
         default=defaults.DEFAULTS["max_depth"],
         type=int,
-        required=False
+        required=False,
     )
     psr.add_argument(
         "--min-samples-leaf",
         help=(
             "If the model is a HistGbdt, then use this as the minimum "
-            'number of samples a leaf node may represent.'
+            "number of samples a leaf node may represent."
         ),
         default=defaults.DEFAULTS["min_samples_leaf"],
         type=int,
-        required=False
+        required=False,
     )
     psr.add_argument(
         "--tag",
@@ -699,12 +701,12 @@ def _main():
     assert (not args["drop_popular"]) or args[
         "balance"
     ], '"--drop-popular" must be used with "--balance".'
-    #assert (not args["analyze_features"]) or (
+    # assert (not args["analyze_features"]) or (
     #    (not args["balance"]) or args["drop_popular"]
-    #), (
+    # ), (
     #    'Refusing to use "--analyze-features" with "--balance" but without '
     #    '"--drop-popular".'
-    #)
+    # )
     if args["model"] == models.HistGbdtSklearnWrapper().name and args["balance"]:
         args["balance"] = False
         args["drop_popular"] = False

@@ -19,15 +19,15 @@ def get_dataloaders(args, net):
     out_dir = args["out_dir"]
     dat_flp = path.join(
         out_dir,
-        defaults.DATA_PREFIX + utils.args_to_str(
-            args, order=sorted(defaults.DEFAULTS.keys()), which="data") +
-        ".npz")
+        defaults.DATA_PREFIX
+        + utils.args_to_str(args, order=sorted(defaults.DEFAULTS.keys()), which="data")
+        + ".npz",
+    )
     scl_prms_flp = path.join(out_dir, "scale_params.json")
     # Check for the presence of both the data and the scaling
     # parameters because the resulting model is useless without the
     # proper scaling parameters.
-    if (not args["regen_data"] and path.exists(dat_flp) and
-            path.exists(scl_prms_flp)):
+    if not args["regen_data"] and path.exists(dat_flp) and path.exists(scl_prms_flp):
         logging.info("Found existing data!")
         trn, val, tst = utils.load_parsed_data(dat_flp)
     else:
@@ -58,8 +58,8 @@ def get_bulk_data(args, net):
     data_dir = args["data_dir"]
     sample_frac = args["sample_percent"] / 100
     trn, val, tst = [
-        get_split(data_dir, name, sample_frac, net)
-        for name in ["train", "val", "test"]]
+        get_split(data_dir, name, sample_frac, net) for name in ["train", "val", "test"]
+    ]
 
     # Validate scaling groups.
     assert trn[3] == val[3] == tst[3], "Scaling groups do not agree."
@@ -78,14 +78,15 @@ def get_bulk_data(args, net):
 
 
 def get_split(data_dir, name, sample_frac, net):
-    """ Constructs a split from many subsplits on disk. """
+    """Constructs a split from many subsplits on disk."""
     # Load the split's subsplits.
     subsplits = utils.load_subsplits(data_dir, name)
     # Optionally select a fraction of each subsplit.
     if sample_frac < 1:
         subsplits = [
-            subsplit[:math.ceil(subsplit.shape[0] * sample_frac)]
-            for subsplit in subsplits]
+            subsplit[: math.ceil(subsplit.shape[0] * sample_frac)]
+            for subsplit in subsplits
+        ]
     # Merge the subsplits into a split.
     split = np.concatenate(subsplits)
     # If there is more than one subsplit, then we need to shuffle the merged split.
@@ -111,13 +112,13 @@ def replace_unknowns(dat, is_dt):
             bad_fets.append(fet)
             continue
         if len(invalid) > 0:
-            logging.debug(fet)
             dat[fet][invalid] = (
-                float("NaN") if is_dt
-                else np.mean(dat[fet][np.logical_not(invalid)]))
-        assert (dat[fet] != -1).all(), f"Found \"-1\" in feature: {fet}"
-    assert not bad_fets, \
-        f"Features contain only \"-1\" ({len(bad_fets)}): {bad_fets}"
+                float("NaN") if is_dt else np.mean(dat[fet][np.logical_not(invalid)])
+            )
+        assert (
+            dat[fet] != -1
+        ).all(), f'Found "-1" in feature after supposedly replacing all "-1": {fet}'
+    assert not bad_fets, f'Features contain only "-1" ({len(bad_fets)}): {bad_fets}'
 
 
 def extract_fets(dat, split_name, net):
@@ -133,29 +134,32 @@ def extract_fets(dat, split_name, net):
     num_out_fets = len(net.out_spc)
     # This is not a strict requirement from a modeling point of view,
     # but is assumed to make data processing easier.
-    assert num_out_fets == 1, \
-        (f"{net.name}: Out spec must contain a single feature, but actually "
-         f"contains: {net.out_spc}")
+    assert num_out_fets == 1, (
+        f"{net.name}: Out spec must contain a single feature, but actually "
+        f"contains: {net.out_spc}"
+    )
 
+    assert len(net.out_spc) == 1
     # Remove samples where the ground truth output is unknown.
     len_before = dat.shape[0]
-    dat = dat[dat[list(net.out_spc)] != -1][0]
+    dat = dat[dat[net.out_spc[0]] != -1]
     removed = dat.shape[0] - len_before
     if removed > 0:
         logging.info(
             f"Removed {removed} rows with unknown out_spc from split "
-            f"\"{split_name}\".")
+            f'"{split_name}".'
+        )
 
-    logging.debug(f"in_spc = {list(net.in_spc)}")
+    logging.debug("in_spc =\n\t%s", "\n\t".join(list(net.in_spc)))
     dat_in = recfunctions.repack_fields(dat[list(net.in_spc)])
     dat_out = recfunctions.repack_fields(dat[list(net.out_spc)])
     # Create a structured array to hold extra data that will not be used as
     # features but may be needed by the training/testing process.
     dtype_extra = features.convert_to_float(
         # The "raw" entry is the unconverted out_spc.
-        [("raw",
-          [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1])] +
-        [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS])
+        [("raw", [typ for typ in dat.dtype.descr if typ[0] in net.out_spc][0][1])]
+        + [typ for typ in dat.dtype.descr if typ[0] in features.EXTRA_FETS]
+    )
     dat_extra = np.empty(shape=dat.shape, dtype=dtype_extra)
     dat_extra["raw"] = dat_out
     for typ in features.EXTRA_FETS:
@@ -166,15 +170,14 @@ def extract_fets(dat, split_name, net):
     if not is_dt:
         # Verify that there are no NaNs or Infs in the data.
         for fet in dat_in.dtype.names:
-            assert (not (
-                np.isnan(dat_in[fet]).any() or
-                np.isinf(dat_in[fet]).any())), \
-                ("Warning: NaNs or Infs in input feature for split "
-                 f"\"{split_name}\": {fet}")
-        assert (not (
-            np.isnan(dat_out[features.LABEL_FET]).any() or
-            np.isinf(dat_out[features.LABEL_FET]).any())), \
-            f"Warning: NaNs or Infs in ground truth for split \"{split_name}\"."
+            assert not (np.isnan(dat_in[fet]).any() or np.isinf(dat_in[fet]).any()), (
+                "Warning: NaNs or Infs in input feature for split "
+                f'"{split_name}": {fet}'
+            )
+        assert not (
+            np.isnan(dat_out[features.LABEL_FET]).any()
+            or np.isinf(dat_out[features.LABEL_FET]).any()
+        ), f'Warning: NaNs or Infs in ground truth for split "{split_name}".'
 
     replace_unknowns(dat_in, is_dt)
 
@@ -182,8 +185,9 @@ def extract_fets(dat, split_name, net):
     dat_out = net.convert_to_class(dat_out)
 
     # Verify data.
-    assert dat_in.shape[0] == dat_out.shape[0], \
-        "Input and output should have the same number of rows."
+    assert (
+        dat_in.shape[0] == dat_out.shape[0]
+    ), "Input and output should have the same number of rows."
     # Find the uniques classes in the output features and make sure that they
     # are properly formed. Assumes that dat_out is a structured numpy array
     # containing a single column specified by features.LABEL_FET.
@@ -212,33 +216,37 @@ def scale_fets(dat, scl_grps, standardize=False):
     parameters are the min and max of that column's scaling group.
     """
     fets = dat.dtype.names
-    assert fets is not None, \
-        f"The provided array is not structured. dtype: {dat.dtype.descr}"
-    assert len(scl_grps) == len(fets), \
-        f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
+    assert (
+        fets is not None
+    ), f"The provided array is not structured. dtype: {dat.dtype.descr}"
+    assert len(scl_grps) == len(
+        fets
+    ), f"Invalid scaling groups ({scl_grps}) for dtype ({dat.dtype.descr})!"
 
     # Determine the unique scaling groups.
     scl_grps_unique = set(scl_grps)
     # Create an empty array to hold the min and max values (i.e.,
     # scaling parameters) for each scaling group.
     scl_grps_prms = np.empty((len(scl_grps_unique), 2), dtype="float64")
+
     # Function to reduce a structured array.
-    rdc = (lambda fnc, arr:
-           fnc(np.array(
-               [fnc(arr[fet]) for fet in arr.dtype.names if fet != ""])))
+    def rdc(fnc, arr):
+        return fnc(np.array([fnc(arr[fet]) for fet in arr.dtype.names if fet != ""]))
+
     # Determine the min and the max of each scaling group.
     for scl_grp in scl_grps_unique:
         # Determine the features in this scaling group.
-        scl_grp_fets = [fet for fet_idx, fet in enumerate(fets)
-                        if scl_grps[fet_idx] == scl_grp]
+        scl_grp_fets = [
+            fet for fet_idx, fet in enumerate(fets) if scl_grps[fet_idx] == scl_grp
+        ]
         # Extract the columns corresponding to this scaling group.
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [
             np.mean(utils.clean(fet_values))
-            if standardize else rdc(np.min, fet_values),
-            np.std(utils.clean(fet_values))
-            if standardize else rdc(np.max, fet_values)
+            if standardize
+            else rdc(np.min, fet_values),
+            np.std(utils.clean(fet_values)) if standardize else rdc(np.max, fet_values),
         ]
 
     # Create an empty array to hold the min and max values (i.e.,
@@ -259,19 +267,20 @@ def scale_fets(dat, scl_grps, standardize=False):
                 # Handle the rare case where the standard deviation is
                 # 0 (meaning that all of the feature values are the
                 # same), in which case return an array of zeros.
-                np.zeros(
-                    fet_values.shape, dtype=fet_values.dtype) if prm_2 == 0
-                else (fet_values - prm_1) / prm_2)
+                np.zeros(fet_values.shape, dtype=fet_values.dtype)
+                if prm_2 == 0
+                else (fet_values - prm_1) / prm_2
+            )
         else:
             # prm_1 is the min and prm_2 is the max.
             scaled = (
                 # Handle the rare case where the min and the max are
                 # the same (meaning that all of the feature values are
                 # the same.
-                np.zeros(
-                    fet_values.shape, dtype=fet_values.dtype) if prm_1 == prm_2
-                else utils.scale(
-                    fet_values, prm_1, prm_2, min_out=0, max_out=1))
+                np.zeros(fet_values.shape, dtype=fet_values.dtype)
+                if prm_1 == prm_2
+                else utils.scale(fet_values, prm_1, prm_2, min_out=0, max_out=1)
+            )
         new[fet] = scaled
 
     return new, scl_prms
@@ -311,8 +320,9 @@ def create_dataloaders(args, trn, val, tst):
         torch.utils.data.DataLoader(
             dataset_trn,
             batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False,
-                drop_popular=args["drop_popular"]))
+                dataset_trn, bch_trn, drop_last=False, drop_popular=args["drop_popular"]
+            ),
+        )
         if args["balance"]
         else torch.utils.data.DataLoader(
             dataset_trn,
@@ -322,12 +332,21 @@ def create_dataloaders(args, trn, val, tst):
             batch_size=dat_trn_in.shape[0] if bch_trn is None else bch_trn,
             # Ordinarily, shuffle should be True. But we shuffle the training
             # data in prepare_data.py, so we do not need to do so again here.
-            shuffle=False, drop_last=False),
+            shuffle=False,
+            drop_last=False,
+        ),
         # Validation dataloader.
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_val_in, dat_val_out, dat_val_extra),
-            batch_size=bch_tst, shuffle=False, drop_last=False),
+            batch_size=bch_tst,
+            shuffle=False,
+            drop_last=False,
+        ),
         # Test dataloader.
         torch.utils.data.DataLoader(
             utils.Dataset(fets, dat_tst_in, dat_tst_out, dat_tst_extra),
-            batch_size=bch_tst, shuffle=False, drop_last=False))
+            batch_size=bch_tst,
+            shuffle=False,
+            drop_last=False,
+        ),
+    )

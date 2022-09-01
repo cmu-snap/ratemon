@@ -242,7 +242,7 @@ UNKNOWABLE_FETS = [
 ALL_FETS = REGULAR_FETS + make_smoothed_features()
 
 # All features that an isolated receiver may use.
-ALL_KNOWABLE_FETS = tuple(fet for fet, _ in ALL_FETS if is_knowable(fet))
+ALL_KNOWABLE_FETS = tuple((fet, typ) for fet, typ in ALL_FETS if is_knowable(fet))
 
 # The feature to use as the ground truth.
 OUT_FET = make_win_metric(TPUT_TO_FAIR_SHARE_RATIO_FET, defaults.CHOSEN_WIN)
@@ -252,7 +252,7 @@ EXTRA_FETS = [
     ARRIVAL_TIME_FET,
     RTT_FET,
     ACTIVE_FLOWS_FET,
-    make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
+    # make_win_metric(TPUT_FAIR_SHARE_BPS_FET, defaults.CHOSEN_WIN),
     make_win_metric(MATHIS_TPUT_LOSS_EVENT_RATE_FET, defaults.CHOSEN_WIN),
 ]
 
