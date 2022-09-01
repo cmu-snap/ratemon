@@ -2,6 +2,15 @@
 
 set -eou pipefail
 
+if [ "$#" -ne 12 ]; then
+    echo "Illegal number of parameters".
+    echo "Usage: ./train.sh <model tag> <train_data_dir> <full_models_dir>" \
+        "<small_models_dir> <sample_percent> <max_iter> <max_leaf_nodes>" \
+        "<max_depth> <min_samples_leaf> <feature_selection_percent>" \
+        "<num_clusters> <num_features_to_pick>"
+    exit 1
+fi
+
 model_tag="$1"
 train_data_dir="$2"
 full_models_dir="$3"
