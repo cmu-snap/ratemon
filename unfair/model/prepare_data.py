@@ -47,10 +47,6 @@ class Split:
         )
 
         num_pkts = math.ceil(num_pkts_tot * self.frac)
-        # Create an empty file for each split. Features values that cannot
-        # be computed are replaced with -1. When reading the splits later,
-        # we can detect incomplete feature values by looking for -1s.
-        self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
         # The next available index in self.dat.
         self.idx = 0
         # # List of all available indices in this split. This set is
@@ -65,8 +61,18 @@ class Split:
         if self.frac == 0:
             logging.info("Skipping split %s because it will select no packets.", name)
             self.finished = True
+
+            # Create an empty file and save it. We need to handle the empty case
+            # separately because we cannot memmap an empty file.
+            self.dat = np.empty((0,), dtype=dtype)
+            np.save(flp, self.dat)
         else:
             self.finished = False
+
+            # Create an empty file for each split. Features values that cannot
+            # be computed are replaced with -1. When reading the splits later,
+            # we can detect incomplete feature values by looking for -1s.
+            self.dat = np.memmap(flp, dtype=dtype, mode="w+", shape=(num_pkts,))
 
     def take(self, exp_dat, exp_available_idxs):
         """Bring additional samples into this Split.
