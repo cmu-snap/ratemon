@@ -412,7 +412,7 @@ def _main():
         }
         for split, num_exps in num_exps_per_split.items():
             assert 0 <= num_exps < num_exps_tot, (
-                f"Number of exps per split must be in the range [0, {num_exps_tot}], "
+                f"Number of exps per split must be in the range [0, {num_exps_tot}), "
                 f"but for split {split} is: {num_exps}"
             )
 
