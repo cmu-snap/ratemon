@@ -118,9 +118,12 @@ def parse_opened_exp(
     }
     flws = list(flw_to_cca.keys())
 
-    client_pcap = path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap")
+    # NOTE: Se no longer use the client pcap.
+    #
+    # client_pcap = path.join(exp_dir, f"client-tcpdump-{exp.name}.pcap")
     server_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
-    if not (path.exists(client_pcap) and path.exists(server_pcap)):
+    # if not (path.exists(client_pcap) and path.exists(server_pcap)):
+    if not path.exists(server_pcap):
         print(f"Warning: Missing pcap file in: {exp_flp}")
         return -1
     # NOTE: Disabled because not used.
