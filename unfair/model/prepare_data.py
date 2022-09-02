@@ -446,10 +446,7 @@ def _main():
             logging.info("Creating disjoint %s split", split_name)
             do_prepare(
                 args,
-                {
-                    split_name_: (1 if split_name_ == split_name else 0)
-                    for split_name_ in SPLIT_NAMES
-                },
+                {split_name: 1},
                 exp_flps_per_split[split_name],
             )
     else:
