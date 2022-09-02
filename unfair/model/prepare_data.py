@@ -155,7 +155,8 @@ def survey(exp_flps, warmup_frac):
     """
     num_exps = len(exp_flps)
     logging.info("Surveying %d experiments...", num_exps)
-    assert exp_flps, "Must provide at least one experiment."
+    if num_exps == 0:
+        return [], 0, None
 
     # Produces a nested list of the form:
     #     [ list of tuples, each element corresponding to an experiment:
@@ -437,6 +438,7 @@ def _main():
         }
 
         # Do the actual splitting.
+        dtype = None
         for split_name in SPLIT_NAMES:
             if args.resume and split_exists(args.out_dir, split_name):
                 # If we are resuming, do not attempt to regenerate splits that
@@ -444,10 +446,8 @@ def _main():
                 logging.info("Skipping split %s", split_name)
                 continue
             logging.info("Creating disjoint %s split", split_name)
-            do_prepare(
-                args,
-                {split_name: 1},
-                exp_flps_per_split[split_name],
+            dtype = do_prepare(
+                args, {split_name: 1}, exp_flps_per_split[split_name], dtype
             )
     else:
         exp_flps_per_split = {"all": exp_flps}
@@ -480,20 +480,23 @@ def _main():
     return 0
 
 
-def do_prepare(args, split_fracs, exp_flps):
-    if not exp_flps:
-        logging.info("No experiments found.")
-        return
+def do_prepare(args, split_fracs, exp_flps, dtype_guess=None):
+    # if not exp_flps:
+    #     logging.info("No experiments found.")
+    #     return
 
     warmup_frac = args.warmup_percent / 100
     sample_frac = args.sample_percent / 100
-    exp_flps, num_pkts, dtype = survey(exp_flps, warmup_frac)
-    logging.info(
-        "Total packets: %d\nAll found features (%d):\n\t%s",
-        num_pkts,
-        len(dtype.names),
-        "\n\t".join(sorted(dtype.names)),
-    )
+    exp_flps, num_pkts, dtype_new = survey(exp_flps, warmup_frac)
+    dtype = dtype_new if dtype_new is not None else dtype_guess
+    assert dtype is not None, "Unable to learn dtype from experiments!"
+
+    # logging.info(
+    #     "Total packets: %d\nAll found features (%d):\n\t%s",
+    #     num_pkts,
+    #     len(dtype.names),
+    #     "\n\t".join(sorted(dtype.names)),
+    # )
 
     # Assemble the minimum dtype.
     dtype = dtype.descr
@@ -512,7 +515,9 @@ def do_prepare(args, split_fracs, exp_flps):
         ), f"Did not find all required features in surveyed files. Missing: {required}"
         dtype = new_dtype
     logging.info(
-        "Using minimum dtype: \n\t%s", "\n\t".join(sorted(str(fet) for fet in dtype))
+        "Using minimum dtype (%d): %s",
+        len(dtype),
+        ", ".join(sorted(str(fet) for fet in dtype)),
     )
 
     # Create the merged training, validation, and test files.
