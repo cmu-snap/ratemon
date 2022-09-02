@@ -525,6 +525,8 @@ def do_prepare(args, split_fracs, exp_flps, dtype_guess=None):
         exp_flps, args.out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_frac
     )
 
+    return dtype
+
 
 if __name__ == "__main__":
     sys.exit(_main())
