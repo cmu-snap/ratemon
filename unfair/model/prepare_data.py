@@ -58,7 +58,7 @@ class Split:
 
         # Track where this Split has been finalized, in which case it cannot have
         # methods called on it.
-        if self.frac == 0:
+        if num_pkts == 0:
             logging.info("Skipping split %s because it will select no packets.", name)
             self.finished = True
 
@@ -272,10 +272,10 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
         # merged files.
         pkts_forgotten += len(all_idxs)
     logging.info(
-        "Forgot %d/%d packets (%0.2f%%)",
+        "Forgot %d/%d packets (%s)",
         pkts_forgotten,
         num_pkts,
-        pkts_forgotten / num_pkts * 100,
+        f"{pkts_forgotten / num_pkts * 100:.2f}" if num_pkts else "-%",
     )
 
     for split in splits.values():
@@ -490,6 +490,8 @@ def do_prepare(args, split_fracs, exp_flps, dtype_guess=None):
     exp_flps, num_pkts, dtype_new = survey(exp_flps, warmup_frac)
     dtype = dtype_new if dtype_new is not None else dtype_guess
     assert dtype is not None, "Unable to learn dtype from experiments!"
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.descr
 
     # logging.info(
     #     "Total packets: %d\nAll found features (%d):\n\t%s",
@@ -499,7 +501,6 @@ def do_prepare(args, split_fracs, exp_flps, dtype_guess=None):
     # )
 
     # Assemble the minimum dtype.
-    dtype = dtype.descr
     if args.model is not None:
         model = models.MODELS[args.model]()
         # We need to keep the model's input and output features, as well as the extra
