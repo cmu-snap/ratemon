@@ -712,7 +712,7 @@ def _main():
     )
     psr.add_argument(
         "--validation-tolerance",
-        help - "Validation tolerance for HistGbdtSklearn.",
+        help="Validation tolerance for HistGbdtSklearn.",
         required=False,
         type=float,
         default=defaults.DEFAULTS["validation_tolerance"],
