@@ -56,6 +56,10 @@ DEFAULTS = {
     "min_samples_leaf": 20,
     "selected_features": None,
     "balance_weighted": False,
+    "hgbdt_lr": 0.1,
+    "validation_fraction": 0.1,
+    "validation_tolerance": 1e-7,
+    "n_iter_no_change": 10
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.

@@ -1136,7 +1136,7 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "max_iter",
             "l2_regularization",
             "early_stop",
-            "lr",
+            "hgbdt_lr",
             "l2_regularization",
             "graph",
             "max_leaf_nodes",
@@ -1144,6 +1144,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             "min_samples_leaf",
             "min_samples_leaf",
             "balance_weighted",
+            "validation_fraction",
+            "validation_tolerance",
+            "n_iter_no_change",
         ]
         # self.in_spc = tuple(sorted((
         #     "throughput b/s-windowed-minRtt8",
@@ -1214,13 +1217,14 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
         #     "mathis model throughput b/s-ewma-alpha0.001",
         #     "1/sqrt loss event rate-windowed-minRtt8",
         # )))
+        self.balance_weighted = False
         self._check()
 
     def new(self, **kwargs):
         self.graph = kwargs["graph"]
         self.net = ensemble.HistGradientBoostingClassifier(
             verbose=1,
-            learning_rate=0.1,  # kwargs["lr"],
+            learning_rate=kwargs["hgbdt_lr"],  # kwargs["lr"],
             max_iter=kwargs["max_iter"],
             max_leaf_nodes=kwargs["max_leaf_nodes"],
             max_depth=kwargs["max_depth"],
@@ -1229,9 +1233,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             early_stopping=kwargs["early_stop"],
             # validation_fraction=20 / 70,
             # 0.1 is the default
-            validation_fraction=0.1,
-            tol=1e-4,
-            n_iter_no_change=5,
+            validation_fraction=kwargs["validation_fraction"],
+            tol=kwargs["validation_tolerance"],
+            n_iter_no_change=kwargs["n_iter_no_change"],
         )
         self.balance_weighted = kwargs["balance_weighted"]
         return self.net
@@ -1250,9 +1254,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
             tot = sum(tots)
             # Each class's weight is 1 minus its popularity ratio.
             weights = torch.Tensor([1 - tot_cls / tot for tot_cls in tots])
-            # Average each weight with a weight of 1, which serves to smooth the
-            # weights.
-            weights = (weights + 1) / 2
+            # # Average each weight with a weight of 1, which serves to smooth the
+            # # weights.
+            # weights = (weights + 1) / 2
             sample_weights = torch.Tensor([weights[label] for label in dat_out])
         else:
             sample_weights = None

@@ -1,11 +1,12 @@
 #!/bin/bash
 
-if [ "$#" -ne 13 ]; then
+if [ "$#" -ne 16 ]; then
     echo "Illegal number of parameters".
     echo "Usage: ./train.sh <model tag> <train_data_dir> <full_models_dir>" \
         "<small_models_dir> <sample_percent> <max_iter> <max_leaf_nodes>" \
-        "<max_depth> <min_samples_leaf> <feature_selection_percent>" \
-        "<num_clusters> <num_features_to_pick> <venv_dir>"
+        "<max_depth> <min_samples_leaf> <lr> <val_frac> <val_tol> \
+        <n_iters_no_change> <feature_selection_percent> \
+        <num_features_to_pick> <venv_dir>"
     exit 1
 fi
 
@@ -18,10 +19,13 @@ max_iter="$6"
 max_leaf_nodes="$7"
 max_depth="$8"
 min_samples_leaf="$9"
-feature_selection_percent="${10}"
-num_clusters="${11}"
-num_features_to_pick="${12}"
-venv_dir="${13}"
+lr="${10}"
+val_frac="${11}"
+val_tol="${12}"
+n_iter_no_change="${13}"
+feature_selection_percent="${14}"
+num_features_to_pick="${15}"
+venv_dir="${16}"
 
 # shellcheck disable=SC1091
 source "$venv_dir/bin/activate"
@@ -47,12 +51,15 @@ bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' 
     --max-leaf-nodes='$max_leaf_nodes' \
     --max-depth='$max_depth' \
     --min-samples-leaf='$min_samples_leaf' \
+    --hgbdt-lr='$lr' \
+    --validation-fraction='$val_frac' \
+    --validation-tolerance='$val_tol' \
+    --n-iter-no-change='$n_iter_no_change' \
     --early-stop \
     --analyze-features \
     --feature-selection-type='perm' \
     --feature-selection-percent='$feature_selection_percent' \
-    --clusters='$num_clusters' \
-    --num-features-to-pick='$num_features_to_pick' \
+    --clusters='$num_features_to_pick' \
     --permutation-importance-repeats=1" ||
     {
         echo "Error encountered during full model training and feature" \
@@ -75,6 +82,10 @@ bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' 
     --max-leaf-nodes='$max_leaf_nodes' \
     --max-depth='$max_depth' \
     --min-samples-leaf='$min_samples_leaf' \
+    --hgbdt-lr='$lr' \
+    --validation-fraction='$val_frac' \
+    --validation-tolerance='$val_tol' \
+    --n-iter-no-change='$n_iter_no_change' \
     --early-stop \
     --selected-features='$(ls "$full_models_dir"/model_*-"$model_tag"-selected_features.json)'" ||
     {

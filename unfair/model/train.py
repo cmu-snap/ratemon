@@ -353,8 +353,8 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
                     out_dir,
                     dat_in_sampled,
                     dat_out_sampled,
-                    args["num_fets_to_pick"],
-                    args["perm_imp_repeats"],
+                    num_fets_to_pick=None,
+                    perm_imp_repeats=args["perm_imp_repeats"],
                 ),
             )
         else:
@@ -695,6 +695,34 @@ def _main():
         help="A JSON file of features to use.",
         required=False,
         type=str,
+    )
+    psr.add_argument(
+        "--hgbdt-lr",
+        help="Learning rate for HistGbdtSklearn.",
+        required=False,
+        type=float,
+        default=defaults.DEFAULTS["hgbdt_lr"],
+    )
+    psr.add_argument(
+        "--validation-fraction",
+        help="Validation fraction for HistGbdtSklearn.",
+        required=False,
+        type=float,
+        default=defaults.DEFAULTS["validation_fraction"],
+    )
+    psr.add_argument(
+        "--validation-tolerance",
+        help - "Validation tolerance for HistGbdtSklearn.",
+        required=False,
+        type=float,
+        default=defaults.DEFAULTS["validation_tolerance"],
+    )
+    psr.add_argument(
+        "--n-iter-no-change",
+        help="n_iter_no_change for HistGbdtSklearn.",
+        required=False,
+        type=int,
+        default=defaults.DEFAULTS["n_iter_no_change"],
     )
     psr, psr_verify = cl_args.add_training(psr)
     args = vars(psr_verify(psr.parse_args()))
