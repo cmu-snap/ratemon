@@ -1159,7 +1159,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
                 for fet in features.get_names(features.ALL_KNOWABLE_FETS)
                 if (
                     # There was a bug in PACKETS_LOST_TOTAL_FET.
-                    (fet != features.PACKETS_LOST_TOTAL_FET)
+                    (fet != features.PACKETS_LOST_TOTAL_FET) and
+                        (fet != features.PAYLOAD_FET) and
+                        (fet != features.WIRELEN_FET)
                     and (
                         # Allow regular features.
                         ("ewma" not in fet and "windowed" not in fet)

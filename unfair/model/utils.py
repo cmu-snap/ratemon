@@ -1264,11 +1264,53 @@ def analyze_feature_correlation(net, out_dir, dat_in, clusters):
             dat_in[:, col][torch.nonzero(torch.logical_not(invalid))]
         )
 
-    # Feature analysis.
     fets = np.asarray(net.in_spc)
-    corr = stats.spearmanr(dat_in).correlation
+        
+    # Check if all values are the same. Correlation does not make sense if all values are the same.
+    constant = set()
+    for col in range(dat_in.size()[1]):
+        if fets[col] == features.LOSS_RATE_FET:
+            logging.info("Loss rate: %s", dat_in[:, col])
+        if (dat_in[:, col] == dat_in[0, col]).all():
+            logging.info("All are same (%d): %s", dat_in[-1, col], fets[col])
+            constant.add(col)
+
+    # Remove features that are constant.
+    new_num_cols = dat_in.size()[1] - len(constant)
+    assert new_num_cols > 0
+    o = 0
+    new_dat = torch.zeros((dat_in.size()[0], new_num_cols), dtype=dat_in.dtype)
+    new_fets = []
+    for m in range(dat_in.size()[1]):
+        if m in constant:
+            continue
+        new_dat[:,o] = dat_in[:,m]
+        new_fets.append(fets[m])
+        o += 1
+    dat_in = new_dat
+    fets = new_fets
+
+    # Feature analysis.
+    corr = stats.spearmanr(dat_in, nan_policy="omit").correlation
     # corr = stats.pearsonr(dat_in_cleaned, dat_out_cleaned).correlation
     # corr = np.corrcoef(dat_in_cleaned, dat_out_cleaned, rowvar=False)
+    logging.info(corr)
+    logging.info("corr.shape: %s", corr.shape)
+    logging.info("fets[-1]: %s", fets[-1])
+    logging.info("type(dat_in): %s", type(dat_in))
+    logging.info("dat_in.shape: %s", dat_in.shape)
+    # logging.info((dat_in[0:19271,242] == 1514).all())
+    for f in range(len(fets)):
+        if dat_in[0:dat_in.shape[0],f].isnan().all():
+            logging.info("dat_in all NaN: %s", fets[f])
+    for f in range(len(fets)):
+        # logging.info(corr[f])
+        #if np.isnan(corr[f]).any():
+        #    logging.info("Some NaN: %s", fets[f])
+        if np.isnan(corr[f]).all():
+            logging.info("corr all NaN: %s", fets[f])
+    # logging.info("dat_in.dtype.names[-1]: %s", dat_in.dtype.names[-1])
+    # logging.info("dat_in[fets[-1]]: %s", dat_in[fets[-1]])
     corr_linkage = cluster.hierarchy.ward(corr)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 12))
