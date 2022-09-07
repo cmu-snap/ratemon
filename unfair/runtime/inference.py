@@ -525,6 +525,9 @@ def run(args, que, inference_flags, done):
     except KeyboardInterrupt:
         logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
+    except Exception as exc:
+        logging.exception("Unknown error in inference process!")
+        raise
     finally:
         if cleanup is not None:
             cleanup()

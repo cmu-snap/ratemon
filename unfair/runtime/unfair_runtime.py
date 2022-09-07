@@ -350,14 +350,14 @@ def pcapy_sniff(args, done):
     while True:  # not done.is_set():
         now_s = time.time()
 
-        # Only check done once every 1000 packets or 1 second.
+        # Only check done once every 10000 packets or 1 second.
         if i % 10000 == 0 or now_s - last_exit_check_s > 1:
             if done.is_set():
                 break
             last_exit_check_s = time.time()
 
         # Note that this is a blocking call. If we do not receive a packet, then this
-        # will never return and we will never check the above exist conditions.
+        # will never return and we will never check the above exit conditions.
         new_packets, new_bytes = receive_packet_pcapy(*pcap.next())
 
         num_packets += new_packets
@@ -501,7 +501,7 @@ def parse_args():
     return args
 
 
-def run(args, manager):
+def run(args):
     """Core logic."""
     # Need to load the model to check the input features for see the longest window.
     net = models.load_model(args.model_file)
@@ -541,10 +541,10 @@ def run(args, manager):
     logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
 
     # Create sychronized data structures.
-    que = manager.Queue()
-    inference_flags = manager.dict()
+    que = MANAGER.Queue()
+    inference_flags = MANAGER.dict()
     # Flag to trigger threads/processes to terminate.
-    done = manager.Event()
+    done = MANAGER.Event()
     done.clear()
 
     # Create the thread that will monitor flows and decide when to run inference.
@@ -589,13 +589,17 @@ def _main():
     logging.basicConfig(
         filename=args.main_log,
         filemode="w",
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s \t| %(message)s",
         level=logging.DEBUG,
     )
     with multiprocessing.Manager() as manager:
         global MANAGER
         MANAGER = manager
-        return run(args, manager)
+        try:
+            return run(args)
+        except:
+            logging.exception("Unknown error in main process!")
+            raise
 
 
 if __name__ == "__main__":
