@@ -93,7 +93,7 @@ bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' 
             "quitting!"
         exit 5
     }
-mv "/tmp/train.log" \
+mv -fv "/tmp/train.log" \
     "$small_models_dir/${model_tag}_selected-features_train.log"
 
 deactivate
