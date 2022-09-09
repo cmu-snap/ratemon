@@ -7,7 +7,7 @@ if [ "$#" -ne 16 ]; then
         "<max_depth> <min_samples_leaf> <lr> <val_frac> <val_tol>" \
         "<n_iters_no_change> <feature_selection_percent>" \
         "<num_features_to_pick> <venv_dir>"
-    exit 1
+    exit 255
 fi
 
 model_tag="$1"
