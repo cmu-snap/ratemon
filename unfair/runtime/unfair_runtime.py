@@ -460,13 +460,7 @@ def parse_args():
         help="Only consider packets to/from the local port 9998.",
     )
     parser.add_argument(
-        "--main-log", help="The main log file to write to.", required=True, type=str
-    )
-    parser.add_argument(
-        "--inference-log",
-        help="The inference log file to write to.",
-        required=True,
-        type=str,
+        "--log", help="The main log file to write to.", required=True, type=str
     )
     parser.add_argument(
         "--batch-size",
@@ -587,7 +581,7 @@ def run(args):
 def _main():
     args = parse_args()
     logging.basicConfig(
-        filename=args.main_log,
+        filename=args.log,
         filemode="w",
         format="%(asctime)s %(levelname)s \t| %(message)s",
         level=logging.DEBUG,

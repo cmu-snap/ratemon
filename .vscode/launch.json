@@ -36,8 +36,7 @@
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=3000",
                 "--batch-size=5",
-                "--main-log=/tmp/unfairness_monitor_main.log",
-                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                "--log=/tmp/unfairness_monitor.log",
                 "--skip-localhost",
                 "--constrain-port",
                 "--debug",
@@ -66,8 +65,7 @@
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--main-log=/tmp/unfairness_monitor_main.log",
-                "--inference-log=/tmp/unfairness_monitor_inference.log"
+                "--log=/tmp/unfairness_monitor_main.log",
                 // "--disable-inference"
             ],
             "autoReload": {
@@ -95,8 +93,7 @@
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--main-log=/tmp/unfairness_monitor_main.log",
-                "--inference-log=/tmp/unfairness_monitor_inference.log",
+                "--log=/tmp/unfairness_monitor_main.log",
                 // "--skip-localhost",
                 "--constrain-port",
                 "--debug",
