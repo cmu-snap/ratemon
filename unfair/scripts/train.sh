@@ -4,9 +4,9 @@ if [ "$#" -ne 16 ]; then
     echo "Illegal number of parameters."
     echo "Usage: ./train.sh <model tag> <train_data_dir> <full_models_dir>" \
         "<small_models_dir> <sample_percent> <max_iter> <max_leaf_nodes>" \
-        "<max_depth> <min_samples_leaf> <lr> <val_frac> <val_tol> \
-        <n_iters_no_change> <feature_selection_percent> \
-        <num_features_to_pick> <venv_dir>"
+        "<max_depth> <min_samples_leaf> <lr> <val_frac> <val_tol>" \
+        "<n_iters_no_change> <feature_selection_percent>" \
+        "<num_features_to_pick> <venv_dir>"
     exit 1
 fi
 
