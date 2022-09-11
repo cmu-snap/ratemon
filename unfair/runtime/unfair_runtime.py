@@ -328,11 +328,11 @@ def pcapy_sniff(args, done):
     # Drop packets that we do not care about.
     if args.skip_localhost:
         filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
-    if args.constrain_port:
+    if args.listen_ports:
         port_filt_l = [
             f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
             f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
-            for port in args.server_ports
+            for port in args.listen_ports
         ]
         filt += f" and ({' or '.join(port_filt_l)})"
     logging.info("Using tcpdump filter: %s", filt)
@@ -455,11 +455,6 @@ def parse_args():
         "--skip-localhost", action="store_true", help="Skip packets to/from localhost."
     )
     parser.add_argument(
-        "--constrain-port",
-        action="store_true",
-        help="Only consider packets to/from the local port 9998.",
-    )
-    parser.add_argument(
         "--log", help="The main log file to write to.", required=True, type=str
     )
     parser.add_argument(
@@ -470,9 +465,9 @@ def parse_args():
         type=int,
     )
     parser.add_argument(
-        "--server-ports",
+        "--listen-ports",
         nargs="+",
-        default=[9998],
+        default=[],
         help="List of ports to which inference will be limited",
         required=False,
         type=int,

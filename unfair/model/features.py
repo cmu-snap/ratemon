@@ -284,21 +284,21 @@ def fill_dependencies(in_spc):
     for name in fets_to_use:
         if MATHIS_TPUT_LOSS_RATE_FET in name:
             if "ewma" in name:
-                new_metric = make_ewma_metric(LOSS_RATE_FET, parse_ewma_metric(name)[1])
+                to_add.add(make_ewma_metric(LOSS_RATE_FET, parse_ewma_metric(name)[1]))
+            elif "windowed" in name:
+                to_add.add(make_win_metric(LOSS_RATE_FET, parse_win_metric(name)[1]))
             else:
-                new_metric = make_win_metric(LOSS_RATE_FET, parse_win_metric(name)[1])
-            to_add.add(new_metric)
+                to_add.add(LOSS_RATE_FET)
         if MATHIS_TPUT_LOSS_EVENT_RATE_FET in name:
             if "ewma" in name:
-                # This should not happen.
-                continue
+                raise Exception(f"Cannot have loss event rate EWMA metric: {name}")
             else:
                 to_add.add(
                     make_win_metric(SQRT_LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
                 )
-                to_add.add(
-                    make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
-                )
+                # to_add.add(
+                #     make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
+                # )
         if INV_INTERARR_TIME_FET in name:
             to_add.add(INV_INTERARR_TIME_FET)
             to_add.add(INTERARR_TIME_FET)
@@ -315,10 +315,15 @@ def fill_dependencies(in_spc):
                 to_add.add(make_ewma_metric(LOSS_RATE_FET, parse_ewma_metric(name)[1]))
             elif "windowed" in name:
                 to_add.add(make_win_metric(LOSS_RATE_FET, parse_win_metric(name)[1]))
-            else:
-                to_add.add(LOSS_RATE_FET)
+            to_add.add(LOSS_RATE_FET)
+            to_add.add(SQRT_LOSS_RATE_FET)
         if SQRT_LOSS_EVENT_RATE_FET in name:
-            to_add.add(make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1]))
+            if "ewma" in name:
+                raise Exception(f"Cannot have loss event rate EWMA metric: {name}")
+            else:
+                to_add.add(
+                    make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
+                )
     combined = fets_to_use | to_add
     if combined == fets_to_use:
         return in_spc

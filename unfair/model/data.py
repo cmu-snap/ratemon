@@ -96,10 +96,12 @@ def get_split(data_dir, name, sample_frac, net):
     return extract_fets(split, name, net)
 
 
-def replace_unknowns(dat, is_dt):
+def replace_unknowns(dat, is_dt, assert_no_unknowns=True):
     """
     Convert all instances of -1 (feature value unknown) to either the mean for
-    that feature or, if is_dt ("is decision tree?") is True, then NaN.
+    that feature or, if is_dt ("is decision tree?") is True, then NaN. If
+    assert_no_unknowns is True, then an assertion error is thrown if any features
+    consist entirely of -1.
 
     Modifies the provided numpy array.
     """
@@ -118,7 +120,24 @@ def replace_unknowns(dat, is_dt):
         assert (
             dat[fet] != -1
         ).all(), f'Found "-1" in feature after supposedly replacing all "-1": {fet}'
-    assert not bad_fets, f'Features contain only "-1" ({len(bad_fets)}): {bad_fets}'
+    if assert_no_unknowns:
+        assert not bad_fets, f'Features contain only "-1" ({len(bad_fets)}): {bad_fets}'
+
+
+def replace_nonfinite(dat):
+    """
+    Convert all instances of inf to NaN.
+
+    Modifies the provided numpy array.
+    """
+    if not dat.shape[0]:
+        return
+    for fet in dat.dtype.names:
+        invalid = np.isinf(dat[fet])
+        dat[fet][invalid] = float("NaN")
+        assert (
+            np.logical_not(np.isinf(dat[fet]))
+        ).all(), f'Found "inf" in feature after supposedly replacing all "inf": {fet}'
 
 
 def extract_fets(dat, split_name, net):

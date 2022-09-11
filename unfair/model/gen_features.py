@@ -1025,24 +1025,33 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
     if previous_fets is None:
         previous_fets = np.full(1, -1, dtype=fets.dtype)
 
-    fets[features.INTERARR_TIME_FET][1:] = (
-        fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
-    )
-    # Change any interarrival times of 0 to 1. This is technically incorrect. An
-    # interarrival time of 0 us just means that the timestamping is not fine-grained
-    # enough. It means that the instantaneous throughput is greater than ~12 Gbps. But
-    # that's basically infinite in terms of our context of ~100 Mbps, so just limiting
-    # it to 12 Gbps (by setting interarrival time to 1 us) seems fine.
-    fets[features.INTERARR_TIME_FET][fets[features.INTERARR_TIME_FET] == 0] = 1
-    fets[features.INV_INTERARR_TIME_FET][1:] = np.divide(
-        8 * 1e6 * fets[features.WIRELEN_FET][1:], fets[features.INTERARR_TIME_FET][1:]
-    )
-
-    fets[features.RTT_RATIO_FET] = np.divide(fets[features.RTT_FET], min_rtt_us)
-
-    fets[features.LOSS_RATE_FET] = fets[features.PACKETS_LOST_FET] / (
-        fets[features.PACKETS_LOST_FET] + 1
-    )
+    if features.INTERARR_TIME_FET in fets.dtype.names:
+        fets[features.INTERARR_TIME_FET][1:] = (
+            fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
+        )
+        # Change any interarrival times of 0 to 1. This is technically incorrect. An
+        # interarrival time of 0 us just means that the timestamping is not fine-grained
+        # enough. It means that the instantaneous throughput is greater than ~12 Gbps.
+        # But that's basically infinite in terms of our context of ~100 Mbps, so just
+        # limiting it to 12 Gbps (by setting interarrival time to 1 us) seems fine.
+        fets[features.INTERARR_TIME_FET][fets[features.INTERARR_TIME_FET] == 0] = 1
+    if features.INV_INTERARR_TIME_FET in fets.dtype.names:
+        fets[features.INV_INTERARR_TIME_FET][1:] = np.divide(
+            8 * 1e6 * fets[features.WIRELEN_FET][1:],
+            fets[features.INTERARR_TIME_FET][1:],
+        )
+    if features.RTT_RATIO_FET in fets.dtype.names:
+        fets[features.RTT_RATIO_FET] = np.divide(fets[features.RTT_FET], min_rtt_us)
+    if features.LOSS_RATE_FET in fets.dtype.names:
+        fets[features.LOSS_RATE_FET] = fets[features.PACKETS_LOST_FET] / (
+            fets[features.PACKETS_LOST_FET] + 1
+        )
+    if features.MIN_RTT_FET in fets.dtype.names:
+        fets[features.MIN_RTT_FET] = min_rtt_us
+    if features.SQRT_LOSS_RATE_FET in fets.dtype.names:
+        np.reciprocal(
+            np.sqrt(fets[features.LOSS_RATE_FET]), out=fets[features.SQRT_LOSS_RATE_FET]
+        )
 
     # EWMA metrics.
     for (metric, _), alpha in itertools.product(features.EWMA_FETS, features.ALPHAS):
@@ -1051,12 +1060,14 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
         if metric not in fets.dtype.names:
             continue
 
+        # For all metrics other than the Mathis model, fill in the 0th entry.
         if not metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
                 previous_fets[metric],
                 fets[0][features.parse_ewma_metric(metric)[0]],
                 alpha,
             )
+
         if metric.startswith(features.INTERARR_TIME_FET):
             # Improve cache locality and minimize branch checks by pushing this look
             # inwards.
@@ -1083,6 +1094,11 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
             for j in range(1, num_pkts):
                 fets[j][metric] = utils.safe_update_ewma(
                     fets[j - 1][metric], fets[j][features.LOSS_RATE_FET], alpha
+                )
+        elif metric.startswith(features.SQRT_LOSS_RATE_FET):
+            for j in range(1, num_pkts):
+                fets[j][metric] = utils.safe_update_ewma(
+                    fets[j - 1][metric], fets[j][features.SQRT_LOSS_RATE_FET], alpha
                 )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
@@ -1193,6 +1209,13 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
             )
             new = utils.safe_div(
                 win_losses, win_losses + (num_pkts - 1 - win_start_idx)
+            )
+        elif metric.startswith(features.SQRT_LOSS_RATE_FET):
+            new = utils.safe_div(
+                1,
+                utils.safe_sqrt(
+                    fets[-1][features.make_win_metric(features.LOSS_RATE_FET, win)]
+                ),
             )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             new = utils.safe_mathis_tput(
