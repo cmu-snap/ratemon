@@ -113,7 +113,7 @@ def parse_opened_exp(
 
     late_flows_port = max(flw[4] for flw in params["flowsets"])
     late_flws = [
-        flw for flw in flws if flw[1] == late_flows_port if len(flw_to_pkts[flw]) > 0
+        flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
     if len(late_flws) == 0:
         logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
@@ -146,32 +146,16 @@ def parse_opened_exp(
     # zipped_arr_times = zipped_arr_times[idx:]
     # zipped_dat = zipped_dat[idx:]
 
-    flw_to_tput_bps = {
-        flw: 0 if len(pkts) == 0 else utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
-        for flw, pkts in flw_to_pkts.items()
-    }
-
-    jfi = sum(flw_to_tput_bps.values()) ** 2 / (
-        len(flw_to_tput_bps) * sum(bits**2 for bits in flw_to_tput_bps.values())
+    jfi = get_jfi(flw_to_pkts)
+    overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
+    fair_flows_util = get_avg_util(
+        exp.bw_bps,
+        {flw: pkts for flw, pkts in flw_to_pkts if flw[1] != late_flows_port},
     )
-
-    # Calculate the average combined throughput of all flows by dividing the total bits
-    # received by all flows by the time difference between when the first flow started
-    # and when the last flow finished.
-    bits_times = (
-        (
-            utils.safe_sum(pkts[features.WIRELEN_FET], 0, len(pkts) - 1),
-            utils.safe_min_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
-            utils.safe_max_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
-        )
-        for pkts in flw_to_pkts.values()
-        if len(pkts) > 0
+    unfair_flows_util = get_avg_util(
+        exp.bw_bps,
+        {flw: pkts for flw, pkts in flw_to_pkts if flw[1] == late_flows_port},
     )
-    bits, start_times_us, end_times_us = zip(*bits_times)
-    avg_total_tput_bps = (
-        sum(bits) * 8 / ((max(end_times_us) - min(start_times_us)) / 1e6)
-    )
-    avg_util = avg_total_tput_bps / exp.bw_bps
 
     # # Save the results.
     # if path.exists(out_flp):
@@ -182,7 +166,37 @@ def parse_opened_exp(
     #         out_flp,
     #         **{str(k + 1): v for k, v in enumerate(flw_results[flw] for flw in flws)},
     #     )
-    return exp, jfi, avg_util
+    return exp, jfi, overall_util, fair_flows_util, unfair_flows_util
+
+
+def get_jfi(flw_to_pkts):
+    flw_to_tput_bps = {
+        flw: 0 if len(pkts) == 0 else utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
+        for flw, pkts in flw_to_pkts.items()
+    }
+    return sum(flw_to_tput_bps.values()) ** 2 / (
+        len(flw_to_tput_bps) * sum(bits**2 for bits in flw_to_tput_bps.values())
+    )
+
+
+def get_avg_util(bw_bps, flw_to_pkts):
+    # Calculate the average combined throughput of all flows by dividing the total bits
+    # received by all flows by the time difference between when the first flow started
+    # and when the last flow finished.
+    bytes_times = (
+        (
+            utils.safe_sum(pkts[features.WIRELEN_FET], 0, len(pkts) - 1),
+            utils.safe_min_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
+            utils.safe_max_win(pkts[features.ARRIVAL_TIME_FET], 0, len(pkts) - 1),
+        )
+        for pkts in flw_to_pkts.values()
+        if len(pkts) > 0
+    )
+    byts, start_times_us, end_times_us = zip(*bytes_times)
+    avg_total_tput_bps = (
+        sum(byts) * 8 / ((max(end_times_us) - min(start_times_us)) / 1e6)
+    )
+    return avg_total_tput_bps / bw_bps
 
 
 def main(args):
@@ -242,13 +256,9 @@ def main(args):
 
     # Dict mapping experiment to JFI.
     results = {
-        exp_jfi_util[0]: (exp_jfi_util[1], exp_jfi_util[2])
-        for exp_jfi_util in results
-        if (
-            isinstance(exp_jfi_util, tuple)
-            and exp_jfi_util[1] != -1
-            and exp_jfi_util[2] != -1
-        )
+        exp_results[0]: tuple(exp_results[1:])
+        for exp_results in results
+        if (isinstance(exp_results, tuple) and -1 not in exp_results[1:])
     }
     # Experiments in which the unfairness monitor was enabled.
     enabled = {exp for exp in results.keys() if exp.use_unfairness_monitor}
@@ -275,17 +285,33 @@ def main(args):
             )
             continue
 
-        jfi_disabled, util_disabled = results[target_disabled_exp]
-        jfi_enabled, util_enabled = results[enabled_exp]
+        (
+            jfi_disabled,
+            overall_util_disabled,
+            fair_flows_util_disabled,
+            unfair_flows_util_disabled,
+        ) = results[target_disabled_exp]
+        (
+            jfi_enabled,
+            overall_util_enabled,
+            fair_flows_util_enabled,
+            unfair_flows_util_enabled,
+        ) = results[enabled_exp]
 
         matched[enabled_exp] = (
             jfi_disabled,
             jfi_enabled,
             jfi_enabled - jfi_disabled,
             (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
-            util_disabled * 100,
-            util_enabled * 100,
-            (util_enabled - util_disabled) * 100,
+            overall_util_disabled * 100,
+            overall_util_enabled * 100,
+            (overall_util_enabled - overall_util_disabled) * 100,
+            fair_flows_util_disabled * 100,
+            fair_flows_util_enabled * 100,
+            (fair_flows_util_enabled - fair_flows_util_disabled) * 100,
+            unfair_flows_util_disabled * 100,
+            unfair_flows_util_enabled * 100,
+            (unfair_flows_util_enabled - unfair_flows_util_disabled) * 100,
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
@@ -297,14 +323,38 @@ def main(args):
         jfis_enabled,
         _,
         jfi_deltas_percent,
-        utils_disabled,
-        utils_enabled,
-        util_deltas_percent,
+        overall_utils_disabled,
+        overall_utils_enabled,
+        overall_util_deltas_percent,
+        fair_flows_utils_disabled,
+        fair_flows_utils_enabled,
+        fair_flows_util_deltas_percent,
+        unfair_flows_utils_disabled,
+        unfair_flows_utils_enabled,
+        unfair_flows_util_deltas_percent,
     ) = list(zip(*matched.values()))
 
     plot_hist(args, jfis_disabled, jfis_enabled, "JFI", "jfi_hist.pdf")
     plot_hist(
-        args, utils_disabled, utils_enabled, "link utilization (%)", "util_hist.pdf"
+        args,
+        overall_utils_disabled,
+        overall_utils_enabled,
+        "overall link utilization (%)",
+        "overall_util_hist.pdf",
+    )
+    plot_hist(
+        args,
+        fair_flows_utils_disabled,
+        fair_flows_utils_enabled,
+        '"fair" flows link utilization (%)',
+        "fair_flows_util_hist.pdf",
+    )
+    plot_hist(
+        args,
+        unfair_flows_utils_disabled,
+        unfair_flows_utils_enabled,
+        '"unfair" flows link utilization (%)',
+        "unfair_flows_util_hist.pdf",
     )
     plot_cdf(
         args,
@@ -318,19 +368,35 @@ def main(args):
     )
     plot_cdf(
         args,
-        [100 - x for x in utils_disabled],
-        [100 - x for x in utils_enabled],
+        [100 - x for x in overall_utils_disabled],
+        [100 - x for x in overall_utils_enabled],
         "unused link capacity (%)",
         100,
         "unused_util_cdf.pdf",
     )
     plot_cdf(
         args,
-        utils_disabled,
-        utils_enabled,
-        "link utilization (%)",
+        overall_utils_disabled,
+        overall_utils_enabled,
+        "overall link utilization (%)",
         100,
         "util_cdf.pdf",
+    )
+    plot_cdf(
+        args,
+        fair_flows_utils_disabled,
+        fair_flows_utils_enabled,
+        '"fair" flows link utilization (%)',
+        100,
+        "fair_flows_util_cdf.pdf",
+    )
+    plot_cdf(
+        args,
+        unfair_flows_utils_disabled,
+        unfair_flows_utils_enabled,
+        '"unfair" flows link utilization (%)',
+        100,
+        "unfair_flows_util_cdf.pdf",
     )
 
     logging.info(
@@ -355,15 +421,38 @@ def main(args):
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
-        np.mean(util_deltas_percent),
-        np.std(util_deltas_percent),
-        np.var(util_deltas_percent),
+        np.mean(overall_util_deltas_percent),
+        np.std(overall_util_deltas_percent),
+        np.var(overall_util_deltas_percent),
     )
     logging.info(
         "Overall average link utilization with monitor enabled: %.4f %%",
-        np.mean(utils_enabled),
+        np.mean(overall_utils_enabled),
     )
-
+    logging.info(
+        (
+            '\n"Fair" flows link utilization change '
+            "--- higher is better, want to be >= 0%%:\n"
+            "\tAvg: %.4f %%\n"
+            "\tStddev: %.4f %%\n"
+            "\tVar: %.4f %%"
+        ),
+        np.mean(fair_flows_util_deltas_percent),
+        np.std(fair_flows_util_deltas_percent),
+        np.var(fair_flows_util_deltas_percent),
+    )
+    logging.info(
+        (
+            '\n"Unfair" flows link utilization change '
+            "--- higher is better, want to be >= 0%%:\n"
+            "\tAvg: %.4f %%\n"
+            "\tStddev: %.4f %%\n"
+            "\tVar: %.4f %%"
+        ),
+        np.mean(unfair_flows_util_deltas_percent),
+        np.std(unfair_flows_util_deltas_percent),
+        np.var(unfair_flows_util_deltas_percent),
+    )
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
 
