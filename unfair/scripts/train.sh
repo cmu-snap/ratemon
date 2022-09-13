@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eou pipefail
+
 if [ "$#" -ne 16 ]; then
     echo "Illegal number of parameters."
     echo "Usage: ./train.sh <model tag> <train_data_dir> <full_models_dir>" \
