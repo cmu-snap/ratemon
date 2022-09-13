@@ -402,10 +402,11 @@ def main(args):
     logging.info(
         (
             "\nOverall JFI change (percent) --- higher is better:\n"
-            "\tAvg: %.4f %%\n"
+            "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
+        "+" if np.mean(jfi_deltas_percent) > 0 else "",
         np.mean(jfi_deltas_percent),
         np.std(jfi_deltas_percent),
         np.var(jfi_deltas_percent),
@@ -417,10 +418,11 @@ def main(args):
         (
             "\nOverall link utilization change "
             "--- higher is better, want to be >= 0%%:\n"
-            "\tAvg: %.4f %%\n"
+            "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
+        "+" if np.mean(overall_util_deltas_percent) > 0 else "",
         np.mean(overall_util_deltas_percent),
         np.std(overall_util_deltas_percent),
         np.var(overall_util_deltas_percent),
@@ -433,10 +435,11 @@ def main(args):
         (
             '\n"Fair" flows link utilization change '
             "--- higher is better, want to be >= 0%%:\n"
-            "\tAvg: %.4f %%\n"
+            "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
+        "+" if np.mean(fair_flows_util_deltas_percent) > 0 else "",
         np.mean(fair_flows_util_deltas_percent),
         np.std(fair_flows_util_deltas_percent),
         np.var(fair_flows_util_deltas_percent),
@@ -445,10 +448,11 @@ def main(args):
         (
             '\n"Unfair" flows link utilization change '
             "--- higher is better, want to be >= 0%%:\n"
-            "\tAvg: %.4f %%\n"
+            "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
+        "+" if np.mean(unfair_flows_util_deltas_percent) > 0 else "",
         np.mean(unfair_flows_util_deltas_percent),
         np.std(unfair_flows_util_deltas_percent),
         np.var(unfair_flows_util_deltas_percent),
