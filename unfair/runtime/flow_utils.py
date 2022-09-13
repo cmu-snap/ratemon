@@ -62,7 +62,7 @@ class Flow:
     Must acquire self.lock before accessing members.
     """
 
-    def __init__(self, fourtuple, loss_event_windows):
+    def __init__(self, fourtuple, loss_event_windows, start_time_us):
         """Set up data structures for a flow."""
         self.ingress_lock = threading.RLock()
         # self.inference_flag = multiprocessing.Value(typecode_or_type="i", lock=True)
@@ -70,6 +70,9 @@ class Flow:
         self.flowkey = FlowKey(*fourtuple)
         self.incoming_packets = []
         self.sent_tsvals = {}
+        # The time at which this flow started. Used to determine the relative packet
+        # arrival time.
+        self.start_time_us = start_time_us
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize

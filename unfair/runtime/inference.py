@@ -41,8 +41,10 @@ def predict(net, in_fets, debug=False):
     return [defaults.Class(pred) for pred in preds]
 
 
-def populate_features(net, flowkey, min_rtt_us, fets, prev_fets):
-    gen_features.parse_received_packets(flowkey, min_rtt_us, fets, prev_fets)
+def populate_features(net, flowkey, start_time_us, min_rtt_us, fets, prev_fets):
+    gen_features.parse_received_packets(
+        flowkey, start_time_us, min_rtt_us, fets, prev_fets
+    )
     # Remove unneeded features that were added as dependencies for the requested
     # features. Only run prediction on the last packet.
     # in_fets = fets[-1:][list(net.in_spc)]
@@ -354,7 +356,13 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 opcode, fourtuple = val[:2]
                 flowkey = flow_utils.FlowKey(*fourtuple)
                 if opcode == "inference":
-                    pkts, packets_lost, min_rtt_us, win_to_loss_event_rate = val[2:]
+                    (
+                        pkts,
+                        packets_lost,
+                        start_time_us,
+                        min_rtt_us,
+                        win_to_loss_event_rate,
+                    ) = val[2:]
                 elif opcode == "remove":
                     logging.info("Inference process: Removing flow %s", flowkey)
                     if flowkey in flow_to_rwnd:
@@ -379,6 +387,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                     in_fets = populate_features(
                         net,
                         flowkey,
+                        start_time_us,
                         min_rtt_us,
                         all_fets,
                         flow_to_prev_features.get(flowkey),

@@ -995,18 +995,20 @@ def parse_opened_exp(
     return smallest_safe_win
 
 
-def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
+def parse_received_packets(flw, start_time_us, min_rtt_us, fets, previous_fets=None):
     """Generate features for the inference runtime.
 
-    Requires the existing minimum RTT (microseconds).
+    Requires the absolute start time of the flow (microseconds measured against the
+    same epoch as the packet timestamps in ARRIVAL_TIME_FET) and the existing minimum
+    RTT (microseconds).
 
     In contrast to parse_opened_exp(), this function only has access to receiver
     information, only processes a single flow, and only returns complete features for
     the last packet. Features that cannot be or are willfully not calculated
-    are set to -1.
+    are set to -1. The results may contain NaN or Inf values.
 
-    Returns a tuple containing a structured numpy array with the resulting features and
-    the updated minimum RTT (microseconds).
+    Returns a tuple containing a structured numpy array with the resulting features,
+    along with the updated minimum RTT (microseconds).
     """
     num_pkts = len(fets)
     assert num_pkts, f"No packets provided for flow: {flw}"
@@ -1018,8 +1020,8 @@ def parse_received_packets(flw, min_rtt_us, fets, previous_fets=None):
         (fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1])
         >= 0
     ).all(), f"Packet arrival times are not monotonically increasing for flow: {flw}"
-    # Transform absolute times into relative times to make life easier.
-    fets[features.ARRIVAL_TIME_FET] -= np.min(fets[features.ARRIVAL_TIME_FET])
+    # Transform absolute times into relative times from the start of the flow.
+    fets[features.ARRIVAL_TIME_FET] -= start_time_us
     assert (fets[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
 
     if previous_fets is None:

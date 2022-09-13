@@ -103,7 +103,7 @@ def receive_packet_pcapy(header, packet):
         if fourtuple in FLOWS:
             flow = FLOWS[fourtuple]
         else:
-            flow = flow_utils.Flow(fourtuple, LOSS_EVENT_INTERVALS)
+            flow = flow_utils.Flow(fourtuple, LOSS_EVENT_INTERVALS, time_us)
             FLOWS[fourtuple] = flow
 
     if tsecr is None or tsval is None:
@@ -295,6 +295,7 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                             fourtuple,
                             flow.incoming_packets,
                             packets_lost,
+                            flow.start_time_us,
                             flow.min_rtt_us,
                             win_to_loss_event_rate,
                         ),
