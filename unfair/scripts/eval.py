@@ -16,7 +16,7 @@ import numpy as np
 from unfair.model import defaults, features, gen_features, utils
 
 
-def plot_cdf(args, disabled, enabled, x_label, filename):
+def plot_cdf(args, disabled, enabled, x_label, x_max, filename):
     count, bins_count = np.histogram(disabled, bins=len(disabled))
     plt.plot(
         bins_count[1:],
@@ -37,6 +37,7 @@ def plot_cdf(args, disabled, enabled, x_label, filename):
 
     plt.xlabel(x_label)
     plt.ylabel("CDF")
+    plt.xlim(0, x_max)
     plt.title(f"CDF of {x_label}, with and without unfairness monitor")
     plt.legend()
     plt.grid(True)
@@ -312,6 +313,7 @@ def main(args):
         jfis_disabled,
         jfis_enabled,
         "JFI",
+        1.0,
         "jfi_cdf.pdf",
     )
     plot_cdf(
@@ -319,6 +321,7 @@ def main(args):
         [100 - x for x in utils_disabled],
         [100 - x for x in utils_enabled],
         "unused link capacity (%)",
+        100,
         "unused_util_cdf.pdf",
     )
     plot_cdf(
@@ -326,6 +329,7 @@ def main(args):
         utils_disabled,
         utils_enabled,
         "link utilization (%)",
+        100,
         "util_cdf.pdf",
     )
 
