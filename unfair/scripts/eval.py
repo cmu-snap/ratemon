@@ -150,11 +150,11 @@ def parse_opened_exp(
     overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
     fair_flows_util = get_avg_util(
         exp.bw_bps,
-        {flw: pkts for flw, pkts in flw_to_pkts if flw[1] != late_flows_port},
+        {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] != late_flows_port},
     )
     unfair_flows_util = get_avg_util(
         exp.bw_bps,
-        {flw: pkts for flw, pkts in flw_to_pkts if flw[1] == late_flows_port},
+        {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
     )
 
     # # Save the results.
