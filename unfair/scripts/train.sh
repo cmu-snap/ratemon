@@ -45,12 +45,10 @@ printf "\tfeature_selection_percent: %s\n" "$feature_selection_percent"
 printf "\tnum_features_to_pick: %s\n" "$num_features_to_pick"
 printf "\tvenv_dir: %s\n" "$venv_dir"
 
+set +u
 # shellcheck disable=SC1091
 source "$venv_dir/bin/activate"
-
-# Put this here because 'source "$venv_dir/bin/activate"' will not work if it
-# happens after this.
-set -eou pipefail
+set -u
 
 unfair_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/../.."
 pushd /tmp
@@ -105,7 +103,7 @@ bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' 
     --validation-tolerance='$val_tol' \
     --n-iter-no-change='$n_iter_no_change' \
     --early-stop \
-    --selected-features='$(ls "$full_models_dir"/model_*-"$model_tag"-selected_features.json)'" ||
+    --selected-features='$(ls -t "$full_models_dir"/model_*-"$model_tag"-selected_features.json | head -n 1)'" ||
     {
         echo "Error encountered while training with selected features," \
             "quitting!"
