@@ -1162,17 +1162,19 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
                 for fet in features.get_names(features.ALL_KNOWABLE_FETS)
                 if (
                     # There was a bug in PACKETS_LOST_TOTAL_FET.
-                    (fet != features.PACKETS_LOST_TOTAL_FET) and
-                        (fet != features.PAYLOAD_FET) and
-                        (fet != features.WIRELEN_FET)
+                    (fet != features.PACKETS_LOST_TOTAL_FET)
+                    and (fet != features.PAYLOAD_FET)
+                    and (fet != features.WIRELEN_FET)
+                    # Only allow curRTT features with windows <= 16 minRTT.
+                    and ("curRtt" not in fet or features.parse_win_metric(fet)[1] <= 16)
                     and (
                         # Allow regular features.
                         ("ewma" not in fet and "windowed" not in fet)
                         # Allow EWMA features.
                         or "ewma" in fet
-                        # Get rid of features with large windows...these are not practical.
-                        # Drop windowed features with windows > 128 minRTT.
-                        or features.parse_win_metric(fet)[1] <= 128
+                        # Get rid of features with large windows...these are not
+                        # practical. Drop windowed features with windows > 32 minRTT.
+                        or features.parse_win_metric(fet)[1] <= 32
                         # Get rid of features with known mistakes.
                         # and (
                         #     not fet.startswith(features.MATHIS_TPUT_LOSS_RATE_FET)
