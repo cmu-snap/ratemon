@@ -1165,6 +1165,9 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
                     (fet != features.PACKETS_LOST_TOTAL_FET)
                     and (fet != features.PAYLOAD_FET)
                     and (fet != features.WIRELEN_FET)
+                    # Do not allow loss rate without history, since this is almost always 0.
+                    and (fet != features.LOSS_EVENT_RATE_FET)
+                    and (fet != features.SQRT_LOSS_RATE_FET)
                     # Only allow curRTT features with windows between 4-16 curRTT.
                     and (
                         "curRtt" not in fet

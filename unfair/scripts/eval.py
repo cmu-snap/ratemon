@@ -601,13 +601,25 @@ def main(args):
     group_and_box_plot(
         args,
         matched,
-        lambda exp: exp.bw_bps,
+        lambda exp: exp.bw_Mbps,
         lambda result: result[5],
-        lambda x: int(x / 1e6),
+        lambda x: x,
         "bandwidth (Mbps)",
         "utilization (%)",
         100,
         "bandwidth_vs_util.pdf",
+        num_buckets=10,
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.target_per_flow_bw_Mbps,
+        lambda result: result[5],
+        lambda x: x,
+        "fair rate (Mbps)",
+        "utilization (%)",
+        100,
+        "fair_rate_vs_util.pdf",
         num_buckets=10,
     )
     group_and_box_plot(
