@@ -1165,8 +1165,11 @@ class HistGbdtSklearnWrapper(SvmSklearnWrapper):
                     (fet != features.PACKETS_LOST_TOTAL_FET)
                     and (fet != features.PAYLOAD_FET)
                     and (fet != features.WIRELEN_FET)
-                    # Only allow curRTT features with windows <= 16 minRTT.
-                    and ("curRtt" not in fet or features.parse_win_metric(fet)[1] <= 16)
+                    # Only allow curRTT features with windows between 4-16 curRTT.
+                    and (
+                        "curRtt" not in fet
+                        or 4 <= features.parse_win_metric(fet)[1] <= 16
+                    )
                     and (
                         # Allow regular features.
                         ("ewma" not in fet and "windowed" not in fet)
