@@ -576,7 +576,7 @@ def main(args):
     group_and_box_plot(
         args,
         matched,
-        lambda exp: exp.cca_1_flows,
+        lambda exp: exp.cca_1_flws,
         lambda result: result[5],
         lambda x: x,
         "Incumbent flows",
