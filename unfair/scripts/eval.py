@@ -99,7 +99,7 @@ def plot_box(args, data, x_ticks, x_label, y_label, filename):
     plt.xticks(
         range(1, len(x_ticks) + 1),
         x_ticks,
-        rotation=0 if len(x_ticks) < 10 else "vertical",
+        rotation=0 if len(x_ticks) <= 10 else "vertical",
     )
     plt.title(f"Boxplot of {y_label} vs. {x_label}")
     plt.grid(True)
@@ -405,7 +405,7 @@ def main(args):
     plot_box(
         args,
         bandwidths_to_util_values,
-        bandwidths_to_util_keys,
+        [int(x / 1e6) for x in bandwidths_to_util_keys],
         "Bandwidth (Mbps)",
         "Utilization (%)",
         "bandwidth_vs_util.pdf",
@@ -413,8 +413,8 @@ def main(args):
     plot_box(
         args,
         rtts_to_util_values,
-        rtts_to_util_keys,
-        "RTT (us)",
+        [int(x / 1e3) for x in rtts_to_util_keys],
+        "RTT (ms)",
         "Utilization (%)",
         "rtt_vs_util.pdf",
     )
