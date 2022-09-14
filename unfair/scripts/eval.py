@@ -242,6 +242,47 @@ def get_avg_util(bw_bps, flw_to_pkts):
     return avg_total_tput_bps / bw_bps
 
 
+def group_and_box_plot(
+    args,
+    matched,
+    category_selector,
+    output_selector,
+    xticks_transformer,
+    x_label,
+    y_label,
+    filename,
+):
+    # Get a list of the categories, and a list of lists of the category values.
+    categories, values = zip(
+        *sorted(
+            {
+                # Second, extract the value for all the exps in each category.
+                category: sorted(
+                    [
+                        output_selector(matched[exp])
+                        for exp in matched.keys()
+                        # Only select experiments for this category.
+                        if category_selector(exp) == category
+                    ]
+                )
+                for category in {
+                    # First, determine the categories.
+                    category_selector(exp)
+                    for exp in matched.keys()
+                }
+            }.items()
+        )
+    )
+    plot_box(
+        args,
+        values,
+        xticks_transformer(categories),
+        x_label,
+        y_label,
+        filename,
+    )
+
+
 def main(args):
     log_flp = path.join(args.out_dir, "output.log")
     logging.basicConfig(
@@ -359,81 +400,6 @@ def main(args):
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
-
-    # Break down based on experiment parameters.
-    bandwidths = {exp.bw_bps for exp in matched.keys()}
-    rtts = {exp.rtt_us for exp in matched.keys()}
-    q_sizes = {get_queue_mult(exp) for exp in matched.keys()}
-    flows_1 = {exp.cca_1_flws for exp in matched.keys()}
-    bandwidths = {
-        bandwidth: [exp for exp in matched.keys() if exp.bw_bps == bandwidth]
-        for bandwidth in bandwidths
-    }
-    rtts = {rtt: [exp for exp in matched.keys() if exp.rtt_us == rtt] for rtt in rtts}
-    q_sizes = {
-        q_size: [exp for exp in matched.keys() if get_queue_mult(exp) == q_size]
-        for q_size in q_sizes
-    }
-    flows_1 = {
-        flows: [exp for exp in matched.keys() if exp.cca_1_flws == flows]
-        for flows in flows_1
-    }
-    bandwidths_to_util = {
-        bandwidth: sorted([matched[exp][5] for exp in exps])
-        for bandwidth, exps in bandwidths.items()
-    }
-    rtts_to_util = {
-        rtt: sorted([matched[exp][5] for exp in exps]) for rtt, exps in rtts.items()
-    }
-    q_sizes_to_util = {
-        q_size: sorted([matched[exp][5] for exp in exps])
-        for q_size, exps in q_sizes.items()
-    }
-    flows_to_util = {
-        flows: sorted([matched[exp][5] for exp in exps])
-        for flows, exps in flows_1.items()
-    }
-
-    bandwidths_to_util_keys, bandwidths_to_util_values = zip(
-        *sorted(bandwidths_to_util.items())
-    )
-    rtts_to_util_keys, rtts_to_util_values = zip(*sorted(rtts_to_util.items()))
-    q_sizes_to_util_keys, q_sizes_to_util_values = zip(*sorted(q_sizes_to_util.items()))
-    flows_to_util_keys, flows_to_util_values = zip(*sorted(flows_to_util.items()))
-
-    # Plot the results.
-    plot_box(
-        args,
-        bandwidths_to_util_values,
-        [int(x / 1e6) for x in bandwidths_to_util_keys],
-        "Bandwidth (Mbps)",
-        "Utilization (%)",
-        "bandwidth_vs_util.pdf",
-    )
-    plot_box(
-        args,
-        rtts_to_util_values,
-        [int(x / 1e3) for x in rtts_to_util_keys],
-        "RTT (ms)",
-        "Utilization (%)",
-        "rtt_vs_util.pdf",
-    )
-    plot_box(
-        args,
-        q_sizes_to_util_values,
-        q_sizes_to_util_keys,
-        "Queue size (x BDP)",
-        "Utilization (%)",
-        "q_size_vs_util.pdf",
-    )
-    plot_box(
-        args,
-        flows_to_util_values,
-        flows_to_util_keys,
-        "Number of incumbent flows",
-        "Utilization (%)",
-        "flows_vs_util.pdf",
-    )
 
     logging.info("Matched experiments: %d", len(matched))
     (
@@ -575,6 +541,49 @@ def main(args):
         np.std(unfair_flows_util_deltas_percent),
         np.var(unfair_flows_util_deltas_percent),
     )
+
+    # Break down utilization based on experiment parameters.
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.bw_bps,
+        lambda result: result[5],
+        lambda x: int(x / 1e6),
+        "Bandwidth (Mbps)",
+        "Utilization (%)",
+        "bandwidth_vs_util.pdf",
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.rtt_us,
+        lambda result: result[5],
+        lambda x: int(x / 1e3),
+        "RTT (ms)",
+        "Utilization (%)",
+        "rtt_vs_util.pdf",
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        get_queue_mult,
+        lambda result: result[5],
+        lambda x: x,
+        "Queue size (x BDP)",
+        "Utilization (%)",
+        "queue_size_vs_util.pdf",
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.cca_1_flows,
+        lambda result: result[5],
+        lambda x: x,
+        "Incumbent flows",
+        "Utilization (%)",
+        "incumbent_flows_vs_util.pdf",
+    )
+
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
 
