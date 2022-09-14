@@ -272,7 +272,7 @@ def group_and_box_plot(
         max_category = max(categories)
         delta = (max_category - min_category) / num_buckets
         category_to_values = {
-            f"[{bucket_start}-{bucket_end})": [
+            f"[{bucket_start:.1f}-{bucket_end:.1f})": [
                 # Look through all the categories and grab the values of any category
                 # that is in this bucket.
                 value
