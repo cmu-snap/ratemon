@@ -80,18 +80,11 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def plot_box(args, data, x_ticks, x_label, y_label, filename):
+def plot_box(args, data, x_ticks, x_label, y_label, filename, rotate):
     """
     Make a box plot of the JFI or utilization over some experiment variable like number
     of flows.
     """
-
-    # fig = plt.figure(figsize =(10, 7))
-
-    # fig7, ax7 = plt.subplots()
-    # ax7.set_title('Multiple Samples with Different sizes')
-    # ax7.boxplot(data)
-
     plt.boxplot(data)
 
     plt.xlabel(x_label)
@@ -99,7 +92,7 @@ def plot_box(args, data, x_ticks, x_label, y_label, filename):
     plt.xticks(
         range(1, len(x_ticks) + 1),
         x_ticks,
-        rotation=0 if len(x_ticks) <= 10 else "vertical",
+        rotation=45 if rotate else 0,
     )
     plt.title(f"Boxplot of {y_label} vs. {x_label}")
     plt.grid(True)
@@ -279,7 +272,7 @@ def group_and_box_plot(
         max_category = max(categories)
         delta = (max_category - min_category) / num_buckets
         category_to_values = {
-            f"{bucket_start:.2f}-{bucket_end:.2f}": [
+            f"[{bucket_start}-{bucket_end})": [
                 # Look through all the categories and grab the values of any category
                 # that is in this bucket.
                 value
@@ -302,18 +295,11 @@ def group_and_box_plot(
     categories, values = zip(
         *sorted(
             category_to_values.items(),
-            key=lambda x: float(x[0].split("-")[0]) if do_buckets else x,
+            key=lambda x: float(x[0].split("-")[0].strip("[")) if do_buckets else x[0],
         )
     )
 
-    plot_box(
-        args,
-        values,
-        categories,
-        x_label,
-        y_label,
-        filename,
-    )
+    plot_box(args, values, categories, x_label, y_label, filename, rotate=do_buckets)
 
 
 def main(args):
