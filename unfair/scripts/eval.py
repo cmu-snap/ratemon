@@ -574,6 +574,7 @@ def main(args):
         lambda x: int(x / 1e6),
         "Bandwidth (Mbps)",
         "Utilization (%)",
+        100,
         "bandwidth_vs_util.pdf",
         num_buckets=10,
     )
@@ -585,6 +586,7 @@ def main(args):
         lambda x: int(x / 1e3),
         "RTT (ms)",
         "Utilization (%)",
+        100,
         "rtt_vs_util.pdf",
         num_buckets=10,
     )
@@ -596,6 +598,7 @@ def main(args):
         lambda x: x,
         "Queue size (x BDP)",
         "Utilization (%)",
+        100,
         "queue_size_vs_util.pdf",
         num_buckets=10,
     )
@@ -607,6 +610,7 @@ def main(args):
         lambda x: x,
         "Incumbent flows",
         "Utilization (%)",
+        100,
         "incumbent_flows_vs_util.pdf",
         num_buckets=10,
     )
