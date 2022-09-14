@@ -675,6 +675,18 @@ def main(args):
     group_and_box_plot(
         args,
         matched,
+        lambda exp: exp.target_per_flow_bw_Mbps,
+        lambda result: result[1],
+        lambda x: x,
+        "fair rate (Mbps)",
+        "JFI",
+        1,
+        "fair_rate_vs_jfi.pdf",
+        num_buckets=10,
+    )
+    group_and_box_plot(
+        args,
+        matched,
         lambda exp: exp.rtt_us,
         lambda result: result[1],
         lambda x: int(x / 1e3),
