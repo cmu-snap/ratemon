@@ -615,6 +615,56 @@ def main(args):
         num_buckets=10,
     )
 
+    # Break down JFI based on experiment parameters.
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.bw_bps,
+        lambda result: result[1],
+        lambda x: int(x / 1e6),
+        "Bandwidth (Mbps)",
+        "JFI",
+        1,
+        "bandwidth_vs_jfi.pdf",
+        num_buckets=10,
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.rtt_us,
+        lambda result: result[1],
+        lambda x: int(x / 1e3),
+        "RTT (ms)",
+        "JFI",
+        1,
+        "rtt_vs_jfi.pdf",
+        num_buckets=10,
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        get_queue_mult,
+        lambda result: result[1],
+        lambda x: x,
+        "Queue size (x BDP)",
+        "JFI",
+        1,
+        "queue_size_vs_jfi.pdf",
+        num_buckets=10,
+    )
+    group_and_box_plot(
+        args,
+        matched,
+        lambda exp: exp.cca_1_flws,
+        lambda result: result[1],
+        lambda x: x,
+        "Incumbent flows",
+        "JFI",
+        1,
+        "incumbent_flows_vs_jfi.pdf",
+        num_buckets=10,
+    )
+
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
 
