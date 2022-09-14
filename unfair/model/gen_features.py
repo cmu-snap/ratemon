@@ -1260,6 +1260,8 @@ def parse_exp(
 ):
     """Lock, untar, and parse an experiment."""
     exp = utils.Exp(exp_flp)
+    # Create output directory if it does not already exist.
+    os.makedirs(out_dir, exist_ok=True)
     out_flp = path.join(out_dir, f"{exp.name}.npz")
     with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
         if locked and exp_dir is not None:
