@@ -347,7 +347,7 @@ def main(args):
     bandwidths = {exp.bw_bps for exp in matched.keys()}
     rtts = {exp.rtt_us for exp in matched.keys()}
     q_sizes = {exp.queue_bdp for exp in matched.keys()}
-    flows_1 = {exp.cca_1_flows for exp in matched.keys()}
+    flows_1 = {exp.cca_1_flws for exp in matched.keys()}
     bandwidths = {
         bandwidth: [exp for exp in matched.keys() if exp.bw_bps == bandwidth]
         for bandwidth in bandwidths
@@ -358,7 +358,7 @@ def main(args):
         for q_size in q_sizes
     }
     flows_1 = {
-        flows: [exp for exp in matched.keys() if exp.cca_1_flows == flows]
+        flows: [exp for exp in matched.keys() if exp.cca_1_flws == flows]
         for flows in flows_1
     }
     bandwidths_to_util = {
