@@ -449,7 +449,12 @@ def main(args):
     logging.info(
         "Matched experiments: %d\n%s",
         len(matched),
-        "\n\t".join([f"{exp.name}: {vals}" for exp, vals in matched.items()]),
+        "\n\t".join(
+            [
+                f"{exp.name}: Overall util (enabled): {vals[5]:.2f} %"
+                for exp, vals in matched.items()
+            ]
+        ),
     )
 
     (
