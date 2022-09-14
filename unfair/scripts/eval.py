@@ -84,6 +84,7 @@ def plot_box(args, data, x_ticks, x_label, y_label, filename):
 
     plt.xlabel(x_label)
     plt.ylabel(y_label)
+    plt.xticks(range(1, len(x_ticks) + 1), x_ticks)
     plt.title(f"Boxplot of {y_label} vs. {x_label}")
     plt.grid(True)
     plt.tight_layout()
@@ -378,11 +379,11 @@ def main(args):
     }
 
     bandwidths_to_util_keys, bandwidths_to_util_values = zip(
-        *bandwidths_to_util.items()
+        *sorted(bandwidths_to_util.items())
     )
-    rtts_to_util_keys, rtts_to_util_values = zip(*rtts_to_util.items())
-    q_sizes_to_util_keys, q_sizes_to_util_values = zip(*q_sizes_to_util.items())
-    flows_to_util_keys, flows_to_util_values = zip(*flows_to_util.items())
+    rtts_to_util_keys, rtts_to_util_values = zip(*sorted(rtts_to_util.items()))
+    q_sizes_to_util_keys, q_sizes_to_util_values = zip(*sorted(q_sizes_to_util.items()))
+    flows_to_util_keys, flows_to_util_values = zip(*sorted(flows_to_util.items()))
 
     # Plot the results.
     plot_box(
