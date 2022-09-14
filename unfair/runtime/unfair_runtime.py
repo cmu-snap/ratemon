@@ -473,6 +473,13 @@ def parse_args():
         required=False,
         type=int,
     )
+    parser.add_argument(
+        "--smoothing-window",
+        default=0,
+        help="Run inference on this many packets from each flow, and smooth the results.",
+        required=False,
+        type=int,
+    )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
     args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)

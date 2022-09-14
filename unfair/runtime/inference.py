@@ -41,14 +41,31 @@ def predict(net, in_fets, debug=False):
     return [defaults.Class(pred) for pred in preds]
 
 
-def populate_features(net, flowkey, start_time_us, min_rtt_us, fets, prev_fets):
-    gen_features.parse_received_packets(
-        flowkey, start_time_us, min_rtt_us, fets, prev_fets
+def populate_features(
+    net, flowkey, start_time_us, min_rtt_us, fets, prev_fets, smoothing_window
+):
+    """
+    Populate the features for a flow.
+
+    Only packets in the smoothing window receive full features and are returned. The
+    smoothing window is always the last `smoothing_window` packets.
+    """
+    assert smoothing_window >= len(fets), (
+        f"Number of packets ({len(fets)}) must be at least as large "
+        f"as the smoothing window ({smoothing_window})."
     )
-    # Remove unneeded features that were added as dependencies for the requested
-    # features. Only run prediction on the last packet.
+    gen_features.parse_received_packets(
+        flowkey,
+        start_time_us,
+        min_rtt_us,
+        fets,
+        prev_fets,
+        win_metrics_start_idx=len(fets) - smoothing_window,
+    )
     # in_fets = fets[-1:][list(net.in_spc)]
-    in_fets = fets[-1:]  # [list(net.in_spc)]
+    # Only run prediction on enough packets to fill the smoothing window. Remove
+    # unneeded features that were added as dependencies for the requested features.
+    in_fets = fets[-smoothing_window:][list(net.in_spc)]
     # Replace -1's and with NaNs and convert to an unstructured numpy array.
     data.replace_unknowns(
         in_fets,
@@ -59,7 +76,7 @@ def populate_features(net, flowkey, start_time_us, min_rtt_us, fets, prev_fets):
     return in_fets
 
 
-def condense_labels(labels):
+def smooth(labels):
     """Combine multiple labels into a single label.
 
     For example, smooth the labels by selecting the average label.
@@ -339,6 +356,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
     logging.info("Inference ready!")
     packets_in_batch = 0
+    packets_covered_by_batch = 0
     batch_proc_time_s = 0
     batch = []
     batch_start_time_s = time.time()
@@ -383,7 +401,8 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                         pkts, dtype, packets_lost, win_to_loss_event_rate
                     )
                     # Populate the above numpy array with features and return a pruned
-                    # version containing only the model input features for the last packet.
+                    # version containing only the model input features the packets in
+                    # the smoothing window.
                     in_fets = populate_features(
                         net,
                         flowkey,
@@ -391,6 +410,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                         min_rtt_us,
                         all_fets,
                         flow_to_prev_features.get(flowkey),
+                        args.smoothing_window,
                     )
                 except AssertionError:
                     # Assertion errors mean this batch of packets violated some
@@ -418,8 +438,11 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                     raise exp
 
                 batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
-                logging.info("Adding flow %s to batch.", flowkey)
-                packets_in_batch += len(pkts)
+                logging.info(
+                    "Adding %d packets from flow %s to batch.", len(in_fets), flowkey
+                )
+                packets_in_batch += len(in_fets)
+                packets_covered_by_batch += len(pkts)
                 batch_proc_time_s += time.time() - features_start_time_s
 
             # If the batch is full, then run inference. Also run inference if it has been a
@@ -427,7 +450,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             # 1 second and the inference interval (if the inference interval is defined).
             batch_time_s = time.time() - batch_start_time_s
             if batch and (
-                len(batch) >= args.batch_size or batch_time_s > max_batch_time_s
+                packets_in_batch >= args.batch_size or batch_time_s > max_batch_time_s
             ):
                 logging.info("Running inference on a batch of %d flow(s).", len(batch))
                 inference_start_time_s = time.time()
@@ -469,7 +492,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                         )
                         inference_flags[fourtuple].value = 0
 
-                pps = packets_in_batch / batch_proc_time_s
+                pps = packets_covered_by_batch / batch_proc_time_s
                 logging.info(
                     "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
                     batch_proc_time_s * 1e3,
@@ -479,6 +502,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
                 batch = []
                 packets_in_batch = 0
+                packets_covered_by_batch = 0
                 batch_proc_time_s = 0
                 batch_start_time_s = time.time()
             else:
@@ -500,18 +524,47 @@ def batch_inference(
     flow_to_decisions,
     flow_to_rwnd,
 ):
+    """
+    Run inference on a batch of flows.
+
+    Note that each flow will occur only once in this batch due to inference_flags
+    control.
+    """
+    num_pkts = sum(len(in_fets) for _, _, _, _, in_fets in batch)
+    # Ranges are inclusive.
+    flow_to_range = {}
+    running = 0
+    for fourtuple, _, _, _, in_fets in batch:
+        flow_to_range[fourtuple] = (running, running + len(in_fets))
+        running += len(in_fets)
+
     # Assemble the batch into a single numpy array.
-    batch_fets = np.empty(len(batch), dtype=batch[0][4].dtype)
-    for idx, (_, _, _, _, in_fets) in enumerate(batch):
-        batch_fets[idx] = in_fets
+    batch_fets = np.empty(num_pkts, dtype=batch[0][4].dtype)
+    for fourtuple, _, _, _, in_fets in batch:
+        start, end = flow_to_range[fourtuple]
+        batch_fets[start:end] = in_fets
 
     # Batch predict! Select only required features.
     labels = predict(net, batch_fets[list(net.in_spc)], args.debug)
 
-    for (_, flowkey, min_rtt_us, all_fets, in_fets), label in zip(batch, labels):
+    for fourtuple, flowkey, min_rtt_us, all_fets, in_fets in batch:
+        start, end = flow_to_range[fourtuple]
+        flw_labels = labels[start:end]
         # Update previous fets for this flow.
         flow_to_prev_features[flowkey] = in_fets[-1]
         # Make a decision for this flow.
+        make_decision(
+            args,
+            flowkey,
+            min_rtt_us,
+            all_fets,
+            smooth(flw_labels),
+            flow_to_decisions,
+            flow_to_rwnd,
+        )
+
+    for (_, flowkey, min_rtt_us, all_fets, in_fets), label in zip(batch, labels):
+        flow_to_prev_features[flowkey] = in_fets[-1]
         make_decision(
             args,
             flowkey,

@@ -995,7 +995,14 @@ def parse_opened_exp(
     return smallest_safe_win
 
 
-def parse_received_packets(flw, start_time_us, min_rtt_us, fets, previous_fets=None):
+def parse_received_packets(
+    flw,
+    start_time_us,
+    min_rtt_us,
+    fets,
+    previous_fets=None,
+    win_metrics_start_idx=0,
+):
     """Generate features for the inference runtime.
 
     Requires the absolute start time of the flow (microseconds measured against the
@@ -1003,15 +1010,23 @@ def parse_received_packets(flw, start_time_us, min_rtt_us, fets, previous_fets=N
     RTT (microseconds).
 
     In contrast to parse_opened_exp(), this function only has access to receiver
-    information, only processes a single flow, and only returns complete features for
-    the last packet. Features that cannot be or are willfully not calculated
-    are set to -1. The results may contain NaN or Inf values.
+    information and only processes a single flow. Furthermore, windowed metrics are
+    only populated from index win_metrics_start_idx through the last packet. Features
+    that cannot be or are willfully not calculated are set to -1. The results may
+    contain NaN or Inf values.
 
     Returns a tuple containing a structured numpy array with the resulting features,
     along with the updated minimum RTT (microseconds).
+
+    TODO: We actually do not update the minimum RTT. Should we, or is that handled
+          elsewhere?
     """
     num_pkts = len(fets)
     assert num_pkts, f"No packets provided for flow: {flw}"
+    assert 1 <= win_metrics_start_idx <= num_pkts, (
+        "Invalid start index for windowed features: "
+        f"1 <= {win_metrics_start_idx} <= {num_pkts - 1}"
+    )
     # Verify that the packets have been received in order (i.e., their
     # arrival times are monotonically increasing). Calculate the time
     # difference between subsequent packets and make sure that it is never
@@ -1126,114 +1141,128 @@ def parse_received_packets(flw, start_time_us, min_rtt_us, fets, previous_fets=N
         else:
             raise Exception(f"Unknown EWMA metric: {metric}")
 
-    # The index at which this window starts.
-    win_to_start_idx = {
-        win: utils.find_bound(
-            fets[features.ARRIVAL_TIME_FET],
-            target=fets[-1][features.ARRIVAL_TIME_FET] - (win * min_rtt_us),
-            min_idx=0,
-            max_idx=num_pkts - 1,
-            which="after",
-        )
-        for win in features.WINDOWS
-    }
-
-    recv_time_cur_us = fets[-1][features.ARRIVAL_TIME_FET]
+    # The index at which this window starts. Uninitialized for now.
+    win_to_start_idx = {win: 0 for win in features.WINDOWS}
 
     # Windowed metrics.
-    #
-    # We only calculate windowed metrics for the last packet (-1).
-    for (metric, _), win in itertools.product(features.WINDOWED_FETS, features.WINDOWS):
-        metric = features.make_win_metric(metric, win)
-        # If this is not a desired feature, then skip it.
-        if metric not in fets.dtype.names:
-            continue
-
-        # Calculate windowed metrics only if an entire window has
-        # elapsed since the start of the flow. Recall that the timestamps
-        # have been adjusted so that the first packet starts at time 0.
-        win_size_us = win * min_rtt_us
-        if (recv_time_cur_us - fets[0][features.ARRIVAL_TIME_FET]) < win_size_us:
-            logging.warning(
-                (
-                    "Warning: Skipping all of windowed metric %s "
-                    "because we lack a full window (%d < %d)"
-                ),
-                metric,
-                recv_time_cur_us,
-                win_size_us,
+    for j in range(win_metrics_start_idx, num_pkts):
+        # Find the start indices for all windowed such that they end on the current
+        # packet.
+        win_to_start_idx = {
+            win: utils.find_bound(
+                fets[features.ARRIVAL_TIME_FET],
+                target=fets[j][features.ARRIVAL_TIME_FET] - (win * min_rtt_us),
+                min_idx=old_start_idx,
+                max_idx=j - 1,
+                which="after",
             )
-            continue
+            for win, old_start_idx in win_to_start_idx.items()
+        }
 
-        # A window requires at least two packets. Note that this means
-        # that the first packet will always be skipped.
-        win_start_idx = win_to_start_idx[win]
-        assert (
-            win_start_idx < num_pkts - 1
-        ), "Window does not contain at least two packtes."
+        available_time_us = (
+            fets[j][features.ARRIVAL_TIME_FET] - fets[0][features.ARRIVAL_TIME_FET]
+        )
 
-        if metric.startswith(features.INTERARR_TIME_FET):
-            new = (
-                fets[-1][features.ARRIVAL_TIME_FET]
-                - fets[win_start_idx][features.ARRIVAL_TIME_FET]
-            ) / (num_pkts - 1 - win_start_idx)
-        elif metric.startswith(features.INV_INTERARR_TIME_FET):
-            new = (
-                8
-                * 1e6
-                * fets[-1][features.WIRELEN_FET]
-                / fets[-1][features.make_win_metric(features.INTERARR_TIME_FET, win)]
-            )
-        elif metric.startswith(features.TPUT_FET):
-            new = utils.safe_tput_bps(fets, win_start_idx, num_pkts - 1)
-        elif metric.startswith(features.RTT_FET):
-            new = utils.safe_mean(fets[features.RTT_FET], win_start_idx, num_pkts - 1)
-        elif metric.startswith(features.RTT_RATIO_FET):
-            new = utils.safe_mean(
-                fets[features.RTT_RATIO_FET], win_start_idx, num_pkts - 1
-            )
-        elif metric.startswith(features.LOSS_EVENT_RATE_FET):
-            # Filled in already.
-            continue
-        elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
-            # 1 / sqrt(loss event rate).
-            new = utils.safe_div(
-                1,
-                utils.safe_sqrt(
-                    fets[-1][
-                        features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
+        for (metric, _), win in itertools.product(
+            features.WINDOWED_FETS, features.WINDOWS
+        ):
+            metric = features.make_win_metric(metric, win)
+            # If this is not a desired feature, then skip it.
+            if metric not in fets.dtype.names:
+                continue
+
+            # Calculate windowed metrics only if an entire window has
+            # elapsed since the start of the flow. Recall that the timestamps
+            # have been adjusted to be relative to the start of the flow.
+            win_size_us = win * min_rtt_us
+            if available_time_us < win_size_us:
+                logging.warning(
+                    (
+                        "Warning: Skipping windowed metric %s for packet %d"
+                        "because we lack a full window (%d < %d)"
+                    ),
+                    metric,
+                    j,
+                    available_time_us,
+                    win_size_us,
+                )
+                continue
+
+            # A window requires at least two packets. Note that this means
+            # that the first packet will always be skipped.
+            win_start_idx = win_to_start_idx[win]
+            assert (
+                win_start_idx < num_pkts - 1
+            ), "Window does not contain at least two packtes."
+
+            if metric.startswith(features.INTERARR_TIME_FET):
+                new = (
+                    fets[j][features.ARRIVAL_TIME_FET]
+                    - fets[win_start_idx][features.ARRIVAL_TIME_FET]
+                ) / (num_pkts - 1 - win_start_idx)
+            elif metric.startswith(features.INV_INTERARR_TIME_FET):
+                new = (
+                    8
+                    * 1e6
+                    * fets[-1][features.WIRELEN_FET]
+                    / fets[-1][
+                        features.make_win_metric(features.INTERARR_TIME_FET, win)
                     ]
-                ),
-            )
-        elif metric.startswith(features.LOSS_RATE_FET):
-            win_losses = utils.safe_sum(
-                fets[features.PACKETS_LOST_FET], win_start_idx + 1, num_pkts - 1
-            )
-            new = utils.safe_div(
-                win_losses, win_losses + (num_pkts - 1 - win_start_idx)
-            )
-        elif metric.startswith(features.SQRT_LOSS_RATE_FET):
-            new = utils.safe_div(
-                1,
-                utils.safe_sqrt(
-                    fets[-1][features.make_win_metric(features.LOSS_RATE_FET, win)]
-                ),
-            )
-        elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
-            new = utils.safe_mathis_tput(
-                fets[-1][features.PAYLOAD_FET],
-                fets[-1][features.RTT_FET],
-                fets[-1][features.make_win_metric(features.LOSS_RATE_FET, win)],
-            )
-        elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
-            new = utils.safe_mathis_tput(
-                fets[-1][features.PAYLOAD_FET],
-                fets[-1][features.RTT_FET],
-                fets[-1][features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)],
-            )
-        else:
-            raise Exception(f"Unknown windowed metric: {metric}")
-        fets[-1][metric] = new
+                )
+            elif metric.startswith(features.TPUT_FET):
+                new = utils.safe_tput_bps(fets, win_start_idx, num_pkts - 1)
+            elif metric.startswith(features.RTT_FET):
+                new = utils.safe_mean(
+                    fets[features.RTT_FET], win_start_idx, num_pkts - 1
+                )
+            elif metric.startswith(features.RTT_RATIO_FET):
+                new = utils.safe_mean(
+                    fets[features.RTT_RATIO_FET], win_start_idx, num_pkts - 1
+                )
+            elif metric.startswith(features.LOSS_EVENT_RATE_FET):
+                # Filled in already.
+                continue
+            elif metric.startswith(features.SQRT_LOSS_EVENT_RATE_FET):
+                # 1 / sqrt(loss event rate).
+                new = utils.safe_div(
+                    1,
+                    utils.safe_sqrt(
+                        fets[j][
+                            features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
+                        ]
+                    ),
+                )
+            elif metric.startswith(features.LOSS_RATE_FET):
+                win_losses = utils.safe_sum(
+                    fets[features.PACKETS_LOST_FET], win_start_idx + 1, num_pkts - 1
+                )
+                new = utils.safe_div(
+                    win_losses, win_losses + (num_pkts - 1 - win_start_idx)
+                )
+            elif metric.startswith(features.SQRT_LOSS_RATE_FET):
+                new = utils.safe_div(
+                    1,
+                    utils.safe_sqrt(
+                        fets[j][features.make_win_metric(features.LOSS_RATE_FET, win)]
+                    ),
+                )
+            elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
+                new = utils.safe_mathis_tput(
+                    fets[j][features.PAYLOAD_FET],
+                    fets[j][features.RTT_FET],
+                    fets[j][features.make_win_metric(features.LOSS_RATE_FET, win)],
+                )
+            elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
+                new = utils.safe_mathis_tput(
+                    fets[j][features.PAYLOAD_FET],
+                    fets[j][features.RTT_FET],
+                    fets[j][
+                        features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
+                    ],
+                )
+            else:
+                raise Exception(f"Unknown windowed metric: {metric}")
+            fets[j][metric] = new
 
     # Make sure that all fets rows were used.
     used_rows = np.sum(fets[features.ARRIVAL_TIME_FET] != -1)
