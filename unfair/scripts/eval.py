@@ -447,7 +447,7 @@ def main(args):
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
 
     logging.info(
-        "Matched experiments: %d\n",
+        "Matched experiments: %d\n%s",
         len(matched),
         "\n\t".join([f"{exp.name}: {vals}" for exp, vals in matched.items()]),
     )
