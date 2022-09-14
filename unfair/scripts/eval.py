@@ -112,6 +112,19 @@ def parse_opened_exp(
     # with gen_features.parse_opened_exp().
 
     logging.info("Parsing: %s", exp_flp)
+
+    # Load results if they already exist.
+    if path.exists(out_flp):
+        logging.info("Found results: %s", out_flp)
+        try:
+            with open(out_flp, "rb") as fil:
+                out = pickle.load(fil)
+                assert len(out) == 4 and isinstance(
+                    out[0], utils.Exp
+                ), f"Improperly formatted results file: {out_flp}"
+        except:
+            logging.exception("Failed to load results from: %s", out_flp)
+    # Check for basic errors.
     if exp.name.startswith("FAILED"):
         logging.info("Error: Experimant failed: %s", exp_flp)
         return -1
@@ -194,16 +207,14 @@ def parse_opened_exp(
         {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
     )
 
-    # # Save the results.
-    # if path.exists(out_flp):
-    #     logging.info(f"\tOutput already exists: {out_flp}")
-    # else:
-    #     logging.info(f"\tSaving: {out_flp}")
-    #     np.savez_compressed(
-    #         out_flp,
-    #         **{str(k + 1): v for k, v in enumerate(flw_results[flw] for flw in flws)},
-    #     )
-    return exp, jfi, overall_util, fair_flows_util, unfair_flows_util
+    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
+
+    # Save the results.
+    logging.info("\tSaving: %s", out_flp)
+    with open(out_flp, "wb") as fil:
+        pickle.dump(out, fil)
+
+    return out
 
 
 def get_jfi(flw_to_pkts):
@@ -322,7 +333,7 @@ def main(args):
         (
             path.join(args.exp_dir, exp),
             args.untar_dir,
-            args.out_dir,
+            path.join(args.out_dir, "individual_results"),
             False,
             args.select_tail_percent,
             parse_opened_exp,
