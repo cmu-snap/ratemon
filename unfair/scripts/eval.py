@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import math
 import multiprocessing
 import os
 from os import path
@@ -14,6 +15,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from unfair.model import defaults, features, gen_features, utils
+
+
+# def round_down_to_power_of_2(x):
+#     return 2 ** math.floor(np.log2(x))
+
+
+def get_queue_mult(exp):
+    queue_mult = math.floor(exp.queue_bdp)
+    if queue_mult == 0:
+        return 0.5
+    return queue_mult
 
 
 def plot_cdf(args, disabled, enabled, x_label, x_max, filename):
@@ -84,7 +96,11 @@ def plot_box(args, data, x_ticks, x_label, y_label, filename):
 
     plt.xlabel(x_label)
     plt.ylabel(y_label)
-    plt.xticks(range(1, len(x_ticks) + 1), x_ticks)
+    plt.xticks(
+        range(1, len(x_ticks) + 1),
+        x_ticks,
+        rotation=0 if len(x_ticks) < 10 else "vertical",
+    )
     plt.title(f"Boxplot of {y_label} vs. {x_label}")
     plt.grid(True)
     plt.tight_layout()
@@ -347,7 +363,7 @@ def main(args):
     # Break down based on experiment parameters.
     bandwidths = {exp.bw_bps for exp in matched.keys()}
     rtts = {exp.rtt_us for exp in matched.keys()}
-    q_sizes = {exp.queue_bdp for exp in matched.keys()}
+    q_sizes = {get_queue_mult(exp) for exp in matched.keys()}
     flows_1 = {exp.cca_1_flws for exp in matched.keys()}
     bandwidths = {
         bandwidth: [exp for exp in matched.keys() if exp.bw_bps == bandwidth]
@@ -355,7 +371,7 @@ def main(args):
     }
     rtts = {rtt: [exp for exp in matched.keys() if exp.rtt_us == rtt] for rtt in rtts}
     q_sizes = {
-        q_size: [exp for exp in matched.keys() if exp.queue_bdp == q_size]
+        q_size: [exp for exp in matched.keys() if get_queue_mult(exp) == q_size]
         for q_size in q_sizes
     }
     flows_1 = {
