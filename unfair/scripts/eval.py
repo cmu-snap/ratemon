@@ -276,7 +276,7 @@ def group_and_box_plot(
     plot_box(
         args,
         values,
-        xticks_transformer(categories),
+        [xticks_transformer(x) for x in categories],
         x_label,
         y_label,
         filename,
