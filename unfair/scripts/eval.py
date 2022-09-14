@@ -80,7 +80,7 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def plot_box(args, data, x_ticks, x_label, y_label, filename, rotate):
+def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate):
     """
     Make a box plot of the JFI or utilization over some experiment variable like number
     of flows.
@@ -94,6 +94,7 @@ def plot_box(args, data, x_ticks, x_label, y_label, filename, rotate):
         x_ticks,
         rotation=45 if rotate else 0,
     )
+    plt.ylim(0, y_max)
     plt.title(f"Boxplot of {y_label} vs. {x_label}")
     plt.grid(True)
     plt.tight_layout()
@@ -243,6 +244,7 @@ def group_and_box_plot(
     xticks_transformer,
     x_label,
     y_label,
+    y_max,
     filename,
     num_buckets,
 ):
@@ -299,7 +301,9 @@ def group_and_box_plot(
         )
     )
 
-    plot_box(args, values, categories, x_label, y_label, filename, rotate=do_buckets)
+    plot_box(
+        args, values, categories, x_label, y_label, y_max, filename, rotate=do_buckets
+    )
 
 
 def main(args):
