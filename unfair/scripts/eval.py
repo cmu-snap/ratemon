@@ -251,32 +251,65 @@ def group_and_box_plot(
     x_label,
     y_label,
     filename,
+    num_buckets,
 ):
+
+    category_to_values = {
+        # Second, extract the value for all the exps in each category.
+        xticks_transformer(category): sorted(
+            [
+                output_selector(matched[exp])
+                for exp in matched.keys()
+                # Only select experiments for this category.
+                if category_selector(exp) == category
+            ]
+        )
+        for category in {
+            # First, determine the categories.
+            category_selector(exp)
+            for exp in matched.keys()
+        }
+    }
+    categories = list(category_to_values.keys())
+
+    # Divide the categories into buckets.
+    do_buckets = len(category_to_values) > num_buckets
+    if do_buckets:
+        min_category = min(categories)
+        max_category = max(categories)
+        delta = (max_category - min_category) / num_buckets
+        category_to_values = {
+            f"{bucket_start:.2f}-{bucket_end:.2f}": [
+                # Look through all the categories and grab the values of any category
+                # that is in this bucket.
+                value
+                for category, values in category_to_values.items()
+                if (
+                    bucket_start
+                    <= category
+                    < (bucket_end if bucket_end < max_category else math.inf)
+                )
+                for value in values
+            ]
+            for bucket_start, bucket_end in [
+                # Define the start and end of each bucket.
+                (min_category + delta * i, min_category + delta * (i + 1))
+                for i in range(num_buckets)
+            ]
+        }
+
     # Get a list of the categories, and a list of lists of the category values.
     categories, values = zip(
         *sorted(
-            {
-                # Second, extract the value for all the exps in each category.
-                category: sorted(
-                    [
-                        output_selector(matched[exp])
-                        for exp in matched.keys()
-                        # Only select experiments for this category.
-                        if category_selector(exp) == category
-                    ]
-                )
-                for category in {
-                    # First, determine the categories.
-                    category_selector(exp)
-                    for exp in matched.keys()
-                }
-            }.items()
+            category_to_values.items(),
+            key=lambda x: float(x[0].split("-")[0]) if do_buckets else x,
         )
     )
+
     plot_box(
         args,
         values,
-        [xticks_transformer(x) for x in categories],
+        categories,
         x_label,
         y_label,
         filename,
@@ -552,6 +585,7 @@ def main(args):
         "Bandwidth (Mbps)",
         "Utilization (%)",
         "bandwidth_vs_util.pdf",
+        num_buckets=10,
     )
     group_and_box_plot(
         args,
@@ -562,6 +596,7 @@ def main(args):
         "RTT (ms)",
         "Utilization (%)",
         "rtt_vs_util.pdf",
+        num_buckets=10,
     )
     group_and_box_plot(
         args,
@@ -572,6 +607,7 @@ def main(args):
         "Queue size (x BDP)",
         "Utilization (%)",
         "queue_size_vs_util.pdf",
+        num_buckets=10,
     )
     group_and_box_plot(
         args,
@@ -582,6 +618,7 @@ def main(args):
         "Incumbent flows",
         "Utilization (%)",
         "incumbent_flows_vs_util.pdf",
+        num_buckets=10,
     )
 
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
