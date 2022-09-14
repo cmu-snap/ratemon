@@ -304,6 +304,17 @@ def group_and_box_plot(
             ]
         }
 
+    # logging.info(
+    #     "Categories for %s:\n%s",
+    #     filename,
+    #     "\n\t".join(
+    #         [
+    #             (f"{category}:\n" + "\n\t\t".join(values))
+    #             for category, values in category_to_values.items()
+    #         ]
+    #     ),
+    # )
+
     # Get a list of the categories, and a list of lists of the category values.
     categories, values = zip(
         *sorted(
@@ -435,7 +446,12 @@ def main(args):
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
 
-    logging.info("Matched experiments: %d", len(matched))
+    logging.info(
+        "Matched experiments: %d\n",
+        len(matched),
+        "\n\t".join([f"{exp.name}: {vals}" for exp, vals in matched.items()]),
+    )
+
     (
         jfis_disabled,
         jfis_enabled,
