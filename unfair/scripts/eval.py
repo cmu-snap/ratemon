@@ -82,8 +82,8 @@ def plot_hist(args, disabled, enabled, x_label, filename):
 
 def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate):
     """
-    Make a box plot of the JFI or utilization over some experiment variable like number
-    of flows.
+    Make a box plot of the JFI or utilization over some experiment variable like
+    number of flows.
     """
     plt.boxplot(data)
 
@@ -572,8 +572,8 @@ def main(args):
         lambda exp: exp.bw_bps,
         lambda result: result[5],
         lambda x: int(x / 1e6),
-        "Bandwidth (Mbps)",
-        "Utilization (%)",
+        "bandwidth (Mbps)",
+        "utilization (%)",
         100,
         "bandwidth_vs_util.pdf",
         num_buckets=10,
@@ -585,7 +585,7 @@ def main(args):
         lambda result: result[5],
         lambda x: int(x / 1e3),
         "RTT (ms)",
-        "Utilization (%)",
+        "utilization (%)",
         100,
         "rtt_vs_util.pdf",
         num_buckets=10,
@@ -596,8 +596,8 @@ def main(args):
         get_queue_mult,
         lambda result: result[5],
         lambda x: x,
-        "Queue size (x BDP)",
-        "Utilization (%)",
+        "queue size (x BDP)",
+        "utilization (%)",
         100,
         "queue_size_vs_util.pdf",
         num_buckets=10,
@@ -608,8 +608,8 @@ def main(args):
         lambda exp: exp.cca_1_flws,
         lambda result: result[5],
         lambda x: x,
-        "Incumbent flows",
-        "Utilization (%)",
+        "incumbent flows",
+        "utilization (%)",
         100,
         "incumbent_flows_vs_util.pdf",
         num_buckets=10,
@@ -622,7 +622,7 @@ def main(args):
         lambda exp: exp.bw_bps,
         lambda result: result[1],
         lambda x: int(x / 1e6),
-        "Bandwidth (Mbps)",
+        "bandwidth (Mbps)",
         "JFI",
         1,
         "bandwidth_vs_jfi.pdf",
@@ -646,7 +646,7 @@ def main(args):
         get_queue_mult,
         lambda result: result[1],
         lambda x: x,
-        "Queue size (x BDP)",
+        "queue size (x BDP)",
         "JFI",
         1,
         "queue_size_vs_jfi.pdf",
@@ -658,7 +658,7 @@ def main(args):
         lambda exp: exp.cca_1_flws,
         lambda result: result[1],
         lambda x: x,
-        "Incumbent flows",
+        "incumbent flows",
         "JFI",
         1,
         "incumbent_flows_vs_jfi.pdf",
