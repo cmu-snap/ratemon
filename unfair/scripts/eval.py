@@ -68,6 +68,32 @@ def plot_hist(args, disabled, enabled, x_label, filename):
     logging.info("Saved histogram to: %s", hist_flp)
 
 
+def plot_box(args, data, x_ticks, x_label, y_label, filename):
+    """
+    Make a box plot of the JFI or utilization over some experiment variable like number
+    of flows.
+    """
+
+    # fig = plt.figure(figsize =(10, 7))
+
+    # fig7, ax7 = plt.subplots()
+    # ax7.set_title('Multiple Samples with Different sizes')
+    # ax7.boxplot(data)
+
+    plt.boxplot(data)
+
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title(f"Boxplot of {y_label} vs. {x_label}")
+    plt.grid(True)
+    plt.tight_layout()
+
+    box_flp = path.join(args.out_dir, filename)
+    plt.savefig(box_flp)
+    plt.close()
+    logging.info("Saved boxplot to: %s", box_flp)
+
+
 def parse_opened_exp(
     exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
 ):
@@ -299,23 +325,114 @@ def main(args):
         ) = results[enabled_exp]
 
         matched[enabled_exp] = (
-            jfi_disabled,
-            jfi_enabled,
-            jfi_enabled - jfi_disabled,
-            (jfi_enabled - jfi_disabled) / jfi_disabled * 100,
-            overall_util_disabled * 100,
-            overall_util_enabled * 100,
-            (overall_util_enabled - overall_util_disabled) * 100,
-            fair_flows_util_disabled * 100,
-            fair_flows_util_enabled * 100,
-            (fair_flows_util_enabled - fair_flows_util_disabled) * 100,
-            unfair_flows_util_disabled * 100,
-            unfair_flows_util_enabled * 100,
-            (unfair_flows_util_enabled - unfair_flows_util_disabled) * 100,
+            jfi_disabled,  # 0
+            jfi_enabled,  # 1
+            jfi_enabled - jfi_disabled,  # 2
+            (jfi_enabled - jfi_disabled) / jfi_disabled * 100,  # 3
+            overall_util_disabled * 100,  # 4
+            overall_util_enabled * 100,  # 5
+            (overall_util_enabled - overall_util_disabled) * 100,  # 6
+            fair_flows_util_disabled * 100,  # 7
+            fair_flows_util_enabled * 100,  # 8
+            (fair_flows_util_enabled - fair_flows_util_disabled) * 100,  # 9
+            unfair_flows_util_disabled * 100,  # 10
+            unfair_flows_util_enabled * 100,  # 11
+            (unfair_flows_util_enabled - unfair_flows_util_disabled) * 100,  # 12
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
         json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
+
+    # Break down based on experiment parameters.
+    bandwidths = {exp.bw_bps for exp in matched.keys()}
+    rtts = {exp.rtt_us for exp in matched.keys()}
+    q_sizes = {exp.queue_bdp for exp in matched.keys()}
+    flows_1 = {exp.cca_1_flows for exp in matched.keys()}
+    bandwidths = {
+        bandwidth: [
+            exp for exp in matched.keys() if exp.bw_bps == bandwidth
+        ] for bandwidth in bandwidths
+    }
+    rtts = {
+        rtt: [exp for exp in matched.keys() if exp.rtt_us == rtt] for rtt in rtts
+    }
+    q_sizes = {
+        q_size: [exp for exp in matched.keys() if exp.queue_bdp == q_size]
+        for q_size in q_sizes
+    }
+    flows_1 = {
+        flows: [exp for exp in matched.keys() if exp.cca_1_flows == flows]
+        for flows in flows_1
+    }
+    bandwidths_to_util = {
+        bandwidth: sorted([matched[exp][5] for exp in exps])
+        for bandwidth, exps in bandwidths.items()
+    }
+    rtts_to_util = {
+        rtt: sorted([matched[exp][5] for exp in exps])
+        for rtt, exps in rtts.items()
+    }
+    q_sizes_to_util = {
+        q_size: sorted([matched[exp][5] for exp in exps])
+        for q_size, exps in q_sizes.items()
+    }
+    flows_to_util = {
+        flows: sorted([matched[exp][5] for exp in exps])
+        for flows, exps in flows_1.items()
+    }
+
+    bandwidths_to_util_keys, bandwidths_to_util_values = zip(*bandwidths_to_util.items())
+    rtts_to_util_keys, rtts_to_util_values = zip(*rtts_to_util.items())
+    q_sizes_to_util_keys, q_sizes_to_util_values = zip(*q_sizes_to_util.items())
+    flows_to_util_keys, flows_to_util_values = zip(*flows_to_util.items())
+
+    # Plot the results.
+    plot_box(args, bandwidths_to_util_values, bandwidths_to_util_keys, "Bandwidth (Mbps)", "Utilization (%)", "bandwidth_vs_util.pdf")
+    plot_box(args, rtts_to_util_values, rtts_to_util_keys, "RTT (us)", "Utilization (%)", "rtt_vs_util.pdf")
+    plot_box(args, q_sizes_to_util_values, q_sizes_to_util_keys, "Queue size (x BDP)", "Utilization (%)", "q_size_vs_util.pdf")
+    plot_box(args, flows_to_util_values, flows_to_util_keys, "Number of incumbent flows", "Utilization (%)", "flows_vs_util.pdf")
+
+    # Plot JFI delta vs. bandwidth.
+    fig, ax = plt.subplots()
+    for bandwidth, exps in bandwidths.items():
+        jfi_deltas = [matched[exp][2] for exp in exps]
+        ax.plot(
+            [bandwidth / 1e6] * len(jfi_deltas),
+            jfi_deltas,
+            "o",
+            label="{} Mbps".format(bandwidth / 1e6),
+        )
+    ax.set_xlabel("Bandwidth (Mbps)")
+    ax.set_ylabel("JFI delta")
+    ax.set_title("JFI delta vs. bandwidth")
+    ax.legend()
+    fig.savefig(path.join(args.out_dir, "jfi_delta_vs_bandwidth.png"))
+
+    # Plot JFI delta vs. RTT.
+    fig, ax = plt.subplots()
+    for rtt, exps in rtts.items():
+        jfi_deltas = [matched[exp][2] for exp in exps]
+        ax.plot(
+            [rtt / 1e3] * len(jfi_deltas),
+            jfi_deltas,
+            "o",
+            label="{} ms".format(rtt / 1e3),
+        )
+    ax.set_xlabel("RTT (ms)")
+    ax.set_ylabel("JFI delta")
+    ax.set_title("JFI delta vs. RTT")
+    ax.legend()
+    fig.savefig(path.join(args.out_dir, "jfi_delta_vs_rtt.png"))
+
+    # Plot JFI delta vs. queue size.
+    fig, ax = plt.subplots()
+    for q_size, exps in q_sizes.items():
+        jfi_deltas = [matched[exp][2] for exp in exps]
+        ax.plot(
+            [q_size] * len(jfi_deltas),
+            jfi_deltas,
+        ] for bandwidth in bandwidths
+    }
 
     logging.info("Matched experiments: %d", len(matched))
     (
