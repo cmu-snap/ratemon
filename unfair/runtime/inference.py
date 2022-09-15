@@ -50,7 +50,7 @@ def populate_features(
     Only packets in the smoothing window receive full features and are returned. The
     smoothing window is always the last `smoothing_window` packets.
     """
-    assert smoothing_window >= len(fets), (
+    assert len(fets) >= smoothing_window, (
         f"Number of packets ({len(fets)}) must be at least as large "
         f"as the smoothing window ({smoothing_window})."
     )
