@@ -92,7 +92,7 @@ def get_split(data_dir, name, sample_frac, net):
                 logging.info(
                     (
                         "Using multiplier %d for subsplit %s, resulting in actual "
-                        "sample fraction of %d"
+                        "sample fraction of %d."
                     ),
                     multiplier,
                     fil,
