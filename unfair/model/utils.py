@@ -33,7 +33,7 @@ from unfair.model import defaults, features
 
 
 # Values considered unsafe for division and min().
-UNSAFE = {-1, 0}
+UNSAFE = {-1, 0, float("inf"), float("NaN")}
 # The sysctl configuration item for TCP window scaling.
 WINDOW_SCALING_CONFIG = "net.ipv4.tcp_window_scaling"
 
@@ -980,7 +980,11 @@ def safe_update_ewma(prev_ewma, new_val, alpha):
     return (
         new_val
         if prev_ewma == -1
-        else (prev_ewma if new_val == -1 else alpha * new_val + (1 - alpha) * prev_ewma)
+        else (
+            prev_ewma
+            if new_val in UNSAFE
+            else alpha * new_val + (1 - alpha) * prev_ewma
+        )
     )
 
 
