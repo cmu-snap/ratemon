@@ -79,12 +79,27 @@ def populate_features(
 def smooth(labels):
     """Combine multiple labels into a single label.
 
-    For example, smooth the labels by selecting the average label.
-
-    Currently, this simply selects the last label.
+    Select the mode. Break ties by selecting the least fair label.
     """
     assert len(labels) > 0, "Labels cannot be empty."
-    return labels[-1]
+
+    # Use https://www.statology.org/numpy-mode/ because we need to support there being
+    # multiple modes, otherwise we would use scipy.stats.mode.
+    #
+    # Find unique values in array along with their counts.
+    vals, counts = np.unique(labels, return_counts=True)
+    # Find indices of modes.
+    mode_value = np.argwhere(counts == np.max(counts))
+    # Get actual mode values.
+    modes = vals[mode_value].flatten().tolist()
+    # The labels are numerically sorted from most fair (lowest label) to least fair
+    # (highest label), so selecting the max of the modes will break ties by selecting
+    # the less fair label.
+    label = max(modes)
+    if len(modes) > 1:
+        logging.warning("Multiple modes encountered during smoothing: %s", modes)
+
+    return label
 
 
 def make_decision(
