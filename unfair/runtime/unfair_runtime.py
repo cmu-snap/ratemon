@@ -512,7 +512,9 @@ def run(args):
     # Need to load the model to check the input features for see the longest window.
     net = models.load_model(args.model_file)
     longest_window = max(
-        features.parse_win_metric(fet)[1] for fet in net.in_spc if "windowed" in fet
+        features.parse_win_metric(fet)[1]
+        for fet in net.in_spc
+        if "windowed" in fet and "minRtt" in fet
     )
     logging.info("Longest minRTT window: %d", longest_window)
 
