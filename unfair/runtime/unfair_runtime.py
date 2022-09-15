@@ -11,6 +11,7 @@ from struct import unpack
 import sys
 import threading
 import time
+from typing import Dict, List, Tuple
 
 import netifaces as ni
 import pcapy
@@ -31,7 +32,7 @@ OLD_THRESH_SEC = 5 * 60
 # packets are appended to the ends of these lists. Periodically, a flow's
 # packets are consumed by the inference engine and that flow's list is
 # reset to empty.
-FLOWS = {}
+FLOWS: Dict[Tuple[int, int, int, int], flow_utils.Flow] = {}
 # Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
 # when adding, removing, or iterating over flows; no need to acquire this lock when
 # updating a flow object.
@@ -40,7 +41,7 @@ FLOWS_LOCK = threading.RLock()
 MY_IP = None
 MANAGER = None
 
-LOSS_EVENT_INTERVALS = []
+LOSS_EVENT_INTERVALS: List[int] = []
 
 
 def receive_packet_pcapy(header, packet):
