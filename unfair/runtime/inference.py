@@ -62,10 +62,8 @@ def populate_features(
         prev_fets,
         win_metrics_start_idx=len(fets) - smoothing_window,
     )
-    # in_fets = fets[-1:][list(net.in_spc)]
-    # Only run prediction on enough packets to fill the smoothing window. Remove
-    # unneeded features that were added as dependencies for the requested features.
-    in_fets = fets[-smoothing_window:][list(net.in_spc)]
+    # Only keep enough packets to fill the smoothing window.
+    in_fets = fets[-smoothing_window:]
     # Replace -1's and with NaNs and convert to an unstructured numpy array.
     data.replace_unknowns(
         in_fets,
@@ -559,7 +557,8 @@ def batch_inference(
         start, end = flow_to_range[fourtuple]
         batch_fets[start:end] = in_fets
 
-    # Batch predict! Select only required features.
+    # Batch predict! Select only required features (remove unneeded features that were
+    # added as dependencies for the requested features).
     labels = predict(net, batch_fets[list(net.in_spc)], args.debug)
 
     for fourtuple, flowkey, min_rtt_us, all_fets, in_fets in batch:
