@@ -612,7 +612,7 @@ def run(args, que, inference_flags, done):
     except KeyboardInterrupt:
         logging.info("Inference process: You pressed Ctrl+C!")
         done.set()
-    except Exception as exc:
+    except:
         logging.exception("Unknown error in inference process!")
         raise
     finally:
