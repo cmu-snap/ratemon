@@ -1271,8 +1271,13 @@ def parse_received_packets(
         used_rows == total_rows
     ), f"Error: Used only {used_rows} of {total_rows} rows for flow {flw}"
 
-    # Determine if there are any NaNs/Infs in the results. Just check the last packet.
-    bad_fets = {fet for fet in fets.dtype.names if not np.isfinite(fets[-1][fet])}
+    # Determine if there are any NaNs/Infs in the results. Just check the packets for
+    # which we calculated windowed features as well.
+    bad_fets = {
+        fet
+        for fet in fets.dtype.names
+        if not np.isfinite(fets[-win_metrics_start_idx:][fet]).any()
+    }
     if bad_fets:
         logging.warning(
             "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
