@@ -28,6 +28,23 @@ def get_queue_mult(exp):
     return queue_mult
 
 
+def plot_cdf_single(args, data, x_label, x_max, filename):
+    count, bins_count = np.histogram(data, bins=len(data))
+    plt.plot(bins_count[1:], np.cumsum(count / sum(count)), alpha=0.75, color="g")
+
+    plt.xlabel(x_label)
+    plt.ylabel("CDF")
+    plt.xlim(0, x_max)
+    plt.title(f"CDF of {x_label}")
+    plt.grid(True)
+    plt.tight_layout()
+
+    cdf_flp = path.join(args.out_dir, filename)
+    plt.savefig(cdf_flp)
+    plt.close()
+    logging.info("Saved CDF to: %s", cdf_flp)
+
+
 def plot_cdf(args, disabled, enabled, x_label, x_max, filename):
     count, bins_count = np.histogram(disabled, bins=len(disabled))
     plt.plot(
@@ -50,7 +67,7 @@ def plot_cdf(args, disabled, enabled, x_label, x_max, filename):
     plt.xlabel(x_label)
     plt.ylabel("CDF")
     plt.xlim(0, x_max)
-    plt.title(f"CDF of {x_label}, with and without unfairness monitor")
+    plt.title(f"CDF of {x_label},\nwith and without unfairness monitor")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -719,6 +736,17 @@ def main(args):
         1,
         "incumbent_flows_vs_jfi.pdf",
         num_buckets=10,
+    )
+
+    # Plot a CDF of the fair rates in the experiment configurations so that we can see
+    # if the randomly-chosen experiments are actually imbalaned.
+    fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched.keys()]
+    plot_cdf_single(
+        args,
+        fair_rates_Mbps,
+        "fair rate (Mbps)",
+        max(fair_rates_Mbps),
+        "fair_rate_cdf.pdf",
     )
 
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
