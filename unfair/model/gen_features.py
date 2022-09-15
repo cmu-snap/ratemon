@@ -1283,6 +1283,14 @@ def parse_received_packets(
             "Warning: Flow %s has NaNs of Infs in features: %s", flw, bad_fets
         )
 
+    for fet in list(bad_fets) + [features.LOSS_RATE_FET]:
+        if fet in fets.dtype.names:
+            logging.info(
+                "Bad fet: %s:\n\t%s",
+                fet,
+                "\n\t".join(str(x) for x in fets[-win_metrics_start_idx:][fet]),
+            )
+
 
 def parse_exp(
     exp_flp,
