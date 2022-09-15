@@ -481,7 +481,7 @@ def parse_args():
     )
     parser.add_argument(
         "--smoothing-window",
-        default=0,
+        default=1,
         help="Run inference on this many packets from each flow, and smooth the results.",
         required=False,
         type=int,
@@ -499,6 +499,9 @@ def parse_args():
     assert (
         args.batch_size > 0
     ), f'"--batch-size" must be greater than 0, but is: {args.batch_size}'
+    assert (
+        args.smoothing_window >= 1
+    ), f"Smoothing window must be >= 1, but is: {args.smoothing_window}"
 
     assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
     return args
