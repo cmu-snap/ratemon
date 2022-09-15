@@ -529,6 +529,10 @@ def run(args):
             )
         )
     )[0]
+
+    # We are done with the model, so clear it.
+    del net
+
     global LOSS_EVENT_INTERVALS
     LOSS_EVENT_INTERVALS = list(
         set(
