@@ -119,9 +119,10 @@ def parse_opened_exp(
         try:
             with open(out_flp, "rb") as fil:
                 out = pickle.load(fil)
-                assert len(out) == 4 and isinstance(
+                assert len(out) == 5 and isinstance(
                     out[0], utils.Exp
                 ), f"Improperly formatted results file: {out_flp}"
+                return out
         except:
             logging.exception("Failed to load results from: %s", out_flp)
     # Check for basic errors.
@@ -363,16 +364,15 @@ def main(args):
         with open(data_flp, "rb") as fil:
             results = pickle.load(fil)
         if len(results) != len(pcaps):
-            logging.info(
+            logging.warning(
                 (
-                    "Error: Expected %d JFI results, but found %d. "
+                    "Warning: Expected %d JFI results, but found %d. "
                     "Delete %s and try again."
                 ),
                 len(pcaps),
                 len(results),
                 data_flp,
             )
-            return 1
     else:
         if defaults.SYNC:
             results = {gen_features.parse_exp(*pcap) for pcap in pcaps}
