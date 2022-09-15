@@ -979,7 +979,7 @@ def safe_update_ewma(prev_ewma, new_val, alpha):
     """
     return (
         new_val
-        if prev_ewma == -1
+        if prev_ewma in UNSAFE
         else (
             prev_ewma
             if new_val in UNSAFE

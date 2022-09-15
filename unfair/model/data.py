@@ -124,7 +124,7 @@ def replace_unknowns(dat, is_dt, assert_no_unknowns=True):
         assert not bad_fets, f'Features contain only "-1" ({len(bad_fets)}): {bad_fets}'
 
 
-def replace_nonfinite(dat):
+def replace_infinite(dat):
     """
     Convert all instances of inf to NaN.
 

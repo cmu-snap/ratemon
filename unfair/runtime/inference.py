@@ -70,7 +70,7 @@ def populate_features(
         isinstance(net, models.HistGbdtSklearnWrapper),
         assert_no_unknowns=False,
     )
-    data.replace_nonfinite(in_fets)
+    data.replace_infinite(in_fets)
     return in_fets
 
 

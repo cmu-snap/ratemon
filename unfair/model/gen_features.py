@@ -1041,9 +1041,6 @@ def parse_received_packets(
     fets[features.ARRIVAL_TIME_FET] -= start_time_us
     assert (fets[features.ARRIVAL_TIME_FET] >= 0).all(), "Negative arrival times!"
 
-    if previous_fets is None:
-        previous_fets = np.full(1, -1, dtype=fets.dtype)
-
     if features.INTERARR_TIME_FET in fets.dtype.names:
         fets[features.INTERARR_TIME_FET][1:] = (
             fets[features.ARRIVAL_TIME_FET][1:] - fets[features.ARRIVAL_TIME_FET][:-1]
@@ -1082,7 +1079,7 @@ def parse_received_packets(
         # For all metrics other than the Mathis model, fill in the 0th entry.
         if not metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
-                previous_fets[metric],
+                -1 if previous_fets is None else previous_fets[metric],
                 fets[0][features.parse_ewma_metric(metric)[0]],
                 alpha,
             )
@@ -1122,7 +1119,7 @@ def parse_received_packets(
                 )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
-                previous_fets[metric],
+                -1 if previous_fets is None else previous_fets[metric],
                 utils.safe_mathis_tput(
                     fets[0][features.PAYLOAD_FET],
                     fets[0][features.RTT_FET],

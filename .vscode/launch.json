@@ -30,7 +30,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/model.pickle",
+                "--model-file=${workspaceFolder}/test/models/model.pickle",
                 "--interface=eno1",
                 "--reaction-strategy=mimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
@@ -40,6 +40,7 @@
                 "--skip-localhost",
                 "--listen-ports=9999",
                 "--debug",
+                "--smoothing-window=10",
                 // "--disable-inference"
             ],
             "autoReload": {
