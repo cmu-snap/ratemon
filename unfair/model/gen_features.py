@@ -1070,9 +1070,6 @@ def parse_received_packets(
             np.sqrt(fets[features.LOSS_RATE_FET]), out=fets[features.SQRT_LOSS_RATE_FET]
         )
 
-    logging.info("previous_fets: %s", previous_fets.dtype.names)
-    logging.info("fets: %s", fets.dtype.names)
-
     # EWMA metrics.
     for (metric, _), alpha in itertools.product(features.EWMA_FETS, features.ALPHAS):
         metric = features.make_ewma_metric(metric, alpha)
