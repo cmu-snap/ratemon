@@ -78,6 +78,21 @@ def plot_cdf(args, disabled, enabled, x_label, x_max, filename):
     logging.info("Saved CDF to: %s", cdf_flp)
 
 
+def plot_hist_single(args, data, x_label, filename):
+    plt.hist(data, bins=50, density=True, facecolor="r", alpha=0.75)
+
+    plt.xlabel(x_label)
+    plt.ylabel("probability (%)")
+    plt.title(f"Histogram of {x_label}")
+    plt.grid(True)
+    plt.tight_layout()
+
+    hist_flp = path.join(args.out_dir, filename)
+    plt.savefig(hist_flp)
+    plt.close()
+    logging.info("Saved histogram to: %s", hist_flp)
+
+
 def plot_hist(args, disabled, enabled, x_label, filename):
     plt.hist(
         disabled, bins=50, density=True, facecolor="r", alpha=0.75, label="Disabled"
@@ -86,7 +101,7 @@ def plot_hist(args, disabled, enabled, x_label, filename):
 
     plt.xlabel(x_label)
     plt.ylabel("probability (%)")
-    plt.title(f"Histogram of {x_label}, with and without unfairness monitor")
+    plt.title(f"Histogram of {x_label},\nwith and without unfairness monitor")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -738,8 +753,8 @@ def main(args):
         num_buckets=10,
     )
 
-    # Plot a CDF of the fair rates in the experiment configurations so that we can see
-    # if the randomly-chosen experiments are actually imbalaned.
+    # Plot the fair rates in the experiment configurations so that we can see if the
+    # randomly-chosen experiments are actually imbalaned.
     fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched.keys()]
     plot_cdf_single(
         args,
@@ -748,6 +763,7 @@ def main(args):
         max(fair_rates_Mbps),
         "fair_rate_cdf.pdf",
     )
+    plot_hist_single(args, fair_rates_Mbps, "fair rate (Mbps)", "fair_rate_hist.pdf")
 
     logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
