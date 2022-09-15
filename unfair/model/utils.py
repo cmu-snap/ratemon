@@ -1235,7 +1235,7 @@ def load_split(split_dir, name):
 def load_subsplits(split_dir, prefix):
     """Load and return Splits that begin with prefix."""
     subsplits = [
-        load_split(split_dir, fil.split("_metadata.")[0])
+        (fil, load_split(split_dir, fil.split("_metadata.")[0]))
         for fil in os.listdir(split_dir)
         if fil.startswith(prefix) and fil.endswith(".pickle")
     ]

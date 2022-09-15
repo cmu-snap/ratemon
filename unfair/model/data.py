@@ -83,10 +83,27 @@ def get_split(data_dir, name, sample_frac, net):
     subsplits = utils.load_subsplits(data_dir, name)
     # Optionally select a fraction of each subsplit.
     if sample_frac < 1:
-        subsplits = [
-            subsplit[: math.ceil(subsplit.shape[0] * sample_frac)]
-            for subsplit in subsplits
-        ]
+        new_subsplits = []
+        for fil, subsplit in subsplits:
+            # HACK: Select more from subsplits that are tagged "high-fair-rate".
+            multiplier = 2 if "high-fair-rate" in fil else 1
+            actual_sample_frac = min(1, sample_frac * multiplier)
+            if multiplier > 1:
+                logging.info(
+                    (
+                        "Using multiplier %d for subsplit %s, resulting in actual "
+                        "sample fraction of %d"
+                    ),
+                    multiplier,
+                    fil,
+                    actual_sample_frac,
+                )
+            new_subsplits.append(
+                subsplit[: math.ceil(subsplit.shape[0] * actual_sample_frac)]
+            )
+        subsplits = new_subsplits
+    else:
+        subsplits = [subsplit for fil, subsplit in subsplits]
     # Merge the subsplits into a split.
     split = np.concatenate(subsplits)
     # If there is more than one subsplit, then we need to shuffle the merged split.
