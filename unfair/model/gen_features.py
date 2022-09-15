@@ -1276,7 +1276,7 @@ def parse_received_packets(
     bad_fets = {
         fet
         for fet in fets.dtype.names
-        if not np.isfinite(fets[-win_metrics_start_idx:][fet]).any()
+        if not np.isfinite(fets[win_metrics_start_idx:][fet]).any()
     }
     if bad_fets:
         logging.warning(
@@ -1288,7 +1288,7 @@ def parse_received_packets(
             logging.info(
                 "Bad fet: %s:\n\t%s",
                 fet,
-                "\n\t".join(str(x) for x in fets[-win_metrics_start_idx:][fet]),
+                "\n\t".join(str(x) for x in fets[win_metrics_start_idx:][fet]),
             )
 
 
