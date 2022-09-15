@@ -202,10 +202,14 @@ def check_flows(args, longest_window, que, inference_flags):
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
                         )
-                    if flow.incoming_packets and (
-                        # Check if the time span covered by the packets is greater than
+                    # We need at least as many packets as the smoothing window, and...
+                    if len(flow.incoming_packets) >= args.smoothing_window and (
+                        # ...check if the time span covered by the packets is greater than
                         # required for the longest windowed input feature.
-                        (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
+                        (
+                            flow.incoming_packets[-args.smoothing_window][4]
+                            - flow.incoming_packets[0][4]
+                        )
                         >= flow.min_rtt_us * longest_window
                     ):
                         # Plan to run inference on this flows.
@@ -269,9 +273,10 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
             ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
 
             # Discard all but the minimum number of packets required to calculate
-            # the longest window's features.
-            end_time_us = flow.incoming_packets[-1][4]
-            for idx in range(1, len(flow.incoming_packets)):
+            # the longest window's features, and the number of packets required
+            # for the smoothing window.
+            end_time_us = flow.incoming_packets[-args.smoothing_window][4]
+            for idx in range(1, len(flow.incoming_packets) - args.smoothing_window):
                 if (
                     end_time_us - flow.incoming_packets[idx][4]
                     < flow.min_rtt_us * longest_window
