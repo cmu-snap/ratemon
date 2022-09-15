@@ -554,7 +554,7 @@ def main(args):
             # Expected total utilization of fair flows.
             [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Disabled", "Enabled"],
+        labels=["Disabled", "Enabled", "Ideal"],
         x_label='"fair" flows link utilization (%)',
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
@@ -568,7 +568,7 @@ def main(args):
             # Expected total utilization of unfair flows.
             [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Disabled", "Enabled"],
+        labels=["Disabled", "Enabled", "Ideal"],
         x_label='"unfair" flows link utilization (%)',
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
