@@ -526,7 +526,9 @@ def parse_opened_exp(
                 elif metric.startswith(features.LOSS_RATE_FET):
                     new = loss_rate_cur
                 elif metric.startswith(features.SQRT_LOSS_RATE_FET):
-                    new = sqrt_loss_rate_cur
+                    new = (
+                        1 if sqrt_loss_rate_cur in utils.UNSAFE else sqrt_loss_rate_cur
+                    )
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
                     new = mathis_tput_raw
                 else:
@@ -1114,8 +1116,9 @@ def parse_received_packets(
                 )
         elif metric.startswith(features.SQRT_LOSS_RATE_FET):
             for j in range(1, num_pkts):
+                new = fets[j][features.SQRT_LOSS_RATE_FET]
                 fets[j][metric] = utils.safe_update_ewma(
-                    fets[j - 1][metric], fets[j][features.SQRT_LOSS_RATE_FET], alpha
+                    fets[j - 1][metric], 1 if new in utils.UNSAFE else new, alpha
                 )
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
