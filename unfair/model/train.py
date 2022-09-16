@@ -334,7 +334,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
             dat_out_sampled = dat_out
             if args["feature_selection_percent"] < 100:
                 logging.info(
-                    "Using a random %d%% of test data for feature selection.",
+                    "Using a random %f%% of test data for feature selection.",
                     args["feature_selection_percent"],
                 )
                 count = math.ceil(

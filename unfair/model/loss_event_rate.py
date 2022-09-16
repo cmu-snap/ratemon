@@ -138,7 +138,7 @@ class LossTracker:
         assert pkt_loss_cur_estimate >= 0
         if pkt_loss_cur_estimate > 1000:
             logging.debug(
-                "Warning: High packet loss estimate: %d", pkt_loss_cur_estimate
+                "Warning: High packet loss estimate: %f", pkt_loss_cur_estimate
             )
         return pkt_loss_cur_estimate
 

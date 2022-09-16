@@ -38,7 +38,7 @@ class Split:
         if split_exists(out_dir, name):
             raise Exception(f"Split already exists: {flp}")
         logging.info(
-            '\tInitializing split "%s" (%d%%, sampling %d%%%s) at: %s',
+            '\tInitializing split "%s" (%f%%, sampling %f%%%s) at: %s',
             self.name,
             split_frac * 100,
             sample_frac * 100,
