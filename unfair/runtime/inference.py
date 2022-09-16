@@ -577,18 +577,6 @@ def batch_inference(
             flow_to_rwnd,
         )
 
-    for (_, flowkey, min_rtt_us, all_fets, in_fets), label in zip(batch, labels):
-        flow_to_prev_features[flowkey] = in_fets[-1]
-        make_decision(
-            args,
-            flowkey,
-            min_rtt_us,
-            all_fets,
-            label,
-            flow_to_decisions,
-            flow_to_rwnd,
-        )
-
 
 def run(args, que, inference_flags, done):
     """Receive packets and run inference on them.
