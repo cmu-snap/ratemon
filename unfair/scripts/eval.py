@@ -16,6 +16,13 @@ import numpy as np
 
 from unfair.model import defaults, features, gen_features, utils
 
+FIGSIZE = (5, 2.5)
+FIGSIZE_BOX = (5, 3.5)
+FONTSIZE = 12
+COLORS = ["b", "r", "g"]
+LINESTYLES = ["solid", "dashed", "dashdot"]
+LINEWIDTH = 2.5
+PREFIX = ""
 
 def get_queue_mult(exp):
     queue_mult = math.floor(exp.queue_bdp)
@@ -25,54 +32,56 @@ def get_queue_mult(exp):
 
 
 def plot_cdf(
-    args, lines, labels, x_label, x_max, filename, title=None, colors=["r", "g", "b"]
+        args, lines, labels, x_label, x_max, filename, title=None, colors=COLORS, linestyles=LINESTYLES, legendloc="best"
 ):
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=FIGSIZE)
 
-    for line, label, color in zip(lines, labels, colors):
+    for line, label, color, linestyle in zip(lines, labels, colors, linestyles):
         count, bins_count = np.histogram(line, bins=len(line))
         plt.plot(
             bins_count[1:],
             np.cumsum(count / sum(count)),
             alpha=0.75,
             color=color,
+            linestyle=linestyle,
             label=label,
+            linewidth=LINEWIDTH,
         )
 
-    plt.xlabel(x_label)
-    plt.ylabel("CDF")
+    plt.xlabel(x_label, fontsize=FONTSIZE)
+    plt.ylabel("CDF", fontsize=FONTSIZE)
     plt.xlim(0, x_max)
     if title is not None:
-        plt.title(title)
+        plt.title(title, fontsize=FONTSIZE)
     if len(lines) > 1:
-        plt.legend()
+        plt.legend(fontsize=FONTSIZE, loc=legendloc)
     plt.grid(True)
     plt.tight_layout()
 
-    cdf_flp = path.join(args.out_dir, filename)
+    cdf_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
     plt.savefig(cdf_flp)
     plt.close()
     logging.info("Saved CDF to: %s", cdf_flp)
 
 
 def plot_hist(
-    args, lines, labels, x_label, filename, title=None, colors=["r", "g", "b"]
+        args, lines, labels, x_label, filename, title=None, colors=COLORS
 ):
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=FIGSIZE)
 
     for line, label, color in zip(lines, labels, colors):
         plt.hist(line, bins=50, density=True, facecolor=color, alpha=0.75, label=label)
 
-    plt.xlabel(x_label)
-    plt.ylabel("probability (%)")
+    plt.xlabel(x_label, fontsize=FONTSIZE)
+    plt.ylabel("probability (%)", fontsize=FONTSIZE)
     if title is not None:
-        plt.title(title)
+        plt.title(title, fontsize=FONTSIZE)
     if len(lines) > 1:
-        plt.legend()
+        plt.legend(fontsize=FONTSIZE)
     plt.grid(True)
     plt.tight_layout()
 
-    hist_flp = path.join(args.out_dir, filename)
+    hist_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
     plt.savefig(hist_flp)
     plt.close()
     logging.info("Saved histogram to: %s", hist_flp)
@@ -85,12 +94,12 @@ def plot_box(
     Make a box plot of the JFI or utilization over some experiment variable like
     number of flows.
     """
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=FIGSIZE_BOX)
 
     plt.boxplot(data)
 
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
+    plt.xlabel(x_label, fontsize=FONTSIZE)
+    plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xticks(
         range(1, len(x_ticks) + 1),
         x_ticks,
@@ -98,11 +107,11 @@ def plot_box(
     )
     plt.ylim(0, y_max)
     if title is not None:
-        plt.title(title)  # f"Boxplot of {y_label} vs. {x_label}"
+        plt.title(title, fontsize=FONTSIZE)
     plt.grid(True)
     plt.tight_layout()
 
-    box_flp = path.join(args.out_dir, filename)
+    box_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
     plt.savefig(box_flp)
     plt.close()
     logging.info("Saved boxplot to: %s", box_flp)
@@ -482,17 +491,19 @@ def main(args):
     plot_cdf(
         args,
         lines=[fair_rates_Mbps],
-        labels=["UnfairMon"],
-        x_label="fair rate (Mbps)",
+        labels=["Fair rate"],
+        x_label="Fair rate (Mbps)",
         x_max=max(fair_rates_Mbps),
         filename="fair_rate_cdf.pdf",
+        linestyles=["solid"],
+        colors=["b"],
         # title=f"CDF of fair rate",
     )
     plot_hist(
         args,
         lines=[fair_rates_Mbps],
-        labels=["fair rate"],
-        x_label="fair rate (Mbps)",
+        labels=["Fair rate"],
+        x_label="Fair rate (Mbps)",
         filename="fair_rate_hist.pdf",
         # title="Histogram of fair rate",
     )
@@ -509,7 +520,7 @@ def main(args):
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label="overall link utilization (%)",
+        x_label="Overall link utilization (%)",
         filename="overall_util_hist.pdf",
         # title="Histogram of overall link utilization,\nwith and without unfairness monitor",
     )
@@ -517,17 +528,17 @@ def main(args):
         args,
         lines=[fair_flows_utils_disabled, fair_flows_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label='"fair" flows link utilization (%)',
+        x_label='Total link utilization of incumbent flows (%)',
         filename="fair_flows_util_hist.pdf",
-        # title='Histogram of "fair" flows link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of "incumbent" flows link utilization,\nwith and without unfairness monitor',
     )
     plot_hist(
         args,
         lines=[unfair_flows_utils_disabled, unfair_flows_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label='"unfair" flows link utilization (%)',
+        x_label='Link utilization of newcomer flow (%)',
         filename="unfair_flows_util_hist.pdf",
-        # title='Histogram of "unfair" flows link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of newcomer flow link utilization,\nwith and without unfairness monitor',
     )
     plot_cdf(
         args,
@@ -536,6 +547,8 @@ def main(args):
         x_label="JFI",
         x_max=1.0,
         filename="jfi_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=["r", "g"],
         # title="CDF of JFI,\nwith and without unfairness monitor",
     )
     plot_cdf(
@@ -545,47 +558,53 @@ def main(args):
             [100 - x for x in overall_utils_enabled],
         ],
         labels=["Original", "UnfairMon"],
-        x_label="unused link capacity (%)",
+        x_label="Unused link capacity (%)",
         x_max=100,
         filename="unused_util_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=["r", "g"],
+        legendloc="lower right",
         # title="CDF of unused link capacity,\nwith and without unfairness monitor",
     )
     plot_cdf(
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label="overall link utilization (%)",
+        x_label="Overall link utilization (%)",
         x_max=100,
         filename="util_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=["r", "g"],
+        legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
     plot_cdf(
         args,
         lines=[
+            # Expected total utilization of incumbent flows.
+            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched.keys()],
             fair_flows_utils_disabled,
             fair_flows_utils_enabled,
-            # Expected total utilization of fair flows.
-            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Original", "UnfairMon", "Perfectly Fair"],
-        x_label='"fair" flows link utilization (%)',
+        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        x_label='Total link utilization of incumbent flows (%)',
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
-        # title='CDF of "fair" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
     )
     plot_cdf(
         args,
         lines=[
+            # Expected total utilization of newcomer flows.
+            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched.keys()],
             unfair_flows_utils_disabled,
             unfair_flows_utils_enabled,
-            # Expected total utilization of unfair flows.
-            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Original", "UnfairMon", "Perfectly Fair"],
-        x_label='"unfair" flows link utilization (%)',
+        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        x_label='Link utilization of newcomer flow (%)',
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
-        # title='CDF of "unfair" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
     )
 
     logging.info(
@@ -622,7 +641,7 @@ def main(args):
     )
     logging.info(
         (
-            '\n"Fair" flows link utilization change '
+            '\nIncumbent flows link utilization change '
             "--- higher is better, want to be >= 0%%:\n"
             "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
@@ -635,7 +654,7 @@ def main(args):
     )
     logging.info(
         (
-            '\n"Unfair" flows link utilization change '
+            '\nNewcomer flow link utilization change '
             "--- higher is better, want to be >= 0%%:\n"
             "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
@@ -654,8 +673,8 @@ def main(args):
         lambda exp: exp.bw_Mbps,
         lambda result: result[5],
         lambda x: x,
-        "bandwidth (Mbps)",
-        "utilization (%)",
+        "Bandwidth (Mbps)",
+        "Utilization (%)",
         100,
         "bandwidth_vs_util.pdf",
         num_buckets=10,
@@ -666,8 +685,8 @@ def main(args):
         lambda exp: exp.target_per_flow_bw_Mbps,
         lambda result: result[5],
         lambda x: x,
-        "fair rate (Mbps)",
-        "utilization (%)",
+        "Fair rate (Mbps)",
+        "Utilization (%)",
         100,
         "fair_rate_vs_util.pdf",
         num_buckets=10,
@@ -679,7 +698,7 @@ def main(args):
         lambda result: result[5],
         lambda x: int(x / 1e3),
         "RTT (ms)",
-        "utilization (%)",
+        "Utilization (%)",
         100,
         "rtt_vs_util.pdf",
         num_buckets=10,
@@ -690,8 +709,8 @@ def main(args):
         get_queue_mult,
         lambda result: result[5],
         lambda x: x,
-        "queue size (x BDP)",
-        "utilization (%)",
+        "Queue size (x BDP)",
+        "Utilization (%)",
         100,
         "queue_size_vs_util.pdf",
         num_buckets=10,
@@ -702,7 +721,7 @@ def main(args):
         lambda exp: exp.cca_1_flws,
         lambda result: result[5],
         lambda x: x,
-        "incumbent flows",
+        "Incumbent flows",
         "utilization (%)",
         100,
         "incumbent_flows_vs_util.pdf",
@@ -716,7 +735,7 @@ def main(args):
         lambda exp: exp.bw_bps,
         lambda result: result[1],
         lambda x: int(x / 1e6),
-        "bandwidth (Mbps)",
+        "Bandwidth (Mbps)",
         "JFI",
         1,
         "bandwidth_vs_jfi.pdf",
@@ -728,7 +747,7 @@ def main(args):
         lambda exp: exp.target_per_flow_bw_Mbps,
         lambda result: result[1],
         lambda x: x,
-        "fair rate (Mbps)",
+        "Fair rate (Mbps)",
         "JFI",
         1,
         "fair_rate_vs_jfi.pdf",
@@ -752,7 +771,7 @@ def main(args):
         get_queue_mult,
         lambda result: result[1],
         lambda x: x,
-        "queue size (x BDP)",
+        "Queue size (x BDP)",
         "JFI",
         1,
         "queue_size_vs_jfi.pdf",
@@ -764,7 +783,7 @@ def main(args):
         lambda exp: exp.cca_1_flws,
         lambda result: result[1],
         lambda x: x,
-        "incumbent flows",
+        "Incumbent flows",
         "JFI",
         1,
         "incumbent_flows_vs_jfi.pdf",
@@ -810,9 +829,17 @@ def parse_args():
         required=False,
         type=float,
     )
+    parser.add_argument(
+        "--prefix",
+        help="A prefix to attach to output filenames.",
+        required=False,
+        type=str
+    )
     args = parser.parse_args()
     assert path.isdir(args.exp_dir)
     assert path.isdir(args.out_dir)
+    global PREFIX
+    PREFIX = "" if args.prefix is None else f"{args.prefix}_"
     return args
 
 
