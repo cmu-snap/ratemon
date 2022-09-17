@@ -55,7 +55,9 @@ def plot_cdf(
     logging.info("Saved CDF to: %s", cdf_flp)
 
 
-def plot_hist(args, lines, labels, x_label, filename, title=None, colors=["r", "g", "b"]):
+def plot_hist(
+    args, lines, labels, x_label, filename, title=None, colors=["r", "g", "b"]
+):
     plt.figure(figsize=(8, 6))
 
     for line, label, color in zip(lines, labels, colors):
@@ -76,7 +78,9 @@ def plot_hist(args, lines, labels, x_label, filename, title=None, colors=["r", "
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate, title=None):
+def plot_box(
+    args, data, x_ticks, x_label, y_label, y_max, filename, rotate, title=None
+):
     """
     Make a box plot of the JFI or utilization over some experiment variable like
     number of flows.
