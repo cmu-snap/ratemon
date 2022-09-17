@@ -25,8 +25,10 @@ def get_queue_mult(exp):
 
 
 def plot_cdf(
-    args, lines, labels, x_label, x_max, filename, title, colors=["r", "g", "b"]
+    args, lines, labels, x_label, x_max, filename, title=None, colors=["r", "g", "b"]
 ):
+    plt.figure(figsize=(8, 6))
+
     for line, label, color in zip(lines, labels, colors):
         count, bins_count = np.histogram(line, bins=len(line))
         plt.plot(
@@ -40,7 +42,8 @@ def plot_cdf(
     plt.xlabel(x_label)
     plt.ylabel("CDF")
     plt.xlim(0, x_max)
-    plt.title(title)  # f"CDF of {x_label},\nwith and without unfairness monitor"
+    if title is not None:
+        plt.title(title)
     if len(lines) > 1:
         plt.legend()
     plt.grid(True)
@@ -52,13 +55,16 @@ def plot_cdf(
     logging.info("Saved CDF to: %s", cdf_flp)
 
 
-def plot_hist(args, lines, labels, x_label, filename, title, colors=["r", "g", "b"]):
+def plot_hist(args, lines, labels, x_label, filename, title=None, colors=["r", "g", "b"]):
+    plt.figure(figsize=(8, 6))
+
     for line, label, color in zip(lines, labels, colors):
         plt.hist(line, bins=50, density=True, facecolor=color, alpha=0.75, label=label)
 
     plt.xlabel(x_label)
     plt.ylabel("probability (%)")
-    plt.title(title)
+    if title is not None:
+        plt.title(title)
     if len(lines) > 1:
         plt.legend()
     plt.grid(True)
@@ -70,11 +76,13 @@ def plot_hist(args, lines, labels, x_label, filename, title, colors=["r", "g", "
     logging.info("Saved histogram to: %s", hist_flp)
 
 
-def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate):
+def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate, title=None):
     """
     Make a box plot of the JFI or utilization over some experiment variable like
     number of flows.
     """
+    plt.figure(figsize=(8, 6))
+
     plt.boxplot(data)
 
     plt.xlabel(x_label)
@@ -85,7 +93,8 @@ def plot_box(args, data, x_ticks, x_label, y_label, y_max, filename, rotate):
         rotation=45 if rotate else 0,
     )
     plt.ylim(0, y_max)
-    plt.title(f"Boxplot of {y_label} vs. {x_label}")
+    if title is not None:
+        plt.title(title)  # f"Boxplot of {y_label} vs. {x_label}"
     plt.grid(True)
     plt.tight_layout()
 
@@ -469,11 +478,11 @@ def main(args):
     plot_cdf(
         args,
         lines=[fair_rates_Mbps],
-        labels=["Enabled"],
+        labels=["UnfairMon"],
         x_label="fair rate (Mbps)",
         x_max=max(fair_rates_Mbps),
         filename="fair_rate_cdf.pdf",
-        title=f"CDF of fair rate",
+        # title=f"CDF of fair rate",
     )
     plot_hist(
         args,
@@ -481,49 +490,49 @@ def main(args):
         labels=["fair rate"],
         x_label="fair rate (Mbps)",
         filename="fair_rate_hist.pdf",
-        title="Histogram of fair rate",
+        # title="Histogram of fair rate",
     )
 
     plot_hist(
         args,
         lines=[jfis_disabled, jfis_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label="JFI",
         filename="jfi_hist.pdf",
-        title="Histogram of JFI,\nwith and without unfairness monitor",
+        # title="Histogram of JFI,\nwith and without unfairness monitor",
     )
     plot_hist(
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label="overall link utilization (%)",
         filename="overall_util_hist.pdf",
-        title="Histogram of overall link utilization,\nwith and without unfairness monitor",
+        # title="Histogram of overall link utilization,\nwith and without unfairness monitor",
     )
     plot_hist(
         args,
         lines=[fair_flows_utils_disabled, fair_flows_utils_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label='"fair" flows link utilization (%)',
         filename="fair_flows_util_hist.pdf",
-        title='Histogram of "fair" flows link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of "fair" flows link utilization,\nwith and without unfairness monitor',
     )
     plot_hist(
         args,
         lines=[unfair_flows_utils_disabled, unfair_flows_utils_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label='"unfair" flows link utilization (%)',
         filename="unfair_flows_util_hist.pdf",
-        title='Histogram of "unfair" flows link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of "unfair" flows link utilization,\nwith and without unfairness monitor',
     )
     plot_cdf(
         args,
         lines=[jfis_disabled, jfis_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label="JFI",
         x_max=1.0,
         filename="jfi_cdf.pdf",
-        title="CDF of JFI,\nwith and without unfairness monitor",
+        # title="CDF of JFI,\nwith and without unfairness monitor",
     )
     plot_cdf(
         args,
@@ -531,20 +540,20 @@ def main(args):
             [100 - x for x in overall_utils_disabled],
             [100 - x for x in overall_utils_enabled],
         ],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label="unused link capacity (%)",
         x_max=100,
         filename="unused_util_cdf.pdf",
-        title="CDF of unused link capacity,\nwith and without unfairness monitor",
+        # title="CDF of unused link capacity,\nwith and without unfairness monitor",
     )
     plot_cdf(
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
-        labels=["Disabled", "Enabled"],
+        labels=["Original", "UnfairMon"],
         x_label="overall link utilization (%)",
         x_max=100,
         filename="util_cdf.pdf",
-        title="CDF of overall link utilization,\nwith and without unfairness monitor",
+        # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
     plot_cdf(
         args,
@@ -554,11 +563,11 @@ def main(args):
             # Expected total utilization of fair flows.
             [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Disabled", "Enabled", "Perfectly Fair"],
+        labels=["Original", "UnfairMon", "Perfectly Fair"],
         x_label='"fair" flows link utilization (%)',
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
-        title='CDF of "fair" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of "fair" flows link utilization,\nwith and without unfairness monitor',
     )
     plot_cdf(
         args,
@@ -568,11 +577,11 @@ def main(args):
             # Expected total utilization of unfair flows.
             [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched.keys()],
         ],
-        labels=["Disabled", "Enabled", "Perfectly Fair"],
+        labels=["Original", "UnfairMon", "Perfectly Fair"],
         x_label='"unfair" flows link utilization (%)',
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
-        title='CDF of "unfair" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of "unfair" flows link utilization,\nwith and without unfairness monitor',
     )
 
     logging.info(
