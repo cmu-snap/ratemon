@@ -75,7 +75,7 @@ def plot_cdf(
     logging.info("Saved CDF to: %s", cdf_flp)
 
     with open(
-        path.join(args.out_dir, PREFIX + filename.strip(".pdf") + "_percentiles.txt"),
+        path.join(args.out_dir, PREFIX + filename[:-4] + "_percentiles.txt"),
         "w",
         encoding="utf-8",
     ) as fil:
