@@ -23,7 +23,7 @@ COLORS = ["b", "r", "g"]
 LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
 PREFIX = ""
-PERCENTILES = [50, 90, 99.9]
+PERCENTILES = [25, 50, 75, 90, 99.9]
 
 
 def get_queue_mult(exp):
