@@ -23,6 +23,8 @@ COLORS = ["b", "r", "g"]
 LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
 PREFIX = ""
+PERCENTILES = [50, 90, 99.9]
+
 
 def get_queue_mult(exp):
     queue_mult = math.floor(exp.queue_bdp)
@@ -32,7 +34,16 @@ def get_queue_mult(exp):
 
 
 def plot_cdf(
-        args, lines, labels, x_label, x_max, filename, title=None, colors=COLORS, linestyles=LINESTYLES, legendloc="best"
+    args,
+    lines,
+    labels,
+    x_label,
+    x_max,
+    filename,
+    title=None,
+    colors=COLORS,
+    linestyles=LINESTYLES,
+    legendloc="best",
 ):
     plt.figure(figsize=FIGSIZE)
 
@@ -58,15 +69,24 @@ def plot_cdf(
     plt.grid(True)
     plt.tight_layout()
 
-    cdf_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
+    cdf_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(cdf_flp)
     plt.close()
     logging.info("Saved CDF to: %s", cdf_flp)
 
+    with open(
+        path.join(args.out_dir, PREFIX + filename.strip(".pdf") + "_percentiles.txt"),
+        "w",
+        encoding="utf-8",
+    ) as fil:
+        for line, label in zip(lines, labels):
+            fil.write(
+                f"Percentiles for {label}: "
+                f"{dict(zip(PERCENTILES, np.percentile(line, PERCENTILES)))}\n"
+            )
 
-def plot_hist(
-        args, lines, labels, x_label, filename, title=None, colors=COLORS
-):
+
+def plot_hist(args, lines, labels, x_label, filename, title=None, colors=COLORS):
     plt.figure(figsize=FIGSIZE)
 
     for line, label, color in zip(lines, labels, colors):
@@ -81,7 +101,7 @@ def plot_hist(
     plt.grid(True)
     plt.tight_layout()
 
-    hist_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
+    hist_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(hist_flp)
     plt.close()
     logging.info("Saved histogram to: %s", hist_flp)
@@ -111,7 +131,7 @@ def plot_box(
     plt.grid(True)
     plt.tight_layout()
 
-    box_flp = path.join(args.out_dir, f"{PREFIX}{filename}")
+    box_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(box_flp)
     plt.close()
     logging.info("Saved boxplot to: %s", box_flp)
@@ -528,7 +548,7 @@ def main(args):
         args,
         lines=[fair_flows_utils_disabled, fair_flows_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label='Total link utilization of incumbent flows (%)',
+        x_label="Total link utilization of incumbent flows (%)",
         filename="fair_flows_util_hist.pdf",
         # title='Histogram of "incumbent" flows link utilization,\nwith and without unfairness monitor',
     )
@@ -536,7 +556,7 @@ def main(args):
         args,
         lines=[unfair_flows_utils_disabled, unfair_flows_utils_enabled],
         labels=["Original", "UnfairMon"],
-        x_label='Link utilization of newcomer flow (%)',
+        x_label="Link utilization of newcomer flow (%)",
         filename="unfair_flows_util_hist.pdf",
         # title='Histogram of newcomer flow link utilization,\nwith and without unfairness monitor',
     )
@@ -587,7 +607,7 @@ def main(args):
             fair_flows_utils_enabled,
         ],
         labels=["Perfectly Fair", "Original", "UnfairMon"],
-        x_label='Total link utilization of incumbent flows (%)',
+        x_label="Total link utilization of incumbent flows (%)",
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
         # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
@@ -601,7 +621,7 @@ def main(args):
             unfair_flows_utils_enabled,
         ],
         labels=["Perfectly Fair", "Original", "UnfairMon"],
-        x_label='Link utilization of newcomer flow (%)',
+        x_label="Link utilization of newcomer flow (%)",
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
         # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
@@ -641,7 +661,7 @@ def main(args):
     )
     logging.info(
         (
-            '\nIncumbent flows link utilization change '
+            "\nIncumbent flows link utilization change "
             "--- higher is better, want to be >= 0%%:\n"
             "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
@@ -654,7 +674,7 @@ def main(args):
     )
     logging.info(
         (
-            '\nNewcomer flow link utilization change '
+            "\nNewcomer flow link utilization change "
             "--- higher is better, want to be >= 0%%:\n"
             "\tAvg: %s%.4f %%\n"
             "\tStddev: %.4f %%\n"
@@ -833,7 +853,7 @@ def parse_args():
         "--prefix",
         help="A prefix to attach to output filenames.",
         required=False,
-        type=str
+        type=str,
     )
     args = parser.parse_args()
     assert path.isdir(args.exp_dir)
