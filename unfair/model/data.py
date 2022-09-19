@@ -86,7 +86,7 @@ def get_split(data_dir, name, sample_frac, net):
         new_subsplits = []
         for fil, subsplit in subsplits:
             # HACK: Select more from subsplits that are tagged "high-fair-rate".
-            multiplier = 2 if "high-fair-rate" in fil else 1
+            multiplier = 1.25 if "high-fair-rate" in fil else 1
             actual_sample_frac = min(1, sample_frac * multiplier)
             if multiplier > 1:
                 logging.info(
