@@ -46,7 +46,7 @@ def react_up(strategy, current):
         # TODO: Change to 1 MSS per RTT
         new = current + 1e6
     elif strategy == ReactionStrategy.MIMD:
-        new = current * 1.1
+        new = current * 1.3
     elif strategy == ReactionStrategy.FILE:
         raise RuntimeError(f'Reaction strategy "{to_str(strategy)}" cannot react.')
     else:
@@ -59,7 +59,7 @@ def react_down(strategy, current):
     if strategy == ReactionStrategy.AIMD:
         new = current / 2
     elif strategy == ReactionStrategy.MIMD:
-        new = current / 2
+        new = current / 1.75
     elif strategy == ReactionStrategy.FILE:
         raise RuntimeError(f'Reaction strategy "{to_str(strategy)}" cannot react.')
     else:
