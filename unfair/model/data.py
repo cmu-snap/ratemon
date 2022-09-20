@@ -34,10 +34,12 @@ def get_dataloaders(args, net):
         logging.info("Regenerating data...")
         trn, val, tst, scl_prms = get_bulk_data(args, net)
         # Save the processed data so that we do not need to process it again.
-        utils.save_parsed_data(dat_flp, trn, val, tst)
+        # NOTE: Not saving data.
+        # utils.save_parsed_data(dat_flp, trn, val, tst)
         # Save scaling parameters. We always need to save the scaling parameters,
         # because the trained model cannot be used without them.
-        utils.save_scl_prms(args["out_dir"], scl_prms)
+        # NOTE: Not saving scaling parameters.
+        # utils.save_scl_prms(args["out_dir"], scl_prms)
 
     # Select the specific columns that we want to use as input features.
     # trn[0] is the input data.
@@ -91,7 +93,7 @@ def get_split(data_dir, name, sample_frac, net):
             if multiplier > 1:
                 logging.info(
                     (
-                        "Using multiplier %d for subsplit %s, resulting in actual "
+                        "Using multiplier %f for subsplit %s, resulting in actual "
                         "sample fraction of %f."
                     ),
                     multiplier,
