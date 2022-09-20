@@ -137,6 +137,75 @@ def plot_box(
     logging.info("Saved boxplot to: %s", box_flp)
 
 
+def plot_lines(
+    lines,
+    x_label,
+    y_label,
+    x_max,
+    out_flp,
+    legendloc="best",
+):
+    plt.figure(figsize=FIGSIZE)
+
+    for line in lines:
+        line, cca = line
+        xs, ys = zip(*line)
+        plt.plot(
+            xs,
+            ys,
+            alpha=0.75,
+            color="b" if cca == "cubic" else "r",
+            linestyle="solid" if cca == "cubic" else "dotdash",
+            label=cca,
+            linewidth=1,
+        )
+
+    plt.xlabel(x_label, fontsize=FONTSIZE)
+    plt.ylabel(y_label, fontsize=FONTSIZE)
+    plt.xlim(0, x_max)
+    plt.grid(True)
+    plt.tight_layout()
+
+    plt.savefig(out_flp)
+    plt.close()
+    logging.info("Saved line graph to: %s", out_flp)
+
+
+def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
+    lines = []
+    for flw, pkts in flw_to_pkts.items():
+        throughputs = []
+        current_bucket = None
+        bucket_start_time = None
+        for idx in range(len(pkts)):
+            if current_bucket is None:
+                current_bucket = [idx]
+                bucket_start_time = pkts[idx][features.ARRIVAL_TIME_FET]
+                continue
+
+            current_bucket.append(idx)
+            current_time = pkts[idx][features.ARRIVAL_TIME_FET]
+
+            if current_time - bucket_start_time >= 1e-3:
+                throughputs.append(
+                    (
+                        (current_time + bucket_start_time) / 2 / 1e6,
+                        utils.safe_tput_bps(
+                            current_bucket, min(current_bucket), max(current_bucket)
+                        )
+                        / 1e6,
+                    )
+                )
+                current_bucket = [idx]
+                bucket_start_time = current_time
+                current_bucket = []
+                bucket_start_time = current_time
+
+        lines.append((throughputs, flw_to_cca[flw]))
+
+    plot_lines(lines, "time (s)", "throughput (Mbps)", exp.bw_Mbps, out_flp)
+
+
 def parse_opened_exp(
     exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
 ):
@@ -239,6 +308,8 @@ def parse_opened_exp(
         exp.bw_bps,
         {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
     )
+
+    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)
 
     out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
 
