@@ -143,6 +143,7 @@ def plot_lines(
     x_label,
     y_label,
     x_max,
+    y_max,
     out_flp,
     legendloc="best",
 ):
@@ -163,9 +164,12 @@ def plot_lines(
 
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
-    plt.xlim(0, x_max)
+    if x_max is not None:
+        plt.xlim(0, x_max)
+    plt.ylim(0, y_max)
     plt.grid(True)
     plt.tight_layout()
+    plt.legend(loc=legendloc)
 
     plt.savefig(out_flp)
     plt.close()
@@ -174,37 +178,45 @@ def plot_lines(
 
 def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
     lines = []
+    initial_time = min(np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values())
     for flw, pkts in flw_to_pkts.items():
         throughputs = []
-        current_bucket = None
-        bucket_start_time = None
+        current_bucket = []
         for idx in range(len(pkts)):
-            if current_bucket is None:
+            if not current_bucket:
                 current_bucket = [idx]
-                bucket_start_time = pkts[idx][features.ARRIVAL_TIME_FET]
                 continue
 
-            current_bucket.append(idx)
-            current_time = pkts[idx][features.ARRIVAL_TIME_FET]
-
-            if current_time - bucket_start_time >= 1e-3:
+            start_idx = current_bucket[0]
+            start_time = pkts[start_idx][features.ARRIVAL_TIME_FET]
+            # Create a bucket for every 100 milliseconds.
+            if len(current_bucket) > 1 and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 1e6:
+                end_idx = current_bucket[-1]
+                end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
+                #print("start:", start_idx)
+                #print("end:", end_idx)
+                #print("start_time:", start_time)
+                #print("end_time:", end_time)
+                #print("end_time - start_time:", end_time - start_time)
                 throughputs.append(
                     (
-                        (current_time + bucket_start_time) / 2 / 1e6,
+                        ((start_time + end_time) / 2  - initial_time) / 1e6,
                         utils.safe_tput_bps(
-                            pkts, min(current_bucket), max(current_bucket)
+                            pkts, start_idx, end_idx
                         )
                         / 1e6,
                     )
                 )
-                current_bucket = [idx]
-                bucket_start_time = current_time
+                # print(throughputs[-1])
                 current_bucket = []
-                bucket_start_time = current_time
+            current_bucket.append(idx)
+
+
+        # Skips the last partial bucket, but that's okay.
 
         lines.append((throughputs, flw_to_cca[flw]))
 
-    plot_lines(lines, "time (s)", "throughput (Mbps)", exp.bw_Mbps, out_flp)
+    plot_lines(lines, "time (s)", "throughput (Mbps)", None, exp.bw_Mbps, out_flp)
 
 
 def parse_opened_exp(
@@ -279,6 +291,8 @@ def parse_opened_exp(
         ]
     )
 
+    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)    
+
     # Remove data from before the late flows start.
     for flw in flw_to_pkts.keys():
         if len(flw_to_pkts[flw]) == 0:
@@ -309,8 +323,6 @@ def parse_opened_exp(
         exp.bw_bps,
         {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
     )
-
-    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)
 
     out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
 
