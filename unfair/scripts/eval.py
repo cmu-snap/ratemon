@@ -155,8 +155,8 @@ def plot_lines(
             xs,
             ys,
             alpha=0.75,
-            color="b" if cca == "cubic" else "r",
-            linestyle="solid" if cca == "cubic" else "dotdash",
+            # color="b" if cca == "cubic" else "r",
+            linestyle="solid" if cca == "cubic" else "dashdot",
             label=cca,
             linewidth=1,
         )
