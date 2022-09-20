@@ -190,7 +190,7 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
             start_idx = current_bucket[0]
             start_time = pkts[start_idx][features.ARRIVAL_TIME_FET]
             # Create a bucket for every 100 milliseconds.
-            if len(current_bucket) > 1 and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 1e6:
+            if len(current_bucket) > 1 and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 500e3:
                 end_idx = current_bucket[-1]
                 end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
                 #print("start:", start_idx)
@@ -200,7 +200,7 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
                 #print("end_time - start_time:", end_time - start_time)
                 throughputs.append(
                     (
-                        ((start_time + end_time) / 2  - initial_time) / 1e6,
+                        (start_time + (end_time - start_time) / 2 - initial_time) / 1e6,
                         utils.safe_tput_bps(
                             pkts, start_idx, end_idx
                         )
@@ -216,7 +216,8 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
 
         lines.append((throughputs, flw_to_cca[flw]))
 
-    plot_lines(lines, "time (s)", "throughput (Mbps)", None, exp.bw_Mbps, out_flp)
+    plot_lines(
+        lines, "time (s)", "throughput (Mbps)", None, exp.bw_Mbps, out_flp, legendloc="upper right")
 
 
 def parse_opened_exp(
@@ -291,7 +292,7 @@ def parse_opened_exp(
         ]
     )
 
-    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)    
+    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)
 
     # Remove data from before the late flows start.
     for flw in flw_to_pkts.keys():
