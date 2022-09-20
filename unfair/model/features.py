@@ -300,6 +300,14 @@ def fill_dependencies(in_spc):
                 #     make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
                 # )
         if INV_INTERARR_TIME_FET in name:
+            if "ewma" in name:
+                to_add.add(
+                    make_ewma_metric(INTERARR_TIME_FET, parse_ewma_metric(name)[1])
+                )
+            elif "windowed" in name:
+                to_add.add(
+                    make_win_metric(INTERARR_TIME_FET, parse_win_metric(name)[1])
+                )
             to_add.add(INV_INTERARR_TIME_FET)
             to_add.add(INTERARR_TIME_FET)
         if INTERARR_TIME_FET in name:

@@ -1191,34 +1191,26 @@ def parse_received_packets(
             # A window requires at least two packets. Note that this means
             # that the first packet will always be skipped.
             win_start_idx = win_to_start_idx[win]
-            assert (
-                win_start_idx < num_pkts - 1
-            ), "Window does not contain at least two packtes."
+            assert win_start_idx < j, "Window does not contain at least two packtes."
 
             if metric.startswith(features.INTERARR_TIME_FET):
                 new = (
                     fets[j][features.ARRIVAL_TIME_FET]
                     - fets[win_start_idx][features.ARRIVAL_TIME_FET]
-                ) / (num_pkts - 1 - win_start_idx)
+                ) / (j - win_start_idx)
             elif metric.startswith(features.INV_INTERARR_TIME_FET):
                 new = (
                     8
                     * 1e6
-                    * fets[-1][features.WIRELEN_FET]
-                    / fets[-1][
-                        features.make_win_metric(features.INTERARR_TIME_FET, win)
-                    ]
+                    * fets[j][features.WIRELEN_FET]
+                    / fets[j][features.make_win_metric(features.INTERARR_TIME_FET, win)]
                 )
             elif metric.startswith(features.TPUT_FET):
-                new = utils.safe_tput_bps(fets, win_start_idx, num_pkts - 1)
+                new = utils.safe_tput_bps(fets, win_start_idx, j)
             elif metric.startswith(features.RTT_FET):
-                new = utils.safe_mean(
-                    fets[features.RTT_FET], win_start_idx, num_pkts - 1
-                )
+                new = utils.safe_mean(fets[features.RTT_FET], win_start_idx, j)
             elif metric.startswith(features.RTT_RATIO_FET):
-                new = utils.safe_mean(
-                    fets[features.RTT_RATIO_FET], win_start_idx, num_pkts - 1
-                )
+                new = utils.safe_mean(fets[features.RTT_RATIO_FET], win_start_idx, j)
             elif metric.startswith(features.LOSS_EVENT_RATE_FET):
                 # Filled in already.
                 continue
@@ -1234,11 +1226,9 @@ def parse_received_packets(
                 )
             elif metric.startswith(features.LOSS_RATE_FET):
                 win_losses = utils.safe_sum(
-                    fets[features.PACKETS_LOST_FET], win_start_idx + 1, num_pkts - 1
+                    fets[features.PACKETS_LOST_FET], win_start_idx + 1, j
                 )
-                new = utils.safe_div(
-                    win_losses, win_losses + (num_pkts - 1 - win_start_idx)
-                )
+                new = utils.safe_div(win_losses, win_losses + (j - win_start_idx))
             elif metric.startswith(features.SQRT_LOSS_RATE_FET):
                 new = utils.safe_div(
                     1,
