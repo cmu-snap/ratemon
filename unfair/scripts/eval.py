@@ -8,6 +8,7 @@ import multiprocessing
 import os
 from os import path
 import pickle
+import random
 import sys
 import time
 
@@ -456,6 +457,7 @@ def main(args):
         for exp in sorted(os.listdir(args.exp_dir))
         if exp.endswith(".tar.gz")
     ]
+    random.shuffle(pcaps)
 
     logging.info("Num files: %d", len(pcaps))
     start_time_s = time.time()
