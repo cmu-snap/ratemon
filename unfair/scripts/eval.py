@@ -192,7 +192,7 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
                     (
                         (current_time + bucket_start_time) / 2 / 1e6,
                         utils.safe_tput_bps(
-                            current_bucket, min(current_bucket), max(current_bucket)
+                            pkts, min(current_bucket), max(current_bucket)
                         )
                         / 1e6,
                     )
