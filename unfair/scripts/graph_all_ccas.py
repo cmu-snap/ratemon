@@ -34,6 +34,9 @@ def load_results(args):
 
 
 def main(args):
+    args.out_dir = path.join(args.results_dir, "all_cca_results")
+    os.makedirs(args.out_dir, exist_ok=True)
+
     results = load_results(args)
     print(list(results.keys()))
 
