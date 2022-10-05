@@ -578,7 +578,7 @@ def main(args):
     (
         jfis_disabled,
         jfis_enabled,
-        _,
+        jfi_deltas,
         jfi_deltas_percent,
         overall_utils_disabled,
         overall_utils_enabled,
