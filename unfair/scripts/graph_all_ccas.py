@@ -81,7 +81,7 @@ def main(args):
             ],
         ],
         labels=[None],
-        x_label="Newcomer CCA",
+        x_label="Newcomer CCA (cubic vs. X)",
         y_label="JFI improvement (%)",
         x_tick_labels=[
             cca_pair[1]
