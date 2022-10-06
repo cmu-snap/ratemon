@@ -270,6 +270,7 @@ def plot_bar(
         labels=x_tick_labels,
         fontsize=FONTSIZE,
         rotation=45 if rotate else 0,
+        ha="right" if rotate else "center",
     )
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
