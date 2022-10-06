@@ -247,6 +247,10 @@ def plot_bar(
     xs = list(range(1, count + 1))
 
     for line, label, color in zip(lines, labels, colors):
+        print("xs:", xs)
+        print("line:", line)
+        print("label:", label)
+        print("color:", color)
         plt.bar(
             xs,
             line,
