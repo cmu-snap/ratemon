@@ -249,7 +249,7 @@ def plot_bar(
     width = 0.75
     count = len(lines[0])
     bar_xs = list(range(1, count + 1))
-    label_xs = [x + width for x in bar_xs]
+    label_xs = [x + (width / 2) for x in bar_xs]
 
     for line, label, color in zip(lines, labels, colors):
         plt.bar(
