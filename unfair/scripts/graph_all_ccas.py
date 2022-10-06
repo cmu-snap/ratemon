@@ -87,7 +87,7 @@ def main(args):
             cca_pair[1]
             for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
         ],
-        filename="ccas.pdf",
+        filename="jfi_deltas_bar.pdf",
         colors=["b"],
         title="Average JFI change, across all CCAs",
         rotate=True,
