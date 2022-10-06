@@ -245,12 +245,11 @@ def plot_bar(
     assert len(lines) == 1
 
     plt.figure(figsize=FIGSIZE_BOX)
-    plt.grid(True)
 
     width = 0.75
     count = len(lines[0])
-    label_xs = list(range(1, count + 1))
-    bar_xs = [x - width for x in label_xs]
+    bar_xs = list(range(1, count + 1))
+    label_xs = [x + width for x in bar_xs]
 
     for line, label, color in zip(lines, labels, colors):
         plt.bar(
@@ -274,7 +273,7 @@ def plot_bar(
     plt.tick_params(axis="x", length=0)
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
-    plt.xlim(0, count + 1 - width)
+    plt.xlim(0, max(bar_xs) + 1)
     plt.ylim(0, y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
