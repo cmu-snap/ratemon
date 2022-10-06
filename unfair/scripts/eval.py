@@ -244,6 +244,8 @@ def plot_bar(
 ):
     assert len(lines) == 1
 
+    plt.figure(figsize=FIGSIZE_BOX)
+
     count = len(lines[0])
     xs = list(range(1, count + 1))
 
