@@ -8,6 +8,7 @@ import pickle
 import sys
 
 from unfair.scripts import eval as evl
+from unfair.model import utils
 
 
 def load_results(args):
@@ -60,7 +61,12 @@ def main(args):
         #     14: results_pickle
         # )}
         keys, values = zip(*results_json.items())
-        results_refactored[cca_pair] = (*(list(zip(*values))), keys, results_pickle)
+        results_refactored[cca_pair] = (
+            *(list(zip(*values))),
+            # Convert each experiment name to an Exp object.
+            [utils.Exp(exp_name) for exp_name in keys],
+            results_pickle,
+        )
     results = results_refactored
 
     evl.plot_cdf(
