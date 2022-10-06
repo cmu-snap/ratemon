@@ -257,6 +257,7 @@ def plot_bar(
         plt.bar(
             xs,
             line,
+            alpha=0.75,
             width=0.8,
             color=color,
             bottom=None,
@@ -278,7 +279,8 @@ def plot_bar(
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
     plt.tight_layout()
-    plt.legend(loc=legendloc)
+    if labels[0] is not None:
+        plt.legend(loc=legendloc)
 
     bar_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(bar_flp)
