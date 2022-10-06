@@ -60,7 +60,7 @@ def main(args):
         #     14: results_pickle
         # )}
         keys, values = zip(*results_json.items())
-        results_refactored[cca_pair] = (*(list(zip(*values()))), keys, results_pickle)
+        results_refactored[cca_pair] = (*(list(zip(*values))), keys, results_pickle)
     results = results_refactored
 
     evl.plot_cdf(
