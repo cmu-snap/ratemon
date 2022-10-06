@@ -236,6 +236,7 @@ def plot_bar(
     y_label,
     x_tick_labels,
     filename,
+    rotate=None,
     y_max=None,
     title=None,
     colors=COLORS,
@@ -261,7 +262,12 @@ def plot_bar(
             label=label,
         )
 
-    plt.xticks(ticks=xs, labels=x_tick_labels, fontsize=FONTSIZE)
+    plt.xticks(
+        ticks=xs,
+        labels=x_tick_labels,
+        fontsize=FONTSIZE,
+        rotation=45 if rotate else 0,
+    )
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xlim(0, count + 1)
