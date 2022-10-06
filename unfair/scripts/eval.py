@@ -242,7 +242,8 @@ def plot_bar(
     colors=COLORS,
     legendloc="best",
 ):
-    assert len(lines) <= 2
+    bar_count = len(lines)
+    assert bar_count <= 2
 
     plt.figure(figsize=FIGSIZE_BOX)
 
@@ -255,7 +256,7 @@ def plot_bar(
         plt.bar(
             (
                 bar_xs
-                if count == 1
+                if bar_count == 1
                 else [x + (-1 if idx == 0 else 1) * (width / 2) for x in bar_xs]
             ),
             line,
