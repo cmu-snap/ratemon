@@ -112,6 +112,7 @@ def main(args):
             cca_pair[1]
             for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
         ],
+        y_max=1,
         filename="jfis_bar.pdf",
         colors=["r", "g"],
         title="Average JFI, across all CCAs",
