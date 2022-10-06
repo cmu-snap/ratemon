@@ -82,14 +82,14 @@ def main(args):
         ],
         labels=[None],
         x_label="Newcomer CCA (cubic vs. X)",
-        y_label="JFI improvement (%)",
+        y_label="JFI change (%)",
         x_tick_labels=[
             cca_pair[1]
             for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
         ],
         filename="ccas.pdf",
         colors=["b"],
-        title="JFI improvement for all CCAs",
+        title="Average JFI change, across all CCAs",
         rotate=True,
     )
 

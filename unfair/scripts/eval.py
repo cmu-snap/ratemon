@@ -274,7 +274,7 @@ def plot_bar(
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xlim(0, max(bar_xs) + 1)
-    plt.ylim(0, y_max)
+    plt.ylim(min(0, min(lines[0])), y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
     plt.tight_layout()
