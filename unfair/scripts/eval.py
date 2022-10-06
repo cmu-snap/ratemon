@@ -245,6 +245,7 @@ def plot_bar(
     assert len(lines) == 1
 
     plt.figure(figsize=FIGSIZE_BOX)
+    plt.grid(True)
 
     count = len(lines[0])
     xs = list(range(1, count + 1))
@@ -271,12 +272,12 @@ def plot_bar(
         fontsize=FONTSIZE,
         rotation=45 if rotate else 0,
         ha="right" if rotate else "center",
+        major=False,
     )
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xlim(0, count + 1)
     plt.ylim(0, y_max)
-    plt.grid(True)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
     plt.tight_layout()
