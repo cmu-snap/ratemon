@@ -69,6 +69,24 @@ def main(args):
         )
     results = results_refactored
 
+    evl.plot_bar(
+        args,
+        lines=[
+            # Need to sort to ensure that the order is the same as in x_tick_labels.
+            [vals[2] for _, vals in sorted(results.items(), key=lambda p: p[0][1])],
+        ],
+        labels=[None],
+        x_label="Newcomer CCA",
+        y_label="JFI improvement",
+        x_tick_labels=[
+            cca_pair[1]
+            for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
+        ],
+        filename="ccas.pdf",
+        colors=["b"],
+        title="JFI improvement for all CCAs",
+    )
+
     evl.plot_cdf(
         args,
         lines=[

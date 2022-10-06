@@ -178,7 +178,9 @@ def plot_lines(
 
 def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
     lines = []
-    initial_time = min(np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values())
+    initial_time = min(
+        np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values()
+    )
     for flw, pkts in flw_to_pkts.items():
         throughputs = []
         current_bucket = []
@@ -190,34 +192,86 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
             start_idx = current_bucket[0]
             start_time = pkts[start_idx][features.ARRIVAL_TIME_FET]
             # Create a bucket for every 100 milliseconds.
-            if len(current_bucket) > 1 and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 500e3:
+            if (
+                len(current_bucket) > 1
+                and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 500e3
+            ):
                 end_idx = current_bucket[-1]
                 end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
-                #print("start:", start_idx)
-                #print("end:", end_idx)
-                #print("start_time:", start_time)
-                #print("end_time:", end_time)
-                #print("end_time - start_time:", end_time - start_time)
+                # print("start:", start_idx)
+                # print("end:", end_idx)
+                # print("start_time:", start_time)
+                # print("end_time:", end_time)
+                # print("end_time - start_time:", end_time - start_time)
                 throughputs.append(
                     (
                         (start_time + (end_time - start_time) / 2 - initial_time) / 1e6,
-                        utils.safe_tput_bps(
-                            pkts, start_idx, end_idx
-                        )
-                        / 1e6,
+                        utils.safe_tput_bps(pkts, start_idx, end_idx) / 1e6,
                     )
                 )
                 # print(throughputs[-1])
                 current_bucket = []
             current_bucket.append(idx)
 
-
         # Skips the last partial bucket, but that's okay.
 
         lines.append((throughputs, flw_to_cca[flw]))
 
     plot_lines(
-        lines, "time (s)", "throughput (Mbps)", None, exp.bw_Mbps, out_flp, legendloc="upper right")
+        lines,
+        "time (s)",
+        "throughput (Mbps)",
+        None,
+        exp.bw_Mbps,
+        out_flp,
+        legendloc="upper right",
+    )
+
+
+def plot_bar(
+    args,
+    lines,
+    labels,
+    x_label,
+    y_label,
+    x_tick_labels,
+    filename,
+    y_max=None,
+    title=None,
+    colors=COLORS,
+    legendloc="best",
+):
+    assert len(lines) == 1
+
+    count = len(lines[0])
+    xs = list(range(1, count + 1))
+
+    for line, label, color in zip(lines, labels, colors):
+        plt.bar(
+            xs,
+            line,
+            width=0.8,
+            color=color,
+            bottom=None,
+            align="center",
+            label=label,
+        )
+
+    plt.xticks(ticks=xs, labels=x_tick_labels, fontsize=FONTSIZE)
+    plt.xlabel(x_label, fontsize=FONTSIZE)
+    plt.ylabel(y_label, fontsize=FONTSIZE)
+    plt.xlim(0, count + 1)
+    plt.ylim(0, y_max)
+    plt.grid(True)
+    if title is not None:
+        plt.title(title, fontsize=FONTSIZE)
+    plt.tight_layout()
+    plt.legend(loc=legendloc)
+
+    bar_flp = path.join(args.out_dir, PREFIX + filename)
+    plt.savefig(bar_flp)
+    plt.close()
+    logging.info("Saved bar graph to: %s", bar_flp)
 
 
 def parse_opened_exp(
