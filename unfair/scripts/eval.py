@@ -249,15 +249,12 @@ def plot_bar(
 
     width = 0.75
     count = len(lines[0])
-    xs = [x - width for x in range(1, count + 1)]
+    label_xs = list(range(1, count + 1))
+    bar_xs = [x - width for x in label_xs]
 
     for line, label, color in zip(lines, labels, colors):
-        print("xs:", xs)
-        print("line:", line)
-        print("label:", label)
-        print("color:", color)
         plt.bar(
-            xs,
+            bar_xs,
             line,
             alpha=0.75,
             width=width,
@@ -268,7 +265,7 @@ def plot_bar(
         )
 
     plt.xticks(
-        ticks=xs,
+        ticks=label_xs,
         labels=x_tick_labels,
         fontsize=FONTSIZE,
         rotation=45 if rotate else 0,
