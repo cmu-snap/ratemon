@@ -61,7 +61,7 @@ def main(args):
         results_refactored[key] = (*(list(zip(*results_json.values()))), results_pickle)
     results = results_refactored
 
-    evl.plot_hist(
+    evl.plot_cdf(
         args,
         lines=[
             # Extract and flatten the JFIs across all CCAs.
@@ -70,8 +70,11 @@ def main(args):
         ],
         labels=["Original", "UnfairMon"],
         x_label="JFI",
-        filename="jfi_hist.pdf",
-        # title="Histogram of JFI,\nwith and without unfairness monitor",
+        x_max=1.0,
+        filename="jfi_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=["r", "g"],
+        # title="CDF of JFI,\nwith and without unfairness monitor",
     )
 
 
