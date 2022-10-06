@@ -41,7 +41,7 @@ def main(args):
     print(list(results.keys()))
 
     results_refactored = {}
-    for key, (results_json, results_pickle) in results.items():
+    for cca_pair, (results_json, results_pickle) in results.items():
         # { (cca1, cca2): (
         #     0: jfis_disabled
         #     1: jfis_enabled
@@ -56,9 +56,11 @@ def main(args):
         #     10: unfair_flows_utils_disabled
         #     11: unfair_flows_utils_enabled
         #     12: unfair_flows_util_deltas_percent
-        #     13: results_pickle
+        #     13: experiments
+        #     14: results_pickle
         # )}
-        results_refactored[key] = (*(list(zip(*results_json.values()))), results_pickle)
+        keys, values = zip(*results_json.items())
+        results_refactored[cca_pair] = (*(list(zip(*values()))), keys, results_pickle)
     results = results_refactored
 
     evl.plot_cdf(
@@ -75,6 +77,57 @@ def main(args):
         linestyles=["dashed", "dashdot"],
         colors=["r", "g"],
         # title="CDF of JFI,\nwith and without unfairness monitor",
+    )
+    evl.plot_cdf(
+        args,
+        lines=[
+            [val for vals in results.values() for val in vals[4]],
+            [val for vals in results.values() for val in vals[5]],
+        ],
+        labels=["Original", "UnfairMon"],
+        x_label="Overall link utilization (%)",
+        x_max=100,
+        filename="util_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=["r", "g"],
+        legendloc="upper left",
+        # title="CDF of overall link utilization,\nwith and without unfairness monitor",
+    )
+    evl.plot_cdf(
+        args,
+        lines=[
+            # Expected total utilization of incumbent flows.
+            [
+                exp.cca_1_flws / exp.tot_flws * 100
+                for vals in results.values()
+                for exp in vals[13]
+            ],
+            [val for vals in results.values() for val in vals[7]],
+            [val for vals in results.values() for val in vals[8]],
+        ],
+        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        x_label="Total link utilization of incumbent flows (%)",
+        x_max=100,
+        filename="fair_flows_util_cdf.pdf",
+        # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+    )
+    evl.plot_cdf(
+        args,
+        lines=[
+            # Expected total utilization of newcomer flows.
+            [
+                exp.cca_2_flws / exp.tot_flws * 100
+                for vals in results.values()
+                for exp in vals[13]
+            ],
+            [val for vals in results.values() for val in vals[10]],
+            [val for vals in results.values() for val in vals[11]],
+        ],
+        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        x_label="Link utilization of newcomer flow (%)",
+        x_max=100,
+        filename="unfair_flows_util_cdf.pdf",
+        # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
     )
 
 
