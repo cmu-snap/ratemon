@@ -92,7 +92,31 @@ def main(args):
         title="Average JFI change, across all CCAs",
         rotate=True,
     )
-
+    evl.plot_bar(
+        args,
+        lines=[
+            # Need to sort to ensure that the order is the same as in x_tick_labels.
+            [
+                np.mean(vals[0])
+                for _, vals in sorted(results.items(), key=lambda p: p[0][1])
+            ],
+            [
+                np.mean(vals[1])
+                for _, vals in sorted(results.items(), key=lambda p: p[0][1])
+            ],
+        ],
+        labels=["Original", "UnfairMon"],
+        x_label="Newcomer CCA (cubic vs. X)",
+        y_label="JFI",
+        x_tick_labels=[
+            cca_pair[1]
+            for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
+        ],
+        filename="jfis_bar.pdf",
+        colors=["r", "g"],
+        title="Average JFI, across all CCAs",
+        rotate=True,
+    )
     evl.plot_cdf(
         args,
         lines=[
