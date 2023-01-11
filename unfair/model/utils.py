@@ -1482,9 +1482,9 @@ def check_fets(fets, in_spc):
     a net (i.e., the net's original feature specification).
     """
     assert fets == in_spc, (
-        "Provided features do not agreed with in_spc."
-        f"\n\tProvided fets ({len(fets)}): {'\n\t\t'.join(fets)}"
-        f"\n\tin_spc ({len(in_spc)}): {'\n\t\t'.join(in_spc)}"
+        "Provided features do not agreed with in_spc." +
+        f"\n\tProvided fets ({len(fets)}): " + "\n\t\t".join(fets) +
+        f"\n\tin_spc ({len(in_spc)}): " + "\n\t\t".join(in_spc)
     )
 
 
