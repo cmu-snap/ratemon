@@ -1483,8 +1483,8 @@ def check_fets(fets, in_spc):
     """
     assert fets == in_spc, (
         "Provided features do not agreed with in_spc." +
-        f"\n\tProvided fets ({len(fets)}):\n" + "\n\t\t".join(sorted(fets)) +
-        f"\n\tin_spc ({len(in_spc)}):\n" + "\n\t\t".join(sorted(in_spc))
+        f"\n\tProvided fets ({len(fets)}):\n\t\t" + "\n\t\t".join(sorted(fets)) +
+        f"\n\tin_spc ({len(in_spc)}):\n\t\t" + "\n\t\t".join(sorted(in_spc))
     )
 
 
