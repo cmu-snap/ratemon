@@ -1482,9 +1482,11 @@ def check_fets(fets, in_spc):
     a net (i.e., the net's original feature specification).
     """
     assert fets == in_spc, (
-        "Provided features do not agreed with in_spc." +
-        f"\n\tProvided fets ({len(fets)}):\n\t\t" + "\n\t\t".join(sorted(fets)) +
-        f"\n\tin_spc ({len(in_spc)}):\n\t\t" + "\n\t\t".join(sorted(in_spc))
+        "Provided features do not agreed with in_spc."
+        + f"\n\tProvided fets ({len(fets)}):\n\t\t"
+        + "\n\t\t".join(sorted(fets))
+        + f"\n\tin_spc ({len(in_spc)}):\n\t\t"
+        + "\n\t\t".join(sorted(in_spc))
     )
 
 
@@ -1680,12 +1682,14 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
         """
         return pkts[1] if includes_acks else None
 
+    assert len(flw_to_pkts) > 0, "No flows provided!"
     first_finish_time_us = min(
         [
             get_data_packets(pkts)[-1][features.ARRIVAL_TIME_FET]
             for pkts in flw_to_pkts.values()
         ]
     )
+
     trimmed = {}
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
