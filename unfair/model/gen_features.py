@@ -89,7 +89,7 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent=None
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent=None
 ):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
@@ -130,7 +130,7 @@ def parse_opened_exp(
     #
     # flw_to_pkts_client = utils.parse_packets(client_pcap, flw_to_cca)
     flw_to_pkts_server = utils.parse_packets(
-        server_pcap, flw_to_cca, select_tail_percent
+        server_pcap, flw_to_cca, server_ip, select_tail_percent
     )
 
     # Log and drop flows with no data packets.
@@ -1287,6 +1287,7 @@ def parse_exp(
     untar_dir,
     out_dir,
     skip_smoothed,
+    server_ip,
     select_tail_percent,
     parse_func=parse_opened_exp,
 ):
@@ -1299,7 +1300,7 @@ def parse_exp(
         if locked and exp_dir is not None:
             try:
                 return parse_func(
-                    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
+                    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent
                 )
             except AssertionError:
                 traceback.print_exc()
@@ -1356,6 +1357,12 @@ def _main():
         required=False,
         type=float,
     )
+    psr.add_argument(
+        "--server-ip",
+        help="The IPv4 address of the server interface on which the PCAPs were captured.",
+        required=True,
+        type=str,
+    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
@@ -1371,6 +1378,7 @@ def _main():
             untar_dir,
             out_dir,
             skip_smoothed,
+            args.server_ip,
             args.select_tail_percent,
         )
         for exp in sorted(os.listdir(exp_dir))

@@ -384,11 +384,12 @@ def make_empty(num_pkts, dtype):
     return np.full((num_pkts,), -1, dtype=dtype)
 
 
-def parse_packets(flp, flw_to_cca, select_tail_percent=None):
+def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
     """Parse a PCAP file.
 
-    Considers packets between a specified client and server using specified
-    ports only.
+    local_ip is a string IPv4 address of the interface on which the PCAP trace
+    was collected, and is used to determine which packets are transmitted vs.
+    recevied.
 
     Returns a dictionary mapping flow to a tuple containing two lists, one for
     data packets and one for ACK packets:
@@ -451,15 +452,14 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
         ip = ether[scapy.layers.inet.IP]
         is_tcp = scapy.layers.inet.TCP in ether
         trans = ether[scapy.layers.inet.TCP if is_tcp else scapy.layers.inet.UDP]
-        # Determine this packet's direction. Assume that the client IP address
-        # if 192.0.0.4 and the server IP address is 192.0.0.2. Assume that all
-        # packets are between the client and server.
-        if ip.src[-1] == "4":
-            dir_idx = 0
-            flw = (trans.sport, trans.dport)
-        else:
-            dir_idx = 1
-            flw = (trans.dport, trans.sport)
+        # Determine this packet's direction. Incoming packets are given dir_idx
+        # of 0 and outgoing packets are given dir_idx of 1. The flow is a tuple
+        # of (client port, server port).
+        dir_idx, flw = (
+            (1, (trans.dport, trans.sport))
+            if ip.src == local_ip
+            else (0, (trans.sport, trans.dport))
+        )
         # Assume that the packets are between the relevent machines. Only check
         # the ports.
         if flw in flw_to_pkts:
