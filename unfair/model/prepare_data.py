@@ -465,7 +465,7 @@ def _main():
 
     # Record which experiments are used for each split so that we do not reuse any
     # of these for evaluation later.
-    with open(path.join(args.out_dir, "used_exps.json"), "w", encoding="utf-8") as fil:
+    with open(path.join(args.out_dir, "split_exps.json"), "w", encoding="utf-8") as fil:
         json.dump(
             # Extract the filename from each filepath.
             {

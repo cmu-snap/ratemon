@@ -261,48 +261,63 @@ class Exp:
             # Update sim.name.
             self.name = self.name[:-4]
 
-        if "unfairTrue" in self.name or "unfairFalse" in self.name:
-            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-unfairTrue-100s-20201118T114242
-            (
-                _,
-                self.cca_1_name,
-                self.cca_2_name,
-                bw_Mbps,
-                rtt_ms,
-                queue_p,
-                cca_1_flws,
-                cca_2_flws,
-                use_unfairness_monitor,
-                end_time,
-                _,
-            ) = toks
-        else:
-            # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-100s-20201118T114242
-            (
-                _,
-                self.cca_1_name,
-                self.cca_2_name,
-                bw_Mbps,
-                rtt_ms,
-                queue_p,
-                cca_1_flws,
-                cca_2_flws,
-                end_time,
-                _,
-            ) = toks
-            use_unfairness_monitor = "unfairFalse"
+        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-unfairTrue-bessTrue-100s-20201118T114242
+        (
+            _,
+            self.cca_1_name,
+            self.cca_2_name,
+            bw_Mbps,
+            rtt_ms,
+            queue_p,
+            cca_1_flws,
+            cca_2_flws,
+            use_unfairness_monitor,
+            use_bess,
+            end_time,
+            _,
+        ) = toks
 
-        # Link bandwidth (Mbps).
-        self.bw_Mbps = float(bw_Mbps[:-2])
-        self.bw_bps = self.bw_Mbps * 1e6
-        # Bottleneck router delay (us).
-        self.rtt_us = float(rtt_ms[:-3]) * 1000
-        # Bandwidth-delay product (bits).
-        self.bdp_b = self.bw_Mbps * self.rtt_us
-        # Queue size (packets).
-        self.queue_p = float(queue_p[:-1])
-        # Queue size (multiples of the BDP).
-        self.queue_bdp = self.queue_p / (self.bdp_b / 8 / 1514)
+        self.use_bess = use_bess == "bessTrue"
+
+        if self.use_bess:
+            # Link bandwidth (Mbps).
+            self.bw_Mbps = float(bw_Mbps[:-2])
+            self.bw_bps = self.bw_Mbps * 1e6
+            # Bottleneck router delay (us).
+            self.rtt_ms = float(rtt_ms[:-3])
+            self.rtt_us = self.rtt_ms * 1e3
+            # Bandwidth-delay product (bits).
+            self.bdp_b = self.bw_Mbps * self.rtt_us
+            # Queue size (packets).
+            self.queue_p = float(queue_p[:-1])
+            # Queue size (multiples of the BDP).
+            self.queue_bdp = self.queue_p / (self.bdp_b / 8 / 1514)
+            # Largest RTT that this experiment should experiment, based on the size
+            # of the bottleneck queue and the RTT. Add one packet to account for
+            # the packet that the bottleneck router is currently processing.
+            self.calculated_max_rtt_us = (
+                self.queue_p + 1
+            ) * 1514 * 8 / self.bw_bps + self.self.rtt_us
+            # Fair share bandwidth for each flow.
+            self.target_per_flow_bw_Mbps = self.bw_Mbps / self.tot_flws
+        else:
+            # If this experiment did not use a BESS node, then it did not
+            # control the bandwidth, RTT, or queue size and therefore all
+            # values derived from these are invalid.
+            self.bw_Mbps = (
+                self.bw_bps
+            ) = (
+                self.rtt_ms
+            ) = (
+                self.rtt_us
+            ) = (
+                self.bdp_b
+            ) = (
+                self.queue_p
+            ) = (
+                self.queue_bdp
+            ) = self.calculated_max_rtt_us = self.target_per_flow_bw_Mbps = None
+
         # Number of CCA 1 flows.
         self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
         # Number of CCA 2 flows.
@@ -311,13 +326,6 @@ class Exp:
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Experiment duration (s).
         self.dur_s = int(end_time[:-1])
-        # Largest RTT that this experiment should experiment, based on the size
-        # of the bottleneck queue and the RTT.
-        self.calculated_max_rtt_us = (self.queue_bdp + 1) * self.rtt_us
-        # Fair share bandwidth for each flow.
-        self.target_per_flow_bw_Mbps = self.bw_Mbps / (
-            self.cca_1_flws + self.cca_2_flws
-        )
         self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
 
 
