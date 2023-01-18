@@ -332,8 +332,8 @@ def parse_opened_exp(
 
             output[j][features.ACTIVE_FLOWS_FET] = active_flws
             output[j][features.BW_FAIR_SHARE_FRAC_FET] = utils.safe_div(1, active_flws)
-            output[j][features.BW_FAIR_SHARE_BPS_FET] = utils.safe_div(
-                exp.bw_bps, active_flws
+            output[j][features.BW_FAIR_SHARE_BPS_FET] = (
+                utils.safe_div(exp.bw_bps, active_flws) if exp.use_bess else -1
             )
 
             # Calculate RTT-related metrics.
@@ -600,7 +600,7 @@ def parse_opened_exp(
                     tput_bps = utils.safe_tput_bps(output, win_start_idx, j)
                     # If the throughput exceeds the bandwidth, then print a
                     # warning and do not record this throughput.
-                    if tput_bps != -1 and tput_bps > exp.bw_bps:
+                    if tput_bps != -1 and exp.use_bess and tput_bps > exp.bw_bps:
                         win_to_errors[win][0] += 1
                         continue
                     new = tput_bps
@@ -903,7 +903,7 @@ def parse_opened_exp(
                 )
                 # Check if the total throughput is erroneous, and if so, then do not
                 # fill in features related to the total throughput.
-                if total_tput_bps > exp.bw_bps:
+                if exp.use_bess and total_tput_bps > exp.bw_bps:
                     win_to_errors[win][1] += 1
                     continue
 
@@ -1300,7 +1300,13 @@ def parse_exp(
         if locked and exp_dir is not None:
             try:
                 return parse_func(
-                    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent
+                    exp,
+                    exp_flp,
+                    exp_dir,
+                    out_flp,
+                    skip_smoothed,
+                    server_ip,
+                    select_tail_percent,
                 )
             except AssertionError:
                 traceback.print_exc()

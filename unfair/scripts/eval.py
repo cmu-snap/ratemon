@@ -222,7 +222,7 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
         "time (s)",
         "throughput (Mbps)",
         None,
-        exp.bw_Mbps,
+        exp.bw_Mbps if exp.use_bess else None,
         out_flp,
         legendloc="upper right",
     )
@@ -387,15 +387,18 @@ def parse_opened_exp(
     # zipped_dat = zipped_dat[idx:]
 
     jfi = get_jfi(flw_to_pkts)
-    overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
-    fair_flows_util = get_avg_util(
-        exp.bw_bps,
-        {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] != late_flows_port},
-    )
-    unfair_flows_util = get_avg_util(
-        exp.bw_bps,
-        {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
-    )
+    if exp.use_bess:
+        overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
+        fair_flows_util = get_avg_util(
+            exp.bw_bps,
+            {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] != late_flows_port},
+        )
+        unfair_flows_util = get_avg_util(
+            exp.bw_bps,
+            {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
+        )
+    else:
+        overall_util = fair_flows_util = unfair_flows_util = 0
 
     out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
 
@@ -664,7 +667,7 @@ def main(args):
     ) = list(zip(*matched.values()))
 
     # Plot the fair rates in the experiment configurations so that we can see if the
-    # randomly-chosen experiments are actually imbalaned.
+    # randomly-chosen experiments are actually imbalanced.
     fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched.keys()]
     plot_cdf(
         args,
