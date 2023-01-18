@@ -277,6 +277,15 @@ class Exp:
             _,
         ) = toks
 
+        # Number of CCA 1 flows.
+        self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
+        # Number of CCA 2 flows.
+        self.cca_2_flws = int(cca_2_flws[: -(len(self.cca_2_name))])
+        # The total number of flows.
+        self.tot_flws = self.cca_1_flws + self.cca_2_flws
+        # Experiment duration (s).
+        self.dur_s = int(end_time[:-1])
+        self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
         self.use_bess = use_bess == "bessTrue"
 
         if self.use_bess:
@@ -297,7 +306,7 @@ class Exp:
             # the packet that the bottleneck router is currently processing.
             self.calculated_max_rtt_us = (
                 self.queue_p + 1
-            ) * 1514 * 8 / self.bw_bps + self.self.rtt_us
+            ) * 1514 * 8 / self.bw_bps + self.rtt_us
             # Fair share bandwidth for each flow.
             self.target_per_flow_bw_Mbps = self.bw_Mbps / self.tot_flws
         else:
@@ -317,16 +326,6 @@ class Exp:
             ) = (
                 self.queue_bdp
             ) = self.calculated_max_rtt_us = self.target_per_flow_bw_Mbps = None
-
-        # Number of CCA 1 flows.
-        self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
-        # Number of CCA 2 flows.
-        self.cca_2_flws = int(cca_2_flws[: -(len(self.cca_2_name))])
-        # The total number of flows.
-        self.tot_flws = self.cca_1_flws + self.cca_2_flws
-        # Experiment duration (s).
-        self.dur_s = int(end_time[:-1])
-        self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
 
 
 def args_to_str(args, order, which):
