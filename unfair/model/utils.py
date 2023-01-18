@@ -417,10 +417,11 @@ def parse_packets(flp, flw_to_cca, select_tail_percent=None):
         times_us = [pkt_mdat.sec * 1000000 + pkt_mdat.usec for _, pkt_mdat in pkts]
         assert times_us, "No packets."
         total_time_us = times_us[-1] - times_us[0]
-        start_time_us = times_us[-1] - (total_time_us * select_tail_percent / 100)
+        new_start_time_us = times_us[-1] - (total_time_us * select_tail_percent / 100)
         start_idx = 0
+        # Find the index of the first packet that is after the new start time.
         for start_idx, time_us in enumerate(times_us):
-            if time_us > start_time_us:
+            if time_us > new_start_time_us:
                 break
         pkts = pkts[start_idx:]
 

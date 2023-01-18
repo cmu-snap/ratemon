@@ -137,17 +137,13 @@ def parse_opened_exp(
     flws_to_remove = []
     for flw, pkts in flw_to_pkts_server.items():
         if len(pkts[0]) == 0:
-            print(f"\tWarning: No packets for flow {flw} in: {exp_flp}")
+            print(f"\tWarning: No data packets for flow {flw} in: {exp_flp}")
             flws_to_remove.append(flw)
     flw_to_pkts_server = {
         flw: pkts
         for flw, pkts in flw_to_pkts_server.items()
         if flw not in flws_to_remove
     }
-    flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
-        flw_to_pkts_server, includes_acks=True
-    )
-
     flw_to_cca = {
         flw: cca for flw, cca in flw_to_cca.items() if flw not in flws_to_remove
     }
@@ -155,6 +151,10 @@ def parse_opened_exp(
     if not flws:
         print(f"Warning: No flows with packets in: {exp_flp}")
         return -1
+
+    flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
+        flw_to_pkts_server, includes_acks=True
+    )
 
     # NOTE: Disabled because not used.
     #
