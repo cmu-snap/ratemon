@@ -31,10 +31,8 @@ def get_time_bounds(pkts, direction="data"):
     Returns a list of tuples of the form:
         ( time of first packet, time of last packet )
     """
-    # [0] selects the data packets (as opposed to the ACKs). [:,1] selects
-    # the column pertaining to arrival time. [[0, -1]] Selects the first and
-    # last arrival times.
     dir_idx = 1 if direction == "ack" else 0
+    # [[0, -1]] Selects the first and last arrival times.
     return [
         tuple(pkts[flw][dir_idx][features.ARRIVAL_TIME_FET][[0, -1]].tolist())
         for flw in pkts.keys()
@@ -138,6 +136,9 @@ def parse_opened_exp(
     for flw, pkts in flw_to_pkts_server.items():
         if len(pkts[0]) == 0:
             print(f"\tWarning: No data packets for flow {flw} in: {exp_flp}")
+            flws_to_remove.append(flw)
+        if len(pkts[0]) == 1:
+            print(f"\tWarning: No ACK packets for flow {flw} in: {exp_flp}")
             flws_to_remove.append(flw)
     flw_to_pkts_server = {
         flw: pkts
@@ -1365,7 +1366,10 @@ def _main():
     )
     psr.add_argument(
         "--server-ip",
-        help="The IPv4 address of the server interface on which the PCAPs were captured.",
+        help=(
+            "The IPv4 address of the server interface on which the "
+            "PCAPs were captured."
+        ),
         required=True,
         type=str,
     )
