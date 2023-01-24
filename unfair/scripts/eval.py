@@ -293,7 +293,7 @@ def plot_bar(
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, select_tail_percent
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent
 ):
     # out_flp and skip_smoothed are not used but are kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -343,7 +343,9 @@ def parse_opened_exp(
         for client_port in flw[3]
     }
     flws = list(flw_to_cca.keys())
-    flw_to_pkts = utils.parse_packets(server_pcap, flw_to_cca, select_tail_percent)
+    flw_to_pkts = utils.parse_packets(
+        server_pcap, flw_to_cca, server_ip, select_tail_percent
+    )
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
     logging.info("\tParsed packets: %s", server_pcap)
@@ -391,11 +393,19 @@ def parse_opened_exp(
         overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
         fair_flows_util = get_avg_util(
             exp.bw_bps,
-            {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] != late_flows_port},
+            {
+                flw: pkts
+                for flw, pkts in flw_to_pkts.items()
+                if flw[1] != late_flows_port
+            },
         )
         unfair_flows_util = get_avg_util(
             exp.bw_bps,
-            {flw: pkts for flw, pkts in flw_to_pkts.items() if flw[1] == late_flows_port},
+            {
+                flw: pkts
+                for flw, pkts in flw_to_pkts.items()
+                if flw[1] == late_flows_port
+            },
         )
     else:
         overall_util = fair_flows_util = unfair_flows_util = 0
@@ -539,6 +549,7 @@ def main(args):
             args.untar_dir,
             path.join(args.out_dir, "individual_results"),
             False,
+            args.server_ip,
             args.select_tail_percent,
             parse_opened_exp,
         )
@@ -1014,6 +1025,15 @@ def parse_args():
         "--prefix",
         help="A prefix to attach to output filenames.",
         required=False,
+        type=str,
+    )
+    parser.add_argument(
+        "--server-ip",
+        help=(
+            "The IPv4 address of the server interface on which the "
+            "PCAPs were captured."
+        ),
+        required=True,
         type=str,
     )
     args = parser.parse_args()
