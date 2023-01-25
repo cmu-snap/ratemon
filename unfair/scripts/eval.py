@@ -320,7 +320,7 @@ def parse_opened_exp(
         logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
-    server_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
+    server_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
     if not path.exists(server_pcap):
         logging.info("Warning: Missing server pcap file in: %s", exp_flp)
         return -1
