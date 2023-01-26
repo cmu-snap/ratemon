@@ -293,7 +293,7 @@ def plot_bar(
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, receiver_ip, select_tail_percent
 ):
     # out_flp and skip_smoothed are not used but are kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -320,9 +320,9 @@ def parse_opened_exp(
         logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
-    server_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
-    if not path.exists(server_pcap):
-        logging.info("Warning: Missing server pcap file in: %s", exp_flp)
+    receiver_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
+    if not path.exists(receiver_pcap):
+        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
         return -1
 
     # Determine flow src and dst ports.
@@ -334,21 +334,21 @@ def parse_opened_exp(
         params = json.load(fil)
 
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-    # form: (client port, server port)
+    # form: (sender port, receiver port)
     #
-    # { (client port, server port): CCA }
+    # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (client_port, flw[4]): flw[0]
+        (flw[3], receiver_port): flw[0]
         for flw in params["flowsets"]
-        for client_port in flw[3]
+        for receiver_port in flw[4]
     }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
-        server_pcap, flw_to_cca, server_ip, select_tail_percent
+        receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
     )
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
-    logging.info("\tParsed packets: %s", server_pcap)
+    logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
     late_flows_port = max(flw[4] for flw in params["flowsets"])
@@ -379,8 +379,8 @@ def parse_opened_exp(
         flw_to_pkts[flw] = flw_to_pkts[flw][idx:]
 
     # zipped_arr_times, zipped_dat = utils.zip_timeseries(
-    #     [flw_to_pkts_server[flw][features.ARRIVAL_TIME_FET] for flw in flws],
-    #     [flw_to_pkts_server[flw] for flw in flws],
+    #     [flw_to_pkts_receiver[flw][features.ARRIVAL_TIME_FET] for flw in flws],
+    #     [flw_to_pkts_receiver[flw] for flw in flws],
     # )
     # for idx, arr_time in enumerate(zipped_arr_times):
     #     if arr_time >= earliest_late_flow_start_time:
@@ -549,7 +549,7 @@ def main(args):
             args.untar_dir,
             path.join(args.out_dir, "individual_results"),
             False,
-            args.server_ip,
+            args.receiver_ip,
             args.select_tail_percent,
             parse_opened_exp,
         )
@@ -1028,9 +1028,9 @@ def parse_args():
         type=str,
     )
     parser.add_argument(
-        "--server-ip",
+        "--receiver-ip",
         help=(
-            "The IPv4 address of the server interface on which the "
+            "The IPv4 address of the receiver interface on which the "
             "PCAPs were captured."
         ),
         required=True,

@@ -258,7 +258,7 @@ def load_bpf():
 def configure_ebpf(args):
     """Set up eBPF hooks."""
     if min(args.listen_ports) >= 50000:
-        # Use the server ports to determine the wait time, so that multiple
+        # Use the listen ports to determine the wait time, so that multiple
         # instances of this program do not try to configure themselves at the same
         # time.
         rand_sleep = min(args.listen_ports) - 50000

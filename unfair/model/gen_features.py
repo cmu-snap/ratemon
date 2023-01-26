@@ -87,7 +87,7 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, server_ip, select_tail_percent=None
+    exp, exp_flp, exp_dir, out_flp, skip_smoothed, receiver_ip, select_tail_percent=None
 ):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
@@ -106,43 +106,43 @@ def parse_opened_exp(
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-    # form: (client port, server port)
+    # form: (sender port, receiver port)
     #
-    # { (client port, server port): CCA }
+    # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (client_port, flw[4]): flw[0]
+        (flw[3], receiver_port): flw[0]
         for flw in params["flowsets"]
-        for client_port in flw[3]
+        for receiver_port in flw[4]
     }
     flws = list(flw_to_cca.keys())
 
-    # NOTE: Se no longer use the client pcap.
+    # NOTE: Se no longer use the sender pcap.
     #
-    # client_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
-    server_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
-    # if not (path.exists(client_pcap) and path.exists(server_pcap)):
-    if not path.exists(server_pcap):
+    # sender_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
+    receiver_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
+    # if not (path.exists(sender_pcap) and path.exists(receiver_pcap)):
+    if not path.exists(receiver_pcap):
         print(f"Warning: Missing pcap file in: {exp_flp}")
         return -1
     # NOTE: Disabled because not used.
     #
-    # flw_to_pkts_client = utils.parse_packets(client_pcap, flw_to_cca)
-    flw_to_pkts_server = utils.parse_packets(
-        server_pcap, flw_to_cca, server_ip, select_tail_percent
+    # flw_to_pkts_sender = utils.parse_packets(sender_pcap, flw_to_cca)
+    flw_to_pkts_receiver = utils.parse_packets(
+        receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
     )
 
     # Log and drop flows with no data packets.
     flws_to_remove = []
-    for flw, pkts in flw_to_pkts_server.items():
+    for flw, pkts in flw_to_pkts_receiver.items():
         if len(pkts[0]) == 0:
             print(f"\tWarning: No data packets for flow {flw} in: {exp_flp}")
             flws_to_remove.append(flw)
         if len(pkts[0]) == 1:
             print(f"\tWarning: No ACK packets for flow {flw} in: {exp_flp}")
             flws_to_remove.append(flw)
-    flw_to_pkts_server = {
+    flw_to_pkts_receiver = {
         flw: pkts
-        for flw, pkts in flw_to_pkts_server.items()
+        for flw, pkts in flw_to_pkts_receiver.items()
         if flw not in flws_to_remove
     }
     flw_to_cca = {
@@ -153,8 +153,8 @@ def parse_opened_exp(
         print(f"Warning: No flows with packets in: {exp_flp}")
         return -1
 
-    flw_to_pkts_server = utils.drop_packets_after_first_flow_finishes(
-        flw_to_pkts_server, includes_acks=True
+    flw_to_pkts_receiver = utils.drop_packets_after_first_flow_finishes(
+        flw_to_pkts_receiver, includes_acks=True
     )
 
     # NOTE: Disabled because not used.
@@ -176,10 +176,10 @@ def parse_opened_exp(
         for bounds in [
             # NOTE: Disabled because not used.
             #
-            # get_time_bounds(flw_to_pkts_client, direction="data"),
-            # get_time_bounds(flw_to_pkts_client, direction="ack"),
-            get_time_bounds(flw_to_pkts_server, direction="data"),
-            get_time_bounds(flw_to_pkts_server, direction="ack"),
+            # get_time_bounds(flw_to_pkts_sender, direction="data"),
+            # get_time_bounds(flw_to_pkts_sender, direction="ack"),
+            get_time_bounds(flw_to_pkts_receiver, direction="data"),
+            get_time_bounds(flw_to_pkts_receiver, direction="ack"),
         ]
         for first_time_us, _ in bounds
     )
@@ -187,19 +187,19 @@ def parse_opened_exp(
     for flw in flws:
         # NOTE: Disabled because not used.
         #
-        # flw_to_pkts_client[flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
-        # flw_to_pkts_client[flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
-        flw_to_pkts_server[flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
-        flw_to_pkts_server[flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        # flw_to_pkts_sender[flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        # flw_to_pkts_sender[flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        flw_to_pkts_receiver[flw][0][features.ARRIVAL_TIME_FET] -= earliest_time_us
+        flw_to_pkts_receiver[flw][1][features.ARRIVAL_TIME_FET] -= earliest_time_us
 
         # NOTE: Disabled because not used.
         #
-        # assert (flw_to_pkts_client[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
-        # assert (flw_to_pkts_client[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
-        assert (flw_to_pkts_server[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
-        assert (flw_to_pkts_server[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
+        # assert (flw_to_pkts_sender[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
+        # assert (flw_to_pkts_sender[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
+        assert (flw_to_pkts_receiver[flw][0][features.ARRIVAL_TIME_FET] >= 0).all()
+        assert (flw_to_pkts_receiver[flw][1][features.ARRIVAL_TIME_FET] >= 0).all()
 
-    flws_time_bounds = get_time_bounds(flw_to_pkts_server, direction="data")
+    flws_time_bounds = get_time_bounds(flw_to_pkts_receiver, direction="data")
 
     # Process PCAP files from senders and receivers.
     # The final output, with one entry per flow.
@@ -225,8 +225,8 @@ def parse_opened_exp(
         packet_seq = cca in {"copa", "vivace"}
         # NOTE: Disabled because not used.
         #
-        # snd_data_pkts, snd_ack_pkts = flw_to_pkts_client[flw]
-        recv_data_pkts, recv_ack_pkts = flw_to_pkts_server[flw]
+        # snd_data_pkts, snd_ack_pkts = flw_to_pkts_sender[flw]
+        recv_data_pkts, recv_ack_pkts = flw_to_pkts_receiver[flw]
 
         first_data_time_us = recv_data_pkts[0][features.ARRIVAL_TIME_FET]
 
@@ -776,7 +776,7 @@ def parse_opened_exp(
         #
         #     # Calculate the true drop rate at the bottleneck queue using the
         #     # bottleneck queue logs.
-        #     client_port = flw[0]
+        #     sender_port = flw[0]
         #     deq_idx = None
         #     drop_rate = None
         #     if q_log is None:
@@ -787,7 +787,7 @@ def parse_opened_exp(
         #         for record_idx, record in reversed(q_log):
         #             if (
         #                 record[0] == "deq"
-        #                 and record[2] == client_port
+        #                 and record[2] == sender_port
         #                 and record[3] == last_seq
         #             ):
         #                 deq_idx = record_idx
@@ -802,7 +802,7 @@ def parse_opened_exp(
         #         # Find the most recent stats log before the last received
         #         # packet was dequeued.
         #         for _, record in reversed(q_log[:deq_idx]):
-        #             if record[0] == "stats" and record[1] == client_port:
+        #             if record[0] == "stats" and record[1] == sender_port:
         #                 drop_rate = record[4] / (record[2] + record[4])
         #                 break
         #     if drop_rate is None:
@@ -848,15 +848,15 @@ def parse_opened_exp(
                 dtype=[
                     (features.WIRELEN_FET, "float64"),
                     (features.MIN_RTT_FET, "float64"),
-                    ("client port", "float64"),
-                    ("server port", "float64"),
+                    ("sender port", "float64"),
+                    ("receiver port", "float64"),
                     ("index", "float64"),
                 ],
             )
             merged[features.WIRELEN_FET] = flw_results[flw][features.WIRELEN_FET]
             merged[features.MIN_RTT_FET] = flw_results[flw][features.MIN_RTT_FET]
-            merged["client port"].fill(flw[0])
-            merged["server port"].fill(flw[1])
+            merged["sender port"].fill(flw[0])
+            merged["receiver port"].fill(flw[1])
             merged["index"] = np.arange(num_pkts)
             combined.append(merged)
         zipped_arr_times, zipped_dat = utils.zip_timeseries(
@@ -910,7 +910,7 @@ def parse_opened_exp(
 
                 # Extract the flow to which this packet belongs, as well as
                 # its index in its flow.
-                flw = tuple(zipped_dat[j][["client port", "server port"]].tolist())
+                flw = tuple(zipped_dat[j][["sender port", "receiver port"]].tolist())
                 index = int(zipped_dat[j]["index"])
                 flw_results[flw][index][
                     features.make_win_metric(features.TOTAL_TPUT_FET, win)
@@ -1288,7 +1288,7 @@ def parse_exp(
     untar_dir,
     out_dir,
     skip_smoothed,
-    server_ip,
+    receiver_ip,
     select_tail_percent,
     parse_func=parse_opened_exp,
 ):
@@ -1306,7 +1306,7 @@ def parse_exp(
                     exp_dir,
                     out_flp,
                     skip_smoothed,
-                    server_ip,
+                    receiver_ip,
                     select_tail_percent,
                 )
             except AssertionError:
@@ -1365,9 +1365,9 @@ def _main():
         type=float,
     )
     psr.add_argument(
-        "--server-ip",
+        "--receiver-ip",
         help=(
-            "The IPv4 address of the server interface on which the "
+            "The IPv4 address of the receiver interface on which the "
             "PCAPs were captured."
         ),
         required=True,
@@ -1388,7 +1388,7 @@ def _main():
             untar_dir,
             out_dir,
             skip_smoothed,
-            args.server_ip,
+            args.receiver_ip,
             args.select_tail_percent,
         )
         for exp in sorted(os.listdir(exp_dir))

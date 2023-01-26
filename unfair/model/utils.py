@@ -401,7 +401,7 @@ def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
     Returns a dictionary mapping flow to a tuple containing two lists, one for
     data packets and one for ACK packets:
         {
-              (client port, server port) :
+              (sender port, receiver port) :
                   ([ list of data packets ], [ list of ACK packets ])
         }
 
@@ -461,7 +461,7 @@ def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
         trans = ether[scapy.layers.inet.TCP if is_tcp else scapy.layers.inet.UDP]
         # Determine this packet's direction. Incoming packets are given dir_idx
         # of 0 and outgoing packets are given dir_idx of 1. The flow is a tuple
-        # of (client port, server port).
+        # of (sender port, receiver port).
         dir_idx, flw = (
             (1, (trans.dport, trans.sport))
             if ip.src == local_ip
@@ -530,7 +530,7 @@ def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
                     if (first & 0x80000000) >> 31:
                         # Type code of 1 = UDT control packet.
                         if dir_idx == 0:
-                            # Client -> server control packet. Skip it.
+                            # sender -> receiver control packet. Skip it.
                             continue
                         if (first & 0x7FFF0000) >> 16 == 2:
                             # ACK.
