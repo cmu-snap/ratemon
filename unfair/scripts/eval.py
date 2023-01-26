@@ -351,7 +351,7 @@ def parse_opened_exp(
     logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
-    late_flows_port = max(flw[4] for flw in params["flowsets"])
+    late_flows_port = max(flw[3] for flw in params["flowsets"])
     late_flws = [
         flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
