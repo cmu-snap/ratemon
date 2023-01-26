@@ -353,7 +353,7 @@ def parse_opened_exp(
 
     late_flows_port = max(flw[3] for flw in params["flowsets"])
     late_flws = [
-        flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
+        flw for flw in flws if flw[0] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
     if len(late_flws) == 0:
         logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
@@ -396,7 +396,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[1] != late_flows_port
+                if flw[0] != late_flows_port
             },
         )
         unfair_flows_util = get_avg_util(
@@ -404,7 +404,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[1] == late_flows_port
+                if flw[0] == late_flows_port
             },
         )
     else:
