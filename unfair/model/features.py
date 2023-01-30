@@ -337,3 +337,12 @@ def fill_dependencies(in_spc):
         return in_spc
     else:
         return fill_dependencies(tuple(sorted(combined)))
+
+
+def merge_feature(fets):
+    """Merge the same feature across multiple flows.
+
+    Real Assume that our smoothing window is N. We want to find the last N packets to arrive. Then we want to interpolate each flow's features at the times of those N packets. Then at each of those interpolated points, we want to combine all of the features.
+    """
+
+    pass

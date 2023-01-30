@@ -32,8 +32,8 @@ OLD_THRESH_SEC = 5 * 60
 # packets are appended to the ends of these lists. Periodically, a flow's
 # packets are consumed by the inference engine and that flow's list is
 # reset to empty.
-FLOWS: typing.Dict[typing.Tuple[int, int, int, int], flow_utils.Flow] = {}
-# Lock for the packet input data structures (e.g., "flows"). Only acquire this lock
+FLOWS = flow_utils.FlowDB()
+# Lock for the packet input data structures (e.g., "FLOWS"). Only acquire this lock
 # when adding, removing, or iterating over flows; no need to acquire this lock when
 # updating a flow object.
 FLOWS_LOCK = threading.RLock()
@@ -178,12 +178,17 @@ def check_flows(args, longest_window, que, inference_flags):
 
     Remove old and empty flows.
     """
-    to_remove = []
-    to_check = []
+    to_remove = set()
+    to_check = set()
 
     # Need to acquire FLOWS_LOCK while iterating over FLOWS.
     with FLOWS_LOCK:
         for fourtuple, flow in FLOWS.items():
+            # A fourtuple might add other fourtuples to to_check if args.
+            # sender_fairness is True.
+            if fourtuple in to_check:
+                continue
+
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
@@ -203,24 +208,27 @@ def check_flows(args, longest_window, que, inference_flags):
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
                         )
-                    # We need at least as many packets as the smoothing window, and...
-                    if len(flow.incoming_packets) >= args.smoothing_window and (
-                        # ...check if the time span covered by the packets is greater than
-                        # required for the longest windowed input feature.
-                        (
-                            flow.incoming_packets[-args.smoothing_window][4]
-                            - flow.incoming_packets[0][4]
-                        )
-                        >= flow.min_rtt_us * longest_window
+                    elif flow_utils.flow_is_ready(
+                        flow, args.smoothing_window, longest_window
                     ):
-                        # Plan to run inference on this flows.
-                        to_check.append(fourtuple)
+                        if args.sender_fairness:
+                            # Only want to add this flow if all the flows from this
+                            # sender are ready.
+                            if FLOWS.sender_okay(
+                                flow.remote_addr, args.smoothing_window, longest_window
+                            ):
+                                to_check |= FLOWS.get_flows_from_sender(
+                                    flow.remote_addr
+                                )
+                        else:
+                            # Plan to run inference on this flows.
+                            to_check.add(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
                     ):
                         # Remove old flows that have not been selected for inference in
                         # a while.
-                        to_remove.append(fourtuple)
+                        to_remove.add(fourtuple)
                 finally:
                     flow.ingress_lock.release()
             else:
@@ -295,18 +303,32 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                 inference_flags[fourtuple].value = 0
             else:
                 try:
-                    que.put(
-                        (
-                            "inference",
-                            fourtuple,
-                            flow.incoming_packets,
-                            packets_lost,
-                            flow.start_time_us,
-                            flow.min_rtt_us,
-                            win_to_loss_event_rate,
-                        ),
-                        block=False,
-                    )
+                    if args.sender_fairness:
+                        que.put(
+                            (
+                                "inference-sender",
+                                fourtuple,
+                                flow.incoming_packets,
+                                packets_lost,
+                                flow.start_time_us,
+                                flow.min_rtt_us,
+                                win_to_loss_event_rate,
+                            ),
+                            block=False,
+                        )
+                    else:
+                        que.put(
+                            (
+                                "inference",
+                                fourtuple,
+                                flow.incoming_packets,
+                                packets_lost,
+                                flow.start_time_us,
+                                flow.min_rtt_us,
+                                win_to_loss_event_rate,
+                            ),
+                            block=False,
+                        )
                 except queue.Full:
                     logging.warning("Warning: Inference queue full!")
 
@@ -485,6 +507,14 @@ def parse_args():
         help="Run inference on this many packets from each flow, and smooth the results.",
         required=False,
         type=int,
+    )
+    parser.add_argument(
+        "--sender-fairness",
+        action="store_true",
+        help=(
+            "Combine all flows from one sender and enforce fairness between "
+            "senders, regardless of how many flows they use."
+        ),
     )
     args = parser.parse_args()
     args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)

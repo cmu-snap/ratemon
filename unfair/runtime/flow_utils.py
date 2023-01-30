@@ -1,9 +1,11 @@
 """Defines useful classes for representing flows."""
 
 import ctypes
+import logging
 import sys
 import threading
 import time
+import typing
 
 from unfair.model import defaults, loss_event_rate, utils
 
@@ -85,3 +87,59 @@ class Flow:
     def __str__(self):
         """Create a string representation of this flow."""
         return str(self.flowkey)
+
+
+class FlowDB(dict):
+    def __init__(self):
+        super().__init__()
+        # Maps each sender IP address to a map of flows.
+        self._senders: typing.Dict[
+            int, typing.Set[typing.Tuple[int, int, int, int]]
+        ] = {}
+
+    def __setitem__(self, key, value):
+        src_ip = key[0]
+        # If this is the first flow from this sender, add the sender.
+        if src_ip not in self._senders:
+            self._senders[src_ip] = set()
+        # Add the flow to the sender.
+        self._senders[src_ip].add(key)
+        return super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        src_ip = key[0]
+        if src_ip in self._senders:
+            # Remove the flow from the sender.
+            if key in self._senders[src_ip]:
+                self._senders[src_ip].remove(key)
+            # If this was the last flow for this sender, remove the sender.
+            if len(self._senders[src_ip]) == 0:
+                del self._senders[src_ip]
+        return super().__delitem__(key)
+
+    def get_flows_from_sender(self, sender_ip):
+        return set(self._senders.get(sender_ip, {}).values())
+
+    def sender_okay(self, sender_ip, smoothing_window, longest_window):
+        for fourtuple in self.get_flows_from_sender(sender_ip):
+            if fourtuple not in self:
+                logging.warning("Flow %s not in flow DB", fourtuple)
+                continue
+            # This flow is not ready for interence if...
+            if not flow_is_ready(self[fourtuple], smoothing_window, longest_window):
+                return False
+        return True
+
+
+def flow_is_ready(flow, smoothing_window, longest_window):
+    # This flow is ready for interence if...
+    return (
+        # We have at least as many packets as the smoothing window...
+        len(flow.incoming_packets) >= smoothing_window
+        and (
+            # ...the time span covered by the packets is at least that which is
+            # required for the longest windowed input feature.
+            (flow.incoming_packets[-smoothing_window][4] - flow.incoming_packets[0][4])
+            >= flow.min_rtt_us * longest_window
+        )
+    )
