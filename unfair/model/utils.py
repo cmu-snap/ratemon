@@ -1283,10 +1283,9 @@ def analyze_feature_correlation(net, out_dir, dat_in, clusters):
     for col in range(dat_in.size()[1]):
         # if fets[col] == features.LOSS_RATE_FET:
         #     logging.info("Loss rate: %s", dat_in[:, col])
-        if (
-                (dat_in[:, col] == dat_in[0, col]).all() or
-                dat_in[0:dat_in.shape[0], col].isnan().all()
-            ):
+        if (dat_in[:, col] == dat_in[0, col]).all() or dat_in[
+            0 : dat_in.shape[0], col
+        ].isnan().all():
             logging.info("All are same (%f): %s", dat_in[-1, col], fets[col])
             constant.add(col)
 
