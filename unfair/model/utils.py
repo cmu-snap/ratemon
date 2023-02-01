@@ -299,7 +299,7 @@ class Exp:
             self.rtt_ms = float(rtt_ms[:-3])
             self.rtt_us = self.rtt_ms * 1e3
             # Bandwidth-delay product (bits). If the configured RTT is zero,
-            # then use the ping RTT.
+            # then use the ping RTT instead.
             self.bdp_b = self.bw_Mbps * (
                 self.rtt_us if self.rtt_us > 0 else self.ping_ms * 1e3
             )
@@ -310,9 +310,12 @@ class Exp:
             # Largest RTT that this experiment should experiment, based on the size
             # of the bottleneck queue and the RTT. Add one packet to account for
             # the packet that the bottleneck router is currently processing.
-            self.calculated_max_rtt_us = (
-                self.queue_p + 1
-            ) * 1514 * 8 / self.bw_bps + self.rtt_us
+            self.calculated_max_rtt_us = (self.queue_p + 1) * 1514 * 8 / self.bw_bps + (
+                # If the configured RTT is zero, then use the ping RTT instead.
+                self.rtt_us
+                if self.rtt_us > 0
+                else self.ping_ms * 1e3
+            )
             # Fair share bandwidth for each flow.
             self.target_per_flow_bw_Mbps = self.bw_Mbps / self.tot_flws
         else:
