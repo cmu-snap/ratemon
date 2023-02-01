@@ -608,11 +608,11 @@ def main(args):
         target_disabled_name = enabled_exp.name.replace("unfairTrue", "unfairFalse")
         # Strip off trailing timestamp (everything after final "-").
         target_disabled_name = target_disabled_name[
-            : -(reversed(target_disabled_name.name).index("-") + 1)
+            : -(target_disabled_name[::-1].index("-") + 1)
         ]
         target_disabled_exp = None
         for disabled_exp in disabled:
-            if disabled_exp.startswith(target_disabled_name):
+            if disabled_exp.name.startswith(target_disabled_name):
                 target_disabled_exp = disabled_exp
                 break
         if target_disabled_exp is None:
