@@ -261,7 +261,7 @@ class Exp:
             # Update sim.name.
             self.name = self.name[:-4]
 
-        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-unfairTrue-bessTrue-100s-20201118T114242
+        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-35.60ping-unfairTrue-bessTrue-100s-20201118T114242
         (
             _,
             self.cca_1_name,
@@ -271,6 +271,7 @@ class Exp:
             queue_p,
             cca_1_flws,
             cca_2_flws,
+            ping_ms,
             use_unfairness_monitor,
             use_bess,
             end_time,
@@ -285,6 +286,8 @@ class Exp:
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Experiment duration (s).
         self.dur_s = int(end_time[:-1])
+        # Baseline ping RTT between sender and receiver.
+        self.ping_ms = float(ping_ms[:-4])
         self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
         self.use_bess = use_bess == "bessTrue"
 
@@ -295,8 +298,11 @@ class Exp:
             # Bottleneck router delay (us).
             self.rtt_ms = float(rtt_ms[:-3])
             self.rtt_us = self.rtt_ms * 1e3
-            # Bandwidth-delay product (bits).
-            self.bdp_b = self.bw_Mbps * self.rtt_us
+            # Bandwidth-delay product (bits). If the configured RTT is zero,
+            # then use the ping RTT.
+            self.bdp_b = self.bw_Mbps * (
+                self.rtt_us if self.rtt_us > 0 else self.ping_ms * 1e3
+            )
             # Queue size (packets).
             self.queue_p = float(queue_p[:-1])
             # Queue size (multiples of the BDP).
