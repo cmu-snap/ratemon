@@ -169,11 +169,11 @@ static inline int clear_hdr_cb_flags(struct bpf_sock_ops *skops)
 
 static inline int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 {
-    // If this is a SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
+    // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
     // reserving three bytes (the minimim) for a TCP header option. These three bytes
     // will never actually be used, but reserving space is the only way for that
     // callback to be triggered.
-    if (((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK) &&
+    if (((skops->skb_tcp_flags & TCPHDR_SYN) == TCPHDR_SYN) &&
         bpf_reserve_hdr_opt(skops, 3, 0))
         return SOCKOPS_ERR;
     return SOCKOPS_OK;
