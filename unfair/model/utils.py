@@ -301,9 +301,7 @@ class Exp:
             self.rtt_us = self.rtt_ms * 1e3
             # Bandwidth-delay product (bits). If the configured RTT is zero,
             # then use the ping RTT instead.
-            self.bdp_b = self.bw_Mbps * (
-                self.rtt_us if self.rtt_us > 0 else self.ping_us
-            )
+            self.bdp_b = self.bw_Mbps * (self.rtt_us + self.ping_us)
             # Queue size (packets).
             self.queue_p = float(queue_p[:-1])
             # Queue size (multiples of the BDP).
