@@ -320,11 +320,6 @@ def parse_opened_exp(
         logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
-    receiver_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
-    if not path.exists(receiver_pcap):
-        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
-        return -1
-
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
     if not path.exists(params_flp):
@@ -332,6 +327,12 @@ def parse_opened_exp(
         return -1
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
+
+    # Look up the name of the receiver host.
+    receiver_pcap = path.join(exp_dir, f"{params.receiver[0]}-tcpdump-{exp.name}.pcap")
+    if not path.exists(receiver_pcap):
+        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
+        return -1
 
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
     # form: (sender port, receiver port)
