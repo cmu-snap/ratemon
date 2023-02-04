@@ -329,7 +329,9 @@ def parse_opened_exp(
         params = json.load(fil)
 
     # Look up the name of the receiver host.
-    receiver_pcap = path.join(exp_dir, f"{params.receiver[0]}-tcpdump-{exp.name}.pcap")
+    receiver_pcap = path.join(
+        exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+    )
     if not path.exists(receiver_pcap):
         logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
         return -1
