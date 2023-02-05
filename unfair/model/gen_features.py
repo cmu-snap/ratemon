@@ -110,7 +110,7 @@ def parse_opened_exp(
     #
     # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (sender_port, flw[5]): flw[0]
+        (sender_port, flw[5]): flw[1]
         for flw in params["flowsets"]
         for sender_port in flw[4]
     }

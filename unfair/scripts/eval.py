@@ -341,7 +341,7 @@ def parse_opened_exp(
     #
     # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (sender_port, flw[5]): flw[0]
+        (sender_port, flw[5]): flw[1]
         for flw in params["flowsets"]
         for sender_port in flw[4]
     }
@@ -356,7 +356,7 @@ def parse_opened_exp(
 
     late_flows_port = max(flw[5] for flw in params["flowsets"])
     late_flws = [
-        flw for flw in flws if flw[0] == late_flows_port and len(flw_to_pkts[flw]) > 0
+        flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
     if len(late_flws) == 0:
         logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
@@ -399,7 +399,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[0] != late_flows_port
+                if flw[1] != late_flows_port
             },
         )
         unfair_flows_util = get_avg_util(
@@ -407,7 +407,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[0] == late_flows_port
+                if flw[1] == late_flows_port
             },
         )
     else:
