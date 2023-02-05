@@ -341,9 +341,9 @@ def parse_opened_exp(
     #
     # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (flw[3], receiver_port): flw[0]
+        (sender_port, flw[5]): flw[0]
         for flw in params["flowsets"]
-        for receiver_port in flw[4]
+        for sender_port in flw[4]
     }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
@@ -354,7 +354,7 @@ def parse_opened_exp(
     logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
-    late_flows_port = max(flw[3] for flw in params["flowsets"])
+    late_flows_port = max(flw[5] for flw in params["flowsets"])
     late_flws = [
         flw for flw in flws if flw[0] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
