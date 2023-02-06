@@ -110,16 +110,19 @@ def parse_opened_exp(
     #
     # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (flw[3], receiver_port): flw[0]
+        (sender_port, flw[5]): flw[1]
         for flw in params["flowsets"]
-        for receiver_port in flw[4]
+        for sender_port in flw[4]
     }
     flws = list(flw_to_cca.keys())
 
     # NOTE: Se no longer use the sender pcap.
     #
     # sender_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
-    receiver_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
+    # Look up the name of the receiver host.
+    receiver_pcap = path.join(
+        exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+    )
     # if not (path.exists(sender_pcap) and path.exists(receiver_pcap)):
     if not path.exists(receiver_pcap):
         print(f"Warning: Missing pcap file in: {exp_flp}")

@@ -359,8 +359,8 @@ def pcapy_sniff(args, done):
         filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
     if args.listen_ports:
         port_filt_l = [
-            f"(dst host {utils.int_to_ip_str(MY_IP)} and src port {port}) or "
-            f"(src host {utils.int_to_ip_str(MY_IP)} and dst port {port})"
+            f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
+            f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
             for port in args.listen_ports
         ]
         filt += f" and ({' or '.join(port_filt_l)})"

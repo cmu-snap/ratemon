@@ -320,11 +320,6 @@ def parse_opened_exp(
         logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
-    receiver_pcap = path.join(exp_dir, f"receiver-tcpdump-{exp.name}.pcap")
-    if not path.exists(receiver_pcap):
-        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
-        return -1
-
     # Determine flow src and dst ports.
     params_flp = path.join(exp_dir, f"{exp.name}.json")
     if not path.exists(params_flp):
@@ -333,14 +328,22 @@ def parse_opened_exp(
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
 
+    # Look up the name of the receiver host.
+    receiver_pcap = path.join(
+        exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+    )
+    if not path.exists(receiver_pcap):
+        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
+        return -1
+
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
     # form: (sender port, receiver port)
     #
     # { (sender port, receiver port): CCA }
     flw_to_cca = {
-        (flw[3], receiver_port): flw[0]
+        (sender_port, flw[5]): flw[1]
         for flw in params["flowsets"]
-        for receiver_port in flw[4]
+        for sender_port in flw[4]
     }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
@@ -351,9 +354,9 @@ def parse_opened_exp(
     logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
-    late_flows_port = max(flw[3] for flw in params["flowsets"])
+    late_flows_port = max(flw[5] for flw in params["flowsets"])
     late_flws = [
-        flw for flw in flws if flw[0] == late_flows_port and len(flw_to_pkts[flw]) > 0
+        flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
     if len(late_flws) == 0:
         logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
@@ -396,7 +399,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[0] != late_flows_port
+                if flw[1] != late_flows_port
             },
         )
         unfair_flows_util = get_avg_util(
@@ -404,7 +407,7 @@ def parse_opened_exp(
             {
                 flw: pkts
                 for flw, pkts in flw_to_pkts.items()
-                if flw[0] == late_flows_port
+                if flw[1] == late_flows_port
             },
         )
     else:
@@ -606,9 +609,13 @@ def main(args):
     for enabled_exp in enabled:
         # Find the corresponding experiment with the unfairness monitor disabled.
         target_disabled_name = enabled_exp.name.replace("unfairTrue", "unfairFalse")
+        # Strip off trailing timestamp (everything after final "-").
+        target_disabled_name = target_disabled_name[
+            : -(target_disabled_name[::-1].index("-") + 1)
+        ]
         target_disabled_exp = None
         for disabled_exp in disabled:
-            if disabled_exp.name == target_disabled_name:
+            if disabled_exp.name.startswith(target_disabled_name):
                 target_disabled_exp = disabled_exp
                 break
         if target_disabled_exp is None:

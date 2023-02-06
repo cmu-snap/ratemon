@@ -285,7 +285,7 @@ class Exp:
         # The total number of flows.
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Experiment duration (s).
-        self.dur_s = int(end_time[:-1])
+        self.dur_s = float(end_time[:-1])
         # Baseline ping RTT between sender and receiver.
         self.ping_ms = float(ping_ms[:-4])
         self.ping_us = self.ping_ms * 1e3
@@ -301,9 +301,7 @@ class Exp:
             self.rtt_us = self.rtt_ms * 1e3
             # Bandwidth-delay product (bits). If the configured RTT is zero,
             # then use the ping RTT instead.
-            self.bdp_b = self.bw_Mbps * (
-                self.rtt_us if self.rtt_us > 0 else self.ping_us
-            )
+            self.bdp_b = self.bw_Mbps * (self.rtt_us + self.ping_us)
             # Queue size (packets).
             self.queue_p = float(queue_p[:-1])
             # Queue size (multiples of the BDP).
@@ -314,10 +312,7 @@ class Exp:
             self.calculated_max_rtt_us = (
                 self.queue_p + 1
             ) * 1514 * 8 / self.bw_bps * 1e6 + (
-                # If the configured RTT is zero, then use the ping RTT instead.
-                self.rtt_us
-                if self.rtt_us > 0
-                else self.ping_us
+                self.rtt_us + self.ping_us
             )
             # Fair share bandwidth for each flow.
             self.target_per_flow_bw_Mbps = self.bw_Mbps / self.tot_flws

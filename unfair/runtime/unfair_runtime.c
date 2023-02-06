@@ -169,11 +169,11 @@ static inline int clear_hdr_cb_flags(struct bpf_sock_ops *skops)
 
 static inline int handle_hdr_opt_len(struct bpf_sock_ops *skops)
 {
-    // If this is a SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
+    // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB callback by
     // reserving three bytes (the minimim) for a TCP header option. These three bytes
     // will never actually be used, but reserving space is the only way for that
     // callback to be triggered.
-    if (((skops->skb_tcp_flags & TCPHDR_SYNACK) == TCPHDR_SYNACK) &&
+    if (((skops->skb_tcp_flags & TCPHDR_SYN) == TCPHDR_SYN) &&
         bpf_reserve_hdr_opt(skops, 3, 0))
         return SOCKOPS_ERR;
     return SOCKOPS_OK;
@@ -189,13 +189,19 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
         bpf_trace_printk("Warning: Not using IPv4 for flow on local port %u\n", skops->local_port);
         return SOCKOPS_OK;
     }
-    if ((skops->skb_tcp_flags & TCPHDR_SYNACK) != TCPHDR_SYNACK)
+
+    // Keep in mind that the window scale is set by the local host on
+    // _outgoing_ SYN and SYNACK packets. The handle_write_hdr_opt() sockops
+    // callback is only triggered for outgoing packets, so all we need to do
+    // is filter for SYN and SYNACK.
+    if ((skops->skb_tcp_flags & TCPHDR_SYN) != TCPHDR_SYN)
     {
-        // This is not a SYNACK packet.
+        // This is not a SYN or SYNACK packet.
         return SOCKOPS_OK;
     }
 
-    // This is a SYNACK packet.
+    // This is an outgoing SYN or SYNACK packet. It should contain the window
+    // scale. Let's try to look it up.
 
     struct tcp_opt win_scale_opt = {
         .kind = TCPOPT_WINDOW,
