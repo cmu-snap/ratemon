@@ -124,6 +124,28 @@ class Class(IntEnum):
     APPROX_FAIR = 1
     ABOVE_FAIR = 2
 
+    @staticmethod
+    def ratio_to_class(ratio):
+        """
+        Converts a ratio of actual throughput to throughput fair share into
+        a fairness class.
+        """
+        # An entry may be either a tuple containing a single value or a
+        # single value.
+        if isinstance(ratio, tuple):
+            assert len(ratio) == 1, "Should be only one column."
+            ratio = ratio[0]
+
+        if ratio < 1 - FAIR_THRESH:
+            cls = Class.BELOW_FAIR
+        elif ratio <= 1 + FAIR_THRESH:
+            cls = Class.APPROX_FAIR
+        elif ratio > 1 + FAIR_THRESH:
+            cls = Class.ABOVE_FAIR
+        else:
+            raise Exception("This case should never be reached.")
+        return cls
+
 
 class Decision(IntEnum):
     """Pacing decisions.

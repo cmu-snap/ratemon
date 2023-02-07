@@ -25,8 +25,8 @@ from unfair.runtime.reaction_strategy import ReactionStrategy
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 # Flows that have not received a new packet in this many seconds will be
 # garbage collected.
-# 5 minutes
-OLD_THRESH_SEC = 5 * 60
+# 1 minute
+OLD_THRESH_SEC = 1 * 60
 
 # Maps each flow (four-tuple) to a list of packets for that flow. New
 # packets are appended to the ends of these lists. Periodically, a flow's
@@ -42,6 +42,8 @@ MY_IP = None
 MANAGER = None
 
 LOSS_EVENT_INTERVALS: typing.List[int] = []
+
+EPOCH = 0
 
 
 def receive_packet_pcapy(header, packet):
@@ -178,6 +180,9 @@ def check_flows(args, longest_window, que, inference_flags):
 
     Remove old and empty flows.
     """
+    global EPOCH
+    EPOCH += 1
+
     to_remove = set()
     to_check = set()
 
@@ -247,14 +252,14 @@ def check_flows(args, longest_window, que, inference_flags):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                check_flow(fourtuple, args, longest_window, que, inference_flags)
+                check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH)
             finally:
                 flow.ingress_lock.release()
         else:
             logging.warning("Could not acquire lock for flow: %s", flow)
 
 
-def check_flow(fourtuple, args, longest_window, que, inference_flags):
+def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
     """Determine whether a flow is unfair and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
@@ -306,7 +311,8 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags):
                     if args.sender_fairness:
                         que.put(
                             (
-                                "inference-sender",
+                                # inference-sender-fairness-<epoch>-<sender IP>-<num flows to expect>
+                                f"inference-sender-fairness-{epoch}-{flow[0]}-{len(FLOWS.get_flows_from_sender(flow[0]))}",
                                 fourtuple,
                                 flow.incoming_packets,
                                 packets_lost,
@@ -440,7 +446,7 @@ def parse_args():
         help="Disable periodic inference.",
     )
     parser.add_argument(
-        "-f", "--model-file", help="The trained model to use.", required=True, type=str
+        "-f", "--model-file", help="The trained model to use.", required=False, type=str
     )
     parser.add_argument(
         "--reaction-strategy",
@@ -534,16 +540,24 @@ def parse_args():
     ), f"Smoothing window must be >= 1, but is: {args.smoothing_window}"
 
     assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
+    assert (
+        args.sender_fairness or args.model_file is not None
+    ), "Specify one of '--model-file' or '--sender-fairness'. "
     return args
 
 
 def run(args):
     """Core logic."""
-    # Need to load the model to check the input features for see the longest window.
-    net = models.load_model(args.model_file)
+    # Need to load the model to check the input features to see the longest window.
+    in_spc = (
+        models.MathisFairness()
+        if args.sender_fairness
+        else models.load_model(args.model_file)
+    ).in_spc
+
     longest_window = max(
         features.parse_win_metric(fet)[1]
-        for fet in net.in_spc
+        for fet in in_spc
         if "windowed" in fet and "minRtt" in fet
     )
     logging.info("Longest minRTT window: %d", longest_window)
@@ -554,16 +568,11 @@ def run(args):
             *list(
                 set(features.PARSE_PACKETS_FETS)
                 | set(
-                    features.feature_names_to_dtype(
-                        features.fill_dependencies(net.in_spc)
-                    )
+                    features.feature_names_to_dtype(features.fill_dependencies(in_spc))
                 )
             )
         )
     )[0]
-
-    # We are done with the model, so clear it.
-    del net
 
     global LOSS_EVENT_INTERVALS
     LOSS_EVENT_INTERVALS = list(

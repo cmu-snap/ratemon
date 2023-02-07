@@ -88,6 +88,10 @@ class Flow:
         """Create a string representation of this flow."""
         return str(self.flowkey)
 
+    def is_interesting(self):
+        """Whether the flow has seen any data in the last few seconds."""
+        return time.time() - self.latest_time_sec < 5
+
 
 class FlowDB(dict):
     def __init__(self):
@@ -117,16 +121,28 @@ class FlowDB(dict):
                 del self._senders[src_ip]
         return super().__delitem__(key)
 
-    def get_flows_from_sender(self, sender_ip):
-        return set(self._senders.get(sender_ip, {}).values())
+    def get_flows_from_sender(self, sender_ip, ignore_uninteresting=True):
+        return {
+            fourtuple
+            for fourtuple in self._senders.get(sender_ip, {}).values()
+            if not ignore_uninteresting or self[fourtuple].is_interesting()
+        }
 
-    def sender_okay(self, sender_ip, smoothing_window, longest_window):
+    def flow_is_interesting(self, fourtuple):
+        return self[fourtuple].is_interesting()
+
+    def sender_okay(
+        self, sender_ip, smoothing_window, longest_window, ignore_uninteresting=True
+    ):
         for fourtuple in self.get_flows_from_sender(sender_ip):
             if fourtuple not in self:
                 logging.warning("Flow %s not in flow DB", fourtuple)
                 continue
-            # This flow is not ready for interence if...
-            if not flow_is_ready(self[fourtuple], smoothing_window, longest_window):
+            # If the flow is both interesting and not ready, then the sender
+            # as a whole is not ready...
+            if (
+                not ignore_uninteresting or self[fourtuple].is_interesting()
+            ) and not flow_is_ready(self[fourtuple], smoothing_window, longest_window):
                 return False
         return True
 

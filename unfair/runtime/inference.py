@@ -339,7 +339,10 @@ def configure_ebpf(args):
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     logging.info("Loading model: %s", args.model_file)
-    net = models.load_model(args.model_file)
+    if args.sender_fairness:
+        net = models.MathisFairness()
+    else:
+        net = models.load_model(args.model_file)
     logging.info("Model features:\n\t%s", "\n\t".join(net.in_spc))
     flow_to_prev_features = {}
     flow_to_decisions = collections.defaultdict(
@@ -373,6 +376,11 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     batch_proc_time_s = 0
     batch = []
     batch_start_time_s = time.time()
+
+    # Maps sender IP to a tuple of:
+    #     (epoch, expected number of flows,
+    #      list of flow features from that sender)
+    waiting_room = {}
     try:
         while not done.is_set():
             val = None
@@ -380,6 +388,9 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 val = que.get(timeout=0.1)
             except queue.Empty:
                 pass
+
+            sender_fairness = False
+            epoch, sender_ip, num_flows_expected = None
 
             # For some reason, the queue returns True or None when the thread on the
             # other end dies.
@@ -394,6 +405,26 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                         min_rtt_us,
                         win_to_loss_event_rate,
                     ) = val[2:]
+                elif opcode.startswith("inference-sender-fairness"):
+                    epoch, sender_ip, num_flows_expected = opcode.split("-")[-3:]
+                    epoch = int(epoch)
+                    num_flows_expected = int(num_flows_expected)
+                    (
+                        pkts,
+                        packets_lost,
+                        start_time_us,
+                        min_rtt_us,
+                        win_to_loss_event_rate,
+                    ) = val[2:]
+                    if (
+                        sender_ip not in waiting_room
+                        or waiting_room[sender_ip][0] < epoch
+                    ):
+                        waiting_room[sender_ip] = (
+                            int(epoch),
+                            int(num_flows_expected),
+                            [],
+                        )
                 elif opcode == "remove":
                     logging.info("Inference process: Removing flow %s", flowkey)
                     if flowkey in flow_to_rwnd:
@@ -450,13 +481,42 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                     )
                     raise exp
 
-                batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
-                logging.info(
-                    "Adding %d packets from flow %s to batch.", len(in_fets), flowkey
-                )
-                packets_in_batch += len(in_fets)
-                packets_covered_by_batch += len(pkts)
-                batch_proc_time_s += time.time() - features_start_time_s
+                if sender_fairness:
+                    waiting_room[sender_ip][2].append(
+                        (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+                    )
+                    logging.info(
+                        "Adding %d packets from flow %s to sender fairness waiting room.",
+                        len(in_fets),
+                        flowkey,
+                    )
+
+                    if len(waiting_room[sender_ip][2]) == waiting_room[sender_ip][1]:
+                        logging.info(
+                            "Sender fairness waiting room is full. Adding to batch."
+                        )
+                        waiting = waiting_room[sender_ip][2]
+                        waiting_room[sender_ip] = (
+                            int(epoch),
+                            int(num_flows_expected),
+                            [],
+                        )
+                        packets_in_batch += sum(len(x[4]) for x in waiting)
+                        packets_covered_by_batch += sum(len(x[5]) for x in waiting)
+
+                        batch.add(merge_features(waiting))
+
+                        batch_proc_time_s += time.time() - features_start_time_s
+                else:
+                    batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
+                    logging.info(
+                        "Adding %d packets from flow %s to batch.",
+                        len(in_fets),
+                        flowkey,
+                    )
+                    packets_in_batch += len(in_fets)
+                    packets_covered_by_batch += len(pkts)
+                    batch_proc_time_s += time.time() - features_start_time_s
 
             # If the batch is full, then run inference. Also run inference if it has been a
             # long time since we ran inference last. A "long time" is defined as the max of
@@ -576,6 +636,60 @@ def batch_inference(
             flow_to_decisions,
             flow_to_rwnd,
         )
+
+
+def merge_features(net, waiting):
+    # List of (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+    assert isinstance(net, models.MathisFairness)
+    # Make sure that each flow has the same number of packets.
+    target_num_pkts = waiting[0][4].shape[0]
+    for _, _, _, _, in_fets, _ in waiting:
+        assert in_fets.shape[0] == target_num_pkts
+
+    # Create the target array.
+    dtype = waiting[0][4].dtype
+    merged = np.empty(target_num_pkts, dtype=dtype)
+
+    # Merge across packets.
+    for pkt_idx in range(target_num_pkts):
+        # Average payload across flows.
+        mss_bytes = np.average(
+            [info[4][pkt_idx][features.PAYLOAD_SIZE_FET] for info in waiting]
+        )
+        # Average RTT across flows.
+        rtt_us = np.average(
+            [
+                info[4][pkt_idx][features.make_win_metric(features.RTT_FET, 8)]
+                for info in waiting
+            ]
+        )
+        # Sum loss event rate across flows.
+        combined_loss_event_rate = np.sum(
+            [
+                info[4][pkt_idx][
+                    features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
+                ]
+                for info in waiting
+            ]
+        )
+        mathis_tput = utils.safe_mathis_tput(
+            mss_bytes, rtt_us, combined_loss_event_rate
+        )
+        combined_tput = np.sum(
+            [
+                info[4][pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
+                for info in waiting
+            ]
+        )
+        merged[pkt_idx] = (
+            mss_bytes,
+            rtt_us,
+            combined_loss_event_rate,
+            mathis_tput,
+            combined_tput,
+        )
+
+    return merged
 
 
 def run(args, que, inference_flags, done):

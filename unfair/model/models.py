@@ -559,32 +559,13 @@ class SvmSklearnWrapper(SvmWrapper):
             f"{len(dat_out.dtype.names)} columns."
         )
 
-        def ratio_to_class(ratio):
-            """
-            Converts a ratio of actual throughput to throughput fair share into
-            a fairness class.
-            """
-            # An entry may be either a tuple containing a single value or a
-            # single value.
-            if isinstance(ratio, tuple):
-                assert len(ratio) == 1, "Should be only one column."
-                ratio = ratio[0]
-
-            if ratio < 1 - defaults.FAIR_THRESH:
-                cls = defaults.Class.BELOW_FAIR
-            elif ratio <= 1 + defaults.FAIR_THRESH:
-                cls = defaults.Class.APPROX_FAIR
-            elif ratio > 1 + defaults.FAIR_THRESH:
-                cls = defaults.Class.ABOVE_FAIR
-            else:
-                raise Exception("This case should never be reached.")
-            return cls
-
         # Create a structured array to hold the result.
         clss = np.empty((dat_out.shape[0],), dtype=[(features.LABEL_FET, "int32")])
         # Map a conversion function across all entries. Note that here an entry
         # is an entire row, which may be a tuple.
-        clss[features.LABEL_FET] = np.vectorize(ratio_to_class, otypes=[int])(dat_out)
+        clss[features.LABEL_FET] = np.vectorize(
+            defaults.Class.ratio_to_class, otypes=[int]
+        )(dat_out)
         return clss
 
     def __evaluate(
@@ -1336,6 +1317,26 @@ class Lstm(torch.nn.Module):
         out = self.fc(out)
         out = self.sg(out)
         return out, hidden
+
+
+class MathisFairness:
+    """A simple model that compares a flow to the Mathis model."""
+
+    in_spc = (
+        features.PAYLOAD_SIZE_FET,
+        features.make_win_metric(features.RTT_FET, 8),
+        features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8),
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8),
+        features.make_win_metric(features.TPUT_FET, 8),
+    )
+
+    def predict(self, dat_in):
+        """Predicts the fairness of a flow."""
+        assert dat_in.shape[1] == len(MathisFairness.in_spc)
+        return [
+            defaults.Class.ratio_to_class(utils.safe_div(tput, mathis_tput))
+            for _, _, _, mathis_tput, tput in dat_in
+        ]
 
 
 #################################################################
