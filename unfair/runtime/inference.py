@@ -880,7 +880,7 @@ def merge_sender_flows(net, sender_flows):
         # Average payload across flows.
         mss_bytes = np.average(
             [
-                in_fets[pkt_idx][features.PAYLOAD_SIZE_FET]
+                in_fets[pkt_idx][features.PAYLOAD_FET]
                 for _, _, _, _, in_fets, _ in sender_flows_interp
             ]
         )
