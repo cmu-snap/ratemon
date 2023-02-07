@@ -336,6 +336,381 @@ def configure_ebpf(args):
     return flow_to_rwnd, ebpf_cleanup
 
 
+def parse_from_inference_queue(
+    val, flow_to_rwnd, flow_to_decisions, flow_to_prev_features
+):
+    sender_fairness = False
+    epoch = num_flows_expected = None
+    opcode, fourtuple = val[:2]
+    flowkey = flow_utils.FlowKey(*fourtuple)
+
+    if opcode.startswith("inference"):
+        (
+            pkts,
+            packets_lost,
+            start_time_us,
+            min_rtt_us,
+            win_to_loss_event_rate,
+        ) = val[2:]
+
+        if opcode.startswith("inference-sender-fairness"):
+            sender_fairness = True
+            epoch, num_flows_expected = opcode.split("-")[-3:]
+            epoch = int(epoch)
+            num_flows_expected = int(num_flows_expected)
+    elif opcode == "remove":
+        logging.info("Inference process: Removing flow %s", flowkey)
+        if flowkey in flow_to_rwnd:
+            del flow_to_rwnd[flowkey]
+        if flowkey in flow_to_decisions:
+            del flow_to_decisions[flowkey]
+        if flowkey in flow_to_prev_features:
+            del flow_to_prev_features[flowkey]
+        return None
+    else:
+        raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
+
+    return (
+        pkts,
+        packets_lost,
+        start_time_us,
+        min_rtt_us,
+        win_to_loss_event_rate,
+        fourtuple,
+        flowkey,
+        sender_fairness,
+        epoch,
+        num_flows_expected,
+    )
+
+
+def build_features(
+    args,
+    net,
+    dtype,
+    pkts,
+    packets_lost,
+    start_time_us,
+    min_rtt_us,
+    win_to_loss_event_rate,
+    inference_flags,
+    flow_to_prev_features,
+    fourtuple,
+    flowkey,
+):
+    logging.info("Building features for flow: %s", flowkey)
+    try:
+        # Prepare the numpy array in which we will store the features.
+        all_fets = packets_to_ndarray(pkts, dtype, packets_lost, win_to_loss_event_rate)
+        # Populate the above numpy array with features and return a pruned
+        # version containing only the model input features the packets in
+        # the smoothing window.
+        return all_fets, populate_features(
+            net,
+            flowkey,
+            start_time_us,
+            min_rtt_us,
+            all_fets,
+            flow_to_prev_features.get(flowkey),
+            args.smoothing_window,
+        )
+    except AssertionError:
+        # Assertion errors mean this batch of packets violated some
+        # precondition, but we are safe to skip them and continue.
+        logging.warning(
+            (
+                "Skipping flow %s because feature generation failed "
+                "due to a non-fatal assertion failure:\n%s"
+            ),
+            flowkey,
+            traceback.format_exc(),
+        )
+        logging.info("Clearing inference flag due to error for flow: %s", flowkey)
+        inference_flags[fourtuple].value = 0
+        return None
+    except Exception as exp:
+        # An unexpected error occurred. It is not safe to continue. Reraise the
+        # exception to kill the process.
+        logging.error(
+            "Feature generation failed due to an unexpected error:\n%s",
+            traceback.format_exc(),
+        )
+        raise exp
+
+
+def wait_or_batch(
+    net,
+    sender_fairness,
+    batch,
+    waiting_room,
+    fourtuple,
+    flowkey,
+    min_rtt_us,
+    all_fets,
+    in_fets,
+    pkts,
+    epoch,
+    num_flows_expected,
+):
+    if sender_fairness:
+        sender_ip = fourtuple[0]
+        if sender_ip not in waiting_room or waiting_room[sender_ip][0] < epoch:
+            waiting_room[sender_ip] = (
+                int(epoch),
+                int(num_flows_expected),
+                [],
+            )
+        logging.info(
+            "Adding %d packets from flow %s to sender fairness waiting room.",
+            len(in_fets),
+            flowkey,
+        )
+        waiting_room[sender_ip][2].append(
+            (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+        )
+
+        if len(waiting_room[sender_ip][2]) < waiting_room[sender_ip][1]:
+            # Waiting room is not full yet, so there are no new packets for the batch.
+            return 0
+
+        # Empty the waiting room.
+        all_flows_from_sender = waiting_room[sender_ip][2]
+        del waiting_room[sender_ip]
+        (
+            merged_fourtuple,
+            merged_flowkey,
+            merged_min_rtt_us,
+            merged_all_fets,
+            merged_in_fets,
+        ) = merge_sender_flows(net, all_flows_from_sender)
+        batch.add(
+            (
+                merged_fourtuple,
+                merged_flowkey,
+                merged_min_rtt_us,
+                merged_all_fets,
+                merged_in_fets,
+            )
+        )
+        logging.info(
+            "Sender fairness waiting room for flow %d is full."
+            "Adding %d merged packets to batch.",
+            merged_flowkey,
+            len(merged_in_fets),
+        )
+        # Additional packets_covered_by_batch
+        return sum(len(flow_info[5]) for flow_info in all_flows_from_sender)
+    else:
+        batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
+        logging.info(
+            "Adding %d packets from flow %s to batch.",
+            len(in_fets),
+            flowkey,
+        )
+        # Additional packets_covered_by_batch
+        return len(pkts)
+
+
+def maybe_run_batch(
+    args,
+    net,
+    batch,
+    flow_to_prev_features,
+    flow_to_decisions,
+    flow_to_rwnd,
+    inference_flags,
+    packets_covered_by_batch,
+    max_batch_time_s,
+    batch_start_time_s,
+    batch_wait_time_s,
+):
+    packets_in_batch = sum(len(flow_info[4]) for flow_info in batch)
+    # Check if the batch is not ready yet, and if so, return False.
+    # If the batch is full, then run inference. Also run inference if it has been a
+    # long time since we ran inference last. A "long time" is defined as the max of
+    # 1 second and the inference interval (if the inference interval is defined).
+    batch_time_s = time.time() - batch_start_time_s
+    if not batch or (
+        packets_in_batch < args.batch_size and batch_time_s < max_batch_time_s
+    ):
+        logging.info(
+            "Not ready to run batch yet. %d, %.2f >? %.2f",
+            packets_in_batch,
+            batch_time_s,
+            max_batch_time_s,
+        )
+        return False, 0
+
+    logging.info("Running inference on a batch of %d flow(s).", len(batch))
+    try:
+        batch_inference(
+            args,
+            net,
+            batch,
+            flow_to_prev_features,
+            flow_to_decisions,
+            flow_to_rwnd,
+        )
+    except AssertionError:
+        # Assertion errors mean this batch of packets violated some
+        # precondition, but we are safe to skip them and continue.
+        logging.warning(
+            "Inference failed due to a non-fatal assertion failure:\n%s",
+            traceback.format_exc(),
+        )
+        return (True,)
+    except Exception as exp:
+        # An unexpected error occurred. It is not safe to continue. Reraise the
+        # exception to kill the process.
+        logging.error(
+            "Inference failed due to an unexpected error:\n%s",
+            traceback.format_exc(),
+        )
+        raise exp
+    finally:
+        for fourtuple, _, _, _, _ in batch:
+            logging.info(
+                ("Clearing inference flag due to finished inference for " "flow: %s"),
+                utils.flow_to_str(fourtuple),
+            )
+            inference_flags[fourtuple].value = 0
+        # Clear the batch.
+        batch.clear()
+
+    batch_proc_time_s = time.time() - batch_start_time_s - batch_wait_time_s
+    pps = packets_covered_by_batch / batch_proc_time_s
+    logging.info(
+        "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
+        batch_proc_time_s * 1e3,
+        pps,
+        pps * 1514 * 8 / 1e6,
+    )
+    return True
+
+
+def loop(
+    args,
+    net,
+    dtype,
+    batch,
+    waiting_room,
+    flow_to_prev_features,
+    flow_to_decisions,
+    flow_to_rwnd,
+    inference_flags,
+    que,
+    packets_covered_by_batch,
+    max_batch_time_s,
+    batch_start_time_s,
+    batch_wait_time_s,
+):
+    # First, check whether we should run inference on the current batch.
+    if maybe_run_batch(
+        args,
+        net,
+        batch,
+        flow_to_prev_features,
+        flow_to_decisions,
+        flow_to_rwnd,
+        inference_flags,
+        packets_covered_by_batch,
+        max_batch_time_s,
+        batch_start_time_s,
+        batch_wait_time_s,
+    ):
+        # (packets_covered_by_batch, batch_start_time_s, batch_wait_time_s)
+        return (0, time.time(), 0)
+
+    # Get the next message from the inference queue.
+    wait_start_time_s = time.time()
+    val = None
+    try:
+        val = que.get(timeout=0.1)
+    except queue.Empty:
+        return (
+            packets_covered_by_batch,
+            batch_start_time_s,
+            time.time() - wait_start_time_s,
+        )
+    batch_wait_time_s += time.time() - wait_start_time_s
+
+    # For some reason, the queue returns True or None when the thread on the
+    # other end dies.
+    if not isinstance(val, tuple):
+        return (
+            packets_covered_by_batch,
+            batch_start_time_s,
+            batch_wait_time_s,
+        )
+
+    parse_res = parse_from_inference_queue(
+        val,
+        flow_to_rwnd,
+        flow_to_decisions,
+        flow_to_prev_features,
+    )
+    if parse_res is None:
+        return (
+            packets_covered_by_batch,
+            batch_start_time_s,
+            batch_wait_time_s,
+        )
+    (
+        pkts,
+        packets_lost,
+        start_time_us,
+        min_rtt_us,
+        win_to_loss_event_rate,
+        fourtuple,
+        flowkey,
+        sender_fairness,
+        epoch,
+        num_flows_expected,
+    ) = parse_res
+
+    build_res = build_features(
+        args,
+        net,
+        dtype,
+        pkts,
+        packets_lost,
+        start_time_us,
+        min_rtt_us,
+        win_to_loss_event_rate,
+        inference_flags,
+        flow_to_prev_features,
+        fourtuple,
+        flowkey,
+    )
+    if build_res is None:
+        return (
+            packets_covered_by_batch,
+            batch_start_time_s,
+            batch_wait_time_s,
+        )
+    all_fets, in_fets = build_res
+
+    packets_covered_by_batch += wait_or_batch(
+        net,
+        sender_fairness,
+        batch,
+        waiting_room,
+        fourtuple,
+        flowkey,
+        min_rtt_us,
+        all_fets,
+        in_fets,
+        pkts,
+        epoch,
+        num_flows_expected,
+    )
+    return (
+        packets_covered_by_batch,
+        batch_start_time_s,
+        batch_wait_time_s,
+    )
+
+
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     logging.info("Loading model: %s", args.model_file)
@@ -360,7 +735,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             )
         )
     )
-
+    # Maximum duration to delay inference to wait to accumulate a batch.
     max_batch_time_s = max(
         0.1,
         (
@@ -369,222 +744,41 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             else 1
         ),
     )
+    logging.info("Inference process ready!")
 
-    logging.info("Inference ready!")
-    packets_in_batch = 0
+    # Total packets covered by the current batch. The actual number of packets
+    # on which inference will be computed is dependent on the smoothing window
+    # and will be smaller than this.
     packets_covered_by_batch = 0
-    batch_proc_time_s = 0
-    batch = []
+    # Time at which the current batch started.
     batch_start_time_s = time.time()
-
+    # Time spent waiting for the inference queue, which should not count
+    # towards time spent computing on the batch.
+    batch_wait_time_s = 0
+    batch = []
     # Maps sender IP to a tuple of:
     #     (epoch, expected number of flows,
     #      list of flow features from that sender)
     waiting_room = {}
+
     try:
         while not done.is_set():
-            val = None
-            try:
-                val = que.get(timeout=0.1)
-            except queue.Empty:
-                pass
-
-            sender_fairness = False
-            epoch, sender_ip, num_flows_expected = None
-
-            # For some reason, the queue returns True or None when the thread on the
-            # other end dies.
-            if isinstance(val, tuple):
-                opcode, fourtuple = val[:2]
-                flowkey = flow_utils.FlowKey(*fourtuple)
-                if opcode == "inference":
-                    (
-                        pkts,
-                        packets_lost,
-                        start_time_us,
-                        min_rtt_us,
-                        win_to_loss_event_rate,
-                    ) = val[2:]
-                elif opcode.startswith("inference-sender-fairness"):
-                    epoch, sender_ip, num_flows_expected = opcode.split("-")[-3:]
-                    epoch = int(epoch)
-                    num_flows_expected = int(num_flows_expected)
-                    (
-                        pkts,
-                        packets_lost,
-                        start_time_us,
-                        min_rtt_us,
-                        win_to_loss_event_rate,
-                    ) = val[2:]
-                    if (
-                        sender_ip not in waiting_room
-                        or waiting_room[sender_ip][0] < epoch
-                    ):
-                        waiting_room[sender_ip] = (
-                            int(epoch),
-                            int(num_flows_expected),
-                            [],
-                        )
-                elif opcode == "remove":
-                    logging.info("Inference process: Removing flow %s", flowkey)
-                    if flowkey in flow_to_rwnd:
-                        del flow_to_rwnd[flowkey]
-                    if flowkey in flow_to_decisions:
-                        del flow_to_decisions[flowkey]
-                    if flowkey in flow_to_prev_features:
-                        del flow_to_prev_features[flowkey]
-                    continue
-                else:
-                    raise RuntimeError(f'Unknown opcode "{opcode}" for flow: {flowkey}')
-
-                logging.info("Building features for flow: %s", flowkey)
-                features_start_time_s = time.time()
-                try:
-                    # Prepare the numpy array in which we will store the features.
-                    all_fets = packets_to_ndarray(
-                        pkts, dtype, packets_lost, win_to_loss_event_rate
-                    )
-                    # Populate the above numpy array with features and return a pruned
-                    # version containing only the model input features the packets in
-                    # the smoothing window.
-                    in_fets = populate_features(
-                        net,
-                        flowkey,
-                        start_time_us,
-                        min_rtt_us,
-                        all_fets,
-                        flow_to_prev_features.get(flowkey),
-                        args.smoothing_window,
-                    )
-                except AssertionError:
-                    # Assertion errors mean this batch of packets violated some
-                    # precondition, but we are safe to skip them and continue.
-                    logging.warning(
-                        (
-                            "Skipping flow %s because feature generation failed "
-                            "due to a non-fatal assertion failure:\n%s"
-                        ),
-                        flowkey,
-                        traceback.format_exc(),
-                    )
-                    logging.info(
-                        "Clearing inference flag due to error for flow: %s", flowkey
-                    )
-                    inference_flags[fourtuple].value = 0
-                    continue
-                except Exception as exp:
-                    # An unexpected error occurred. It is not safe to continue. Reraise the
-                    # exception to kill the process.
-                    logging.error(
-                        "Feature generation failed due to an unexpected error:\n%s",
-                        traceback.format_exc(),
-                    )
-                    raise exp
-
-                if sender_fairness:
-                    waiting_room[sender_ip][2].append(
-                        (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
-                    )
-                    logging.info(
-                        "Adding %d packets from flow %s to sender fairness waiting room.",
-                        len(in_fets),
-                        flowkey,
-                    )
-
-                    if len(waiting_room[sender_ip][2]) == waiting_room[sender_ip][1]:
-                        logging.info(
-                            "Sender fairness waiting room is full. Adding to batch."
-                        )
-                        waiting = waiting_room[sender_ip][2]
-                        waiting_room[sender_ip] = (
-                            int(epoch),
-                            int(num_flows_expected),
-                            [],
-                        )
-                        packets_in_batch += sum(len(x[4]) for x in waiting)
-                        packets_covered_by_batch += sum(len(x[5]) for x in waiting)
-
-                        batch.add(merge_features(waiting))
-
-                        batch_proc_time_s += time.time() - features_start_time_s
-                else:
-                    batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
-                    logging.info(
-                        "Adding %d packets from flow %s to batch.",
-                        len(in_fets),
-                        flowkey,
-                    )
-                    packets_in_batch += len(in_fets)
-                    packets_covered_by_batch += len(pkts)
-                    batch_proc_time_s += time.time() - features_start_time_s
-
-            # If the batch is full, then run inference. Also run inference if it has been a
-            # long time since we ran inference last. A "long time" is defined as the max of
-            # 1 second and the inference interval (if the inference interval is defined).
-            batch_time_s = time.time() - batch_start_time_s
-            if batch and (
-                packets_in_batch >= args.batch_size or batch_time_s > max_batch_time_s
-            ):
-                logging.info("Running inference on a batch of %d flow(s).", len(batch))
-                inference_start_time_s = time.time()
-                try:
-                    batch_inference(
-                        args,
-                        net,
-                        batch,
-                        flow_to_prev_features,
-                        flow_to_decisions,
-                        flow_to_rwnd,
-                    )
-                except AssertionError:
-                    # Assertion errors mean this batch of packets violated some
-                    # precondition, but we are safe to skip them and continue.
-                    logging.warning(
-                        "Inference failed due to a non-fatal assertion failure:\n%s",
-                        traceback.format_exc(),
-                    )
-                    continue
-                except Exception as exp:
-                    # An unexpected error occurred. It is not safe to continue. Reraise the
-                    # exception to kill the process.
-                    logging.error(
-                        "Inference failed due to an unexpected error:\n%s",
-                        traceback.format_exc(),
-                    )
-                    raise exp
-                else:
-                    batch_proc_time_s += time.time() - inference_start_time_s
-                finally:
-                    for fourtuple, _, _, _, _ in batch:
-                        logging.info(
-                            (
-                                "Clearing inference flag due to finished inference for "
-                                "flow: %s"
-                            ),
-                            utils.flow_to_str(fourtuple),
-                        )
-                        inference_flags[fourtuple].value = 0
-
-                pps = packets_covered_by_batch / batch_proc_time_s
-                logging.info(
-                    "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
-                    batch_proc_time_s * 1e3,
-                    pps,
-                    pps * 1514 * 8 / 1e6,
-                )
-
-                batch = []
-                packets_in_batch = 0
-                packets_covered_by_batch = 0
-                batch_proc_time_s = 0
-                batch_start_time_s = time.time()
-            else:
-                logging.info(
-                    "Not ready to run batch yet. %d, %.2f >? %.2f",
-                    len(batch),
-                    batch_time_s,
-                    max_batch_time_s,
-                )
+            packets_covered_by_batch, batch_start_time_s, batch_wait_time_s = loop(
+                args,
+                net,
+                dtype,
+                batch,
+                waiting_room,
+                flow_to_prev_features,
+                flow_to_decisions,
+                flow_to_rwnd,
+                inference_flags,
+                que,
+                packets_covered_by_batch,
+                max_batch_time_s,
+                batch_start_time_s,
+                batch_wait_time_s,
+            )
     except queue.Empty:
         return
 
@@ -638,58 +832,102 @@ def batch_inference(
         )
 
 
-def merge_features(net, waiting):
-    # List of (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+def merge_sender_flows(net, sender_flows):
+    """
+    sender_flows is a list of tuples of the form:
+        (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+    """
+    # Sanity check. Make sure that each flow has the same number of packets,
+    # the same remote IP, and the same local IP. Make sure that all of the
+    # remote ports are unique. This function only works if the net is a
+    # MathisFairness model.
     assert isinstance(net, models.MathisFairness)
-    # Make sure that each flow has the same number of packets.
-    target_num_pkts = waiting[0][4].shape[0]
-    for _, _, _, _, in_fets, _ in waiting:
+    target_num_pkts = sender_flows[0][4].shape[0]
+    target_remote_ip = sender_flows[0][0][0]
+    target_local_ip = sender_flows[0][0][2]
+    all_remote_ports = set()
+    for fourtuple, _, _, all_fets, in_fets, _ in sender_flows:
         assert in_fets.shape[0] == target_num_pkts
+        assert all_fets.shape[0] == target_num_pkts
+        assert fourtuple[0] == target_remote_ip
+        assert fourtuple[2] == target_local_ip
+        all_remote_ports.add(fourtuple[1])
+    assert len(all_remote_ports) == len(sender_flows)
 
-    # Create the target array.
-    dtype = waiting[0][4].dtype
-    merged = np.empty(target_num_pkts, dtype=dtype)
+    # Find last smoothing_window packets from across all flows in sender_flows..
+    last_smoothing_window_times = []
+    for _, _, _, all_fets, _, _ in sender_flows:
+        last_smoothing_window_times.extend(all_fets[features.ARRIVAL_TIME_FET].tolist())
+    last_smoothing_window_times.sort()
+    last_smoothing_window_times = last_smoothing_window_times[-target_num_pkts:]
 
-    # Merge across packets.
+    # For each flow, interpolate at the times of those last smoothing_window packets.
+    sender_flows_interp = []
+    for _, _, _, all_fets, in_fets, _ in sender_flows:
+        interp = np.empty(target_num_pkts, dtype=in_fets.dtype)
+        for fet in in_fets.dtype.names:
+            # Interpolate at the times of the last smoothing_window packets.
+            interp[fet] = np.interp(
+                last_smoothing_window_times,
+                all_fets[features.ARRIVAL_TIME_FET],
+                in_fets[fet],
+            )
+        sender_flows_interp.append(interp)
+
+    # Merge the interpolated features across flows.
+    merged_in_fets = np.empty(target_num_pkts, dtype=sender_flows[0][4].dtype)
     for pkt_idx in range(target_num_pkts):
         # Average payload across flows.
         mss_bytes = np.average(
-            [info[4][pkt_idx][features.PAYLOAD_SIZE_FET] for info in waiting]
+            [
+                in_fets[pkt_idx][features.PAYLOAD_SIZE_FET]
+                for _, _, _, _, in_fets, _ in sender_flows_interp
+            ]
         )
         # Average RTT across flows.
         rtt_us = np.average(
             [
-                info[4][pkt_idx][features.make_win_metric(features.RTT_FET, 8)]
-                for info in waiting
+                in_fets[pkt_idx][features.make_win_metric(features.RTT_FET, 8)]
+                for _, _, _, _, in_fets, _ in sender_flows_interp
             ]
         )
         # Sum loss event rate across flows.
         combined_loss_event_rate = np.sum(
             [
-                info[4][pkt_idx][
+                in_fets[pkt_idx][
                     features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
                 ]
-                for info in waiting
+                for _, _, _, _, in_fets, _ in sender_flows_interp
             ]
         )
         mathis_tput = utils.safe_mathis_tput(
             mss_bytes, rtt_us, combined_loss_event_rate
         )
-        combined_tput = np.sum(
+        tput = np.sum(
             [
-                info[4][pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
-                for info in waiting
+                in_fets[pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
+                for _, _, _, _, in_fets, _ in sender_flows_interp
             ]
         )
-        merged[pkt_idx] = (
+        merged_in_fets[pkt_idx] = (
             mss_bytes,
             rtt_us,
             combined_loss_event_rate,
             mathis_tput,
-            combined_tput,
+            tput,
         )
 
-    return merged
+    # Keep the remote and local IP addresses, but set the ports to 0.
+    fourtuple = (sender_flows[0][0][0], 0, sender_flows[0][0][0], 0)
+    return (
+        fourtuple,
+        flow_utils.FlowKey(*fourtuple),
+        # The new min_rtt_us is the min of the min_rtt_us of the sender's flows.
+        min(info[2] for info in sender_flows),
+        # We do not generate all_fets for merged flows.
+        merged_in_fets,
+        merged_in_fets,
+    )
 
 
 def run(args, que, inference_flags, done):
