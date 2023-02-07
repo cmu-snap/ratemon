@@ -6,5 +6,6 @@
     "cmake.configureOnOpen": false,
     "files.associations": {
         "types.h": "c"
-    }
+    },
+    "python.analysis.typeCheckingMode": "basic"
 }
