@@ -1323,7 +1323,7 @@ class MathisFairness:
     """A simple model that compares a flow to the Mathis model."""
 
     in_spc = (
-        features.PAYLOAD_SIZE_FET,
+        features.PAYLOAD_FET,
         features.make_win_metric(features.RTT_FET, 8),
         features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8),
         features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8),
