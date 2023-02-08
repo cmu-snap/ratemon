@@ -609,7 +609,7 @@ def maybe_run_batch(
             batch_time_s,
             max_batch_time_s,
         )
-        return False, 0
+        return False
 
     logging.info("Running inference on a batch of %d flow(s).", len(batch))
     try:
@@ -627,7 +627,6 @@ def maybe_run_batch(
             "Inference failed due to a non-fatal assertion failure:\n%s",
             traceback.format_exc(),
         )
-        return (True,)
     except Exception as exp:
         # An unexpected error occurred. It is not safe to continue. Reraise the
         # exception to kill the process.
