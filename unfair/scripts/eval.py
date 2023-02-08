@@ -20,7 +20,12 @@ from unfair.model import defaults, features, gen_features, utils
 FIGSIZE = (5, 2.2)
 FIGSIZE_BOX = (5, 3.5)
 FONTSIZE = 12
-COLORS = ["b", "r", "g"]
+# COLORS = ["b", "r", "g"]
+COLORS = [
+    "#d7191c",
+    "#2c7bb6",
+    "#fdae61",
+]
 LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
 PREFIX = ""
@@ -695,7 +700,7 @@ def main(args):
         x_max=max(fair_rates_Mbps),
         filename="fair_rate_cdf.pdf",
         linestyles=["solid"],
-        colors=["b"],
+        colors=COLORS[:1],
         # title=f"CDF of fair rate",
     )
     plot_hist(
@@ -747,7 +752,7 @@ def main(args):
         x_max=1.0,
         filename="jfi_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=["r", "g"],
+        colors=COLORS[:2],
         # title="CDF of JFI,\nwith and without unfairness monitor",
     )
     plot_cdf(
@@ -761,7 +766,7 @@ def main(args):
         x_max=100,
         filename="unused_util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=["r", "g"],
+        colors=COLORS[:2],
         legendloc="lower right",
         # title="CDF of unused link capacity,\nwith and without unfairness monitor",
     )
@@ -773,7 +778,7 @@ def main(args):
         x_max=100,
         filename="util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=["r", "g"],
+        colors=COLORS[:2],
         legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
