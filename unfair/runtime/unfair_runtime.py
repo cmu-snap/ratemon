@@ -189,8 +189,8 @@ def check_flows(args, longest_window, que, inference_flags):
     # Need to acquire FLOWS_LOCK while iterating over FLOWS.
     with FLOWS_LOCK:
         for fourtuple, flow in FLOWS.items():
-            # A fourtuple might add other fourtuples to to_check if args.
-            # sender_fairness is True.
+            # A fourtuple might add other fourtuples to to_check if
+            # args.sender_fairness is True.
             if fourtuple in to_check:
                 continue
 
@@ -226,7 +226,7 @@ def check_flows(args, longest_window, que, inference_flags):
                                     flow.remote_addr
                                 )
                         else:
-                            # Plan to run inference on this flows.
+                            # Plan to run inference on this flow.
                             to_check.add(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
@@ -252,7 +252,9 @@ def check_flows(args, longest_window, que, inference_flags):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH)
+                check_flow(
+                    fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH
+                )
             finally:
                 flow.ingress_lock.release()
         else:
@@ -308,31 +310,26 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
                 inference_flags[fourtuple].value = 0
             else:
                 try:
+                    info = (
+                        fourtuple,
+                        flow.incoming_packets,
+                        packets_lost,
+                        flow.start_time_us,
+                        flow.min_rtt_us,
+                        win_to_loss_event_rate,
+                    )
                     if args.sender_fairness:
                         que.put(
                             (
                                 # inference-sender-fairness-<epoch>-<sender IP>-<num flows to expect>
                                 f"inference-sender-fairness-{epoch}-{flow[0]}-{len(FLOWS.get_flows_from_sender(flow[0]))}",
-                                fourtuple,
-                                flow.incoming_packets,
-                                packets_lost,
-                                flow.start_time_us,
-                                flow.min_rtt_us,
-                                win_to_loss_event_rate,
+                                *info,
                             ),
                             block=False,
                         )
                     else:
                         que.put(
-                            (
-                                "inference",
-                                fourtuple,
-                                flow.incoming_packets,
-                                packets_lost,
-                                flow.start_time_us,
-                                flow.min_rtt_us,
-                                win_to_loss_event_rate,
-                            ),
+                            ("inference", *info),
                             block=False,
                         )
                 except queue.Full:

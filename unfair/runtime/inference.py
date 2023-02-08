@@ -861,7 +861,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         return
 
 
-def merge_furtuples(fourtuples):
+def merge_fourtuples(fourtuples):
     """Merge multiple fourtuples from one sender by discarding the port numbers."""
     return (
         fourtuples[0]
@@ -888,7 +888,7 @@ def batch_inference(
     flow_to_range = {}
 
     merged_fourtuples = [
-        merge_furtuples(fourtuples) for fourtuples, _, _, _, _ in batch
+        merge_fourtuples(fourtuples) for fourtuples, _, _, _, _ in batch
     ]
 
     running = 0

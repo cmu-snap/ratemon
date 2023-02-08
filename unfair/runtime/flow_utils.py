@@ -88,9 +88,9 @@ class Flow:
         """Create a string representation of this flow."""
         return str(self.flowkey)
 
-    def is_interesting(self):
+    def is_interesting(self, timeout_s=5):
         """Whether the flow has seen any data in the last few seconds."""
-        return time.time() - self.latest_time_sec < 5
+        return time.time() - self.latest_time_sec < timeout_s
 
 
 class FlowDB(dict):
