@@ -100,13 +100,50 @@ def smooth(labels):
     return label
 
 
-def make_decision(
-    args, flowkey, min_rtt_us, fets, label, flow_to_decisions, flow_to_rwnd
-):
-    """Make a flow unfairness mitigation decision.
+def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_decisions):
+    """Make a fairness decision for all flows from a sender.
 
-    Base the decision on the flow's label and existing decision. Use the flow's features
-    to calculate any necessary flow metrics, such as the throughput.
+    Take the Mathis fair throughput and divide it equally between the flows.
+    """
+    logging.info("Label for flows [%s]: %s", ", ".join(flowkeys), label)
+
+    mathis_tput_bps = fets[-1][
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8)
+    ]
+    # Divied the Mathis fair throughput equally between the flows.
+    per_flow_tput_bps = mathis_tput_bps / len(flowkeys)
+
+    if label == defaults.Class.ABOVE_FAIR:
+        # This sender is sending too fast. Force all flows to slow down.
+        new_decision = (
+            defaults.Decision.PACED,
+            per_flow_tput_bps,
+            utils.bdp_B(per_flow_tput_bps, min_rtt_us / 1e6),
+        )
+    elif np.array(
+        [
+            flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+            for flowkey in flowkeys
+        ]
+    ).any():
+        # The current measurement is that the sender is not unfair, but at
+        # least one of its flows is already being paced. Preserve the existing
+        # per-flow decisions.
+        new_decision = None
+    else:
+        # This sender is not behaving unfairly and none of its flows behaved
+        # badly in the past, so leave it alone.
+        new_decision = (defaults.Decision.NOT_PACED, None, None)
+    return new_decision
+
+
+def make_decision_flow_fairness(
+    args, flowkey, min_rtt_us, fets, label, flow_to_decisions
+):
+    """Make a fairness decision for a single flow.
+
+    FIXME: Why are the BDP calculations coming out so small? Is the throughput
+           just low due to low application demand?
     """
     logging.info("Label for flow %s: %s", flowkey, label)
     if args.reaction_strategy == ReactionStrategy.FILE:
@@ -161,10 +198,11 @@ def make_decision(
             # This flow is not already being paced and is not behaving unfairly, so
             # leave it alone.
             new_decision = (defaults.Decision.NOT_PACED, None, None)
+    return new_decision
 
-    # FIXME: Why are the BDP calculations coming out so small? Is the throughput
-    #        just low due to low application demand?
 
+def apply_decision(flowkey, new_decision, flow_to_decisions, flow_to_rwnd):
+    """Apply a decision to a flow."""
     logging.info(
         "Decision for flow %s: (%s, target tput: %s, rwnd: %s)",
         flowkey,
@@ -198,6 +236,29 @@ def make_decision(
             )
             flow_to_rwnd[flowkey] = ctypes.c_uint32(new_decision[2])
         flow_to_decisions[flowkey] = new_decision
+
+
+def make_decision(
+    args, flowkeys, min_rtt_us, fets, label, flow_to_decisions, flow_to_rwnd
+):
+    """Make a flow unfairness mitigation decision.
+
+    Base the decision on the flow's label and existing decision. Use the flow's features
+    to calculate any necessary flow metrics, such as the throughput.
+    """
+    if args.sender_fairness:
+        new_decision = make_decision_sender_fairness(
+            flowkeys, min_rtt_us, fets, label, flow_to_decisions
+        )
+    else:
+        assert len(flowkeys) == 1
+        new_decision = make_decision_flow_fairness(
+            args, flowkeys[0], min_rtt_us, fets, label, flow_to_decisions
+        )
+
+    if new_decision is not None:
+        for flowkey in flowkeys:
+            apply_decision(flowkey, new_decision, flow_to_decisions, flow_to_rwnd)
 
 
 def packets_to_ndarray(pkts, dtype, packets_lost, win_to_loss_event_rate):
@@ -339,6 +400,7 @@ def configure_ebpf(args):
 def parse_from_inference_queue(
     val, flow_to_rwnd, flow_to_decisions, flow_to_prev_features
 ):
+    """Parse a message from the inference queue."""
     sender_fairness = False
     epoch = num_flows_expected = None
     opcode, fourtuple = val[:2]
@@ -398,6 +460,7 @@ def build_features(
     fourtuple,
     flowkey,
 ):
+    """Build features for a flow."""
     logging.info("Building features for flow: %s", flowkey)
     try:
         # Prepare the numpy array in which we will store the features.
@@ -405,7 +468,7 @@ def build_features(
         # Populate the above numpy array with features and return a pruned
         # version containing only the model input features the packets in
         # the smoothing window.
-        return all_fets, populate_features(
+        in_fets = populate_features(
             net,
             flowkey,
             start_time_us,
@@ -414,6 +477,9 @@ def build_features(
             flow_to_prev_features.get(flowkey),
             args.smoothing_window,
         )
+        # Update previous fets for this flow.
+        flow_to_prev_features[flowkey] = in_fets[-1]
+        return all_fets, in_fets
     except AssertionError:
         # Assertion errors mean this batch of packets violated some
         # precondition, but we are safe to skip them and continue.
@@ -452,10 +518,13 @@ def wait_or_batch(
     epoch,
     num_flows_expected,
 ):
+    """Decide whether a flow should wait (if doing sender fairness) or be batched."""
     if sender_fairness:
-        sender_ip = fourtuple[0]
-        if sender_ip not in waiting_room or waiting_room[sender_ip][0] < epoch:
-            waiting_room[sender_ip] = (
+        if (
+            flowkey.remote_addr not in waiting_room
+            or waiting_room[flowkey.remote_addr][0] < epoch
+        ):
+            waiting_room[flowkey.remote_addr] = (
                 int(epoch),
                 int(num_flows_expected),
                 [],
@@ -465,43 +534,46 @@ def wait_or_batch(
             len(in_fets),
             flowkey,
         )
-        waiting_room[sender_ip][2].append(
+        waiting_room[flowkey.remote_addr][2].append(
             (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
         )
 
-        if len(waiting_room[sender_ip][2]) < waiting_room[sender_ip][1]:
+        if (
+            len(waiting_room[flowkey.remote_addr][2])
+            < waiting_room[flowkey.remote_addr][1]
+        ):
             # Waiting room is not full yet, so there are no new packets for the batch.
             return 0
 
         # Empty the waiting room.
-        all_flows_from_sender = waiting_room[sender_ip][2]
-        del waiting_room[sender_ip]
+        all_flows_from_sender = waiting_room[flowkey.remote_addr][2]
+        del waiting_room[flowkey.remote_addr]
         (
-            merged_fourtuple,
-            merged_flowkey,
+            merged_fourtuples,
+            merged_flowkeys,
             merged_min_rtt_us,
             merged_all_fets,
             merged_in_fets,
         ) = merge_sender_flows(net, all_flows_from_sender)
         batch.add(
             (
-                merged_fourtuple,
-                merged_flowkey,
+                merged_fourtuples,
+                merged_flowkeys,
                 merged_min_rtt_us,
                 merged_all_fets,
                 merged_in_fets,
             )
         )
         logging.info(
-            "Sender fairness waiting room for flow %d is full."
+            "Sender fairness waiting room for sender %s is full."
             "Adding %d merged packets to batch.",
-            merged_flowkey,
+            merged_flowkeys[0].remote_addr,
             len(merged_in_fets),
         )
         # Additional packets_covered_by_batch
         return sum(len(flow_info[5]) for flow_info in all_flows_from_sender)
     else:
-        batch.append((fourtuple, flowkey, min_rtt_us, all_fets, in_fets))
+        batch.append(([fourtuple], [flowkey], min_rtt_us, all_fets, in_fets))
         logging.info(
             "Adding %d packets from flow %s to batch.",
             len(in_fets),
@@ -515,16 +587,14 @@ def maybe_run_batch(
     args,
     net,
     batch,
-    flow_to_prev_features,
     flow_to_decisions,
     flow_to_rwnd,
     inference_flags,
-    packets_covered_by_batch,
     max_batch_time_s,
     batch_start_time_s,
-    batch_wait_time_s,
 ):
-    packets_in_batch = sum(len(flow_info[4]) for flow_info in batch)
+    """Check if a batch is ready and process it."""
+    packets_in_batch = sum(len(in_fets) for _, _, _, _, in_fets in batch)
     # Check if the batch is not ready yet, and if so, return False.
     # If the batch is full, then run inference. Also run inference if it has been a
     # long time since we ran inference last. A "long time" is defined as the max of
@@ -547,7 +617,6 @@ def maybe_run_batch(
             args,
             net,
             batch,
-            flow_to_prev_features,
             flow_to_decisions,
             flow_to_rwnd,
         )
@@ -568,27 +637,20 @@ def maybe_run_batch(
         )
         raise exp
     finally:
-        for fourtuple, _, _, _, _ in batch:
-            logging.info(
-                ("Clearing inference flag due to finished inference for " "flow: %s"),
-                utils.flow_to_str(fourtuple),
-            )
-            inference_flags[fourtuple].value = 0
+        for fourtuples, flowkeys, _, _, _ in batch:
+            for fourtuple, flowkey in zip(fourtuples, flowkeys):
+                logging.info(
+                    "Clearing inference flag due to finished inference for flow: %s",
+                    flowkey,
+                )
+                inference_flags[fourtuple].value = 0
         # Clear the batch.
         batch.clear()
 
-    batch_proc_time_s = time.time() - batch_start_time_s - batch_wait_time_s
-    pps = packets_covered_by_batch / batch_proc_time_s
-    logging.info(
-        "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
-        batch_proc_time_s * 1e3,
-        pps,
-        pps * 1514 * 8 / 1e6,
-    )
     return True
 
 
-def loop(
+def loop_iteration(
     args,
     net,
     dtype,
@@ -604,21 +666,32 @@ def loop(
     batch_start_time_s,
     batch_wait_time_s,
 ):
+    """Run one iteration of the inference loop.
+
+    Includes: checking if the current batch is ready and running it, pulling a
+    message from the inference queue, computing features, and deciding if the
+    flow should wait (sender fairness) or be batched immediately.
+    """
     # First, check whether we should run inference on the current batch.
     if maybe_run_batch(
         args,
         net,
         batch,
-        flow_to_prev_features,
         flow_to_decisions,
         flow_to_rwnd,
         inference_flags,
-        packets_covered_by_batch,
         max_batch_time_s,
         batch_start_time_s,
-        batch_wait_time_s,
     ):
-        # (packets_covered_by_batch, batch_start_time_s, batch_wait_time_s)
+        batch_proc_time_s = time.time() - batch_start_time_s - batch_wait_time_s
+        pps = packets_covered_by_batch / batch_proc_time_s
+        logging.info(
+            "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
+            batch_proc_time_s * 1e3,
+            pps,
+            pps * 1514 * 8 / 1e6,
+        )
+        # Reset: (packets_covered_by_batch, batch_start_time_s, batch_wait_time_s)
         return (0, time.time(), 0)
 
     # Get the next message from the inference queue.
@@ -720,6 +793,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         net = models.load_model(args.model_file)
     logging.info("Model features:\n\t%s", "\n\t".join(net.in_spc))
     flow_to_prev_features = {}
+    # Maps flowkey to (decision, desired throughput, corresponding RWND)
     flow_to_decisions = collections.defaultdict(
         lambda: (defaults.Decision.NOT_PACED, None, None)
     )
@@ -763,7 +837,11 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
 
     try:
         while not done.is_set():
-            packets_covered_by_batch, batch_start_time_s, batch_wait_time_s = loop(
+            (
+                packets_covered_by_batch,
+                batch_start_time_s,
+                batch_wait_time_s,
+            ) = loop_iteration(
                 args,
                 net,
                 dtype,
@@ -783,11 +861,19 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
         return
 
 
+def merge_furtuples(fourtuples):
+    """Merge multiple fourtuples from one sender by discarding the port numbers."""
+    return (
+        fourtuples[0]
+        if len(fourtuples) == 1
+        else (fourtuples[0][0], fourtuples[0][1], 0, 0)
+    )
+
+
 def batch_inference(
     args,
     net,
     batch,
-    flow_to_prev_features,
     flow_to_decisions,
     flow_to_rwnd,
 ):
@@ -800,14 +886,19 @@ def batch_inference(
     num_pkts = sum(len(in_fets) for _, _, _, _, in_fets in batch)
     # Ranges are inclusive.
     flow_to_range = {}
+
+    merged_fourtuples = [
+        merge_furtuples(fourtuples) for fourtuples, _, _, _, _ in batch
+    ]
+
     running = 0
-    for fourtuple, _, _, _, in_fets in batch:
+    for fourtuple, (_, _, _, _, in_fets) in zip(merged_fourtuples, batch):
         flow_to_range[fourtuple] = (running, running + len(in_fets))
         running += len(in_fets)
 
     # Assemble the batch into a single numpy array.
     batch_fets = np.empty(num_pkts, dtype=batch[0][4].dtype)
-    for fourtuple, _, _, _, in_fets in batch:
+    for fourtuple, (_, _, _, _, in_fets) in zip(merged_fourtuples, batch):
         start, end = flow_to_range[fourtuple]
         batch_fets[start:end] = in_fets
 
@@ -815,15 +906,15 @@ def batch_inference(
     # added as dependencies for the requested features).
     labels = predict(net, batch_fets[list(net.in_spc)], args.debug)
 
-    for fourtuple, flowkey, min_rtt_us, all_fets, in_fets in batch:
+    for fourtuple, (_, flowkeys, min_rtt_us, all_fets, in_fets) in zip(
+        merged_fourtuples, batch
+    ):
         start, end = flow_to_range[fourtuple]
         flw_labels = labels[start:end]
-        # Update previous fets for this flow.
-        flow_to_prev_features[flowkey] = in_fets[-1]
         # Make a decision for this flow.
         make_decision(
             args,
-            flowkey,
+            flowkeys,
             min_rtt_us,
             all_fets,
             smooth(flw_labels),
@@ -834,6 +925,8 @@ def batch_inference(
 
 def merge_sender_flows(net, sender_flows):
     """
+    Merge multiple flows from the same sender into a single super-flow.
+
     sender_flows is a list of tuples of the form:
         (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
     """
@@ -843,15 +936,15 @@ def merge_sender_flows(net, sender_flows):
     # MathisFairness model.
     assert isinstance(net, models.MathisFairness)
     target_num_pkts = sender_flows[0][4].shape[0]
-    target_remote_ip = sender_flows[0][0][0]
-    target_local_ip = sender_flows[0][0][2]
+    target_remote_ip = sender_flows[0][1].remote_addr
+    target_local_ip = sender_flows[0][1].local_addr
     all_remote_ports = set()
-    for fourtuple, _, _, all_fets, in_fets, _ in sender_flows:
+    for _, flowkey, _, all_fets, in_fets, _ in sender_flows:
         assert in_fets.shape[0] == target_num_pkts
         assert all_fets.shape[0] == target_num_pkts
-        assert fourtuple[0] == target_remote_ip
-        assert fourtuple[2] == target_local_ip
-        all_remote_ports.add(fourtuple[1])
+        assert flowkey.remote_addr == target_remote_ip
+        assert flowkey.local_addr == target_local_ip
+        all_remote_ports.add(flowkey.remote_port)
     assert len(all_remote_ports) == len(sender_flows)
 
     # Find last smoothing_window packets from across all flows in sender_flows..
@@ -917,13 +1010,11 @@ def merge_sender_flows(net, sender_flows):
             tput,
         )
 
-    # Keep the remote and local IP addresses, but set the ports to 0.
-    fourtuple = (sender_flows[0][0][0], 0, sender_flows[0][0][0], 0)
     return (
-        fourtuple,
-        flow_utils.FlowKey(*fourtuple),
+        [fourtuple for fourtuple, _, _, _, _, _ in sender_flows],
+        [flowkey for _, flowkey, _, _, _, _ in sender_flows],
         # The new min_rtt_us is the min of the min_rtt_us of the sender's flows.
-        min(info[2] for info in sender_flows),
+        min(min_rtt_us for _, _, min_rtt_us, _, _, _ in sender_flows),
         # We do not generate all_fets for merged flows.
         merged_in_fets,
         merged_in_fets,
