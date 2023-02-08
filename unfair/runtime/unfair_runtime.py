@@ -144,10 +144,8 @@ def receive_packet_pcapy(header, packet):
 
             # Only give up credit for processing incoming packets.
             return 1, total_bytes
-        else:
-            # Track outgoing tsval for use later.
-            flow.sent_tsvals[tsval] = time_us
-
+        # Track outgoing tsval for use later.
+        flow.sent_tsvals[tsval] = time_us
     return 0, 0
 
 
@@ -213,9 +211,8 @@ def check_flows(args, longest_window, que, inference_flags):
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
                         )
-                    elif flow_utils.flow_is_ready(
-                        flow, args.smoothing_window, longest_window
-                    ):
+                    if flow.is_ready(args.smoothing_window, longest_window):
+                        logging.info("flow is ready %s", flow)
                         if args.sender_fairness:
                             # Only want to add this flow if all the flows from this
                             # sender are ready.
@@ -573,18 +570,16 @@ def run(args):
 
     global LOSS_EVENT_INTERVALS
     LOSS_EVENT_INTERVALS = list(
-        set(
-            [
-                features.parse_win_metric(fet)[1]
-                for fet in all_features
-                if "windowed" in fet
-                and (
-                    fet.startswith(features.LOSS_EVENT_RATE_FET)
-                    or fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
-                    or fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
-                )
-            ]
-        )
+        {
+            features.parse_win_metric(fet)[1]
+            for fet in all_features
+            if "windowed" in fet
+            and (
+                fet.startswith(features.LOSS_EVENT_RATE_FET)
+                or fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                or fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+            )
+        }
     )
     logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
 

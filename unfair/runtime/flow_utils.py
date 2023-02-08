@@ -92,6 +92,19 @@ class Flow:
         """Whether the flow has seen any data in the last few seconds."""
         return time.time() - self.latest_time_sec < timeout_s
 
+    def is_ready(self, smoothing_window, longest_window):
+        # This flow is ready for interence if...
+        return (
+            # ...we have at least as many packets as the smoothing window...
+            len(self.incoming_packets) >= smoothing_window
+            and (
+                # ...the time span covered by the packets is at least that which is
+                # required for the longest windowed input feature.
+                (self.incoming_packets[-smoothing_window][4] - self.incoming_packets[0][4])
+                >= self.min_rtt_us * longest_window
+            )
+        )
+
 
 class FlowDB(dict):
     def __init__(self):
@@ -142,20 +155,6 @@ class FlowDB(dict):
             # as a whole is not ready...
             if (
                 not ignore_uninteresting or self[fourtuple].is_interesting()
-            ) and not flow_is_ready(self[fourtuple], smoothing_window, longest_window):
+            ) and not self[fourtuple].is_ready(smoothing_window, longest_window):
                 return False
         return True
-
-
-def flow_is_ready(flow, smoothing_window, longest_window):
-    # This flow is ready for interence if...
-    return (
-        # We have at least as many packets as the smoothing window...
-        len(flow.incoming_packets) >= smoothing_window
-        and (
-            # ...the time span covered by the packets is at least that which is
-            # required for the longest windowed input feature.
-            (flow.incoming_packets[-smoothing_window][4] - flow.incoming_packets[0][4])
-            >= flow.min_rtt_us * longest_window
-        )
-    )

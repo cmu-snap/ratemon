@@ -519,60 +519,7 @@ def wait_or_batch(
     num_flows_expected,
 ):
     """Decide whether a flow should wait (if doing sender fairness) or be batched."""
-    if sender_fairness:
-        if (
-            flowkey.remote_addr not in waiting_room
-            or waiting_room[flowkey.remote_addr][0] < epoch
-        ):
-            waiting_room[flowkey.remote_addr] = (
-                int(epoch),
-                int(num_flows_expected),
-                [],
-            )
-        logging.info(
-            "Adding %d packets from flow %s to sender fairness waiting room.",
-            len(in_fets),
-            flowkey,
-        )
-        waiting_room[flowkey.remote_addr][2].append(
-            (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
-        )
-
-        if (
-            len(waiting_room[flowkey.remote_addr][2])
-            < waiting_room[flowkey.remote_addr][1]
-        ):
-            # Waiting room is not full yet, so there are no new packets for the batch.
-            return 0
-
-        # Empty the waiting room.
-        all_flows_from_sender = waiting_room[flowkey.remote_addr][2]
-        del waiting_room[flowkey.remote_addr]
-        (
-            merged_fourtuples,
-            merged_flowkeys,
-            merged_min_rtt_us,
-            merged_all_fets,
-            merged_in_fets,
-        ) = merge_sender_flows(net, all_flows_from_sender)
-        batch.add(
-            (
-                merged_fourtuples,
-                merged_flowkeys,
-                merged_min_rtt_us,
-                merged_all_fets,
-                merged_in_fets,
-            )
-        )
-        logging.info(
-            "Sender fairness waiting room for sender %s is full."
-            "Adding %d merged packets to batch.",
-            merged_flowkeys[0].remote_addr,
-            len(merged_in_fets),
-        )
-        # Additional packets_covered_by_batch
-        return sum(len(flow_info[5]) for flow_info in all_flows_from_sender)
-    else:
+    if not sender_fairness:
         batch.append(([fourtuple], [flowkey], min_rtt_us, all_fets, in_fets))
         logging.info(
             "Adding %d packets from flow %s to batch.",
@@ -581,6 +528,59 @@ def wait_or_batch(
         )
         # Additional packets_covered_by_batch
         return len(pkts)
+
+    if (
+            flowkey.remote_addr not in waiting_room
+            or waiting_room[flowkey.remote_addr][0] < epoch
+    ):
+        waiting_room[flowkey.remote_addr] = (
+            int(epoch),
+            int(num_flows_expected),
+            [],
+        )
+    logging.info(
+        "Adding %d packets from flow %s to sender fairness waiting room.",
+        len(in_fets),
+        flowkey,
+    )
+    waiting_room[flowkey.remote_addr][2].append(
+        (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
+    )
+
+    if (
+            len(waiting_room[flowkey.remote_addr][2])
+            < waiting_room[flowkey.remote_addr][1]
+    ):
+        # Waiting room is not full yet, so there are no new packets for the batch.
+        return 0
+
+    # Empty the waiting room.
+    all_flows_from_sender = waiting_room[flowkey.remote_addr][2]
+    del waiting_room[flowkey.remote_addr]
+    (
+        merged_fourtuples,
+        merged_flowkeys,
+        merged_min_rtt_us,
+        merged_all_fets,
+        merged_in_fets,
+    ) = merge_sender_flows(net, all_flows_from_sender)
+    batch.add(
+        (
+            merged_fourtuples,
+            merged_flowkeys,
+            merged_min_rtt_us,
+            merged_all_fets,
+            merged_in_fets,
+        )
+    )
+    logging.info(
+        "Sender fairness waiting room for sender %s is full."
+        "Adding %d merged packets to batch.",
+        merged_flowkeys[0].remote_addr,
+        len(merged_in_fets),
+    )
+    # Additional packets_covered_by_batch
+    return sum(len(flow_info[5]) for flow_info in all_flows_from_sender)
 
 
 def maybe_run_batch(
