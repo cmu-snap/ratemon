@@ -33,10 +33,6 @@ OLD_THRESH_SEC = 1 * 60
 # packets are consumed by the inference engine and that flow's list is
 # reset to empty.
 FLOWS = flow_utils.FlowDB()
-# Lock for the packet input data structures (e.g., "FLOWS"). Only acquire this lock
-# when adding, removing, or iterating over flows; no need to acquire this lock when
-# updating a flow object.
-FLOWS_LOCK = threading.RLock()
 
 MY_IP = None
 MANAGER = None
@@ -102,7 +98,7 @@ def receive_packet_pcapy(header, packet):
     fourtuple = (
         (daddr, saddr, dport, sport) if incoming else (saddr, daddr, sport, dport)
     )
-    with FLOWS_LOCK:
+    with FLOWS.lock:
         if fourtuple in FLOWS:
             flow = FLOWS[fourtuple]
         else:
@@ -130,7 +126,13 @@ def receive_packet_pcapy(header, packet):
                                 old_min_rtt_us,
                                 flow.min_rtt_us,
                             )
+                        #else:
+                        #    logging.info("New RTT is not min %s", flow)
                     # del flow.sent_tsvals[tsecr]
+                    else:
+                        logging.info("candidate_rtt_us <= 0 %s", flow)
+                else:
+                    logging.info("Cannot find send tsecr %s", flow)
 
             flow.incoming_packets.append(
                 (
@@ -184,18 +186,21 @@ def check_flows(args, longest_window, que, inference_flags):
     to_remove = set()
     to_check = set()
 
-    # Need to acquire FLOWS_LOCK while iterating over FLOWS.
-    with FLOWS_LOCK:
+    # Need to acquire FLOWS.lock while iterating over FLOWS.
+    with FLOWS.lock:
         for fourtuple, flow in FLOWS.items():
+            logging.info("checking flow %s", flow)
             # A fourtuple might add other fourtuples to to_check if
             # args.sender_fairness is True.
             if fourtuple in to_check:
+                logging.info("Flow already in to_check...skipping %s", flow)
                 continue
 
             # Try to acquire the lock for this flow. If unsuccessful, do not block; move
             # on to the next flow.
             if flow.ingress_lock.acquire(blocking=False):
                 try:
+                    logging.info("got flow lock %s", flow)
                     if flow.incoming_packets:
                         logging.info(
                             (
@@ -211,19 +216,27 @@ def check_flows(args, longest_window, que, inference_flags):
                             (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
                             / 1e6,
                         )
+                    else:
+                        logging.info("No incoming packets for flow %s", flow)
                     if flow.is_ready(args.smoothing_window, longest_window):
                         logging.info("flow is ready %s", flow)
                         if args.sender_fairness:
                             # Only want to add this flow if all the flows from this
                             # sender are ready.
                             if FLOWS.sender_okay(
-                                flow.remote_addr, args.smoothing_window, longest_window
+                                flow.flowkey.remote_addr, args.smoothing_window, longest_window
                             ):
-                                to_check |= FLOWS.get_flows_from_sender(
-                                    flow.remote_addr
-                                )
+                                logging.info("sender ready %s", utils.int_to_ip_str(flow.flowkey.remote_addr))
+                                flows_to_add = FLOWS.get_flows_from_sender(flow.flowkey.remote_addr)
+                                logging.info("flows_to_add %s", flows_to_add)
+                                to_check |= flows_to_add
+                            else:
+                                logging.info("sender not ready %s", utils.int_to_ip_str(flow.flowkey.remote_addr))
+                                logging.info("get_flows_from_sender %s", FLOWS.get_flows_from_sender(flow.flowkey.remote_addr))
+
                         else:
                             # Plan to run inference on this flow.
+                            logging.info("Adding one fourtuple: %ds", fourtuple)
                             to_check.add(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
@@ -231,6 +244,8 @@ def check_flows(args, longest_window, que, inference_flags):
                         # Remove old flows that have not been selected for inference in
                         # a while.
                         to_remove.add(fourtuple)
+                    else:
+                        logging.info("Else case! %s", flow)
                 finally:
                     flow.ingress_lock.release()
             else:
@@ -243,6 +258,7 @@ def check_flows(args, longest_window, que, inference_flags):
                 del inference_flags[fourtuple]
             que.put(("remove", fourtuple))
 
+    logging.info("to_check %s", to_check)
     for fourtuple in to_check:
         flow = FLOWS[fourtuple]
         # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
@@ -319,7 +335,7 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
                         que.put(
                             (
                                 # inference-sender-fairness-<epoch>-<sender IP>-<num flows to expect>
-                                f"inference-sender-fairness-{epoch}-{flow[0]}-{len(FLOWS.get_flows_from_sender(flow[0]))}",
+                                f"inference-sender-fairness-{epoch}-{flow.flowkey.remote_addr}-{len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr))}",
                                 *info,
                             ),
                             block=False,

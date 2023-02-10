@@ -105,7 +105,7 @@ def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_dec
 
     Take the Mathis fair throughput and divide it equally between the flows.
     """
-    logging.info("Label for flows [%s]: %s", ", ".join(flowkeys), label)
+    logging.info("Label for flows [%s]: %s", ", ".join(str(flowkey) for flowkey in flowkeys), label)
 
     mathis_tput_bps = fets[-1][
         features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8)
@@ -417,7 +417,7 @@ def parse_from_inference_queue(
 
         if opcode.startswith("inference-sender-fairness"):
             sender_fairness = True
-            epoch, num_flows_expected = opcode.split("-")[-3:]
+            epoch, num_flows_expected = opcode.split("-")[-2:]
             epoch = int(epoch)
             num_flows_expected = int(num_flows_expected)
     elif opcode == "remove":
@@ -477,6 +477,8 @@ def build_features(
             flow_to_prev_features.get(flowkey),
             args.smoothing_window,
         )
+        # We do not need to keep all of the original packets.
+        all_fets = all_fets[-args.smoothing_window:]
         # Update previous fets for this flow.
         flow_to_prev_features[flowkey] = in_fets[-1]
         return all_fets, in_fets
@@ -564,7 +566,7 @@ def wait_or_batch(
         merged_all_fets,
         merged_in_fets,
     ) = merge_sender_flows(net, all_flows_from_sender)
-    batch.add(
+    batch.append(
         (
             merged_fourtuples,
             merged_flowkeys,
@@ -595,6 +597,8 @@ def maybe_run_batch(
 ):
     """Check if a batch is ready and process it."""
     packets_in_batch = sum(len(in_fets) for _, _, _, _, in_fets in batch)
+    logging.info("packets_in_batch %s", packets_in_batch)
+    logging.info("len(batch) %s", len(batch))
     # Check if the batch is not ready yet, and if so, return False.
     # If the batch is full, then run inference. Also run inference if it has been a
     # long time since we ran inference last. A "long time" is defined as the max of
@@ -799,7 +803,9 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     dtype = features.convert_to_float(
         sorted(
             list(
-                set(features.PARSE_PACKETS_FETS)
+                # Manually add a feature for the number of packets lost.
+                {(features.PACKETS_LOST_FET, "float64")}
+                | set(features.PARSE_PACKETS_FETS)
                 | set(
                     features.feature_names_to_dtype(
                         features.fill_dependencies(net.in_spc)
@@ -808,6 +814,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             )
         )
     )
+    logging.info("inference dtype %s", dtype)
     # Maximum duration to delay inference to wait to accumulate a batch.
     max_batch_time_s = max(
         0.1,
@@ -939,6 +946,8 @@ def merge_sender_flows(net, sender_flows):
     target_local_ip = sender_flows[0][1].local_addr
     all_remote_ports = set()
     for _, flowkey, _, all_fets, in_fets, _ in sender_flows:
+        logging.info("in_fets.shape %s", in_fets.shape)
+        logging.info("all_fets.shape %s", all_fets.shape)
         assert in_fets.shape[0] == target_num_pkts
         assert all_fets.shape[0] == target_num_pkts
         assert flowkey.remote_addr == target_remote_ip
@@ -967,20 +976,20 @@ def merge_sender_flows(net, sender_flows):
         sender_flows_interp.append(interp)
 
     # Merge the interpolated features across flows.
-    merged_in_fets = np.empty(target_num_pkts, dtype=sender_flows[0][4].dtype)
+    merged_in_fets = np.empty(target_num_pkts, dtype=features.feature_names_to_dtype(net.in_spc))
     for pkt_idx in range(target_num_pkts):
         # Average payload across flows.
         mss_bytes = np.average(
             [
                 in_fets[pkt_idx][features.PAYLOAD_FET]
-                for _, _, _, _, in_fets, _ in sender_flows_interp
+                for in_fets in sender_flows_interp
             ]
         )
         # Average RTT across flows.
         rtt_us = np.average(
             [
                 in_fets[pkt_idx][features.make_win_metric(features.RTT_FET, 8)]
-                for _, _, _, _, in_fets, _ in sender_flows_interp
+                for in_fets in sender_flows_interp
             ]
         )
         # Sum loss event rate across flows.
@@ -989,7 +998,7 @@ def merge_sender_flows(net, sender_flows):
                 in_fets[pkt_idx][
                     features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
                 ]
-                for _, _, _, _, in_fets, _ in sender_flows_interp
+                for in_fets in sender_flows_interp
             ]
         )
         mathis_tput = utils.safe_mathis_tput(
@@ -998,7 +1007,7 @@ def merge_sender_flows(net, sender_flows):
         tput = np.sum(
             [
                 in_fets[pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
-                for _, _, _, _, in_fets, _ in sender_flows_interp
+                for in_fets in sender_flows_interp
             ]
         )
         merged_in_fets[pkt_idx] = (
@@ -1008,6 +1017,9 @@ def merge_sender_flows(net, sender_flows):
             mathis_tput,
             tput,
         )
+
+    for fet in merged_in_fets.dtype.names:
+        logging.info("merged '%s' %s", fet, merged_in_fets[fet])
 
     return (
         [fourtuple for fourtuple, _, _, _, _, _ in sender_flows],

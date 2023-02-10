@@ -75,6 +75,9 @@ class Flow:
         # The time at which this flow started. Used to determine the relative packet
         # arrival time.
         self.start_time_us = start_time_us
+        # The approximate delta between packet timestamps from libpcap and the
+        # system clock.
+        self.approx_pcap_system_delta_us = time.time() * 1e6 - start_time_us
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize
@@ -88,22 +91,24 @@ class Flow:
         """Create a string representation of this flow."""
         return str(self.flowkey)
 
-    def is_interesting(self, timeout_s=5):
+    def is_interesting(self, timeout_us=5e6):
         """Whether the flow has seen any data in the last few seconds."""
-        return time.time() - self.latest_time_sec < timeout_s
+        with self.ingress_lock:
+            return self.incoming_packets and (time.time() * 1e6 - self.approx_pcap_system_delta_us - self.incoming_packets[-1][4] < timeout_us)
 
     def is_ready(self, smoothing_window, longest_window):
-        # This flow is ready for interence if...
-        return (
-            # ...we have at least as many packets as the smoothing window...
-            len(self.incoming_packets) >= smoothing_window
-            and (
-                # ...the time span covered by the packets is at least that which is
-                # required for the longest windowed input feature.
-                (self.incoming_packets[-smoothing_window][4] - self.incoming_packets[0][4])
-                >= self.min_rtt_us * longest_window
+        with self.ingress_lock:
+            # This flow is ready for interence if...
+            return (
+                # ...we have at least as many packets as the smoothing window...
+                len(self.incoming_packets) >= smoothing_window
+                and (
+                    # ...the time span covered by the packets is at least that which is
+                    # required for the longest windowed input feature.
+                    (self.incoming_packets[-smoothing_window][4] - self.incoming_packets[0][4])
+                    >= self.min_rtt_us * longest_window
+                )
             )
-        )
 
 
 class FlowDB(dict):
@@ -113,48 +118,57 @@ class FlowDB(dict):
         self._senders: typing.Dict[
             int, typing.Set[typing.Tuple[int, int, int, int]]
         ] = {}
+        # Acquire this lock when adding, removing, or iterating over flows; no
+        # need to acquire this lock updating a flow object.
+        self.lock = threading.RLock()
 
     def __setitem__(self, key, value):
-        src_ip = key[0]
-        # If this is the first flow from this sender, add the sender.
-        if src_ip not in self._senders:
-            self._senders[src_ip] = set()
-        # Add the flow to the sender.
-        self._senders[src_ip].add(key)
-        return super().__setitem__(key, value)
+        """key is a fourtuple and value is a Flow object."""
+        with self.lock:
+            sender_ip = value.flowkey.remote_addr
+            # If this is the first flow from this sender, add the sender.
+            if sender_ip not in self._senders:
+                self._senders[sender_ip] = set()
+            # Add the flow to the sender.
+            self._senders[sender_ip].add(key)
+            return super().__setitem__(key, value)
 
     def __delitem__(self, key):
-        src_ip = key[0]
-        if src_ip in self._senders:
-            # Remove the flow from the sender.
-            if key in self._senders[src_ip]:
-                self._senders[src_ip].remove(key)
-            # If this was the last flow for this sender, remove the sender.
-            if len(self._senders[src_ip]) == 0:
-                del self._senders[src_ip]
-        return super().__delitem__(key)
+        with self.lock:
+            src_ip = key[0]
+            if src_ip in self._senders:
+                # Remove the flow from the sender.
+                if key in self._senders[src_ip]:
+                    self._senders[src_ip].remove(key)
+                # If this was the last flow for this sender, remove the sender.
+                if len(self._senders[src_ip]) == 0:
+                    del self._senders[src_ip]
+            return super().__delitem__(key)
 
     def get_flows_from_sender(self, sender_ip, ignore_uninteresting=True):
-        return {
-            fourtuple
-            for fourtuple in self._senders.get(sender_ip, {}).values()
-            if not ignore_uninteresting or self[fourtuple].is_interesting()
-        }
-
-    def flow_is_interesting(self, fourtuple):
-        return self[fourtuple].is_interesting()
+        with self.lock:
+            logging.info("self._senders: %s", self._senders)
+            #logging.info("self._senders[sender_ip]: %s", self._senders[sender_ip])
+            #for fourtuple in self._senders.get(sender_ip, set()):
+            #    logging.info("get_flows_from_sender checking fourtuple %s", fourtuple)
+            return {
+                fourtuple
+                for fourtuple in self._senders.get(sender_ip, set())
+                if not ignore_uninteresting or self[fourtuple].is_interesting()
+            }
 
     def sender_okay(
         self, sender_ip, smoothing_window, longest_window, ignore_uninteresting=True
     ):
-        for fourtuple in self.get_flows_from_sender(sender_ip):
-            if fourtuple not in self:
-                logging.warning("Flow %s not in flow DB", fourtuple)
-                continue
-            # If the flow is both interesting and not ready, then the sender
-            # as a whole is not ready...
-            if (
-                not ignore_uninteresting or self[fourtuple].is_interesting()
-            ) and not self[fourtuple].is_ready(smoothing_window, longest_window):
-                return False
-        return True
+        with self.lock:
+            for fourtuple in self.get_flows_from_sender(sender_ip):
+                if fourtuple not in self:
+                    logging.warning("Flow %s not in flow DB", fourtuple)
+                    continue
+                # If the flow is both interesting and not ready, then the sender
+                # as a whole is not ready...
+                if (
+                    not ignore_uninteresting or self[fourtuple].is_interesting()
+                ) and not self[fourtuple].is_ready(smoothing_window, longest_window):
+                    return False
+            return True
