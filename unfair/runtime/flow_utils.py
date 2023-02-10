@@ -94,7 +94,12 @@ class Flow:
     def is_interesting(self, timeout_us=5e6):
         """Whether the flow has seen any data in the last few seconds."""
         with self.ingress_lock:
-            return self.incoming_packets and (time.time() * 1e6 - self.approx_pcap_system_delta_us - self.incoming_packets[-1][4] < timeout_us)
+            return self.incoming_packets and (
+                time.time() * 1e6
+                - self.approx_pcap_system_delta_us
+                - self.incoming_packets[-1][4]
+                < timeout_us
+            )
 
     def is_ready(self, smoothing_window, longest_window):
         with self.ingress_lock:
@@ -105,7 +110,8 @@ class Flow:
                 and (
                     # ...the time span covered by the packets is at least that which is
                     # required for the longest windowed input feature.
-                    (self.incoming_packets[-smoothing_window][4] - self.incoming_packets[0][4])
+                    self.incoming_packets[-smoothing_window][4]
+                    - self.incoming_packets[0][4]
                     >= self.min_rtt_us * longest_window
                 )
             )
@@ -147,10 +153,6 @@ class FlowDB(dict):
 
     def get_flows_from_sender(self, sender_ip, ignore_uninteresting=True):
         with self.lock:
-            logging.info("self._senders: %s", self._senders)
-            #logging.info("self._senders[sender_ip]: %s", self._senders[sender_ip])
-            #for fourtuple in self._senders.get(sender_ip, set()):
-            #    logging.info("get_flows_from_sender checking fourtuple %s", fourtuple)
             return {
                 fourtuple
                 for fourtuple in self._senders.get(sender_ip, set())

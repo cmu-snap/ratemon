@@ -105,7 +105,11 @@ def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_dec
 
     Take the Mathis fair throughput and divide it equally between the flows.
     """
-    logging.info("Label for flows [%s]: %s", ", ".join(str(flowkey) for flowkey in flowkeys), label)
+    logging.info(
+        "Label for flows [%s]: %s",
+        ", ".join(str(flowkey) for flowkey in flowkeys),
+        label,
+    )
 
     mathis_tput_bps = fets[-1][
         features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8)
@@ -164,9 +168,6 @@ def make_decision_flow_fairness(
                 if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
                 else tput_bps,
             )
-            # logging.info(
-            #     "new_tput_bps: %f, current tput_bps: %f", new_tput_bps, tput_bps
-            # )
             new_decision = (
                 defaults.Decision.PACED,
                 new_tput_bps,
@@ -217,9 +218,6 @@ def apply_decision(flowkey, new_decision, flow_to_decisions, flow_to_rwnd):
                 del flow_to_rwnd[flowkey]
         else:
             new_decision = (new_decision[0], new_decision[1], round(new_decision[2]))
-            # if new_decision[2] > 2**16:
-            #     logging.info(f"Warning: Asking for RWND >= 2**16: {new_decision[2]}")
-            #     new_decision[2] = 2**16 - 1
             if new_decision[2] < defaults.MIN_RWND_B:
                 logging.info(
                     ("Warning: Flow %s asking for RWND < %d: %d. " "Overriding to %d."),
@@ -312,7 +310,6 @@ def load_bpf():
     with open(bpf_flp, "r", encoding="utf-8") as fil:
         bpf_text = fil.read()
     # Load BPF program.
-    # logging.info("BPF program:\n%s", bpf_text)
     return BPF(text=bpf_text)
 
 
@@ -478,7 +475,7 @@ def build_features(
             args.smoothing_window,
         )
         # We do not need to keep all of the original packets.
-        all_fets = all_fets[-args.smoothing_window:]
+        all_fets = all_fets[-args.smoothing_window :]
         # Update previous fets for this flow.
         flow_to_prev_features[flowkey] = in_fets[-1]
         return all_fets, in_fets
@@ -532,8 +529,8 @@ def wait_or_batch(
         return len(pkts)
 
     if (
-            flowkey.remote_addr not in waiting_room
-            or waiting_room[flowkey.remote_addr][0] < epoch
+        flowkey.remote_addr not in waiting_room
+        or waiting_room[flowkey.remote_addr][0] < epoch
     ):
         waiting_room[flowkey.remote_addr] = (
             int(epoch),
@@ -549,10 +546,7 @@ def wait_or_batch(
         (fourtuple, flowkey, min_rtt_us, all_fets, in_fets, pkts)
     )
 
-    if (
-            len(waiting_room[flowkey.remote_addr][2])
-            < waiting_room[flowkey.remote_addr][1]
-    ):
+    if len(waiting_room[flowkey.remote_addr][2]) < waiting_room[flowkey.remote_addr][1]:
         # Waiting room is not full yet, so there are no new packets for the batch.
         return 0
 
@@ -597,8 +591,6 @@ def maybe_run_batch(
 ):
     """Check if a batch is ready and process it."""
     packets_in_batch = sum(len(in_fets) for _, _, _, _, in_fets in batch)
-    logging.info("packets_in_batch %s", packets_in_batch)
-    logging.info("len(batch) %s", len(batch))
     # Check if the batch is not ready yet, and if so, return False.
     # If the batch is full, then run inference. Also run inference if it has been a
     # long time since we ran inference last. A "long time" is defined as the max of
@@ -976,15 +968,16 @@ def merge_sender_flows(net, sender_flows):
         sender_flows_interp.append(interp)
 
     # Merge the interpolated features across flows.
-    merged_in_fets = np.empty(target_num_pkts, dtype=features.feature_names_to_dtype(net.in_spc))
+    merged_in_fets = np.empty(
+        target_num_pkts, dtype=features.feature_names_to_dtype(net.in_spc)
+    )
     for pkt_idx in range(target_num_pkts):
         # Average payload across flows.
-        logging.info("measured payloads for sender %s: %s",
-                     utils.int_to_ip_str(target_remote_ip),
-                     [
-                         in_fets[pkt_idx][features.PAYLOAD_FET]
-                         for in_fets in sender_flows_interp
-                     ])
+        logging.info(
+            "measured payloads for sender %s: %s",
+            utils.int_to_ip_str(target_remote_ip),
+            [in_fets[pkt_idx][features.PAYLOAD_FET] for in_fets in sender_flows_interp],
+        )
         mss_bytes = 1448.0
         # mss_bytes = np.average(
         #     [
@@ -999,7 +992,9 @@ def merge_sender_flows(net, sender_flows):
                 for in_fets in sender_flows_interp
             ]
         )
-        # The loss rate is a fraction already distributed across all packets, so it is representative of the relative loss that the combined flow aught to experience.
+        # The loss rate is a fraction already distributed across all packets,
+        # so it is representative of the relative loss that the combined flow
+        # aught to experience.
         average_loss_event_rate = np.average(
             [
                 in_fets[pkt_idx][
@@ -1017,9 +1012,7 @@ def merge_sender_flows(net, sender_flows):
         #         for in_fets in sender_flows_interp
         #     ]
         # )
-        mathis_tput = utils.safe_mathis_tput(
-            mss_bytes, rtt_us, average_loss_event_rate
-        )
+        mathis_tput = utils.safe_mathis_tput(mss_bytes, rtt_us, average_loss_event_rate)
         tput = np.sum(
             [
                 in_fets[pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
@@ -1034,7 +1027,7 @@ def merge_sender_flows(net, sender_flows):
             tput,
         )
 
-    logging.info("sender %s merged flows:", utils.int_to_ip_str(target_remote_ip))
+    logging.info("sender %s merged fets:", utils.int_to_ip_str(target_remote_ip))
     for fet in merged_in_fets.dtype.names:
         logging.info("merged '%s' %s", fet, merged_in_fets[fet])
 

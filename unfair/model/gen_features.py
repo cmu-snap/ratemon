@@ -87,7 +87,14 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, receiver_ip, select_tail_percent=None
+    exp,
+    exp_flp,
+    exp_dir,
+    out_flp,
+    skip_smoothed,
+    receiver_ip,
+    select_tail_percent=None,
+    sender_fairness=False,
 ):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
@@ -1293,6 +1300,7 @@ def parse_exp(
     skip_smoothed,
     receiver_ip,
     select_tail_percent,
+    sender_fairness,
     parse_func=parse_opened_exp,
 ):
     """Lock, untar, and parse an experiment."""
@@ -1311,6 +1319,7 @@ def parse_exp(
                     skip_smoothed,
                     receiver_ip,
                     select_tail_percent,
+                    sender_fairness,
                 )
             except AssertionError:
                 traceback.print_exc()
@@ -1393,6 +1402,7 @@ def _main():
             skip_smoothed,
             args.receiver_ip,
             args.select_tail_percent,
+            False,
         )
         for exp in sorted(os.listdir(exp_dir))
         if exp.endswith(".tar.gz")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import collections
 import json
 import logging
 import math
@@ -298,7 +299,14 @@ def plot_bar(
 
 
 def parse_opened_exp(
-    exp, exp_flp, exp_dir, out_flp, skip_smoothed, receiver_ip, select_tail_percent
+    exp,
+    exp_flp,
+    exp_dir,
+    out_flp,
+    skip_smoothed,
+    receiver_ip,
+    select_tail_percent,
+    sender_fairness,
 ):
     # out_flp and skip_smoothed are not used but are kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -350,6 +358,13 @@ def parse_opened_exp(
         for flw in params["flowsets"]
         for sender_port in flw[4]
     }
+    # Map flow to sender IP address (WAN). Each flow tuple will be unique because
+    # the receiver ports are unique across flows from different senders.
+    flw_to_sender = {
+        (sender_port, flw[5]): flw[0][6]
+        for flw in params["flowsets"]
+        for sender_port in flw[4]
+    }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
         receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
@@ -396,7 +411,7 @@ def parse_opened_exp(
     # zipped_arr_times = zipped_arr_times[idx:]
     # zipped_dat = zipped_dat[idx:]
 
-    jfi = get_jfi(flw_to_pkts)
+    jfi = get_jfi(flw_to_pkts, sender_fairness, flw_to_sender)
     if exp.use_bess:
         overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
         fair_flows_util = get_avg_util(
@@ -418,7 +433,7 @@ def parse_opened_exp(
     else:
         overall_util = fair_flows_util = unfair_flows_util = 0
 
-    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
+    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util, flw_to_sender)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
@@ -428,14 +443,21 @@ def parse_opened_exp(
     return out
 
 
-def get_jfi(flw_to_pkts):
+def get_jfi(flw_to_pkts, sender_fairness=False, flw_to_sender=None):
     flw_to_tput_bps = {
         flw: 0 if len(pkts) == 0 else utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
         for flw, pkts in flw_to_pkts.items()
     }
-    return sum(flw_to_tput_bps.values()) ** 2 / (
-        len(flw_to_tput_bps) * sum(bits**2 for bits in flw_to_tput_bps.values())
-    )
+    if sender_fairness:
+        assert flw_to_sender is not None
+        sender_to_tput_bps = collections.defaultdict(float)
+        for flw, tput_bps in flw_to_tput_bps.items():
+            sender_to_tput_bps[flw_to_sender[flw]] += tput_bps
+        values = sender_to_tput_bps.values()
+    else:
+        values = flw_to_tput_bps.values()
+
+    return sum(values) ** 2 / (len(values) * sum(value**2 for value in values))
 
 
 def get_avg_util(bw_bps, flw_to_pkts):
@@ -559,6 +581,7 @@ def main(args):
             False,
             args.receiver_ip,
             args.select_tail_percent,
+            args.sender_fairness,
             parse_opened_exp,
         )
         for exp in sorted(os.listdir(args.exp_dir))
@@ -1047,6 +1070,11 @@ def parse_args():
         ),
         required=True,
         type=str,
+    )
+    parser.add_argument(
+        "--sender-fairness",
+        action="store_true",
+        help="Evaluate fairness across senders instead of across flows.",
     )
     args = parser.parse_args()
     assert path.isdir(args.exp_dir)
