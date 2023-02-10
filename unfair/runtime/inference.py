@@ -576,9 +576,9 @@ def wait_or_batch(
         )
     )
     logging.info(
-        "Sender fairness waiting room for sender %s is full."
+        "Sender fairness waiting room for sender %s is full. "
         "Adding %d merged packets to batch.",
-        merged_flowkeys[0].remote_addr,
+        utils.int_to_ip_str(merged_flowkeys[0].remote_addr),
         len(merged_in_fets),
     )
     # Additional packets_covered_by_batch
@@ -979,12 +979,19 @@ def merge_sender_flows(net, sender_flows):
     merged_in_fets = np.empty(target_num_pkts, dtype=features.feature_names_to_dtype(net.in_spc))
     for pkt_idx in range(target_num_pkts):
         # Average payload across flows.
-        mss_bytes = np.average(
-            [
-                in_fets[pkt_idx][features.PAYLOAD_FET]
-                for in_fets in sender_flows_interp
-            ]
-        )
+        logging.info("measured payloads for sender %s: %s",
+                     utils.int_to_ip_str(target_remote_ip),
+                     [
+                         in_fets[pkt_idx][features.PAYLOAD_FET]
+                         for in_fets in sender_flows_interp
+                     ])
+        mss_bytes = 1448.0
+        # mss_bytes = np.average(
+        #     [
+        #         in_fets[pkt_idx][features.PAYLOAD_FET]
+        #         for in_fets in sender_flows_interp
+        #     ]
+        # )
         # Average RTT across flows.
         rtt_us = np.average(
             [
@@ -992,8 +999,8 @@ def merge_sender_flows(net, sender_flows):
                 for in_fets in sender_flows_interp
             ]
         )
-        # Sum loss event rate across flows.
-        combined_loss_event_rate = np.sum(
+        # The loss rate is a fraction already distributed across all packets, so it is representative of the relative loss that the combined flow aught to experience.
+        average_loss_event_rate = np.average(
             [
                 in_fets[pkt_idx][
                     features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
@@ -1001,8 +1008,17 @@ def merge_sender_flows(net, sender_flows):
                 for in_fets in sender_flows_interp
             ]
         )
+        # Sum loss event rate across flows.
+        # combined_loss_event_rate = np.sum(
+        #     [
+        #         in_fets[pkt_idx][
+        #             features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
+        #         ]
+        #         for in_fets in sender_flows_interp
+        #     ]
+        # )
         mathis_tput = utils.safe_mathis_tput(
-            mss_bytes, rtt_us, combined_loss_event_rate
+            mss_bytes, rtt_us, average_loss_event_rate
         )
         tput = np.sum(
             [
@@ -1013,11 +1029,12 @@ def merge_sender_flows(net, sender_flows):
         merged_in_fets[pkt_idx] = (
             mss_bytes,
             rtt_us,
-            combined_loss_event_rate,
+            average_loss_event_rate,
             mathis_tput,
             tput,
         )
 
+    logging.info("sender %s merged flows:", utils.int_to_ip_str(target_remote_ip))
     for fet in merged_in_fets.dtype.names:
         logging.info("merged '%s' %s", fet, merged_in_fets[fet])
 
