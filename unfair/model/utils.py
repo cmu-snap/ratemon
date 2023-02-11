@@ -305,13 +305,13 @@ class Exp:
             # Queue size (packets).
             self.queue_p = float(queue_p[:-1])
             # Queue size (multiples of the BDP).
-            self.queue_bdp = self.queue_p / (self.bdp_b / 8 / 1514)
+            self.queue_bdp = self.queue_p / (self.bdp_b / 8 / defaults.PACKET_LEN_B)
             # Largest RTT that this experiment should experiment, based on the size
             # of the bottleneck queue and the RTT. Add one packet to account for
             # the packet that the bottleneck router is currently processing.
             self.calculated_max_rtt_us = (
                 self.queue_p + 1
-            ) * 1514 * 8 / self.bw_bps * 1e6 + (
+            ) * defaults.PACKET_LEN_B * 8 / self.bw_bps * 1e6 + (
                 self.rtt_us + self.ping_us
             )
             # Fair share bandwidth for each flow.
@@ -778,7 +778,7 @@ def get_class_popularity(dat, classes):
     return [(dat == cls).sum() for cls in classes]
 
 
-def safe_mathis_tput(mss_bytes, rtt_us, loss_rate):
+def safe_mathis_tput_bps(mss_bytes, rtt_us, loss_rate):
     """Return the Mathis model fair throughput.
 
     tput = (MSS / RTT) * (C / sqrt(loss_rate))
@@ -1323,7 +1323,7 @@ def analyze_feature_correlation(net, out_dir, dat_in, clusters):
     # logging.info("fets[-1]: %s", fets[-1])
     # logging.info("type(dat_in): %s", type(dat_in))
     # logging.info("dat_in.shape: %s", dat_in.shape)
-    # logging.info((dat_in[0:19271,242] == 1514).all())
+    # logging.info((dat_in[0:19271,242] == defaults.PACKET_LEN_B).all())
     # for f in range(len(fets)):
     #     if dat_in[0:dat_in.shape[0],f].isnan().all():
     #         logging.info("dat_in all NaN: %s", fets[f])

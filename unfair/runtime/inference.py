@@ -100,7 +100,9 @@ def smooth(labels):
     return label
 
 
-def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_decisions):
+def make_decision_sender_fairness(
+    args, flowkeys, min_rtt_us, fets, label, flow_to_decisions
+):
     """Make a fairness decision for all flows from a sender.
 
     Take the Mathis fair throughput and divide it equally between the flows.
@@ -111,14 +113,22 @@ def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_dec
         label,
     )
 
-    mathis_tput_bps = fets[-1][
-        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8)
+    mathis_tput_bps_ler = fets[-1][
+        features.make_win_metric(
+            features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, models.MathisFairness.win_size
+        )
     ]
     # Divied the Mathis fair throughput equally between the flows.
-    per_flow_tput_bps = mathis_tput_bps / len(flowkeys)
+    per_flow_tput_bps = mathis_tput_bps_ler / len(flowkeys)
 
-    if label == defaults.Class.ABOVE_FAIR:
-        # This sender is sending too fast. Force all flows to slow down.
+    loss_rate = fets[-1][
+        features.make_win_metric(features.LOSS_RATE_FET, models.MathisFairness.win_size)
+    ]
+
+    if label == defaults.Class.ABOVE_FAIR and loss_rate >= 1e-9:
+        # This sender is sending too fast according to the Mathis model, and we
+        # know that the bottleneck is fully utilized because there has been loss
+        # recently. Force all flows to slow down to the Mathis model fair rate.
         new_decision = (
             defaults.Decision.PACED,
             per_flow_tput_bps,
@@ -131,12 +141,38 @@ def make_decision_sender_fairness(flowkeys, min_rtt_us, fets, label, flow_to_dec
         ]
     ).any():
         # The current measurement is that the sender is not unfair, but at
-        # least one of its flows is already being paced. Preserve the existing
-        # per-flow decisions.
-        new_decision = None
+        # least one of its flows is already being paced. If the bottlenck is
+        # not fully utilized, then allow the flows to speed up.
+        #
+        # We use the loss rate to determine whether the bottleneck is fully
+        # utilized. If the loss rate is 0, then the bottleneck is not fully
+        # utilized. If there is loss, then the bottleneck is fully utilized.
+        if loss_rate < 1e-9:
+            new_tput_bps = reaction_strategy.react_up(
+                args.reaction_strategy,
+                # Base the new throughput on the observed average per-flow
+                # throughput.
+                fets[-1][
+                    features.make_win_metric(
+                        features.TPUT_FET, models.MathisFairness.win_size
+                    )
+                ]
+                / len(flowkeys),
+            )
+            new_decision = (
+                defaults.Decision.PACED,
+                new_tput_bps,
+                utils.bdp_B(new_tput_bps, min_rtt_us / 1e6),
+            )
+        else:
+            # We know that the bottleneck is fully utilized because the sender
+            # experienced loss recently. Preserve the existing per-flow decisions.
+            new_decision = None
+
     else:
-        # This sender is not behaving unfairly and none of its flows behaved
-        # badly in the past, so leave it alone.
+        # The sender is not unfair or it is unfair but the link is not fully
+        # utilized, and none of its flows behaved badly in the past, so leave
+        # it alone.
         new_decision = (defaults.Decision.NOT_PACED, None, None)
     return new_decision
 
@@ -246,7 +282,7 @@ def make_decision(
     """
     if args.sender_fairness:
         new_decision = make_decision_sender_fairness(
-            flowkeys, min_rtt_us, fets, label, flow_to_decisions
+            args, flowkeys, min_rtt_us, fets, label, flow_to_decisions
         )
     else:
         assert len(flowkeys) == 1
@@ -684,7 +720,7 @@ def loop_iteration(
             "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
             batch_proc_time_s * 1e3,
             pps,
-            pps * 1514 * 8 / 1e6,
+            pps * defaults.PACKET_LEN_B * 8 / 1e6,
         )
         # Reset: (packets_covered_by_batch, batch_start_time_s, batch_wait_time_s)
         return (0, time.time(), 0)
@@ -938,8 +974,6 @@ def merge_sender_flows(net, sender_flows):
     target_local_ip = sender_flows[0][1].local_addr
     all_remote_ports = set()
     for _, flowkey, _, all_fets, in_fets, _ in sender_flows:
-        logging.info("in_fets.shape %s", in_fets.shape)
-        logging.info("all_fets.shape %s", all_fets.shape)
         assert in_fets.shape[0] == target_num_pkts
         assert all_fets.shape[0] == target_num_pkts
         assert flowkey.remote_addr == target_remote_ip
@@ -972,23 +1006,14 @@ def merge_sender_flows(net, sender_flows):
         target_num_pkts, dtype=features.feature_names_to_dtype(net.in_spc)
     )
     for pkt_idx in range(target_num_pkts):
-        # Average payload across flows.
-        logging.info(
-            "measured payloads for sender %s: %s",
-            utils.int_to_ip_str(target_remote_ip),
-            [in_fets[pkt_idx][features.PAYLOAD_FET] for in_fets in sender_flows_interp],
-        )
-        mss_bytes = 1448.0
-        # mss_bytes = np.average(
-        #     [
-        #         in_fets[pkt_idx][features.PAYLOAD_FET]
-        #         for in_fets in sender_flows_interp
-        #     ]
-        # )
         # Average RTT across flows.
-        rtt_us = np.average(
+        average_rtt_us = np.average(
             [
-                in_fets[pkt_idx][features.make_win_metric(features.RTT_FET, 8)]
+                in_fets[pkt_idx][
+                    features.make_win_metric(
+                        features.RTT_FET, models.MathisFairness.win_size
+                    )
+                ]
                 for in_fets in sender_flows_interp
             ]
         )
@@ -998,33 +1023,45 @@ def merge_sender_flows(net, sender_flows):
         average_loss_event_rate = np.average(
             [
                 in_fets[pkt_idx][
-                    features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
+                    features.make_win_metric(
+                        features.LOSS_EVENT_RATE_FET, models.MathisFairness.win_size
+                    )
                 ]
                 for in_fets in sender_flows_interp
             ]
         )
-        # Sum loss event rate across flows.
-        # combined_loss_event_rate = np.sum(
-        #     [
-        #         in_fets[pkt_idx][
-        #             features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8)
-        #         ]
-        #         for in_fets in sender_flows_interp
-        #     ]
-        # )
-        mathis_tput = utils.safe_mathis_tput(mss_bytes, rtt_us, average_loss_event_rate)
-        tput = np.sum(
+        average_loss_rate = np.average(
             [
-                in_fets[pkt_idx][features.make_win_metric(features.TPUT_FET, 8)]
+                in_fets[pkt_idx][
+                    features.make_win_metric(
+                        features.LOSS_RATE_FET, models.MathisFairness.win_size
+                    )
+                ]
                 for in_fets in sender_flows_interp
             ]
         )
         merged_in_fets[pkt_idx] = (
-            mss_bytes,
-            rtt_us,
+            average_rtt_us,
             average_loss_event_rate,
-            mathis_tput,
-            tput,
+            average_loss_rate,
+            # Recompute the Mathis throughput.
+            utils.safe_mathis_tput_bps(
+                defaults.MSS_B, average_rtt_us, average_loss_event_rate
+            ),
+            utils.safe_mathis_tput_bps(
+                defaults.MSS_B, average_rtt_us, average_loss_rate
+            ),
+            # Sum the throughput across flows.
+            np.sum(
+                [
+                    in_fets[pkt_idx][
+                        features.make_win_metric(
+                            features.TPUT_FET, models.MathisFairness.win_size
+                        )
+                    ]
+                    for in_fets in sender_flows_interp
+                ]
+            ),
         )
 
     logging.info("sender %s merged fets:", utils.int_to_ip_str(target_remote_ip))

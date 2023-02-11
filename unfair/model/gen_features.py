@@ -507,7 +507,7 @@ def parse_opened_exp(
             output[j][features.LOSS_RATE_FET] = loss_rate_cur
             sqrt_loss_rate_cur = utils.safe_div(1, utils.safe_sqrt(loss_rate_cur))
             output[j][features.SQRT_LOSS_RATE_FET] = sqrt_loss_rate_cur
-            mathis_tput_raw = utils.safe_mathis_tput(
+            mathis_tput_raw = utils.safe_mathis_tput_bps(
                 output[j][features.PAYLOAD_FET],
                 output[j][features.RTT_FET],
                 output[j][features.LOSS_RATE_FET],
@@ -654,7 +654,7 @@ def parse_opened_exp(
                     # Populated below.
                     continue
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
-                    new = utils.safe_mathis_tput(
+                    new = utils.safe_mathis_tput_bps(
                         output[j][features.PAYLOAD_FET],
                         output[j][features.RTT_FET],
                         output[j][features.LOSS_RATE_FET],
@@ -718,7 +718,9 @@ def parse_opened_exp(
                 output[j][sqrt_loss_event_rate_metric] = utils.safe_div(
                     1, utils.safe_sqrt(loss_event_rates[j])
                 )
-                output[j][mathis_tput_loss_event_rate_metric] = utils.safe_mathis_tput(
+                output[j][
+                    mathis_tput_loss_event_rate_metric
+                ] = utils.safe_mathis_tput_bps(
                     output[j][features.PAYLOAD_FET],
                     output[j][features.RTT_FET],
                     loss_event_rates[j],
@@ -1131,7 +1133,7 @@ def parse_received_packets(
         elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
             fets[0][metric] = utils.safe_update_ewma(
                 -1 if previous_fets is None else previous_fets[metric],
-                utils.safe_mathis_tput(
+                utils.safe_mathis_tput_bps(
                     fets[0][features.PAYLOAD_FET],
                     fets[0][features.RTT_FET],
                     fets[0][features.LOSS_RATE_FET],
@@ -1142,7 +1144,7 @@ def parse_received_packets(
                 # tput = (MSS / RTT) * (C / sqrt(p))
                 fets[j][metric] = utils.safe_update_ewma(
                     fets[j - 1][metric],
-                    utils.safe_mathis_tput(
+                    utils.safe_mathis_tput_bps(
                         fets[j][features.PAYLOAD_FET],
                         fets[j][features.RTT_FET],
                         fets[j][features.LOSS_RATE_FET],
@@ -1248,13 +1250,13 @@ def parse_received_packets(
                     ),
                 )
             elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
-                new = utils.safe_mathis_tput(
+                new = utils.safe_mathis_tput_bps(
                     fets[j][features.PAYLOAD_FET],
                     fets[j][features.RTT_FET],
                     fets[j][features.make_win_metric(features.LOSS_RATE_FET, win)],
                 )
             elif metric.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET):
-                new = utils.safe_mathis_tput(
+                new = utils.safe_mathis_tput_bps(
                     fets[j][features.PAYLOAD_FET],
                     fets[j][features.RTT_FET],
                     fets[j][

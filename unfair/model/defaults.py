@@ -59,7 +59,7 @@ DEFAULTS = {
     "hgbdt_lr": 0.1,
     "validation_fraction": 0.1,
     "validation_tolerance": 1e-7,
-    "n_iter_no_change": 10
+    "n_iter_no_change": 10,
 }
 # When converting an arguments dictionary to a string, ignore arguments that do
 # not impact model training.
@@ -162,3 +162,9 @@ MATHIS_C = math.sqrt(3 / 2)
 
 # The smallest RWND value to allow.
 MIN_RWND_B = 2000
+
+# Assume this is the TCP MSS.
+MSS_B = 1448
+
+# Assume this is the total packet size.
+PACKET_LEN_B = 1514

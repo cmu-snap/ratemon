@@ -1322,12 +1322,15 @@ class Lstm(torch.nn.Module):
 class MathisFairness:
     """A simple model that compares a flow to the Mathis model."""
 
+    win_size = 8
+
     in_spc = (
-        features.PAYLOAD_FET,
-        features.make_win_metric(features.RTT_FET, 8),
-        features.make_win_metric(features.LOSS_EVENT_RATE_FET, 8),
-        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, 8),
-        features.make_win_metric(features.TPUT_FET, 8),
+        features.make_win_metric(features.RTT_FET, win_size),
+        features.make_win_metric(features.LOSS_EVENT_RATE_FET, win_size),
+        features.make_win_metric(features.LOSS_RATE_FET, win_size),
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win_size),
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_RATE_FET, win_size),
+        features.make_win_metric(features.TPUT_FET, win_size),
     )
 
     def predict(self, dat_in):
