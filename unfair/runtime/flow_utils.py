@@ -141,14 +141,15 @@ class FlowDB(dict):
 
     def __delitem__(self, key):
         with self.lock:
-            src_ip = key[0]
-            if src_ip in self._senders:
-                # Remove the flow from the sender.
-                if key in self._senders[src_ip]:
-                    self._senders[src_ip].remove(key)
-                # If this was the last flow for this sender, remove the sender.
-                if len(self._senders[src_ip]) == 0:
-                    del self._senders[src_ip]
+            if key in self:
+                sender_ip = self[key].flowkey.remote_addr
+                if sender_ip in self._senders:
+                    # Remove the flow from the sender.
+                    if key in self._senders[sender_ip]:
+                        self._senders[sender_ip].remove(key)
+                    # If this was the last flow for this sender, remove the sender.
+                    if len(self._senders[sender_ip]) == 0:
+                        del self._senders[sender_ip]
             return super().__delitem__(key)
 
     def get_flows_from_sender(self, sender_ip, ignore_uninteresting=True):

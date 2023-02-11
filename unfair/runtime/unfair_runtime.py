@@ -167,6 +167,11 @@ def check_loop(args, longest_window, que, inference_flags, done):
     except KeyboardInterrupt:
         logging.info("Cancelled.")
         done.set()
+    except:
+        logging.exception("Other exception")
+        raise
+    finally:
+        logging.info("Out of check loop")
 
 
 def check_flows(args, longest_window, que, inference_flags):

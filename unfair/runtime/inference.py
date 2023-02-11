@@ -168,16 +168,16 @@ def make_decision_sender_fairness(
             new_tput_bps = reaction_strategy.react_up(
                 args.reaction_strategy,
                 # Base the new throughput on the previous enforced throughput.
-                avg_enforced_tput_bps,
+                #, avg_enforced_tput_bps,
                 # # Base the new throughput on the observed average per-flow
                 # # throughput.
                 # # Note: this did not work because a flow that was spuriously aggressive can steal a lot of bandwidth from other flows.
-                # fets[-1][
-                #     features.make_win_metric(
-                #         features.TPUT_FET, models.MathisFairness.win_size
-                #     )
-                # ]
-                # / len(flowkeys),
+                fets[-1][
+                    features.make_win_metric(
+                        features.TPUT_FET, models.MathisFairness.win_size
+                    )
+                ]
+                / len(flowkeys),
             )
             new_decision = (
                 defaults.Decision.PACED,
