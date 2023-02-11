@@ -297,6 +297,7 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
                 packets_lost,
                 win_to_loss_event_rate,
             ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
+            logging.info("win_to_loss_event_rate: %s", win_to_loss_event_rate)
 
             # Discard all but the minimum number of packets required to calculate
             # the longest window's features, and the number of packets required

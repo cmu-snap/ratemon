@@ -7,7 +7,8 @@ from unfair.model import features
 
 
 class LossTracker:
-    def __init__(self, window_sizes=[8]):
+    def __init__(self, flow, window_sizes=[8]):
+        self.flow = flow
         self.window_sizes = window_sizes
         self.largest_window = max(self.window_sizes) if window_sizes else None
         # Track which packets are definitely retransmissions. Ignore these
@@ -144,6 +145,13 @@ class LossTracker:
 
     def calculate_loss_event_rate(self, weights):
         """Use to calculate loss event rate."""
+        logging.info("Flow %s len(self.loss_events): %s", self.flow, len(self.loss_events))
+        logging.info("Flow %s len(weights): %s", self.flow, len(weights))
+        logging.info("Flow %s weights: %s", self.flow, weights)
+        for i in range(min(len(self.loss_events), len(weights))):
+            logging.info("Flow %s self.loss_events[%s]: %s", self.flow, i, self.loss_events[i])
+            logging.info("Flow %s weights[%s]: %s", self.flow, i, weights[i])
+
         interval_total_0 = 0
         interval_total_1 = 0
         weights_total = 0
@@ -194,8 +202,8 @@ class LossTracker:
 
         if all_pkts:
             return packets_lost, per_packet_loss_event_rate
-        else:
-            return packets_lost, {
-                max_loss_events: self.calculate_loss_event_rate(weights)
-                for max_loss_events, weights in self.weights.items()
-            }
+
+        return packets_lost, {
+            max_loss_events: self.calculate_loss_event_rate(weights)
+            for max_loss_events, weights in self.weights.items()
+        }
