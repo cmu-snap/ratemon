@@ -1337,8 +1337,8 @@ class MathisFairness:
         """Predicts the fairness of a flow."""
         assert dat_in.shape[1] == len(MathisFairness.in_spc)
         return [
-            defaults.Class.ratio_to_class(utils.safe_div(tput, mathis_tput))
-            for _, _, _, mathis_tput, tput in dat_in
+            defaults.Class.ratio_to_class(utils.safe_div(tput_bps, mathis_tput_bps_ler))
+            for _, _, _, mathis_tput_bps_ler, _, tput_bps in dat_in
         ]
 
 
