@@ -308,7 +308,7 @@ def parse_opened_exp(
     select_tail_percent,
     sender_fairness,
 ):
-    # out_flp and skip_smoothed are not used but are kept to maintain API compatibility
+    # skip_smoothed is not used but is kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
 
     logging.info("Parsing: %s", exp_flp)
@@ -433,7 +433,7 @@ def parse_opened_exp(
     else:
         overall_util = fair_flows_util = unfair_flows_util = 0
 
-    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util, flw_to_sender)
+    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
