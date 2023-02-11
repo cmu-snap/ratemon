@@ -126,6 +126,7 @@ def make_decision_sender_fairness(
     ]
 
     if label == defaults.Class.ABOVE_FAIR and loss_rate >= 1e-9:
+        logging.info("Mode 1")
         # This sender is sending too fast according to the Mathis model, and we
         # know that the bottleneck is fully utilized because there has been loss
         # recently. Force all flows to slow down to the Mathis model fair rate.
@@ -140,6 +141,7 @@ def make_decision_sender_fairness(
             for flowkey in flowkeys
         ]
     ).any():
+        logging.info("Mode 2")
         # The current measurement is that the sender is not unfair, but at
         # least one of its flows is already being paced. If the bottlenck is
         # not fully utilized, then allow the flows to speed up.
@@ -147,17 +149,35 @@ def make_decision_sender_fairness(
         # We use the loss rate to determine whether the bottleneck is fully
         # utilized. If the loss rate is 0, then the bottleneck is not fully
         # utilized. If there is loss, then the bottleneck is fully utilized.
+
+        # Look up the average enforced throughput of the flows that are already
+        # being paced.
+        avg_enforced_tput_bps = np.average(
+            [
+                flow_to_decisions[flowkey][1]
+                for flowkey in flowkeys
+                if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+            ]
+        )
+        logging.info(
+            "Average enforced throughput: %.2f Mbps", avg_enforced_tput_bps / 1e6
+        )
+
         if loss_rate < 1e-9:
+            logging.info("Mode 2.1")
             new_tput_bps = reaction_strategy.react_up(
                 args.reaction_strategy,
-                # Base the new throughput on the observed average per-flow
-                # throughput.
-                fets[-1][
-                    features.make_win_metric(
-                        features.TPUT_FET, models.MathisFairness.win_size
-                    )
-                ]
-                / len(flowkeys),
+                # Base the new throughput on the previous enforced throughput.
+                avg_enforced_tput_bps,
+                # # Base the new throughput on the observed average per-flow
+                # # throughput.
+                # # Note: this did not work because a flow that was spuriously aggressive can steal a lot of bandwidth from other flows.
+                # fets[-1][
+                #     features.make_win_metric(
+                #         features.TPUT_FET, models.MathisFairness.win_size
+                #     )
+                # ]
+                # / len(flowkeys),
             )
             new_decision = (
                 defaults.Decision.PACED,
@@ -165,11 +185,13 @@ def make_decision_sender_fairness(
                 utils.bdp_B(new_tput_bps, min_rtt_us / 1e6),
             )
         else:
+            logging.info("Mode 2.2")
             # We know that the bottleneck is fully utilized because the sender
             # experienced loss recently. Preserve the existing per-flow decisions.
             new_decision = None
 
     else:
+        logging.info("Mode 3")
         # The sender is not unfair or it is unfair but the link is not fully
         # utilized, and none of its flows behaved badly in the past, so leave
         # it alone.
