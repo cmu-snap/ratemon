@@ -39,9 +39,7 @@ class LossTracker:
     @staticmethod
     def make_interval_weights(num_intervals):
         """Use to calculate loss event rate."""
-        return [
-            1 - i * 1 / num_intervals for i in range(num_intervals)
-        ]
+        return [1 - i * 1 / num_intervals for i in range(num_intervals)]
 
     def update_for_new_packet(self, prev_pkt, cur_pkt, packets_lost):
         if packets_lost > 0:
