@@ -157,16 +157,17 @@ def plot_lines(
 
     for line in lines:
         line, cca = line
-        xs, ys = zip(*line)
-        plt.plot(
-            xs,
-            ys,
-            alpha=0.75,
-            # color="b" if cca == "cubic" else "r",
-            linestyle="solid" if cca == "cubic" else "dashdot",
-            label=cca,
-            linewidth=1,
-        )
+        if len(line) > 0:
+            xs, ys = zip(*line)
+            plt.plot(
+                xs,
+                ys,
+                alpha=0.75,
+                # color="b" if cca == "cubic" else "r",
+                linestyle="solid" if cca == "cubic" else "dashdot",
+                label=cca,
+                linewidth=1,
+            )
 
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
