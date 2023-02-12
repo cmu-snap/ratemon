@@ -121,6 +121,7 @@ def make_decision_sender_fairness(
     # Divied the Mathis fair throughput equally between the flows.
     per_flow_tput_bps = mathis_tput_bps_ler / len(flowkeys)
 
+    # Measure the recent loss rate.
     loss_rate = fets[-1][
         features.make_win_metric(features.LOSS_RATE_FET, models.MathisFairness.win_size)
     ]
@@ -167,17 +168,23 @@ def make_decision_sender_fairness(
             logging.info("Mode 2.1")
             new_tput_bps = reaction_strategy.react_up(
                 args.reaction_strategy,
+                # Base the new throughput on the current mathis model fair
+                # rate. This will prevent the flows from growing quickly.
+                # But it will allow a bit of probing that will help drive
+                # the loss rate down faster and lead to quicker growth in
+                # the Mathis fair rate.
+                per_flow_tput_bps,
                 # Base the new throughput on the previous enforced throughput.
-                #, avg_enforced_tput_bps,
+                # avg_enforced_tput_bps,
                 # # Base the new throughput on the observed average per-flow
                 # # throughput.
                 # # Note: this did not work because a flow that was spuriously aggressive can steal a lot of bandwidth from other flows.
-                fets[-1][
-                    features.make_win_metric(
-                        features.TPUT_FET, models.MathisFairness.win_size
-                    )
-                ]
-                / len(flowkeys),
+                # fets[-1][
+                #     features.make_win_metric(
+                #         features.TPUT_FET, models.MathisFairness.win_size
+                #     )
+                # ]
+                # / len(flowkeys),
                 # ^^^ Bw probing: We give it move tput. If it actually achieves higher tput, then we give it more.
                 # But if it doesn't achieve higher tput, then we don't end up growing forever.
                 # With limitless scaling based on the enforce throughput, the throughput will eventually
