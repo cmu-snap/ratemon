@@ -2,6 +2,7 @@
 
 import collections
 import logging
+import math
 
 from unfair.model import features
 
@@ -39,12 +40,7 @@ class LossTracker:
     def make_interval_weights(num_intervals):
         """Use to calculate loss event rate."""
         return [
-            (
-                1
-                if i < num_intervals / 2
-                else 2 * (num_intervals - i) / (num_intervals + 2)
-            )
-            for i in range(num_intervals)
+            1 - i * 1 / num_intervals for i in range(num_intervals)
         ]
 
     def update_for_new_packet(self, prev_pkt, cur_pkt, packets_lost):
@@ -145,11 +141,15 @@ class LossTracker:
 
     def calculate_loss_event_rate(self, weights):
         """Use to calculate loss event rate."""
-        logging.info("Flow %s len(self.loss_events): %s", self.flow, len(self.loss_events))
+        logging.info(
+            "Flow %s len(self.loss_events): %s", self.flow, len(self.loss_events)
+        )
         logging.info("Flow %s len(weights): %s", self.flow, len(weights))
         logging.info("Flow %s weights: %s", self.flow, weights)
         for i in range(min(len(self.loss_events), len(weights))):
-            logging.info("Flow %s self.loss_events[%s]: %s", self.flow, i, self.loss_events[i])
+            logging.info(
+                "Flow %s self.loss_events[%s]: %s", self.flow, i, self.loss_events[i]
+            )
             logging.info("Flow %s weights[%s]: %s", self.flow, i, weights[i])
 
         interval_total_0 = 0
