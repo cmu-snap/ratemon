@@ -178,6 +178,10 @@ def make_decision_sender_fairness(
                     )
                 ]
                 / len(flowkeys),
+                # ^^^ Bw probing: We give it move tput. If it actually achieves higher tput, then we give it more.
+                # But if it doesn't achieve higher tput, then we don't end up growing forever.
+                # With limitless scaling based on the enforce throughput, the throughput will eventually
+                # cause losses and lead to a huge drop, basically like timeout+slow start.
             )
             new_decision = (
                 defaults.Decision.PACED,
