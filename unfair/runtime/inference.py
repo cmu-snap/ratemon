@@ -118,8 +118,22 @@ def make_decision_sender_fairness(
             features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, models.MathisFairness.win_size
         )
     ]
+
+    modified_mathis_tput_bps_ler = utils.safe_mathis_tput_bps(
+        defaults.MSS_B,
+        fets[-1][
+            features.make_win_metric(features.RTT_FET, models.MathisFairness.win_size)
+        ],
+        fets[-1][
+            features.make_win_metric(
+                features.LOSS_EVENT_RATE_FET, models.MathisFairness.win_size
+            )
+        ]
+        / 4,
+    )
+
     # Divied the Mathis fair throughput equally between the flows.
-    per_flow_tput_bps = mathis_tput_bps_ler / len(flowkeys)
+    per_flow_tput_bps = modified_mathis_tput_bps_ler / len(flowkeys)
 
     # Measure the recent loss rate.
     loss_rate = fets[-1][
