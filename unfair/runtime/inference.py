@@ -1085,7 +1085,7 @@ def merge_sender_flows(net, sender_flows):
         # The loss rate is a fraction already distributed across all packets,
         # so it is representative of the relative loss that the combined flow
         # aught to experience.
-        average_loss_event_rate = np.average(
+        min_loss_event_rate = np.min(
             [
                 in_fets[pkt_idx][
                     features.make_win_metric(
@@ -1107,11 +1107,11 @@ def merge_sender_flows(net, sender_flows):
         )
         merged_in_fets[pkt_idx] = (
             average_rtt_us,
-            average_loss_event_rate,
+            min_loss_event_rate,
             average_loss_rate,
             # Recompute the Mathis throughput.
             utils.safe_mathis_tput_bps(
-                defaults.MSS_B, average_rtt_us, average_loss_event_rate
+                defaults.MSS_B, average_rtt_us, min_loss_event_rate
             ),
             utils.safe_mathis_tput_bps(
                 defaults.MSS_B, average_rtt_us, average_loss_rate
