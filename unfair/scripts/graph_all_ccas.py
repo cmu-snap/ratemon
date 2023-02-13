@@ -45,6 +45,10 @@ def main(args):
 
     results_refactored = {}
     for cca_pair, (results_json, results_pickle) in results.items():
+        # Skip DCTCP because we do not have switch ECN marking enabled.
+        if cca_pair[1] == "dctcp":
+            continue
+
         # { (cca1, cca2): (
         #     0: jfis_disabled
         #     1: jfis_enabled
@@ -89,7 +93,7 @@ def main(args):
         ],
         filename="jfi_deltas_bar.pdf",
         colors=["b"],
-        title="Average JFI change, across all CCAs",
+        # title="Change in Average JFI, for all CCAs",
         rotate=True,
     )
     evl.plot_bar(
@@ -115,7 +119,7 @@ def main(args):
         y_max=1,
         filename="jfis_bar.pdf",
         colors=["r", "g"],
-        title="Average JFI, across all CCAs",
+        # title="Average JFI, for all CCAs",
         rotate=True,
     )
     evl.plot_cdf(
