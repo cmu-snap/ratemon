@@ -20,7 +20,7 @@ from unfair.model import defaults, features, gen_features, utils
 
 FIGSIZE = (5, 2.2)
 FIGSIZE_BOX = (5, 3.5)
-FIGSIZE_BAR = (5, 2.2)
+FIGSIZE_BAR = (5, 2.5)
 FONTSIZE = 12
 # COLORS = ["b", "r", "g"]
 COLORS_MAP = {
