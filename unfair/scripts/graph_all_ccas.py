@@ -92,7 +92,7 @@ def main(args):
             for cca_pair, _ in sorted(results.items(), key=lambda p: p[0][1])
         ],
         filename="jfi_deltas_bar.pdf",
-        colors=eval.COLORS,
+        colors=evl.COLORS,
         # title="Change in Average JFI, for all CCAs",
         rotate=True,
     )
@@ -118,7 +118,7 @@ def main(args):
         ],
         y_max=1,
         filename="jfis_bar.pdf",
-        colors=eval.COLORS,
+        colors=evl.COLORS,
         # title="Average JFI, for all CCAs",
         rotate=True,
     )
@@ -134,7 +134,7 @@ def main(args):
         x_max=1.0,
         filename="jfi_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=eval.COLORS,
+        colors=evl.COLORS,
         # title="CDF of JFI,\nwith and without unfairness monitor",
     )
     evl.plot_cdf(
@@ -148,7 +148,7 @@ def main(args):
         x_max=100,
         filename="util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=eval.COLORS,
+        colors=evl.COLORS,
         legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
