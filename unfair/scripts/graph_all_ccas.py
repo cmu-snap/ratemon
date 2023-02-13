@@ -134,7 +134,7 @@ def main(args):
         x_max=1.0,
         filename="jfi_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=[evl.COLORS_MAP["blue"]],
+        colors=evl.COLORS,
         # title="CDF of JFI,\nwith and without unfairness monitor",
     )
     evl.plot_cdf(
@@ -148,7 +148,7 @@ def main(args):
         x_max=100,
         filename="util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
-        colors=[evl.COLORS_MAP["blue"]],
+        colors=evl.COLORS,
         legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
@@ -169,6 +169,11 @@ def main(args):
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
         # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+        colors=[
+            evl.COLORS_MAP["orange"],
+            evl.COLORS_MAP["red"],
+            evl.COLORS_MAP["blue"],
+        ],
     )
     evl.plot_cdf(
         args,
@@ -187,6 +192,11 @@ def main(args):
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
         # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
+        colors=[
+            evl.COLORS_MAP["orange"],
+            evl.COLORS_MAP["red"],
+            evl.COLORS_MAP["blue"],
+        ],
     )
 
 
