@@ -20,12 +20,13 @@ from unfair.model import defaults, features, gen_features, utils
 
 FIGSIZE = (5, 2.2)
 FIGSIZE_BOX = (5, 3.5)
+FIGSIZE_BAR = (5, 2.2)
 FONTSIZE = 12
 # COLORS = ["b", "r", "g"]
 COLORS = [
-    "#d7191c",
-    "#2c7bb6",
-    "#fdae61",
+    "#d7191c",  # Red
+    "#2c7bb6",  # Blue
+    "#fdae61",  # Orange
 ]
 LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
@@ -252,7 +253,7 @@ def plot_bar(
     bar_count = len(lines)
     assert bar_count <= 2
 
-    plt.figure(figsize=FIGSIZE_BOX)
+    plt.figure(figsize=FIGSIZE_BAR)
 
     width = 0.75
     count = len(lines[0])
@@ -292,6 +293,7 @@ def plot_bar(
     plt.tight_layout()
     if labels[0] is not None:
         plt.legend(loc=legendloc)
+    plt.grid(True)
 
     bar_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(bar_flp)
@@ -819,6 +821,7 @@ def main(args):
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
         # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+        colors=reversed(COLORS),
     )
     plot_cdf(
         args,
@@ -833,6 +836,7 @@ def main(args):
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
         # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
+        colors=reversed(COLORS),
     )
 
     logging.info(
