@@ -118,7 +118,7 @@ def main(args):
         ],
         y_max=1,
         filename="jfis_bar.pdf",
-        colors=[evl.COLORS_MAP["blue"]],
+        colors=evl.COLORS,
         # title="Average JFI, for all CCAs",
         rotate=True,
     )
