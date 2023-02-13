@@ -40,7 +40,7 @@ def get_time_bounds(pkts, direction="data"):
 
 
 @contextmanager
-def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
+def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp, always_reparse):
     """Untar an experiment.
 
     Lock the experiment to prevent two processes from opening it at once.
@@ -57,7 +57,7 @@ def open_exp(exp, exp_flp, untar_dir, out_dir, out_flp):
             print(f"Parsing already in progress: {exp_flp}")
             yield False, None
         # If the output file exists, then we do not need to parse this file.
-        elif path.exists(out_flp):
+        elif not always_reparse and path.exists(out_flp):
             print(f"Already parsed: {exp_flp}")
             yield False, None
         else:
@@ -1303,6 +1303,7 @@ def parse_exp(
     receiver_ip,
     select_tail_percent,
     sender_fairness,
+    always_reparse=False,
     parse_func=parse_opened_exp,
 ):
     """Lock, untar, and parse an experiment."""
@@ -1310,7 +1311,7 @@ def parse_exp(
     # Create output directory if it does not already exist.
     os.makedirs(out_dir, exist_ok=True)
     out_flp = path.join(out_dir, f"{exp.name}.npz")
-    with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp) as (locked, exp_dir):
+    with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp, always_reparse) as (locked, exp_dir):
         if locked and exp_dir is not None:
             try:
                 return parse_func(

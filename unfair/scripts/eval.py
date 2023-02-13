@@ -611,6 +611,7 @@ def main(args):
             args.receiver_ip,
             args.select_tail_percent,
             args.sender_fairness,
+            True,
             parse_opened_exp,
         )
         for exp in sorted(os.listdir(args.exp_dir))
