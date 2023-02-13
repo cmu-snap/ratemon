@@ -121,6 +121,7 @@ def main(args):
         colors=evl.COLORS,
         # title="Average JFI, for all CCAs",
         rotate=True,
+        stacked=True,
     )
     evl.plot_cdf(
         args,

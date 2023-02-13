@@ -286,9 +286,13 @@ def plot_bar(
     title=None,
     colors=COLORS,
     legendloc="best",
+    stacked=False,
 ):
     bar_count = len(lines)
     assert bar_count <= 2
+    if stacked:
+        assert bar_count == 2
+        bar_count = 1
 
     plt.figure(figsize=FIGSIZE_BAR)
 
@@ -297,20 +301,28 @@ def plot_bar(
     bar_xs = list(range(bar_count, bar_count * (count + 1), bar_count))
     label_xs = [x + (width / 2 * bar_count) for x in bar_xs]
 
-    for idx, (line, label, color) in enumerate(zip(lines, labels, colors)):
+    for line_idx, (line, label, color) in enumerate(zip(lines, labels, colors)):
         plt.bar(
             (
                 bar_xs
                 if bar_count == 1
-                else [x + (-1 if idx == 0 else 1) * (width / 2) for x in bar_xs]
+                else [x + (-1 if line_idx == 0 else 1) * (width / 2) for x in bar_xs]
             ),
-            line,
+            (
+                [val - lines[line_idx - 1][val_idx] for val_idx, val in enumerate(line)]
+                if stacked and line_idx == 1
+                else line
+            ),
             alpha=0.75,
             width=width,
             color=color,
-            bottom=None,
             align="center",
             label=label,
+            **(
+                {"bottom": lines[line_idx - 1] if line_idx == 1 else 0}
+                if stacked
+                else {}
+            ),
         )
 
     plt.xticks(
