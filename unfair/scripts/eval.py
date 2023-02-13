@@ -239,7 +239,7 @@ def plot_flows_over_time(
                 sender_to_tputs[sender] = [
                     flw_to_cca[flw],
                     0,
-                    ([time_s, 0] for time_s, _ in throughputs),
+                    [[time_s, 0] for time_s, _ in throughputs],
                 ]
             # Make sure that all flows from this sender use the same CCA.
             if sender_to_tputs[sender][0] != flw_to_cca[flw]:
