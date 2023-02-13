@@ -123,7 +123,7 @@ def main(args):
         rotate=True,
         stacked=True,
         legendloc="lower left",
-        legend_ncols=2,
+        legend_ncol=2,
     )
     evl.plot_cdf(
         args,

@@ -293,7 +293,7 @@ def plot_bar(
     colors=COLORS,
     legendloc="best",
     stacked=False,
-    legend_ncols=1,
+    legend_ncol=1,
 ):
     bar_count = len(lines)
     assert bar_count <= 2
@@ -302,7 +302,7 @@ def plot_bar(
         bar_count = 1
 
     plt.figure(figsize=FIGSIZE_BAR)
-    plt.grid(True)
+    # plt.grid(True)
 
     width = 0.75
     count = len(lines[0])
@@ -349,7 +349,7 @@ def plot_bar(
         plt.title(title, fontsize=FONTSIZE)
     plt.tight_layout()
     if labels[0] is not None:
-        plt.legend(loc=legendloc, ncols=legend_ncols, fontsize=FONTSIZE)
+        plt.legend(loc=legendloc, ncol=legend_ncol, fontsize=FONTSIZE)
 
     bar_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(bar_flp)
