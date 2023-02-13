@@ -185,7 +185,9 @@ def plot_lines(
     logging.info("Saved line graph to: %s", out_flp)
 
 
-def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
+def plot_flows_over_time(
+    exp, out_flp, flw_to_pkts, flw_to_cca, sender_fairness=False, flw_to_sender=None
+):
     lines = []
     initial_time = min(
         np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values()
@@ -224,7 +226,23 @@ def plot_flows_over_time(exp, out_flp, flw_to_pkts, flw_to_cca):
 
         # Skips the last partial bucket, but that's okay.
 
-        lines.append((throughputs, flw_to_cca[flw]))
+        lines.append((throughputs, flw))
+
+    if sender_fairness and flw_to_sender is not None:
+        sender_to_tputs = dict()
+        # Accumulate the throughput of each sender.
+        for (throughputs, flw) in lines:
+            sender = flw_to_sender[flw]
+            if sender not in sender_to_tputs:
+                sender_to_tputs[sender] = [[time_s, 0] for time_s, _ in throughputs]
+            for idx, (_, tput_Mbps) in enumerate(throughputs):
+                sender_to_tputs[sender][idx][1] += tput_Mbps
+        lines = [
+            (throughputs, f"Sender {idx + 1}")
+            for idx, (_, throughputs) in enumerate(sender_to_tputs.items())
+        ]
+    else:
+        lines = [(throughputs, flw_to_cca[flw]) for (throughputs, flw) in lines]
 
     plot_lines(
         lines,
@@ -393,7 +411,14 @@ def parse_opened_exp(
         ]
     )
 
-    plot_flows_over_time(exp, out_flp[:-4] + "_flows.pdf", flw_to_pkts, flw_to_cca)
+    plot_flows_over_time(
+        exp,
+        out_flp[:-4] + "_flows.pdf",
+        flw_to_pkts,
+        flw_to_cca,
+        sender_fairness,
+        flw_to_sender,
+    )
 
     # Remove data from before the late flows start.
     for flw in flw_to_pkts.keys():
