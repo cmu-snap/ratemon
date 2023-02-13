@@ -161,15 +161,21 @@ def plot_lines(
     plt.grid(True)
 
     for idx, line in enumerate(lines):
-        line, cca = line
+        line, label = line
         if len(line) > 0:
             xs, ys = zip(*line)
             plt.plot(
                 xs,
                 ys,
                 alpha=0.75,
-                linestyle="solid" if cca == "cubic" else "dashdot",
-                label=cca,
+                linestyle=(
+                    # If this is a sender fairness graph but not the first
+                    # sender, or a cubic flow in a flow fairness graph...
+                    "solid"
+                    if "flows" in label or label == "cubic"
+                    else "dashdot"
+                ),
+                label=label,
                 linewidth=linewidth,
                 **{} if colors is None else {"color": colors[idx]},
             )
@@ -269,7 +275,7 @@ def plot_flows_over_time(
         out_flp,
         legendloc="upper right",
         linewidth=2 if sender_fairness else 1,
-        colors=[COLORS_MAP["blue"], COLORS_MAP["orange"]] if sender_fairness else None,
+        colors=[COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None,
     )
 
 
