@@ -154,10 +154,12 @@ def plot_lines(
     y_max,
     out_flp,
     legendloc="best",
+    linewidth=1,
+    colors=None,
 ):
     plt.figure(figsize=FIGSIZE)
 
-    for line in lines:
+    for idx, line in enumerate(lines):
         line, cca = line
         if len(line) > 0:
             xs, ys = zip(*line)
@@ -165,10 +167,10 @@ def plot_lines(
                 xs,
                 ys,
                 alpha=0.75,
-                # color="b" if cca == "cubic" else "r",
                 linestyle="solid" if cca == "cubic" else "dashdot",
                 label=cca,
-                linewidth=1,
+                linewidth=linewidth,
+                **{} if colors is None else {"color": colors[idx]},
             )
 
     plt.xlabel(x_label, fontsize=FONTSIZE)
@@ -234,12 +236,26 @@ def plot_flows_over_time(
         for (throughputs, flw) in lines:
             sender = flw_to_sender[flw]
             if sender not in sender_to_tputs:
-                sender_to_tputs[sender] = [[time_s, 0] for time_s, _ in throughputs]
+                sender_to_tputs[sender] = [
+                    flw_to_cca[flw],
+                    0,
+                    ([time_s, 0] for time_s, _ in throughputs),
+                ]
+            # Make sure that all flows from this sender use the same CCA.
+            if sender_to_tputs[sender][0] != flw_to_cca[flw]:
+                logging.error(
+                    "Sender %s has multiple CCAs: %s, %s",
+                    sender,
+                    sender_to_tputs[sender][0],
+                    flw_to_cca[flw],
+                )
+                continue
+            sender_to_tputs[sender][1] += 1
             for idx, (_, tput_Mbps) in enumerate(throughputs):
-                sender_to_tputs[sender][idx][1] += tput_Mbps
+                sender_to_tputs[sender][2][idx][1] += tput_Mbps
         lines = [
-            (throughputs, f"Sender {idx + 1}")
-            for idx, (_, throughputs) in enumerate(sender_to_tputs.items())
+            (throughputs, f"{num_flows} {cca} {'flow' if num_flows == 1 else 'flows'}")
+            for cca, num_flows, throughputs in sender_to_tputs.values()
         ]
     else:
         lines = [(throughputs, flw_to_cca[flw]) for (throughputs, flw) in lines]
@@ -252,6 +268,8 @@ def plot_flows_over_time(
         exp.bw_Mbps if exp.use_bess else None,
         out_flp,
         legendloc="upper right",
+        linewidth=2 if sender_fairness else 1,
+        colors=[COLORS_MAP["blue"], COLORS_MAP["orange"]] if sender_fairness else None,
     )
 
 
