@@ -23,11 +23,12 @@ FIGSIZE_BOX = (5, 3.5)
 FIGSIZE_BAR = (5, 2.2)
 FONTSIZE = 12
 # COLORS = ["b", "r", "g"]
-COLORS = [
-    "#d7191c",  # Red
-    "#2c7bb6",  # Blue
-    "#fdae61",  # Orange
-]
+COLORS_MAP = {
+    "red": "#d7191c",
+    "blue": "#2c7bb6",
+    "orange": "#fdae61",
+}
+COLORS = [COLORS_MAP["red"], COLORS_MAP["blue"], COLORS_MAP["orange"]]
 LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
 PREFIX = ""
@@ -821,7 +822,7 @@ def main(args):
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
         # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
-        colors=reversed(COLORS),
+        colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
     plot_cdf(
         args,
@@ -836,7 +837,7 @@ def main(args):
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
         # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
-        colors=reversed(COLORS),
+        colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
 
     logging.info(
