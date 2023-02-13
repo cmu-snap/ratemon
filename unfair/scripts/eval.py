@@ -331,6 +331,7 @@ def plot_bar(
                 if stacked
                 else {}
             ),
+            **({"hatch": "/"} if stacked and line_idx == 1 else {}),
         )
 
     plt.xticks(
