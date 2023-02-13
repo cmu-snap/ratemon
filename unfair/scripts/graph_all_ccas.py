@@ -122,6 +122,8 @@ def main(args):
         # title="Average JFI, for all CCAs",
         rotate=True,
         stacked=True,
+        legendloc="lower left",
+        legend_ncols=2,
     )
     evl.plot_cdf(
         args,

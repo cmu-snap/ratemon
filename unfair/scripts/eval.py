@@ -55,6 +55,7 @@ def plot_cdf(
     legendloc="best",
 ):
     plt.figure(figsize=FIGSIZE)
+    plt.grid(True)
 
     for line, label, color, linestyle in zip(lines, labels, colors, linestyles):
         count, bins_count = np.histogram(line, bins=len(line))
@@ -75,7 +76,6 @@ def plot_cdf(
         plt.title(title, fontsize=FONTSIZE)
     if len(lines) > 1:
         plt.legend(fontsize=FONTSIZE, loc=legendloc)
-    plt.grid(True)
     plt.tight_layout()
 
     cdf_flp = path.join(args.out_dir, PREFIX + filename)
@@ -124,6 +124,7 @@ def plot_box(
     number of flows.
     """
     plt.figure(figsize=FIGSIZE_BOX)
+    plt.grid(True)
 
     plt.boxplot(data)
 
@@ -137,7 +138,6 @@ def plot_box(
     plt.ylim(0, y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
-    plt.grid(True)
     plt.tight_layout()
 
     box_flp = path.join(args.out_dir, PREFIX + filename)
@@ -158,6 +158,7 @@ def plot_lines(
     colors=None,
 ):
     plt.figure(figsize=FIGSIZE)
+    plt.grid(True)
 
     for idx, line in enumerate(lines):
         line, cca = line
@@ -178,9 +179,8 @@ def plot_lines(
     if x_max is not None:
         plt.xlim(0, x_max)
     plt.ylim(0, y_max)
-    plt.grid(True)
     plt.tight_layout()
-    plt.legend(loc=legendloc)
+    plt.legend(loc=legendloc, fontsize=FONTSIZE)
 
     plt.savefig(out_flp)
     plt.close()
@@ -287,6 +287,7 @@ def plot_bar(
     colors=COLORS,
     legendloc="best",
     stacked=False,
+    legend_ncols=1,
 ):
     bar_count = len(lines)
     assert bar_count <= 2
@@ -295,6 +296,7 @@ def plot_bar(
         bar_count = 1
 
     plt.figure(figsize=FIGSIZE_BAR)
+    plt.grid(True)
 
     width = 0.75
     count = len(lines[0])
@@ -341,8 +343,7 @@ def plot_bar(
         plt.title(title, fontsize=FONTSIZE)
     plt.tight_layout()
     if labels[0] is not None:
-        plt.legend(loc=legendloc)
-    plt.grid(True)
+        plt.legend(loc=legendloc, ncols=legend_ncols, fontsize=FONTSIZE)
 
     bar_flp = path.join(args.out_dir, PREFIX + filename)
     plt.savefig(bar_flp)
