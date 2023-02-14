@@ -158,8 +158,9 @@ def plot_lines(
     colors=None,
     bbox_to_anchor=None,
     legend_ncol=1,
+    figsize=FIGSIZE,
 ):
-    plt.figure(figsize=FIGSIZE)
+    plt.figure(figsize=figsize)
     plt.grid(True)
 
     for idx, line in enumerate(lines):
@@ -283,8 +284,9 @@ def plot_flows_over_time(
         legendloc=("center" if sender_fairness else "upper right"),
         linewidth=(2 if sender_fairness else 1),
         colors=([COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None),
-        bbox_to_anchor=((0.5, 1.13) if sender_fairness else None),
+        bbox_to_anchor=((0.5, 1.25) if sender_fairness else None),
         legend_ncol=(2 if sender_fairness else 1),
+        figsize=(5, 2.8)
     )
 
 
