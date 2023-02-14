@@ -196,7 +196,7 @@ def plot_lines(
     )
 
     plt.tight_layout()
-    plt.savefig(out_flp)
+    plt.savefig(out_flp, bbox_inches="tight")
     plt.close()
     logging.info("Saved line graph to: %s", out_flp)
 
@@ -284,9 +284,9 @@ def plot_flows_over_time(
         legendloc=("center" if sender_fairness else "upper right"),
         linewidth=(2 if sender_fairness else 1),
         colors=([COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None),
-        bbox_to_anchor=((0.5, 1.25) if sender_fairness else None),
+        bbox_to_anchor=((0.5, 1.15) if sender_fairness else None),
         legend_ncol=(2 if sender_fairness else 1),
-        figsize=(5, 2.8)
+        figsize=(5, 2.6)
     )
 
 
