@@ -127,9 +127,13 @@ def parse_opened_exp(
     #
     # sender_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
     # Look up the name of the receiver host.
-    receiver_pcap = path.join(
-        exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
-    )
+    if "receiver" in params:
+        receiver_pcap = path.join(
+            exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+        )
+    else:
+        receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
+
     # if not (path.exists(sender_pcap) and path.exists(receiver_pcap)):
     if not path.exists(receiver_pcap):
         print(f"Warning: Missing pcap file in: {exp_flp}")
@@ -1311,7 +1315,10 @@ def parse_exp(
     # Create output directory if it does not already exist.
     os.makedirs(out_dir, exist_ok=True)
     out_flp = path.join(out_dir, f"{exp.name}.npz")
-    with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp, always_reparse) as (locked, exp_dir):
+    with open_exp(exp, exp_flp, untar_dir, out_dir, out_flp, always_reparse) as (
+        locked,
+        exp_dir,
+    ):
         if locked and exp_dir is not None:
             try:
                 return parse_func(

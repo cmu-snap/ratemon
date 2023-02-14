@@ -262,21 +262,45 @@ class Exp:
             self.name = self.name[:-4]
 
         # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-35.60ping-unfairTrue-bessTrue-100s-20201118T114242
-        (
-            _,
-            self.cca_1_name,
-            self.cca_2_name,
-            bw_Mbps,
-            rtt_ms,
-            queue_p,
-            cca_1_flws,
-            cca_2_flws,
-            ping_ms,
-            use_unfairness_monitor,
-            use_bess,
-            end_time,
-            _,
-        ) = toks
+        if len(toks) == 11:
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                use_unfairness_monitor,
+                end_time,
+                _,
+            ) = toks
+            self.ping_ms = 0
+            self.ping_us = 0
+            self.use_bess = True
+        elif len(toks) == 13:
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                ping_ms,
+                use_unfairness_monitor,
+                use_bess,
+                end_time,
+                _,
+            ) = toks
+            # Baseline ping RTT between sender and receiver.
+            self.ping_ms = float(ping_ms[:-4])
+            self.ping_us = self.ping_ms * 1e3
+            self.use_bess = use_bess == "bessTrue"
+        else:
+            raise RuntimeError(f"Unexpected number of tokens in {sim}: {len(toks)}")
 
         # Number of CCA 1 flows.
         self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
@@ -286,11 +310,7 @@ class Exp:
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Experiment duration (s).
         self.dur_s = float(end_time[:-1])
-        # Baseline ping RTT between sender and receiver.
-        self.ping_ms = float(ping_ms[:-4])
-        self.ping_us = self.ping_ms * 1e3
         self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
-        self.use_bess = use_bess == "bessTrue"
 
         if self.use_bess:
             # Link bandwidth (Mbps).

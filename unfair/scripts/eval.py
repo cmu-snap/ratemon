@@ -408,29 +408,52 @@ def parse_opened_exp(
         params = json.load(fil)
 
     # Look up the name of the receiver host.
-    receiver_pcap = path.join(
-        exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
-    )
+    if "receiver" in params:
+        receiver_pcap = path.join(
+            exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+        )
+        old = False
+    else:
+        receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
+        old = True
     if not path.exists(receiver_pcap):
         logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
         return -1
 
-    # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-    # form: (sender port, receiver port)
-    #
-    # { (sender port, receiver port): CCA }
-    flw_to_cca = {
-        (sender_port, flw[5]): flw[1]
-        for flw in params["flowsets"]
-        for sender_port in flw[4]
-    }
-    # Map flow to sender IP address (WAN). Each flow tuple will be unique because
-    # the receiver ports are unique across flows from different senders.
-    flw_to_sender = {
-        (sender_port, flw[5]): flw[0][6]
-        for flw in params["flowsets"]
-        for sender_port in flw[4]
-    }
+    if old:
+        # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
+        # form: (sender port, receiver port)
+        #
+        # { (sender port, receiver port): CCA }
+        flw_to_cca = {
+            (sender_port, flw[4]): flw[0]
+            for flw in params["flowsets"]
+            for sender_port in flw[3]
+        }
+        # Map flow to sender IP address (WAN). Each flow tuple will be unique because
+        # the receiver ports are unique across flows from different senders.
+        flw_to_sender = {
+            (sender_port, flw[4]): params["client"][3]
+            for flw in params["flowsets"]
+            for sender_port in flw[3]
+        }
+    else:
+        # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
+        # form: (sender port, receiver port)
+        #
+        # { (sender port, receiver port): CCA }
+        flw_to_cca = {
+            (sender_port, flw[5]): flw[1]
+            for flw in params["flowsets"]
+            for sender_port in flw[4]
+        }
+        # Map flow to sender IP address (WAN). Each flow tuple will be unique because
+        # the receiver ports are unique across flows from different senders.
+        flw_to_sender = {
+            (sender_port, flw[5]): flw[0][6]
+            for flw in params["flowsets"]
+            for sender_port in flw[4]
+        }
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
         receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
