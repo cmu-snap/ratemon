@@ -156,6 +156,7 @@ def plot_lines(
     legendloc="best",
     linewidth=1,
     colors=None,
+    bbox_to_anchor=None,
 ):
     plt.figure(figsize=FIGSIZE)
     plt.grid(True)
@@ -186,7 +187,11 @@ def plot_lines(
         plt.xlim(0, x_max)
     plt.ylim(0, y_max)
     plt.tight_layout()
-    plt.legend(loc=legendloc, fontsize=FONTSIZE)
+    plt.legend(
+        loc=legendloc,
+        fontsize=FONTSIZE,
+        **({} if bbox_to_anchor is None else {"bbox_to_anchor": bbox_to_anchor}),
+    )
 
     plt.savefig(out_flp)
     plt.close()
@@ -273,9 +278,10 @@ def plot_flows_over_time(
         None,
         exp.bw_Mbps if exp.use_bess else None,
         out_flp,
-        legendloc="upper right",
+        legendloc="center",
         linewidth=2 if sender_fairness else 1,
         colors=[COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None,
+        bbox_to_anchor=(0.5, 1.1),
     )
 
 
