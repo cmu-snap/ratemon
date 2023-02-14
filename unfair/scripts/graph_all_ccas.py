@@ -93,7 +93,8 @@ def main(args):
         ],
         filename="jfi_deltas_bar.pdf",
         colors=[evl.COLORS_MAP["blue"]],
-        # title="Change in Average JFI, for all CCAs",
+        # Note: This is not the same as the change in average JFI. This is per-experiment change.
+        # title="Average JFI change, for all CCAs",
         rotate=True,
     )
     evl.plot_bar(
