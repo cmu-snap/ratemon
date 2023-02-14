@@ -175,7 +175,7 @@ def plot_lines(
                     # If this is a sender fairness graph but not the first
                     # sender, or a cubic flow in a flow fairness graph...
                     "solid"
-                    if "flows" in label or label == "cubic"
+                    if "Sender 2" in label or label == "cubic"
                     else "dashdot"
                 ),
                 label=label,
@@ -268,8 +268,8 @@ def plot_flows_over_time(
             for idx, (_, tput_Mbps) in enumerate(throughputs):
                 sender_to_tputs[sender][2][idx][1] += tput_Mbps
         lines = [
-            (throughputs, f"{num_flows} {cca} {'flow' if num_flows == 1 else 'flows'}")
-            for cca, num_flows, throughputs in sender_to_tputs.values()
+            (throughputs, f"Sender {sender_idx + 1}: {num_flows} {cca}")
+            for sender_idx, (cca, num_flows, throughputs) in enumerate(sender_to_tputs.values())
         ]
     else:
         lines = [(throughputs, flw_to_cca[flw]) for (throughputs, flw) in lines]
