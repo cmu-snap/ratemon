@@ -76,9 +76,9 @@ def plot_cdf(
         plt.title(title, fontsize=FONTSIZE)
     if len(lines) > 1:
         plt.legend(fontsize=FONTSIZE, loc=legendloc)
-    plt.tight_layout()
 
     cdf_flp = path.join(args.out_dir, PREFIX + filename)
+    plt.tight_layout()
     plt.savefig(cdf_flp)
     plt.close()
     logging.info("Saved CDF to: %s", cdf_flp)
@@ -108,9 +108,9 @@ def plot_hist(args, lines, labels, x_label, filename, title=None, colors=COLORS)
     if len(lines) > 1:
         plt.legend(fontsize=FONTSIZE)
     plt.grid(True)
-    plt.tight_layout()
 
     hist_flp = path.join(args.out_dir, PREFIX + filename)
+    plt.tight_layout()
     plt.savefig(hist_flp)
     plt.close()
     logging.info("Saved histogram to: %s", hist_flp)
@@ -138,9 +138,9 @@ def plot_box(
     plt.ylim(0, y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
-    plt.tight_layout()
 
     box_flp = path.join(args.out_dir, PREFIX + filename)
+    plt.tight_layout()
     plt.savefig(box_flp)
     plt.close()
     logging.info("Saved boxplot to: %s", box_flp)
@@ -157,6 +157,7 @@ def plot_lines(
     linewidth=1,
     colors=None,
     bbox_to_anchor=None,
+    legend_ncol=1,
 ):
     plt.figure(figsize=FIGSIZE)
     plt.grid(True)
@@ -186,13 +187,14 @@ def plot_lines(
     if x_max is not None:
         plt.xlim(0, x_max)
     plt.ylim(0, y_max)
-    plt.tight_layout()
     plt.legend(
         loc=legendloc,
         fontsize=FONTSIZE,
+        ncol=legend_ncol,
         **({} if bbox_to_anchor is None else {"bbox_to_anchor": bbox_to_anchor}),
     )
 
+    plt.tight_layout()
     plt.savefig(out_flp)
     plt.close()
     logging.info("Saved line graph to: %s", out_flp)
@@ -278,10 +280,11 @@ def plot_flows_over_time(
         None,
         exp.bw_Mbps if exp.use_bess else None,
         out_flp,
-        legendloc="center",
-        linewidth=2 if sender_fairness else 1,
-        colors=[COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None,
-        bbox_to_anchor=(0.5, 1.1),
+        legendloc=("center" if sender_fairness else "upper right"),
+        linewidth=(2 if sender_fairness else 1),
+        colors=([COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None),
+        bbox_to_anchor=((0.5, 1.13) if sender_fairness else None),
+        legend_ncol=(2 if sender_fairness else 1),
     )
 
 
@@ -354,11 +357,11 @@ def plot_bar(
     plt.ylim(min(0, min(lines[0])), y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
-    plt.tight_layout()
     if labels[0] is not None:
         plt.legend(loc=legendloc, ncol=legend_ncol, fontsize=FONTSIZE)
 
     bar_flp = path.join(args.out_dir, PREFIX + filename)
+    plt.tight_layout()
     plt.savefig(bar_flp)
     plt.close()
     logging.info("Saved bar graph to: %s", bar_flp)
