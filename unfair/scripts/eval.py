@@ -265,8 +265,18 @@ def plot_flows_over_time(
                 )
                 continue
             sender_to_tputs[sender][1] += 1
-            for idx, (_, tput_Mbps) in enumerate(throughputs):
-                sender_to_tputs[sender][2][idx][1] += tput_Mbps
+            for sample_idx, (_, tput_Mbps) in enumerate(throughputs):
+                if sample_idx < len(sender_to_tputs[sender][2]):
+                    sender_to_tputs[sender][2][sample_idx][1] += tput_Mbps
+                else:
+                    break
+                # except:
+                #     print("len(sender_to_tputs[sender])", len(sender_to_tputs[sender]))
+                #     print("len(sender_to_tputs[sender][2])", len(sender_to_tputs[sender][2]))
+                #     print("len(sender_to_tputs[sender][2][0])", len(sender_to_tputs[sender][2][0]))
+                #     print("len(throughputs)", len(throughputs))
+                #     print("sample_idx", sample_idx)
+                #     raise
         lines = [
             (throughputs, f"Sender {sender_idx + 1}: {num_flows} {cca}")
             for sender_idx, (cca, num_flows, throughputs) in enumerate(sender_to_tputs.values())
