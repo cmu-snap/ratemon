@@ -261,7 +261,7 @@ class Exp:
             # Update sim.name.
             self.name = self.name[:-4]
 
-        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-35.60ping-unfairTrue-bessTrue-100s-20201118T114242
+        # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-0bitrate-0bitrate-35.60ping-unfairTrue-bessTrue-100s-20201118T114242
         if len(toks) == 11:
             (
                 _,
@@ -279,6 +279,8 @@ class Exp:
             self.ping_ms = 0
             self.ping_us = 0
             self.use_bess = True
+            self.bitrate_Mbps_1 = 0
+            self.bitrate_Mbps_2 = 0
         elif len(toks) == 13:
             (
                 _,
@@ -299,6 +301,34 @@ class Exp:
             self.ping_ms = float(ping_ms[:-4])
             self.ping_us = self.ping_ms * 1e3
             self.use_bess = use_bess == "bessTrue"
+            self.bitrate_Mbps_1 = 0
+            self.bitrate_Mbps_2 = 0
+        elif len(toks) == 15:
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                bitrate_Mbps_1,
+                bitrate_Mbps_2,
+                ping_ms,
+                use_unfairness_monitor,
+                use_bess,
+                end_time,
+                _,
+            ) = toks
+            # Baseline ping RTT between sender and receiver.
+            self.ping_ms = float(ping_ms[:-4])
+            self.ping_us = self.ping_ms * 1e3
+            self.use_bess = use_bess == "bessTrue"
+            # Bitrate for CCA 1 flows.
+            self.bitrate_Mbps_1 = float(bitrate_Mbps_1[:-7])
+            # Bitrate for CCA 2 flows.
+            self.bitrate_Mbps_2 = float(bitrate_Mbps_2[:-7])
         else:
             raise RuntimeError(f"Unexpected number of tokens in {sim}: {len(toks)}")
 
@@ -310,7 +340,11 @@ class Exp:
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Experiment duration (s).
         self.dur_s = float(end_time[:-1])
+        # Baseline ping RTT between sender and receiver.
+        self.ping_ms = float(ping_ms[:-4])
+        self.ping_us = self.ping_ms * 1e3
         self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
+        self.use_bess = use_bess == "bessTrue"
 
         if self.use_bess:
             # Link bandwidth (Mbps).
@@ -325,15 +359,13 @@ class Exp:
             # Queue size (packets).
             self.queue_p = float(queue_p[:-1])
             # Queue size (multiples of the BDP).
-            self.queue_bdp = self.queue_p / (self.bdp_b / 8 / defaults.PACKET_LEN_B)
+            self.queue_bdp = self.queue_p / (self.bdp_b / 8 / 1514)
             # Largest RTT that this experiment should experiment, based on the size
             # of the bottleneck queue and the RTT. Add one packet to account for
             # the packet that the bottleneck router is currently processing.
             self.calculated_max_rtt_us = (
                 self.queue_p + 1
-            ) * defaults.PACKET_LEN_B * 8 / self.bw_bps * 1e6 + (
-                self.rtt_us + self.ping_us
-            )
+            ) * 1514 * 8 / self.bw_bps * 1e6 + (self.rtt_us + self.ping_us)
             # Fair share bandwidth for each flow.
             self.target_per_flow_bw_Mbps = self.bw_Mbps / self.tot_flws
         else:
@@ -1574,6 +1606,7 @@ def select_fets_perm(cluster_to_fets, top_fets):
     Each entry in top_fets is a tuple of the form: (feature name, feature
     importance).
     """
+
     # Returns the dictionary keys whose values contain an item.
     def get_keys(x, d):
         return [k for k, v in d.items() if x in v]
