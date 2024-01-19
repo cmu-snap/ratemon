@@ -276,11 +276,13 @@ class Exp:
                 end_time,
                 _,
             ) = toks
-            self.ping_ms = 0
-            self.ping_us = 0
-            self.use_bess = True
-            self.bitrate_Mbps_1 = 0
-            self.bitrate_Mbps_2 = 0
+            self.cca_back_name = ""
+            cca_back_flws = "0"
+            bitrate_Mbps_1 = "0bitrate"
+            bitrate_Mbps_2 = "0bitrate"
+            bitrate_Mbps_back = "0bitrate"
+            ping_ms = "0ping"
+            use_bess = "bessTrue"
         elif len(toks) == 13:
             (
                 _,
@@ -297,12 +299,11 @@ class Exp:
                 end_time,
                 _,
             ) = toks
-            # Baseline ping RTT between sender and receiver.
-            self.ping_ms = float(ping_ms[:-4])
-            self.ping_us = self.ping_ms * 1e3
-            self.use_bess = use_bess == "bessTrue"
-            self.bitrate_Mbps_1 = 0
-            self.bitrate_Mbps_2 = 0
+            self.cca_back_name = ""
+            cca_back_flws = "0"
+            bitrate_Mbps_1 = "0bitrate"
+            bitrate_Mbps_2 = "0bitrate"
+            bitrate_Mbps_back = "0bitrate"
         elif len(toks) == 15:
             (
                 _,
@@ -321,14 +322,30 @@ class Exp:
                 end_time,
                 _,
             ) = toks
-            # Baseline ping RTT between sender and receiver.
-            self.ping_ms = float(ping_ms[:-4])
-            self.ping_us = self.ping_ms * 1e3
-            self.use_bess = use_bess == "bessTrue"
-            # Bitrate for CCA 1 flows.
-            self.bitrate_Mbps_1 = float(bitrate_Mbps_1[:-7])
-            # Bitrate for CCA 2 flows.
-            self.bitrate_Mbps_2 = float(bitrate_Mbps_2[:-7])
+            self.cca_back_name = ""
+            cca_back_flws = "0"
+            bitrate_Mbps_back = "0bitrate"
+        elif len(toks) == 18:
+            (
+                _,
+                self.cca_1_name,
+                self.cca_2_name,
+                self.cca_back_name,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                cca_1_flws,
+                cca_2_flws,
+                cca_back_flws,
+                bitrate_Mbps_1,
+                bitrate_Mbps_2,
+                bitrate_Mbps_back,
+                ping_ms,
+                use_unfairness_monitor,
+                use_bess,
+                end_time,
+                _,
+            ) = toks
         else:
             raise RuntimeError(f"Unexpected number of tokens in {sim}: {len(toks)}")
 
@@ -336,15 +353,25 @@ class Exp:
         self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
         # Number of CCA 2 flows.
         self.cca_2_flws = int(cca_2_flws[: -(len(self.cca_2_name))])
+        # Number of CCA (background) flows.
+        self.cca_back_flws = int(cca_back_flws[: -(len(self.cca_back_name))])
         # The total number of flows.
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
-        # Experiment duration (s).
-        self.dur_s = float(end_time[:-1])
+        # Bitrate for CCA 1 flows.
+        self.bitrate_Mbps_1 = float(bitrate_Mbps_1[:-7])
+        # Bitrate for CCA 2 flows.
+        self.bitrate_Mbps_2 = float(bitrate_Mbps_2[:-7])
+        # Bitrate for background CCA flows.
+        self.bitrate_Mbps_back = float(bitrate_Mbps_back[:-7])
         # Baseline ping RTT between sender and receiver.
         self.ping_ms = float(ping_ms[:-4])
         self.ping_us = self.ping_ms * 1e3
+        # Whether the unfairness monitor was used in this experiment.
         self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
+        # Whether bess was used for bottleneck emulation in this experiment.
         self.use_bess = use_bess == "bessTrue"
+        # Experiment duration (s).
+        self.dur_s = float(end_time[:-1])
 
         if self.use_bess:
             # Link bandwidth (Mbps).
