@@ -127,16 +127,22 @@ def parse_opened_exp(
     #
     # sender_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
     # Look up the name of the receiver host.
-    if "receiver" in params:
-        receiver_pcap = path.join(
-            exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
-        )
-    else:
-        receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
+    # print("params", params)
+    # In a FlowSet, the second entry is the receiver Host, where the first entry is the
+    # name.
+    receiver_names = {flw[1][0] for flw in params["flowsets"]}
+    assert len(receiver_names) == 1, f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
+    receiver_name = receiver_names.pop()
+    assert receiver_name == "receiver", f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
+    receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
+
+    # if "receiver" in params:
+    # else:
+    #     receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
 
     # if not (path.exists(sender_pcap) and path.exists(receiver_pcap)):
     if not path.exists(receiver_pcap):
-        print(f"Warning: Missing pcap file in: {exp_flp}")
+        print(f"Warning: Missing pcap file in: {exp_flp} --- {receiver_pcap}")
         return -1
     # NOTE: Disabled because not used.
     #
