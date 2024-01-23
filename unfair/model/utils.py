@@ -567,7 +567,7 @@ def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
             make_empty(num_pkts, features.PARSE_PCAP_FETS),
             make_empty(num_pkts, features.PARSE_PCAP_FETS),
         )
-        for flw_ports in flw_to_cca.keys()
+        for flw_ports in flw_to_cca
     }
 
     for idx, (pkt_dat, pkt_mdat) in enumerate(pkts):
@@ -685,7 +685,7 @@ def parse_packets(flp, flw_to_cca, local_ip, select_tail_percent=None):
             )
 
     # Remove unused rows.
-    for flw in flw_to_pkts.keys():
+    for flw in flw_to_pkts:
         data, ack = flw_to_pkts[flw]
         flw_to_pkts[flw] = (remove_unused_rows(data), remove_unused_rows(ack))
 

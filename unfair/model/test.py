@@ -7,7 +7,6 @@ import multiprocessing
 import os
 from os import path
 import pickle
-from statistics import mean
 import time
 from matplotlib import pyplot
 
@@ -22,7 +21,7 @@ import utils
 
 
 def plot_bar(x_axis, y_axis, file_name):
-    """ Create a bar graph. """
+    """Create a bar graph."""
     y_pos = np.arange(len(y_axis))
     pyplot.bar(y_pos, y_axis, align="center", alpha=0.5)
     pyplot.xticks(y_pos, x_axis)
@@ -96,16 +95,25 @@ def plot_bar(x_axis, y_axis, file_name):
 #             bucketized_rtt_dict, bucketized_queue_dict)
 
 
-def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
-                standardize):
-    """ Evaluate a single experiment. """
+def process_one(
+    idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize
+):
+    """Evaluate a single experiment."""
     if not path.exists(out_dir):
         os.makedirs(out_dir)
 
     # Load and parse the experiment.
     temp_path, exp = train.process_exp(
-        idx, total, net, exp_flp, out_dir, warmup_prc, keep_prc=100,
-        cca="bbr", sequential=True)
+        idx,
+        total,
+        net,
+        exp_flp,
+        out_dir,
+        warmup_prc,
+        keep_prc=100,
+        cca="bbr",
+        sequential=True,
+    )
     dat_in, dat_out, dat_extra, _ = utils.load_tmp_file(temp_path)
 
     # Load and apply the scaling parameters.
@@ -123,11 +131,14 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
             fets=dat_in.dtype.names,
             dat_in=utils.clean(dat_in),
             dat_out=utils.clean(dat_out),
-            dat_extra=dat_extra).raw(),
+            dat_extra=dat_extra,
+        ).raw(),
         graph_prms={
-            "analyze_features": False, "out_dir": out_dir,
+            "analyze_features": False,
+            "out_dir": out_dir,
             "sort_by_unfairness": False,  # "dur_s": exp.dur_s
-        })
+        },
+    )
 
     print("Accuracy:", accuracy)
 
@@ -138,14 +149,14 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
     # all_bucketized_accuracy.append(bucketized_accuracy)
     # mean_bucketized_accuracy = mean(all_bucketized_accuracy)
 
-    # for bw_mbps in bw_dict.keys():
+    # for bw_mbps in bw_dict:
     #     if exp.bw_Mbps <= bw_mbps:
     #         bw_dict[bw_mbps].append(accuracy)
     #         bucketized_bw_dict[bw_mbps].append(bucketized_accuracy)
     #         break
 
     # rtt_us = exp.rtt_us
-    # for rtt_us_ in rtt_dict.keys():
+    # for rtt_us_ in rtt_dict:
     #     if rtt_us <= rtt_us_:
     #         rtt_dict[rtt_us_].append(accuracy)
     #         bucketized_rtt_dict[rtt_us_].append(bucketized_accuracy)
@@ -153,7 +164,7 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
 
     # bdp = exp.bw_Mbps * rtt_us / (1448) / exp.queue_p
 
-    # for queue_bdp in queue_dict.keys():
+    # for queue_bdp in queue_dict:
     #     if bdp <= queue_bdp:
     #         queue_dict[queue_bdp].append(accuracy)
     #         bucketized_queue_dict[queue_bdp].append(bucketized_accuracy)
@@ -166,7 +177,7 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
     #     "----Average bucketized accuracy for all the processed experiments: "
     #     f"{mean_bucketized_accuracy}\n")
 
-    # for bw_mbps in bw_dict.keys():
+    # for bw_mbps in bw_dict:
     #     if bw_dict[bw_mbps]:
     #         bw_accuracy = mean(bw_dict[bw_mbps])
     #         bucketized_bw_accuracy = mean(bucketized_bw_dict[bw_mbps])
@@ -175,14 +186,14 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
     #             "\n"
     #             f"    bucketized accuracy {bucketized_bw_accuracy}")
 
-    # for rtt_us_ in rtt_dict.keys():
+    # for rtt_us_ in rtt_dict:
     #     if rtt_dict[rtt_us_]:
     #         rtt_accuracy = mean(rtt_dict[rtt_us_])
     #         bucketized_rtt_accuracy = mean(bucketized_rtt_dict[rtt_us_])
     #         print(f"----Rtt less than {rtt_us_}ns accuracy {rtt_accuracy}\n"
     #               f"    bucketized accuracy {bucketized_rtt_accuracy}")
 
-    # for queue_bdp in queue_dict.keys():
+    # for queue_bdp in queue_dict:
     #     if queue_dict[queue_bdp]:
     #         queue_accuracy = mean(queue_dict[queue_bdp])
     #         bucketized_queue_accuracy = mean(bucketized_queue_dict[queue_bdp])
@@ -194,22 +205,30 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
 
 
 def main():
-    """ This program's entrypoint. """
+    """This program's entrypoint."""
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Analyzes full experiments.")
     psr, psr_verify = cl_args.add_running(psr)
     psr.add_argument(
-        "--model", help="The path to a trained model file.", required=True,
-        type=str)
+        "--model", help="The path to a trained model file.", required=True, type=str
+    )
     psr.add_argument(
         "--experiments",
-        help=("The path to a directory of experiments to analyze, or the path "
-              "to a single experiment file."),
-        required=False, default=None, type=str)
+        help=(
+            "The path to a directory of experiments to analyze, or the path "
+            "to a single experiment file."
+        ),
+        required=False,
+        default=None,
+        type=str,
+    )
     psr.add_argument(
         "--input-file",
         help=("The path to a file containing a list of experiments."),
-        required=False, default=None, type=str)
+        required=False,
+        default=None,
+        type=str,
+    )
     args = psr_verify(psr.parse_args())
     mdl_flp = args.model
     out_dir = args.out_dir
@@ -217,16 +236,18 @@ def main():
     input_file = args.input_file
     exp_dir = args.experiments
 
-    assert (exp_dir is None) != (input_file is None), \
-        "Test takes in either a directory of experiments or " \
+    assert (exp_dir is None) != (input_file is None), (
+        "Test takes in either a directory of experiments or "
         "an input file containing all the experiments"
+    )
     assert path.exists(mdl_flp), f"Model file does not exist: {mdl_flp}"
     if args.experiments:
-        assert path.exists(exp_dir), \
-            f"Experiment dir/file does not exist: {exp_dir}"
+        assert path.exists(exp_dir), f"Experiment dir/file does not exist: {exp_dir}"
         exp_flps = (
             [path.join(exp_dir, exp_fln) for exp_fln in os.listdir(exp_dir)]
-            if path.isdir(exp_dir) else [exp_dir])
+            if path.isdir(exp_dir)
+            else [exp_dir]
+        )
     else:
         with open(input_file, "r") as input_file:
             exp_flps = [line.rstrip("\n") for line in input_file]
@@ -238,8 +259,9 @@ def main():
         utils.str_to_args(
             path.basename(mdl_flp),
             order=sorted(defaults.DEFAULTS.keys()),
-            which="model"
-        )["model"]]()
+            which="model",
+        )["model"]
+    ]()
     # # Manually remove the loss event rate sqrt feature.
     # net.in_spc.remove("loss event rate sqrt")
     # Load the model.
@@ -264,10 +286,18 @@ def main():
 
     total = len(exp_flps)
     func_input = [
-        (idx, total, exp_flp,
-         path.join(out_dir, path.basename(exp_flp).split(".")[0]), net,
-         args.warmup_percent, args.scale_params, standardize)
-        for idx, exp_flp in enumerate(exp_flps)]
+        (
+            idx,
+            total,
+            exp_flp,
+            path.join(out_dir, path.basename(exp_flp).split(".")[0]),
+            net,
+            args.warmup_percent,
+            args.scale_params,
+            standardize,
+        )
+        for idx, exp_flp in enumerate(exp_flps)
+    ]
 
     print(f"Num files: {len(func_input)}")
     tim_srt_s = time.time()

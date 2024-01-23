@@ -424,6 +424,24 @@ def parse_opened_exp(
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
 
+    # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
+    # form: (sender port, receiver port)
+    #
+    # { (sender port, receiver port): CCA }
+    flw_to_cca = {
+        (sender_port, flw[6]): flw[2]
+        for flw in params["flowsets"]
+        for sender_port in flw[5]
+    }
+    flws = list(flw_to_cca.keys())
+    # Map flow to sender IP address (LAN). Each flow tuple will be unique because
+    # the receiver ports are unique across flows from different senders.
+    flw_to_sender = {
+        (sender_port, flw[6]): flw[0][7]
+        for flw in params["flowsets"]
+        for sender_port in flw[5]
+    }
+
     # Look up the name of the receiver host.
     # if "receiver" in params:
     #     receiver_pcap = path.join(
@@ -435,40 +453,26 @@ def parse_opened_exp(
     assert (
         len(receiver_names) == 1
     ), f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
-    receiver_name = receiver_names.pop()
-    assert (
-        receiver_name == "receiver"
-    ), f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
-    receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
-    if not path.exists(receiver_pcap):
-        print(f"Warning: Missing pcap file in: {exp_flp} --- {receiver_pcap}")
-        return -1
+    flw_to_pkts = dict()
+    for receiver_name in receiver_names:
+        receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
-    # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-    # form: (sender port, receiver port)
-    #
-    # { (sender port, receiver port): CCA }
-    flw_to_cca = {
-        (sender_port, flw[6]): flw[2]
-        for flw in params["flowsets"]
-        for sender_port in flw[5]
-    }
-    # Map flow to sender IP address (LAN). Each flow tuple will be unique because
-    # the receiver ports are unique across flows from different senders.
-    flw_to_sender = {
-        (sender_port, flw[6]): flw[0][7]
-        for flw in params["flowsets"]
-        for sender_port in flw[5]
-    }
+        # Need to process all PCAPs to build a combined record of all flows.
 
-    flws = list(flw_to_cca.keys())
-    flw_to_pkts = utils.parse_packets(
-        receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
-    )
+        if not path.exists(receiver_pcap):
+            print(f"Warning: Missing pcap file in: {exp_flp} --- {receiver_pcap}")
+            return -1
+
+        for flw, pkts in utils.parse_packets(
+            receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
+        ).items():
+            flw_to_pkts[flw] = pkts
+
+        logging.info("\tParsed packets: %s", receiver_pcap)
+
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
-    logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
     # Highest receiver port.
@@ -497,7 +501,7 @@ def parse_opened_exp(
     )
 
     # Remove data from before the late flows start.
-    for flw in flw_to_pkts.keys():
+    for flw in flw_to_pkts:
         if len(flw_to_pkts[flw]) == 0:
             flw_to_pkts[flw] = []
             continue
@@ -602,7 +606,7 @@ def group_and_box_plot(
         xticks_transformer(category): sorted(
             [
                 output_selector(matched[exp])
-                for exp in matched.keys()
+                for exp in matched
                 # Only select experiments for this category.
                 if category_selector(exp) == category
             ]
@@ -610,7 +614,7 @@ def group_and_box_plot(
         for category in {
             # First, determine the categories.
             category_selector(exp)
-            for exp in matched.keys()
+            for exp in matched
         }
     }
     categories = list(category_to_values.keys())
@@ -730,9 +734,9 @@ def main(args):
         if (isinstance(exp_results, tuple) and -1 not in exp_results[1:])
     }
     # Experiments in which the unfairness monitor was enabled.
-    enabled = {exp for exp in results.keys() if exp.use_unfairmon}
+    enabled = {exp for exp in results if exp.use_unfairmon}
     # Experiments in which the unfairness monitor was disabled.
-    disabled = {exp for exp in results.keys() if not exp.use_unfairmon}
+    disabled = {exp for exp in results if not exp.use_unfairmon}
 
     # Match each enabled experiment with its corresponding disabled experiment and
     # compute the JFI delta. matched is a dict mapping the name of the enabled
@@ -819,7 +823,7 @@ def main(args):
 
     # Plot the fair rates in the experiment configurations so that we can see if the
     # randomly-chosen experiments are actually imbalanced.
-    fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched.keys()]
+    fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched]
     plot_cdf(
         args,
         lines=[fair_rates_Mbps],
@@ -914,7 +918,7 @@ def main(args):
         args,
         lines=[
             # Expected total utilization of incumbent flows.
-            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched.keys()],
+            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched],
             fair_flows_utils_disabled,
             fair_flows_utils_enabled,
         ],
@@ -929,7 +933,7 @@ def main(args):
         args,
         lines=[
             # Expected total utilization of newcomer flows.
-            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched.keys()],
+            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched],
             unfair_flows_utils_disabled,
             unfair_flows_utils_enabled,
         ],

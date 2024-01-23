@@ -35,7 +35,7 @@ def get_time_bounds(pkts, direction="data"):
     # [[0, -1]] Selects the first and last arrival times.
     return [
         tuple(pkts[flw][dir_idx][features.ARRIVAL_TIME_FET][[0, -1]].tolist())
-        for flw in pkts.keys()
+        for flw in pkts
     ]
 
 

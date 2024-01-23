@@ -765,7 +765,7 @@ def _main():
             args["selected_features"] = tuple(sorted(json.load(fil)))
 
     # Verify that all arguments are reflected in defaults.DEFAULTS.
-    for arg in args.keys():
+    for arg in args:
         assert (
             arg in defaults.DEFAULTS
         ), f"Argument {arg} missing from defaults.DEFAULTS!"
