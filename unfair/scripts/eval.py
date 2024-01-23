@@ -450,9 +450,7 @@ def parse_opened_exp(
     #     old = False
     # else:
     receiver_names = {flw[1][0] for flw in params["flowsets"]}
-    assert (
-        len(receiver_names) == 1
-    ), f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
+    assert receiver_names, "Cannot determine receiver."
 
     flw_to_pkts = dict()
     for receiver_name in receiver_names:
