@@ -36,7 +36,7 @@
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=100",
                 "--batch-size=10",
-                "--log=/tmp/unfairness_monitor.log",
+                "--log=/tmp/unfairmon.log",
                 "--skip-localhost",
                 "--listen-ports=9999",
                 "--debug",
@@ -66,7 +66,7 @@
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/unfairness_monitor_main.log",
+                "--log=/tmp/unfairmon_main.log",
                 // "--disable-inference"
             ],
             "autoReload": {
@@ -94,7 +94,7 @@
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/unfairness_monitor_main.log",
+                "--log=/tmp/unfairmon_main.log",
                 // "--skip-localhost",
                 "--constrain-port",
                 "--debug",

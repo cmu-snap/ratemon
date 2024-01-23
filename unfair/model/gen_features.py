@@ -123,7 +123,7 @@ def parse_opened_exp(
     }
     flws = list(flw_to_cca.keys())
 
-    # NOTE: Se no longer use the sender pcap.
+    # NOTE: We no longer use the sender pcap.
     #
     # sender_pcap = path.join(exp_dir, f"sender-tcpdump-{exp.name}.pcap")
     # Look up the name of the receiver host.

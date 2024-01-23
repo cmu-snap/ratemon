@@ -262,7 +262,32 @@ class Exp:
             self.name = self.name[:-4]
 
         # unfair-pcc-cubic-8bw-30rtt-64q-1pcc-1cubic-0bitrate-0bitrate-35.60ping-unfairTrue-bessTrue-100s-20201118T114242
-        if len(toks) == 11:
+
+        # unfair-36.0bw-164.0rtt-2048q-bbr,cubic-1,7-0.16ping-unfairFalse-bessTrue-id885164571-20240123T092126.tar.gz
+        if "-id" in sim:
+            (
+                _,
+                bw_Mbps,
+                rtt_ms,
+                queue_p,
+                ccas,
+                flows,
+                ping_ms,
+                use_unfairmon,
+                use_bess,
+                _,
+            ) = toks
+            ccas = tuple(ccas.split(","))
+            flows = tuple(int(f) for f in flows.split(","))
+            self.cca_1_name = ccas[0]
+            self.cca_2_name = ccas[1]
+            self.cca_back_name = ""
+            cca_1_flws = flows[0]
+            cca_2_flws = flows[1]
+            cca_back_flws = "0"
+            bitrate_Mbps_1 = "0bitrate"
+            bitrate_Mbps_1 = "0bitrate"
+        elif len(toks) == 11:
             (
                 _,
                 self.cca_1_name,
@@ -272,7 +297,7 @@ class Exp:
                 queue_p,
                 cca_1_flws,
                 cca_2_flws,
-                use_unfairness_monitor,
+                use_unfairmon,
                 end_time,
                 _,
             ) = toks
@@ -294,7 +319,7 @@ class Exp:
                 cca_1_flws,
                 cca_2_flws,
                 ping_ms,
-                use_unfairness_monitor,
+                use_unfairmon,
                 use_bess,
                 end_time,
                 _,
@@ -317,7 +342,7 @@ class Exp:
                 bitrate_Mbps_1,
                 bitrate_Mbps_2,
                 ping_ms,
-                use_unfairness_monitor,
+                use_unfairmon,
                 use_bess,
                 end_time,
                 _,
@@ -341,7 +366,7 @@ class Exp:
                 bitrate_Mbps_2,
                 bitrate_Mbps_back,
                 ping_ms,
-                use_unfairness_monitor,
+                use_unfairmon,
                 use_bess,
                 end_time,
                 _,
@@ -367,7 +392,7 @@ class Exp:
         self.ping_ms = float(ping_ms[:-4])
         self.ping_us = self.ping_ms * 1e3
         # Whether the unfairness monitor was used in this experiment.
-        self.use_unfairness_monitor = use_unfairness_monitor == "unfairTrue"
+        self.use_unfairmon = use_unfairmon == "unfairTrue"
         # Whether bess was used for bottleneck emulation in this experiment.
         self.use_bess = use_bess == "bessTrue"
         # Experiment duration (s).

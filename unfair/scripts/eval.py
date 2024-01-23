@@ -737,9 +737,9 @@ def main(args):
         if (isinstance(exp_results, tuple) and -1 not in exp_results[1:])
     }
     # Experiments in which the unfairness monitor was enabled.
-    enabled = {exp for exp in results.keys() if exp.use_unfairness_monitor}
+    enabled = {exp for exp in results.keys() if exp.use_unfairmon}
     # Experiments in which the unfairness monitor was disabled.
-    disabled = {exp for exp in results.keys() if not exp.use_unfairness_monitor}
+    disabled = {exp for exp in results.keys() if not exp.use_unfairmon}
 
     # Match each enabled experiment with its corresponding disabled experiment and
     # compute the JFI delta. matched is a dict mapping the name of the enabled
