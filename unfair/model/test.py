@@ -126,7 +126,7 @@ def process_one(idx, total, exp_flp, out_dir, net, warmup_prc, scl_prms_flp,
             dat_extra=dat_extra).raw(),
         graph_prms={
             "analyze_features": False, "out_dir": out_dir,
-            "sort_by_unfairness": False, "dur_s": exp.dur_s
+            "sort_by_unfairness": False,  # "dur_s": exp.dur_s
         })
 
     print("Accuracy:", accuracy)

@@ -98,7 +98,7 @@ def process_one(sim_flp, out_dir, net, warmup_prc, scl_prms_flp, standardize, al
         graph_prms={
             "out_dir": out_dir,
             "sort_by_unfairness": False,
-            "dur_s": sim.dur_s
+            # "dur_s": sim.dur_s
         })
 
     all_accuracy.append(accuracy)

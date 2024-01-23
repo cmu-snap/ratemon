@@ -231,7 +231,7 @@ class BinaryModelWrapper(PytorchModelWrapper):
         the last packet in the window.
         """
         self.log("Creating arrival time buckets...")
-        # 100x the min RTT (as determined by the experiment parameters).
+        # Bucket duration. 100x the min RTT (as determined by the experiment parameters).
         dur_us = 100 * 2 * (exp.edge_delays[0] * 2 + exp.btl_delay_us)
         # Determine the safe starting index. Do not pick indices
         # between 0 and start_idx to make sure that all windows ending
@@ -257,7 +257,11 @@ class BinaryModelWrapper(PytorchModelWrapper):
         else:
             # The number of windows is the number of times the window
             # durations fits within the experiment.
-            num_wins = 10 * math.floor(exp.dur_s * 1e6 / dur_us)
+            exp_dur_us = (
+                dat_in[-1][features.ARRIVAL_TIME_FET]
+                - dat_in[0][features.ARRIVAL_TIME_FET]
+            )
+            num_wins = 10 * math.floor(exp_dur_us / dur_us)
             # Select random intervals from this experiment to create the
             # new input data. win_idx is the index into
             # dat_in_new. pkt_idx is the index of the last packet in this

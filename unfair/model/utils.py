@@ -300,7 +300,8 @@ class Exp:
                 cca_1_flws,
                 cca_2_flws,
                 use_unfairmon,
-                end_time,
+                _,
+                # end_time,
                 _,
             ) = toks
             self.cca_back_name = ""
@@ -323,7 +324,8 @@ class Exp:
                 ping_ms,
                 use_unfairmon,
                 use_bess,
-                end_time,
+                _,
+                # end_time,
                 _,
             ) = toks
             self.cca_back_name = ""
@@ -346,7 +348,8 @@ class Exp:
                 ping_ms,
                 use_unfairmon,
                 use_bess,
-                end_time,
+                _,
+                # end_time,
                 _,
             ) = toks
             self.cca_back_name = ""
@@ -370,7 +373,8 @@ class Exp:
                 ping_ms,
                 use_unfairmon,
                 use_bess,
-                end_time,
+                _,
+                # end_time,
                 _,
             ) = toks
         else:
@@ -398,7 +402,7 @@ class Exp:
         # Whether bess was used for bottleneck emulation in this experiment.
         self.use_bess = use_bess == "bessTrue"
         # Experiment duration (s).
-        self.dur_s = float(end_time[:-1])
+        # self.dur_s = float(end_time[:-1])
 
         if self.use_bess:
             # Link bandwidth (Mbps).

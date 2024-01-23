@@ -321,7 +321,7 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         dat_in,
         dat_out,
         dat_extra,
-        graph_prms={"out_dir": out_dir, "sort_by_unfairness": True, "dur_s": None},
+        graph_prms={"out_dir": out_dir, "sort_by_unfairness": True},  # , "dur_s": None},
     )
     logging.info(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 
