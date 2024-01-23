@@ -131,9 +131,13 @@ def parse_opened_exp(
     # In a FlowSet, the second entry is the receiver Host, where the first entry is the
     # name.
     receiver_names = {flw[1][0] for flw in params["flowsets"]}
-    assert len(receiver_names) == 1, f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
+    assert (
+        len(receiver_names) == 1
+    ), f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
     receiver_name = receiver_names.pop()
-    assert receiver_name == "receiver", f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
+    assert (
+        receiver_name == "receiver"
+    ), f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
     receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
     # if "receiver" in params:

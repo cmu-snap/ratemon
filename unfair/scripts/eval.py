@@ -247,7 +247,7 @@ def plot_flows_over_time(
     if sender_fairness and flw_to_sender is not None:
         sender_to_tputs = dict()
         # Accumulate the throughput of each sender.
-        for (throughputs, flw) in lines:
+        for throughputs, flw in lines:
             sender = flw_to_sender[flw]
             if sender not in sender_to_tputs:
                 sender_to_tputs[sender] = [
@@ -279,7 +279,9 @@ def plot_flows_over_time(
                 #     raise
         lines = [
             (throughputs, f"Sender {sender_idx + 1}: {num_flows} {cca}")
-            for sender_idx, (cca, num_flows, throughputs) in enumerate(sender_to_tputs.values())
+            for sender_idx, (cca, num_flows, throughputs) in enumerate(
+                sender_to_tputs.values()
+            )
         ]
     else:
         lines = [(throughputs, flw_to_cca[flw]) for (throughputs, flw) in lines]
@@ -296,7 +298,7 @@ def plot_flows_over_time(
         colors=([COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None),
         bbox_to_anchor=((0.5, 1.15) if sender_fairness else None),
         legend_ncol=(2 if sender_fairness else 1),
-        figsize=(5, 2.6)
+        figsize=(5, 2.6),
     )
 
 
@@ -423,52 +425,43 @@ def parse_opened_exp(
         params = json.load(fil)
 
     # Look up the name of the receiver host.
-    if "receiver" in params:
-        receiver_pcap = path.join(
-            exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
-        )
-        old = False
-    else:
-        receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
-        old = True
+    # if "receiver" in params:
+    #     receiver_pcap = path.join(
+    #         exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
+    #     )
+    #     old = False
+    # else:
+    receiver_names = {flw[1][0] for flw in params["flowsets"]}
+    assert (
+        len(receiver_names) == 1
+    ), f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
+    receiver_name = receiver_names.pop()
+    assert (
+        receiver_name == "receiver"
+    ), f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
+    receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
+
     if not path.exists(receiver_pcap):
-        logging.info("Warning: Missing receiver pcap file in: %s", exp_flp)
+        print(f"Warning: Missing pcap file in: {exp_flp} --- {receiver_pcap}")
         return -1
 
-    if old:
-        # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-        # form: (sender port, receiver port)
-        #
-        # { (sender port, receiver port): CCA }
-        flw_to_cca = {
-            (sender_port, flw[4]): flw[0]
-            for flw in params["flowsets"]
-            for sender_port in flw[3]
-        }
-        # Map flow to sender IP address (WAN). Each flow tuple will be unique because
-        # the receiver ports are unique across flows from different senders.
-        flw_to_sender = {
-            (sender_port, flw[4]): params["client"][3]
-            for flw in params["flowsets"]
-            for sender_port in flw[3]
-        }
-    else:
-        # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
-        # form: (sender port, receiver port)
-        #
-        # { (sender port, receiver port): CCA }
-        flw_to_cca = {
-            (sender_port, flw[5]): flw[1]
-            for flw in params["flowsets"]
-            for sender_port in flw[4]
-        }
-        # Map flow to sender IP address (WAN). Each flow tuple will be unique because
-        # the receiver ports are unique across flows from different senders.
-        flw_to_sender = {
-            (sender_port, flw[5]): flw[0][6]
-            for flw in params["flowsets"]
-            for sender_port in flw[4]
-        }
+    # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
+    # form: (sender port, receiver port)
+    #
+    # { (sender port, receiver port): CCA }
+    flw_to_cca = {
+        (sender_port, flw[6]): flw[2]
+        for flw in params["flowsets"]
+        for sender_port in flw[5]
+    }
+    # Map flow to sender IP address (LAN). Each flow tuple will be unique because
+    # the receiver ports are unique across flows from different senders.
+    flw_to_sender = {
+        (sender_port, flw[6]): flw[0][7]
+        for flw in params["flowsets"]
+        for sender_port in flw[5]
+    }
+
     flws = list(flw_to_cca.keys())
     flw_to_pkts = utils.parse_packets(
         receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
@@ -478,7 +471,8 @@ def parse_opened_exp(
     logging.info("\tParsed packets: %s", receiver_pcap)
     flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
-    late_flows_port = max(flw[5] for flw in params["flowsets"])
+    # Highest receiver port.
+    late_flows_port = max(flw[6] for flw in params["flowsets"])
     late_flws = [
         flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
     ]
@@ -603,7 +597,6 @@ def group_and_box_plot(
     filename,
     num_buckets,
 ):
-
     category_to_values = {
         # Second, extract the value for all the exps in each category.
         xticks_transformer(category): sorted(
