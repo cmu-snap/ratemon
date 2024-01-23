@@ -276,6 +276,7 @@ class Exp:
                 use_unfairmon,
                 use_bess,
                 _,
+                _,
             ) = toks
             ccas = tuple(ccas.split(","))
             flows = tuple(int(f) for f in flows.split(","))
@@ -284,9 +285,10 @@ class Exp:
             self.cca_back_name = ""
             cca_1_flws = flows[0]
             cca_2_flws = flows[1]
-            cca_back_flws = "0"
+            cca_back_flws = 0
             bitrate_Mbps_1 = "0bitrate"
-            bitrate_Mbps_1 = "0bitrate"
+            bitrate_Mbps_2 = "0bitrate"
+            bitrate_Mbps_back = "0bitrate"
         elif len(toks) == 11:
             (
                 _,
@@ -375,11 +377,11 @@ class Exp:
             raise RuntimeError(f"Unexpected number of tokens in {sim}: {len(toks)}")
 
         # Number of CCA 1 flows.
-        self.cca_1_flws = int(cca_1_flws[: -(len(self.cca_1_name))])
+        self.cca_1_flws = cca_1_flws if isinstance(cca_1_flws, int) else int(cca_1_flws[: -(len(self.cca_1_name))])
         # Number of CCA 2 flows.
-        self.cca_2_flws = int(cca_2_flws[: -(len(self.cca_2_name))])
+        self.cca_2_flws = cca_2_flws if isinstance(cca_2_flws, int) else int(cca_2_flws[: -(len(self.cca_2_name))])
         # Number of CCA (background) flows.
-        self.cca_back_flws = int(cca_back_flws[: -(len(self.cca_back_name))])
+        self.cca_back_flws = cca_back_flws if isinstance(cca_back_flws, int) else int(cca_back_flws[: -(len(self.cca_back_name))])
         # The total number of flows.
         self.tot_flws = self.cca_1_flws + self.cca_2_flws
         # Bitrate for CCA 1 flows.
