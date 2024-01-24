@@ -448,20 +448,23 @@ def parse_opened_exp(
     receiver_name_to_ip = {flw[1][0]: flw[1][7] for flw in params["flowsets"]}
     assert receiver_name_to_ip, "Cannot determine receiver(s)."
 
+    # Need to process all PCAPs to build a combined record of all flows.
     flw_to_pkts = dict()
     for receiver_name, receiver_ip in receiver_name_to_ip.items():
         receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
-        # Need to process all PCAPs to build a combined record of all flows.
-
         if not path.exists(receiver_pcap):
-            print(f"Warning: Missing pcap file in: {exp_flp} --- {receiver_pcap}")
+            logging.error("Error: Missing pcap file in: %s --- %s", exp_flp, receiver_pcap)
             return -1
 
         for flw, pkts in utils.parse_packets(
             receiver_pcap, flw_to_cca, receiver_ip, select_tail_percent
         ).items():
-            flw_to_pkts[flw] = pkts
+            if sum(len(p) for p in pkts) > 0:
+                # Only add flow if parse_packets() found at least one packet. This is
+                # to support multiple receivers, where parse_packets() checks each
+                # receiver for all flows even if each only has a subset of flows.
+                flw_to_pkts[flw] = pkts
 
         logging.info("\tParsed packets: %s", receiver_pcap)
 
