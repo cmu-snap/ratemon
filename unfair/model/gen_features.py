@@ -720,17 +720,15 @@ def parse_opened_exp(
             mathis_tput_loss_event_rate_metric = features.make_win_metric(
                 features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win
             )
-            for j in range(len(output)):
+            for ler, out in zip(loss_event_rates, output):
                 # Use the loss event rate to compute 1 / sqrt(loss event rate).
-                output[j][sqrt_loss_event_rate_metric] = utils.safe_div(
-                    1, utils.safe_sqrt(loss_event_rates[j])
+                out[sqrt_loss_event_rate_metric] = utils.safe_div(
+                    1, utils.safe_sqrt(ler)
                 )
-                output[j][
-                    mathis_tput_loss_event_rate_metric
-                ] = utils.safe_mathis_tput_bps(
-                    output[j][features.PAYLOAD_FET],
-                    output[j][features.RTT_FET],
-                    loss_event_rates[j],
+                out[mathis_tput_loss_event_rate_metric] = utils.safe_mathis_tput_bps(
+                    out[features.PAYLOAD_FET],
+                    out[features.RTT_FET],
+                    ler,
                 )
 
         # NOTE: Disabled because not used.

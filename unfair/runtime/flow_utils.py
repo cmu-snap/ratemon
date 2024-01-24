@@ -5,7 +5,6 @@ import logging
 import sys
 import threading
 import time
-import typing
 
 from unfair.model import defaults, loss_event_rate, utils
 
@@ -121,9 +120,7 @@ class FlowDB(dict):
     def __init__(self):
         super().__init__()
         # Maps each sender IP address to a map of flows.
-        self._senders: typing.Dict[
-            int, typing.Set[typing.Tuple[int, int, int, int]]
-        ] = {}
+        self._senders = {}
         # Acquire this lock when adding, removing, or iterating over flows; no
         # need to acquire this lock updating a flow object.
         self.lock = threading.RLock()

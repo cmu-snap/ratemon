@@ -2,16 +2,16 @@
 
 import collections
 import logging
-import math
 
 from unfair.model import features
 
 
 class LossTracker:
     def __init__(self, flow, window_sizes=[8]):
+        assert window_sizes, "Must specific window_sizes."
         self.flow = flow
         self.window_sizes = window_sizes
-        self.largest_window = max(self.window_sizes) if window_sizes else None
+        self.largest_window = max(self.window_sizes)
         # Track which packets are definitely retransmissions. Ignore these
         # packets when estimating the RTT. Note that because we are doing
         # receiver-side retransmission tracking, it is possible that there are
