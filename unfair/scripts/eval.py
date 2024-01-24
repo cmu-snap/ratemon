@@ -368,7 +368,7 @@ def plot_bar(
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xlim(0, max(bar_xs) + 1)
-    plt.ylim(min(0, min(lines[0])), y_max)
+    plt.ylim(min(0, lines[0]), y_max)
     if title is not None:
         plt.title(title, fontsize=FONTSIZE)
     if labels[0] is not None:
@@ -387,7 +387,6 @@ def parse_opened_exp(
     exp_dir,
     out_flp,
     skip_smoothed,
-    receiver_ip,
     select_tail_percent,
     sender_fairness,
 ):
@@ -406,8 +405,12 @@ def parse_opened_exp(
                     out[0], utils.Exp
                 ), f"Improperly formatted results file: {out_flp}"
                 return out
-        except:
-            logging.exception("Failed to load results from: %s", out_flp)
+        except FileNotFoundError:
+            logging.exception("Cannot find results in: %s", out_flp)
+        except pickle.PickleError:
+            logging.exception("Pickle error when loads results from: %s", out_flp)
+        except AssertionError:
+            logging.exception("Improperly formatted results file: %s", out_flp)
     # Check for basic errors.
     if exp.name.startswith("FAILED"):
         logging.info("Error: Experimant failed: %s", exp_flp)
@@ -442,18 +445,11 @@ def parse_opened_exp(
         for sender_port in flw[5]
     }
 
-    # Look up the name of the receiver host.
-    # if "receiver" in params:
-    #     receiver_pcap = path.join(
-    #         exp_dir, f"{params['receiver'][0]}-tcpdump-{exp.name}.pcap"
-    #     )
-    #     old = False
-    # else:
-    receiver_names = {flw[1][0] for flw in params["flowsets"]}
-    assert receiver_names, "Cannot determine receiver."
+    receiver_name_to_ip = {flw[1][0]: flw[1][7] for flw in params["flowsets"]}
+    assert receiver_name_to_ip, "Cannot determine receiver(s)."
 
     flw_to_pkts = dict()
-    for receiver_name in receiver_names:
+    for receiver_name, receiver_ip in receiver_name_to_ip.items():
         receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
         # Need to process all PCAPs to build a combined record of all flows.
@@ -685,7 +681,6 @@ def main(args):
             args.untar_dir,
             path.join(args.out_dir, "individual_results"),
             False,
-            args.receiver_ip,
             args.select_tail_percent,
             args.sender_fairness,
             True,
@@ -1169,15 +1164,6 @@ def parse_args():
         "--prefix",
         help="A prefix to attach to output filenames.",
         required=False,
-        type=str,
-    )
-    parser.add_argument(
-        "--receiver-ip",
-        help=(
-            "The IPv4 address of the receiver interface on which the "
-            "PCAPs were captured."
-        ),
-        required=True,
         type=str,
     )
     parser.add_argument(

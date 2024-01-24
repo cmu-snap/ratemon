@@ -92,7 +92,6 @@ def parse_opened_exp(
     exp_dir,
     out_flp,
     skip_smoothed,
-    receiver_ip,
     select_tail_percent=None,
     sender_fairness=False,
 ):
@@ -112,6 +111,7 @@ def parse_opened_exp(
         return -1
     with open(params_flp, "r", encoding="utf-8") as fil:
         params = json.load(fil)
+
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
     # form: (sender port, receiver port)
     #
@@ -129,20 +129,13 @@ def parse_opened_exp(
     # Look up the name of the receiver host.
     # print("params", params)
     # In a FlowSet, the second entry is the receiver Host, where the first entry is the
-    # name.
-    receiver_names = {flw[1][0] for flw in params["flowsets"]}
+    # name and the 8th entry is the LAN IP.
+    receiver_name_to_ip = {flw[1][0]: flw[1][7] for flw in params["flowsets"]}
     assert (
-        len(receiver_names) == 1
-    ), f"For training, all flows must use the same receiver. Receivers: {receiver_names}"
-    receiver_name = receiver_names.pop()
-    assert (
-        receiver_name == "receiver"
-    ), f"For training, receiver should be named 'receiver'. Receiver: {receiver_name}"
+        len(receiver_name_to_ip) == 1
+    ), f"For training, must use a single receiver: {receiver_name_to_ip}"
+    receiver_name, receiver_ip = list(receiver_name_to_ip.items())[0]
     receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
-
-    # if "receiver" in params:
-    # else:
-    #     receiver_pcap = path.join(exp_dir, f"server-tcpdump-{exp.name}.pcap")
 
     # if not (path.exists(sender_pcap) and path.exists(receiver_pcap)):
     if not path.exists(receiver_pcap):
@@ -557,7 +550,7 @@ def parse_opened_exp(
                 elif metric.startswith(features.MATHIS_TPUT_LOSS_RATE_FET):
                     new = mathis_tput_raw
                 else:
-                    raise Exception(f"Unknown EWMA metric: {metric}")
+                    raise RuntimeError(f"Unknown EWMA metric: {metric}")
                 # Update the EWMA. If this is the first value, then use 0 are
                 # the old value.
                 output[j][metric] = utils.safe_update_ewma(
@@ -677,7 +670,7 @@ def parse_opened_exp(
                     # Populated below.
                     continue
                 else:
-                    raise Exception(f"Unknown windowed metric: {metric}")
+                    raise RuntimeError(f"Unknown windowed metric: {metric}")
                 output[j][metric] = new
 
             prev_seq = recv_seq
@@ -1166,7 +1159,7 @@ def parse_received_packets(
                     alpha,
                 )
         else:
-            raise Exception(f"Unknown EWMA metric: {metric}")
+            raise RuntimeError(f"Unknown EWMA metric: {metric}")
 
     # The index at which this window starts. Uninitialized for now.
     win_to_start_idx = {win: 0 for win in features.WINDOWS}
@@ -1278,7 +1271,7 @@ def parse_received_packets(
                     ],
                 )
             else:
-                raise Exception(f"Unknown windowed metric: {metric}")
+                raise RuntimeError(f"Unknown windowed metric: {metric}")
             fets[j][metric] = new
 
     # Make sure that all fets rows were used.
@@ -1314,7 +1307,6 @@ def parse_exp(
     untar_dir,
     out_dir,
     skip_smoothed,
-    receiver_ip,
     select_tail_percent,
     sender_fairness,
     always_reparse=False,
@@ -1337,7 +1329,6 @@ def parse_exp(
                     exp_dir,
                     out_flp,
                     skip_smoothed,
-                    receiver_ip,
                     select_tail_percent,
                     sender_fairness,
                 )
@@ -1396,15 +1387,6 @@ def _main():
         required=False,
         type=float,
     )
-    psr.add_argument(
-        "--receiver-ip",
-        help=(
-            "The IPv4 address of the receiver interface on which the "
-            "PCAPs were captured."
-        ),
-        required=True,
-        type=str,
-    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     exp_dir = args.exp_dir
@@ -1420,7 +1402,6 @@ def _main():
             untar_dir,
             out_dir,
             skip_smoothed,
-            args.receiver_ip,
             args.select_tail_percent,
             False,
         )
