@@ -454,7 +454,9 @@ def parse_opened_exp(
         receiver_pcap = path.join(exp_dir, f"{receiver_name}-tcpdump-{exp.name}.pcap")
 
         if not path.exists(receiver_pcap):
-            logging.error("Error: Missing pcap file in: %s --- %s", exp_flp, receiver_pcap)
+            logging.error(
+                "Error: Missing pcap file in: %s --- %s", exp_flp, receiver_pcap
+            )
             return -1
 
         for flw, pkts in utils.parse_packets(
