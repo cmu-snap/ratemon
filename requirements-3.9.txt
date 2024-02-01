@@ -7,7 +7,7 @@ flake8==4.0.1
 flake8-polyfill==1.0.2
 fonttools==4.27.1
 isort==5.10.1
-joblib==1.2.0
+joblib==1.3.2
 kiwisolver==1.3.1
 lazy-object-proxy==1.7.1
 matplotlib==3.3.4
@@ -44,8 +44,8 @@ python-dateutil==2.8.2
 PyYAML==6.0
 requirements-detector==0.7
 scapy==2.5.0
-scikit-learn==0.24.2
-scipy==1.11.1
+scikit-learn==1.4.0
+scipy==1.12.1
 setoptconf-tmp==0.3.1
 six==1.16.0
 snowballstemmer==2.2.0
