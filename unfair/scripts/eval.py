@@ -208,10 +208,11 @@ def plot_flows_over_time(
     initial_time = min(
         np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values()
     )
+    # Put packets into buckets of 100 milliseconds.
     for flw, pkts in flw_to_pkts.items():
         throughputs = []
         current_bucket = []
-        for idx in range(len(pkts)):
+        for idx, pkt in enumerate(pkts):
             if not current_bucket:
                 current_bucket = [idx]
                 continue
@@ -221,7 +222,7 @@ def plot_flows_over_time(
             # Create a bucket for every 100 milliseconds.
             if (
                 len(current_bucket) > 1
-                and pkts[idx][features.ARRIVAL_TIME_FET] - start_time > 500e3
+                and pkt[features.ARRIVAL_TIME_FET] - start_time > 500e3
             ):
                 end_idx = current_bucket[-1]
                 end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
@@ -244,6 +245,8 @@ def plot_flows_over_time(
 
         lines.append((throughputs, flw))
 
+    # If sender_fairness, then graph the total throughput of each sender instead of the
+    # throughput of each flow.
     if sender_fairness and flw_to_sender is not None:
         sender_to_tputs = dict()
         # Accumulate the throughput of each sender.
@@ -498,16 +501,28 @@ def parse_opened_exp(
         sender_fairness,
         flw_to_sender,
     )
+    sender_to_flws = collections.defaultdict(list)
+    for flw, sender in flw_to_sender.items():
+        sender_to_flws[sender].append(flw)
+    for sender, flws in sender_to_flws.items():
+        plot_flows_over_time(
+            exp,
+            out_flp[:-4] + f"_flows-from-{sender}.pdf",
+            {flw: flw_to_pkts[flw] for flw in flws},
+            flw_to_cca,
+        )
 
     # Remove data from before the late flows start.
-    for flw in flw_to_pkts:
-        if len(flw_to_pkts[flw]) == 0:
+    for flw, pkts in flw_to_pkts.items():
+        if len(pkts) == 0:
             flw_to_pkts[flw] = []
             continue
-        for idx, arr_time in enumerate(flw_to_pkts[flw][features.ARRIVAL_TIME_FET]):
+        cutoff_idx = 0
+        for idx, arr_time in enumerate(pkts[features.ARRIVAL_TIME_FET]):
             if arr_time >= earliest_late_flow_start_time:
+                cutoff_idx = idx
                 break
-        flw_to_pkts[flw] = flw_to_pkts[flw][idx:]
+        flw_to_pkts[flw] = pkts[cutoff_idx:]
 
     # zipped_arr_times, zipped_dat = utils.zip_timeseries(
     #     [flw_to_pkts_receiver[flw][features.ARRIVAL_TIME_FET] for flw in flws],
@@ -679,6 +694,8 @@ def main(args):
     print("Logging to:", log_flp)
     logging.info("Evaluating experiments in: %s", args.exp_dir)
 
+    our_label = "ServicePolicy" if args.sender_fairness else "FlowPolicy"
+
     # Find all experiments.
     pcaps = [
         (
@@ -731,9 +748,9 @@ def main(args):
         for exp_results in results
         if (isinstance(exp_results, tuple) and -1 not in exp_results[1:])
     }
-    # Experiments in which the unfairness monitor was enabled.
+    # Experiments in which the unfairmon was enabled.
     enabled = {exp for exp in results if exp.use_unfairmon}
-    # Experiments in which the unfairness monitor was disabled.
+    # Experiments in which the unfairmon was disabled.
     disabled = {exp for exp in results if not exp.use_unfairmon}
 
     # Match each enabled experiment with its corresponding disabled experiment and
@@ -742,7 +759,7 @@ def main(args):
     #     ( disabled JFI, enabled JFI, difference in JFI from enabled to disabled )
     matched = {}
     for enabled_exp in enabled:
-        # Find the corresponding experiment with the unfairness monitor disabled.
+        # Find the corresponding experiment with the unfairmon disabled.
         target_disabled_name = enabled_exp.name.replace("unfairTrue", "unfairFalse")
         # Strip off trailing timestamp (everything after final "-").
         target_disabled_name = target_disabled_name[
@@ -755,7 +772,7 @@ def main(args):
                 break
         if target_disabled_exp is None:
             logging.info(
-                "Warning: Cannot find experiment with unfairness monitor disabled: %s",
+                "Warning: Cannot find experiment with unfairmon disabled: %s",
                 target_disabled_name,
             )
             continue
@@ -845,45 +862,45 @@ def main(args):
     plot_hist(
         args,
         lines=[jfis_disabled, jfis_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="JFI",
         filename="jfi_hist.pdf",
-        # title="Histogram of JFI,\nwith and without unfairness monitor",
+        # title="Histogram of JFI,\nwith and without RateMon",
     )
     plot_hist(
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="Overall link utilization (%)",
         filename="overall_util_hist.pdf",
-        # title="Histogram of overall link utilization,\nwith and without unfairness monitor",
+        # title="Histogram of overall link utilization,\nwith and without RateMon",
     )
     plot_hist(
         args,
         lines=[fair_flows_utils_disabled, fair_flows_utils_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="Total link utilization of incumbent flows (%)",
         filename="fair_flows_util_hist.pdf",
-        # title='Histogram of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of "incumbent" flows link utilization,\nwith and without RateMon',
     )
     plot_hist(
         args,
         lines=[unfair_flows_utils_disabled, unfair_flows_utils_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="Link utilization of newcomer flow (%)",
         filename="unfair_flows_util_hist.pdf",
-        # title='Histogram of newcomer flow link utilization,\nwith and without unfairness monitor',
+        # title='Histogram of newcomer flow link utilization,\nwith and without RateMon',
     )
     plot_cdf(
         args,
         lines=[jfis_disabled, jfis_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="JFI",
         x_max=1.0,
         filename="jfi_cdf.pdf",
         linestyles=["dashed", "dashdot"],
         colors=COLORS[:2],
-        # title="CDF of JFI,\nwith and without unfairness monitor",
+        # title="CDF of JFI,\nwith and without RateMon",
     )
     plot_cdf(
         args,
@@ -891,26 +908,26 @@ def main(args):
             [100 - x for x in overall_utils_disabled],
             [100 - x for x in overall_utils_enabled],
         ],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="Unused link capacity (%)",
         x_max=100,
         filename="unused_util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
         colors=COLORS[:2],
         legendloc="lower right",
-        # title="CDF of unused link capacity,\nwith and without unfairness monitor",
+        # title="CDF of unused link capacity,\nwith and without RateMon",
     )
     plot_cdf(
         args,
         lines=[overall_utils_disabled, overall_utils_enabled],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", our_label],
         x_label="Overall link utilization (%)",
         x_max=100,
         filename="util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
         colors=COLORS[:2],
         legendloc="upper left",
-        # title="CDF of overall link utilization,\nwith and without unfairness monitor",
+        # title="CDF of overall link utilization,\nwith and without RateMon",
     )
     plot_cdf(
         args,
@@ -920,11 +937,11 @@ def main(args):
             fair_flows_utils_disabled,
             fair_flows_utils_enabled,
         ],
-        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        labels=["Perfectly Fair", "Original", our_label],
         x_label="Total link utilization of incumbent flows (%)",
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
-        # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of "incumbent" flows link utilization,\nwith and without RateMon',
         colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
     plot_cdf(
@@ -935,11 +952,11 @@ def main(args):
             unfair_flows_utils_disabled,
             unfair_flows_utils_enabled,
         ],
-        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        labels=["Perfectly Fair", "Original", our_label],
         x_label="Link utilization of newcomer flow (%)",
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
-        # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
+        # title='CDF of newcomer flow link utilization,\nwith and without RateMon',
         colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
 
