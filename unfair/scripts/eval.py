@@ -131,7 +131,7 @@ def plot_box(
     plt.xlabel(x_label, fontsize=FONTSIZE)
     plt.ylabel(y_label, fontsize=FONTSIZE)
     plt.xticks(
-        range(1, len(x_ticks) + 1),
+        list(range(1, len(x_ticks) + 1)),
         x_ticks,
         rotation=45 if rotate else 0,
     )
@@ -392,6 +392,7 @@ def parse_opened_exp(
     skip_smoothed,
     select_tail_percent,
     sender_fairness,
+    classifier="cca",
 ):
     # skip_smoothed is not used but is kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -511,6 +512,10 @@ def parse_opened_exp(
             {flw: flw_to_pkts[flw] for flw in flws},
             flw_to_cca,
         )
+    # TODO: Add markers for bottleneck
+    # Need to get bottleneck info in here
+    # So, need to get config file in here?
+    # Bottleneck info is not in the
 
     # Remove data from before the late flows start.
     for flw, pkts in flw_to_pkts.items():
@@ -535,28 +540,31 @@ def parse_opened_exp(
     # zipped_dat = zipped_dat[idx:]
 
     jfi = get_jfi(flw_to_pkts, sender_fairness, flw_to_sender)
-    if exp.use_bess:
-        overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
-        fair_flows_util = get_avg_util(
-            exp.bw_bps,
-            {
-                flw: pkts
-                for flw, pkts in flw_to_pkts.items()
-                if flw[1] != late_flows_port
-            },
-        )
-        unfair_flows_util = get_avg_util(
-            exp.bw_bps,
-            {
-                flw: pkts
-                for flw, pkts in flw_to_pkts.items()
-                if flw[1] == late_flows_port
-            },
-        )
-    else:
-        overall_util = fair_flows_util = unfair_flows_util = 0
 
-    out = (exp, jfi, overall_util, fair_flows_util, unfair_flows_util)
+    # Calculate class-based utilization numbers.
+    if exp.use_bess:
+        # Determine a mapping from class to flows in that class.
+        class_to_flws = collections.defaultdict(list)
+        classifier = CLASSIFIERS[classifier]
+        for flw in params["flowsets"]:
+            flow_class = classifier(flw)
+            for sender_port in flw[5]:
+                class_to_flws[flow_class].append((sender_port, flw[6]))
+
+        overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
+        # Calculate the utilization of each class.
+        class_to_util = {
+            flow_class: get_avg_util(
+                exp.bw_bps,
+                {flw: flw_to_pkts[flw] for flw in flws},
+            )
+            for flow_class, flws in class_to_flws.items()
+        }
+    else:
+        overall_util = 0
+        class_to_util = {}
+
+    out = (exp, jfi, overall_util, class_to_util)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
@@ -702,10 +710,11 @@ def main(args):
             path.join(args.exp_dir, exp),
             args.untar_dir,
             path.join(args.out_dir, "individual_results"),
-            False,
+            False,  # skip_smoothed
             args.select_tail_percent,
             args.sender_fairness,
-            True,
+            "start_time_s",  # classifier
+            True,  # always_reparse
             parse_opened_exp,
         )
         for exp in sorted(os.listdir(args.exp_dir))
@@ -776,21 +785,57 @@ def main(args):
                 target_disabled_name,
             )
             continue
+        matched[enabled_exp] = (
+            results[target_disabled_exp],
+            results[enabled_exp],
+        )
 
+    # Determine the experiment category and make sure that all experiments are from the
+    # same category.
+    categories = set()
+    for exp in matched:
+        exp_flp = path.join(args.exp_dir, exp.name)
+        params_flp = path.join(exp_flp, f"{exp.name}.json")
+        if not path.exists(params_flp):
+            logging.info(
+                "Error: Cannot find params file (%s) in: %s", params_flp, exp_flp
+            )
+            return -1
+        with open(params_flp, "r", encoding="utf-8") as fil:
+            params = json.load(fil)
+        categories.add(params["category"])
+    assert len(categories) == 1
+    category = categories.pop()
+
+    # Call category-specific evaluation function.
+    ret = EVALS[category](args, our_label, matched)
+
+    logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
+    return ret
+
+
+def eval_shared(args, our_label, matched):
+    """Generate graphs for the simple shared bottleneck experiments."""
+    matched_results = {}
+    for enabled_exp, (disabled_results, enabled_results) in matched.items():
         (
             jfi_disabled,
             overall_util_disabled,
-            fair_flows_util_disabled,
-            unfair_flows_util_disabled,
-        ) = results[target_disabled_exp]
+            class_to_util_disabled,
+        ) = disabled_results
         (
             jfi_enabled,
             overall_util_enabled,
-            fair_flows_util_enabled,
-            unfair_flows_util_enabled,
-        ) = results[enabled_exp]
+            class_to_util_enabled,
+        ) = enabled_results
 
-        matched[enabled_exp] = (
+        assert tuple(sorted(class_to_util_disabled.keys())) == (0, 20)
+        incumbent_flows_util_disabled = class_to_util_disabled[0]
+        newcomer_flows_util_disabled = class_to_util_disabled[20]
+        incumbent_flows_util_enabled = class_to_util_enabled[0]
+        newcomer_flows_util_enabled = class_to_util_disabled[20]
+
+        matched_results[enabled_exp] = (
             jfi_disabled,  # 0
             jfi_enabled,  # 1
             jfi_enabled - jfi_disabled,  # 2
@@ -798,24 +843,26 @@ def main(args):
             overall_util_disabled * 100,  # 4
             overall_util_enabled * 100,  # 5
             (overall_util_enabled - overall_util_disabled) * 100,  # 6
-            fair_flows_util_disabled * 100,  # 7
-            fair_flows_util_enabled * 100,  # 8
-            (fair_flows_util_enabled - fair_flows_util_disabled) * 100,  # 9
-            unfair_flows_util_disabled * 100,  # 10
-            unfair_flows_util_enabled * 100,  # 11
-            (unfair_flows_util_enabled - unfair_flows_util_disabled) * 100,  # 12
+            incumbent_flows_util_disabled * 100,  # 7
+            incumbent_flows_util_enabled * 100,  # 8
+            (incumbent_flows_util_enabled - incumbent_flows_util_disabled) * 100,  # 9
+            newcomer_flows_util_disabled * 100,  # 10
+            newcomer_flows_util_enabled * 100,  # 11
+            (newcomer_flows_util_enabled - newcomer_flows_util_disabled) * 100,  # 12
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
-        json.dump({exp.name: val for exp, val in matched.items()}, fil, indent=4)
+        json.dump(
+            {exp.name: val for exp, val in matched_results.items()}, fil, indent=4
+        )
 
     logging.info(
         "Matched experiments: %d\n%s",
-        len(matched),
+        len(matched_results),
         "\n\t".join(
             [
                 f"{exp.name}: Overall util (enabled): {vals[5]:.2f} %"
-                for exp, vals in matched.items()
+                for exp, vals in matched_results.items()
             ]
         ),
     )
@@ -828,17 +875,17 @@ def main(args):
         overall_utils_disabled,
         overall_utils_enabled,
         overall_util_deltas_percent,
-        fair_flows_utils_disabled,
-        fair_flows_utils_enabled,
-        fair_flows_util_deltas_percent,
-        unfair_flows_utils_disabled,
-        unfair_flows_utils_enabled,
-        unfair_flows_util_deltas_percent,
-    ) = list(zip(*matched.values()))
+        incumbent_flows_utils_disabled,
+        incumbent_flows_utils_enabled,
+        incumbent_flows_util_deltas_percent,
+        newcomer_flows_utils_disabled,
+        newcomer_flows_utils_enabled,
+        newcomer_flows_util_deltas_percent,
+    ) = list(zip(*matched_results.values()))
 
     # Plot the fair rates in the experiment configurations so that we can see if the
     # randomly-chosen experiments are actually imbalanced.
-    fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched]
+    fair_rates_Mbps = [exp.target_per_flow_bw_Mbps for exp in matched_results]
     plot_cdf(
         args,
         lines=[fair_rates_Mbps],
@@ -877,18 +924,18 @@ def main(args):
     )
     plot_hist(
         args,
-        lines=[fair_flows_utils_disabled, fair_flows_utils_enabled],
+        lines=[incumbent_flows_utils_disabled, incumbent_flows_utils_enabled],
         labels=["Original", our_label],
         x_label="Total link utilization of incumbent flows (%)",
-        filename="fair_flows_util_hist.pdf",
+        filename="incumbent_flows_util_hist.pdf",
         # title='Histogram of "incumbent" flows link utilization,\nwith and without RateMon',
     )
     plot_hist(
         args,
-        lines=[unfair_flows_utils_disabled, unfair_flows_utils_enabled],
+        lines=[newcomer_flows_utils_disabled, newcomer_flows_utils_enabled],
         labels=["Original", our_label],
         x_label="Link utilization of newcomer flow (%)",
-        filename="unfair_flows_util_hist.pdf",
+        filename="newcomer_flows_util_hist.pdf",
         # title='Histogram of newcomer flow link utilization,\nwith and without RateMon',
     )
     plot_cdf(
@@ -933,14 +980,14 @@ def main(args):
         args,
         lines=[
             # Expected total utilization of incumbent flows.
-            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched],
-            fair_flows_utils_disabled,
-            fair_flows_utils_enabled,
+            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched_results],
+            incumbent_flows_utils_disabled,
+            incumbent_flows_utils_enabled,
         ],
         labels=["Perfectly Fair", "Original", our_label],
         x_label="Total link utilization of incumbent flows (%)",
         x_max=100,
-        filename="fair_flows_util_cdf.pdf",
+        filename="incumbent_flows_util_cdf.pdf",
         # title='CDF of "incumbent" flows link utilization,\nwith and without RateMon',
         colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
@@ -948,14 +995,14 @@ def main(args):
         args,
         lines=[
             # Expected total utilization of newcomer flows.
-            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched],
-            unfair_flows_utils_disabled,
-            unfair_flows_utils_enabled,
+            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched_results],
+            newcomer_flows_utils_disabled,
+            newcomer_flows_utils_enabled,
         ],
         labels=["Perfectly Fair", "Original", our_label],
         x_label="Link utilization of newcomer flow (%)",
         x_max=100,
-        filename="unfair_flows_util_cdf.pdf",
+        filename="newcomer_flows_util_cdf.pdf",
         # title='CDF of newcomer flow link utilization,\nwith and without RateMon',
         colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
     )
@@ -1000,10 +1047,10 @@ def main(args):
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
-        "+" if np.mean(fair_flows_util_deltas_percent) > 0 else "",
-        np.mean(fair_flows_util_deltas_percent),
-        np.std(fair_flows_util_deltas_percent),
-        np.var(fair_flows_util_deltas_percent),
+        "+" if np.mean(incumbent_flows_util_deltas_percent) > 0 else "",
+        np.mean(incumbent_flows_util_deltas_percent),
+        np.std(incumbent_flows_util_deltas_percent),
+        np.var(incumbent_flows_util_deltas_percent),
     )
     logging.info(
         (
@@ -1013,16 +1060,16 @@ def main(args):
             "\tStddev: %.4f %%\n"
             "\tVar: %.4f %%"
         ),
-        "+" if np.mean(unfair_flows_util_deltas_percent) > 0 else "",
-        np.mean(unfair_flows_util_deltas_percent),
-        np.std(unfair_flows_util_deltas_percent),
-        np.var(unfair_flows_util_deltas_percent),
+        "+" if np.mean(newcomer_flows_util_deltas_percent) > 0 else "",
+        np.mean(newcomer_flows_util_deltas_percent),
+        np.std(newcomer_flows_util_deltas_percent),
+        np.var(newcomer_flows_util_deltas_percent),
     )
 
     # Break down utilization based on experiment parameters.
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.bw_Mbps,
         lambda result: result[5],
         lambda x: x,
@@ -1034,7 +1081,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.target_per_flow_bw_Mbps,
         lambda result: result[5],
         lambda x: x,
@@ -1046,7 +1093,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.rtt_us,
         lambda result: result[5],
         lambda x: int(x / 1e3),
@@ -1058,7 +1105,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         get_queue_mult,
         lambda result: result[5],
         lambda x: x,
@@ -1070,7 +1117,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.cca_1_flws,
         lambda result: result[5],
         lambda x: x,
@@ -1084,7 +1131,7 @@ def main(args):
     # Break down JFI based on experiment parameters.
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.bw_bps,
         lambda result: result[1],
         lambda x: int(x / 1e6),
@@ -1096,7 +1143,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.target_per_flow_bw_Mbps,
         lambda result: result[1],
         lambda x: x,
@@ -1108,7 +1155,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.rtt_us,
         lambda result: result[1],
         lambda x: int(x / 1e3),
@@ -1120,7 +1167,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         get_queue_mult,
         lambda result: result[1],
         lambda x: x,
@@ -1132,7 +1179,7 @@ def main(args):
     )
     group_and_box_plot(
         args,
-        matched,
+        matched_results,
         lambda exp: exp.cca_1_flws,
         lambda result: result[1],
         lambda x: x,
@@ -1142,9 +1189,15 @@ def main(args):
         "incumbent_flows_vs_jfi.pdf",
         num_buckets=10,
     )
-
-    logging.info("Done analyzing - time: %.2f seconds", time.time() - start_time_s)
     return 0
+
+
+def eval_multibottleneck(args, our_label, matched):
+    raise NotImplementedError()
+
+
+def eval_background(args, our_label, matched):
+    raise NotImplementedError()
 
 
 def parse_args():
@@ -1200,6 +1253,28 @@ def parse_args():
     PREFIX = "" if args.prefix is None else f"{args.prefix}_"
     return args
 
+
+# Used to group flows into classes based on a particular parameter.
+# Examples of classes:
+#     CCA, e.g., Cubic vs. BBR
+#     Flow start time, e.g., incumbent vs. newcomer
+#     Sender, e.g., sender-0 vs. sender-1.
+#     Receiver, e.g., receiver-0 vs. sink.
+# A flow's class is separate from whether unfairmon is enabled or disabled at the
+# experiment level
+CLASSIFIERS = {
+    "sender": lambda flw: flw[0][0],
+    "receiver": lambda flw: flw[1][0],
+    "cca": lambda flw: flw[2],
+    "start_time_s": lambda flw: flw[3],
+}
+# The evaluation function is specific to the experiment category.
+# "category" is configured in the original config JSON.
+EVALS = {
+    "shared": eval_shared,
+    "multibottleneck": eval_multibottleneck,
+    "background": eval_background,
+}
 
 if __name__ == "__main__":
     sys.exit(main(parse_args()))

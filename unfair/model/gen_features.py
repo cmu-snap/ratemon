@@ -94,6 +94,7 @@ def parse_opened_exp(
     skip_smoothed,
     select_tail_percent=None,
     sender_fairness=False,
+    classifier=None,
 ):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
@@ -708,9 +709,9 @@ def parse_opened_exp(
                 )
                 continue
             # Fill in loss event rate.
-            output[
-                features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)
-            ] = loss_event_rates
+            output[features.make_win_metric(features.LOSS_EVENT_RATE_FET, win)] = (
+                loss_event_rates
+            )
 
             # Fill in the sqrt of the loss event rate and the mathis tput based on loss
             # event rate.
@@ -1306,7 +1307,8 @@ def parse_exp(
     out_dir,
     skip_smoothed,
     select_tail_percent,
-    sender_fairness,
+    sender_fairness=False,
+    classifier=None,
     always_reparse=False,
     parse_func=parse_opened_exp,
 ):
@@ -1329,6 +1331,7 @@ def parse_exp(
                     skip_smoothed,
                     select_tail_percent,
                     sender_fairness,
+                    classifier,
                 )
             except AssertionError:
                 traceback.print_exc()
@@ -1401,7 +1404,6 @@ def _main():
             out_dir,
             skip_smoothed,
             args.select_tail_percent,
-            False,
         )
         for exp in sorted(os.listdir(exp_dir))
         if exp.endswith(".tar.gz")
