@@ -1215,7 +1215,7 @@ def eval_background(args, our_label, matched):
         foreground_flows_util_disabled = class_to_util_disabled["receiver"]
         background_flows_util_disabled = class_to_util_disabled["sink"]
         foreground_flows_util_enabled = class_to_util_enabled["receiver"]
-        background_flows_util_enabled = class_to_util_disabled["sink"]
+        background_flows_util_enabled = class_to_util_enabled["sink"]
 
         matched_results[enabled_exp] = (
             jfi_disabled,  # 0
