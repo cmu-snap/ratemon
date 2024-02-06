@@ -1425,10 +1425,10 @@ def _main():
     print(f"Num files: {len(pcaps)}")
     tim_srt_s = time.time()
     if defaults.SYNC:
-        smallest_safe_wins = {parse_exp(*pcap) for pcap in pcaps}
+        smallest_safe_wins = [parse_exp(*pcap) for pcap in pcaps]
     else:
         with multiprocessing.Pool(processes=args.parallel) as pol:
-            smallest_safe_wins = set(pol.starmap(parse_exp, pcaps))
+            smallest_safe_wins = [pol.starmap(parse_exp, pcaps)]
     print(f"Done parsing - time: {time.time() - tim_srt_s:.2f} seconds")
 
     # Remove return values from experiments that were not parsed.
