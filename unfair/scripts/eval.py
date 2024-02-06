@@ -880,6 +880,7 @@ def eval_shared(args, our_label, matched):
         newcomer_flows_utils_disabled,
         newcomer_flows_utils_enabled,
         newcomer_flows_util_deltas_percent,
+        _,  # params
     ) = list(zip(*matched_results.values()))
 
     # Plot the fair rates in the experiment configurations so that we can see if the
@@ -1261,6 +1262,7 @@ def eval_background(args, our_label, matched):
         background_flows_utils_disabled,
         background_flows_utils_enabled,
         _,  # background_flows_util_deltas_percent,
+        _,  # params
     ) = list(zip(*matched_results.values()))
 
     num_flows = [
