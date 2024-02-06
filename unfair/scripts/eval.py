@@ -842,7 +842,7 @@ def eval_shared(args, our_label, matched):
         incumbent_flows_util_disabled = class_to_util_disabled[0]
         newcomer_flows_util_disabled = class_to_util_disabled[20]
         incumbent_flows_util_enabled = class_to_util_enabled[0]
-        newcomer_flows_util_enabled = class_to_util_disabled[20]
+        newcomer_flows_util_enabled = class_to_util_enabled[20]
 
         matched_results[enabled_exp] = (
             jfi_disabled,  # 0
@@ -1273,12 +1273,12 @@ def eval_background(args, our_label, matched):
         for _, (disabled_results, _) in matched.items()
     ]
     # Expected total utilization of foreground flows.
-    foreground_flows_fair_shares = (
+    foreground_flows_fair_shares = [
         fore / (fore + back) * 100 for fore, back in num_flows
-    )
-    background_flows_fair_shares = (
+    ]
+    background_flows_fair_shares = [
         back / (fore + back) * 100 for fore, back in num_flows
-    )
+    ]
 
     plot_cdf(
         args,
