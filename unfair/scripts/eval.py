@@ -392,7 +392,6 @@ def parse_opened_exp(
     skip_smoothed,
     select_tail_percent,
     sender_fairness,
-    classifier="cca",
 ):
     # skip_smoothed is not used but is kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -424,12 +423,7 @@ def parse_opened_exp(
         return -1
 
     # Determine flow src and dst ports.
-    params_flp = path.join(exp_dir, f"{exp.name}.json")
-    if not path.exists(params_flp):
-        logging.info("Error: Cannot find params file (%s) in: %s", params_flp, exp_flp)
-        return -1
-    with open(params_flp, "r", encoding="utf-8") as fil:
-        params = json.load(fil)
+    params = get_params(exp_dir)
 
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
     # form: (sender port, receiver port)
@@ -545,7 +539,7 @@ def parse_opened_exp(
     if exp.use_bess:
         # Determine a mapping from class to flows in that class.
         class_to_flws = collections.defaultdict(list)
-        classifier = CLASSIFIERS[classifier]
+        classifier = CLASSIFIERS[CATEGORIES[params["category"]][0]]
         for flw in params["flowsets"]:
             flow_class = classifier(flw)
             for sender_port in flw[5]:
@@ -564,7 +558,7 @@ def parse_opened_exp(
         overall_util = 0
         class_to_util = {}
 
-    out = (exp, jfi, overall_util, class_to_util)
+    out = (exp, params, jfi, overall_util, class_to_util)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
@@ -691,13 +685,16 @@ def group_and_box_plot(
     )
 
 
-def get_params(exp_flp):
-    """Load the params JSON file for the given experiment."""
-    exp = utils.Exp(exp_flp)
-    params_flp = path.join(exp_flp, f"{exp.name}.json")
+def get_params(exp_dir):
+    """
+    Load the params JSON file for the given experiment.
+
+    exp_dir is an untarred individual experiment.
+    """
+    params_flp = path.join(exp_dir, f"{utils.Exp(exp_dir).name}.json")
     if not path.exists(params_flp):
         raise FileNotFoundError(
-            f"Error: Cannot find params file ({params_flp}) in: {exp_flp}"
+            f"Error: Cannot find params file ({params_flp}) in: {exp_dir}"
         )
     with open(params_flp, "r", encoding="utf-8") as fil:
         return json.load(fil)
@@ -716,35 +713,20 @@ def main(args):
 
     our_label = "ServicePolicy" if args.sender_fairness else "FlowPolicy"
 
-    # Determine the experiment category and make sure that all experiments are from the
-    # same category.
-    exp_flps = [
-        path.join(args.exp_dir, exp)
-        for exp in sorted(os.listdir(args.exp_dir))
-        if exp.endswith(".tar.gz")
-    ]
-    categories = set()
-    for exp_flp in exp_flps:
-        categories.add(get_params(exp_flp)["category"])
-    assert len(categories) == 1
-    category = categories.pop()
-    # Extract the classifier and evaluation function for the given category.
-    classifier, eval_func = CATEGORIES[category]
-
     # Find all experiments.
     pcaps = [
         (
-            exp_flp,
+            path.join(args.exp_dir, exp),
             args.untar_dir,
             path.join(args.out_dir, "individual_results"),
             False,  # skip_smoothed
             args.select_tail_percent,
             args.sender_fairness,
-            classifier,
             True,  # always_reparse
             parse_opened_exp,
         )
-        for exp_flp in exp_flps
+        for exp in sorted(os.listdir(args.exp_dir))
+        if exp.endswith(".tar.gz")
     ]
     random.shuffle(pcaps)
 
@@ -783,6 +765,19 @@ def main(args):
         for exp_results in results
         if (isinstance(exp_results, tuple) and -1 not in exp_results[1:])
     }
+
+    # Determine the experiment category and make sure that all experiments are from the
+    # same category.
+    categories = set()
+    for params, _, _, _ in results.values():
+        categories.add(params["category"])
+    assert (
+        len(categories) == 1
+    ), f"Experiments must belong to the same category, but these were found: {categories}"
+    category = categories.pop()
+    # Extract the classifier and evaluation function for the given category.
+    _, eval_func = CATEGORIES[category]
+
     # Experiments in which the unfairmon was enabled.
     enabled = {exp for exp in results if exp.use_unfairmon}
     # Experiments in which the unfairmon was disabled.
@@ -814,7 +809,6 @@ def main(args):
             )
             continue
         matched[enabled_exp] = (
-            get_params(path.join(args.exp_dir, target_disabled_exp.name)),
             results[target_disabled_exp],
             results[enabled_exp],
         )
@@ -830,13 +824,15 @@ def main(args):
 def eval_shared(args, our_label, matched):
     """Generate graphs for the simple shared bottleneck experiments."""
     matched_results = {}
-    for enabled_exp, (_, disabled_results, enabled_results) in matched.items():
+    for enabled_exp, (disabled_results, enabled_results) in matched.items():
         (
+            _,
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
         ) = disabled_results
         (
+            _,
             jfi_enabled,
             overall_util_enabled,
             class_to_util_enabled,
@@ -1201,13 +1197,15 @@ def eval_multibottleneck(args, our_label, matched):
 def eval_background(args, our_label, matched):
     """Generate graphs for the simple background flows experiments."""
     matched_results = {}
-    for enabled_exp, (_, disabled_results, enabled_results) in matched.items():
+    for enabled_exp, (disabled_results, enabled_results) in matched.items():
         (
+            _,
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
         ) = disabled_results
         (
+            _,
             jfi_enabled,
             overall_util_enabled,
             class_to_util_enabled,
@@ -1261,14 +1259,18 @@ def eval_background(args, our_label, matched):
         (
             # Foreground flows (not to "sink").
             sum(
-                flowset[9] for flowset in params["flowsets"] if flowset[1][0] != "sink"
+                flowset[9]
+                for flowset in disabled_results[0]["flowsets"]
+                if flowset[1][0] != "sink"
             ),
             # Background flows (to "sink").
             sum(
-                flowset[9] for flowset in params["flowsets"] if flowset[1][0] == "sink"
+                flowset[9]
+                for flowset in disabled_results[0]["flowsets"]
+                if flowset[1][0] == "sink"
             ),
         )
-        for _, (params, _, _) in matched.items()
+        for _, (disabled_results, _) in matched.items()
     ]
     # Expected total utilization of foreground flows.
     foreground_flows_fair_shares = (
