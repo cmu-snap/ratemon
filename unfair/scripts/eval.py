@@ -624,13 +624,13 @@ def group_and_box_plot(
                 output_selector(vals)
                 for exp, vals in matched_results.items()
                 # Only select experiments for this category.
-                if category_selector(exp) == category
+                if category_selector(exp, vals) == category
             ]
         )
         for category in {
             # First, determine the categories.
-            category_selector(exp)
-            for exp in matched_results
+            category_selector(exp, vals)
+            for exp, vals in matched_results.items()
         }
     }
     categories = list(category_to_values.keys())
