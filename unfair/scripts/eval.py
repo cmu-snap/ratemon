@@ -35,7 +35,7 @@ PREFIX = ""
 PERCENTILES = [5, 10, 25, 50, 75, 90, 99.9]
 
 
-def get_queue_mult(exp):
+def get_queue_mult(exp, vals):
     queue_mult = math.floor(exp.queue_bdp)
     if queue_mult == 0:
         return 0.5
@@ -607,7 +607,7 @@ def get_avg_util(bw_bps, flw_to_pkts):
 
 def group_and_box_plot(
     args,
-    matched,
+    matched_results,
     category_selector,
     output_selector,
     xticks_transformer,
@@ -621,8 +621,8 @@ def group_and_box_plot(
         # Second, extract the value for all the exps in each category.
         xticks_transformer(category): sorted(
             [
-                output_selector(matched[exp])
-                for exp in matched
+                output_selector(vals)
+                for exp, vals in matched_results.items()
                 # Only select experiments for this category.
                 if category_selector(exp) == category
             ]
@@ -630,7 +630,7 @@ def group_and_box_plot(
         for category in {
             # First, determine the categories.
             category_selector(exp)
-            for exp in matched
+            for exp in matched_results
         }
     }
     categories = list(category_to_values.keys())
@@ -826,7 +826,7 @@ def eval_shared(args, our_label, matched):
     matched_results = {}
     for enabled_exp, (disabled_results, enabled_results) in matched.items():
         (
-            _,
+            params,
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
@@ -858,6 +858,7 @@ def eval_shared(args, our_label, matched):
             newcomer_flows_util_disabled * 100,  # 10
             newcomer_flows_util_enabled * 100,  # 11
             (newcomer_flows_util_enabled - newcomer_flows_util_disabled) * 100,  # 12
+            params,  # 13
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
@@ -1068,7 +1069,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.bw_Mbps,
+        lambda exp, vals: exp.bw_Mbps,
         lambda result: result[5],
         lambda x: x,
         "Bandwidth (Mbps)",
@@ -1080,7 +1081,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.target_per_flow_bw_Mbps,
+        lambda exp, vals: exp.target_per_flow_bw_Mbps,
         lambda result: result[5],
         lambda x: x,
         "Fair rate (Mbps)",
@@ -1092,7 +1093,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.rtt_us,
+        lambda exp, vals: exp.rtt_us,
         lambda result: result[5],
         lambda x: int(x / 1e3),
         "RTT (ms)",
@@ -1116,7 +1117,10 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.cca_1_flws,
+        # Add up the total number of incumbent flows across the flowsets.
+        lambda exp, vals: sum(
+            flowset[9] for flowset in vals[-1]["flowsets"] if flowset[3] == 0
+        ),
         lambda result: result[5],
         lambda x: x,
         "Incumbent flows",
@@ -1130,7 +1134,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.bw_bps,
+        lambda exp, vals: exp.bw_bps,
         lambda result: result[1],
         lambda x: int(x / 1e6),
         "Bandwidth (Mbps)",
@@ -1142,7 +1146,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.target_per_flow_bw_Mbps,
+        lambda exp, vals: exp.target_per_flow_bw_Mbps,
         lambda result: result[1],
         lambda x: x,
         "Fair rate (Mbps)",
@@ -1154,7 +1158,7 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.rtt_us,
+        lambda exp, vals: exp.rtt_us,
         lambda result: result[1],
         lambda x: int(x / 1e3),
         "RTT (ms)",
@@ -1178,7 +1182,10 @@ def eval_shared(args, our_label, matched):
     group_and_box_plot(
         args,
         matched_results,
-        lambda exp: exp.cca_1_flws,
+        # Add up the total number of incumbent flows across the flowsets.
+        lambda exp, vals: sum(
+            flowset[9] for flowset in vals[-1]["flowsets"] if flowset[3] == 0
+        ),
         lambda result: result[1],
         lambda x: x,
         "Incumbent flows",
@@ -1199,7 +1206,7 @@ def eval_background(args, our_label, matched):
     matched_results = {}
     for enabled_exp, (disabled_results, enabled_results) in matched.items():
         (
-            _,
+            params,
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
@@ -1232,6 +1239,7 @@ def eval_background(args, our_label, matched):
             background_flows_util_enabled * 100,  # 11
             (background_flows_util_enabled - background_flows_util_disabled)
             * 100,  # 12
+            params,  # 13
         )
     # Save JFI results.
     with open(path.join(args.out_dir, "results.json"), "w", encoding="utf-8") as fil:
