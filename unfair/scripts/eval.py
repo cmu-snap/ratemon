@@ -754,7 +754,7 @@ def main(args):
             results = [gen_features.parse_exp(*pcap) for pcap in pcaps]
         else:
             with multiprocessing.Pool(processes=args.parallel) as pol:
-                results = [pol.starmap(gen_features.parse_exp, pcaps)]
+                results = pol.starmap(gen_features.parse_exp, pcaps)
         # Save raw JFI results from parsed experiments.
         with open(data_flp, "wb") as fil:
             pickle.dump(results, fil)
