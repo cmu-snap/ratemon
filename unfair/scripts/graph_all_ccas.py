@@ -156,6 +156,7 @@ def main(args):
         legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without unfairness monitor",
     )
+    raise RuntimeError("Cannot use exp.cca_1_flws.")
     evl.plot_cdf(
         args,
         lines=[
@@ -179,6 +180,7 @@ def main(args):
             evl.COLORS_MAP["blue"],
         ],
     )
+    raise RuntimeError("Cannot use exp.cca_2_flws.")
     evl.plot_cdf(
         args,
         lines=[

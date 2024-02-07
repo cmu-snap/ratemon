@@ -976,11 +976,33 @@ def eval_shared(args, our_label, matched):
         legendloc="upper left",
         # title="CDF of overall link utilization,\nwith and without RateMon",
     )
+
+    num_flows = [
+        (
+            # Incumbent flows (start at 0s).
+            sum(
+                flowset[9]
+                for flowset in disabled_results[0]["flowsets"]
+                if flowset[3] == 0
+            ),
+            # Newcomer flows (start at 20s).
+            sum(
+                flowset[9]
+                for flowset in disabled_results[0]["flowsets"]
+                if flowset[3] == 20
+            ),
+        )
+        for _, (disabled_results, _) in matched.items()
+    ]
+    # Expected total utilization of incumbent and newcomer flows.
+    incumbent_flows_fair_shares = [inc / (inc + new) * 100 for inc, new in num_flows]
+    newcomer_flows_fair_shares = [new / (inc + new) * 100 for inc, new in num_flows]
+
     plot_cdf(
         args,
         lines=[
             # Expected total utilization of incumbent flows.
-            [exp.cca_1_flws / exp.tot_flws * 100 for exp in matched_results],
+            incumbent_flows_fair_shares,
             incumbent_flows_utils_disabled,
             incumbent_flows_utils_enabled,
         ],
@@ -995,7 +1017,7 @@ def eval_shared(args, our_label, matched):
         args,
         lines=[
             # Expected total utilization of newcomer flows.
-            [exp.cca_2_flws / exp.tot_flws * 100 for exp in matched_results],
+            newcomer_flows_fair_shares,
             newcomer_flows_utils_disabled,
             newcomer_flows_utils_enabled,
         ],
@@ -1282,7 +1304,7 @@ def eval_background(args, our_label, matched):
         )
         for _, (disabled_results, _) in matched.items()
     ]
-    # Expected total utilization of foreground flows.
+    # Expected total utilization of foreground and background flows.
     foreground_flows_fair_shares = [
         fore / (fore + back) * 100 for fore, back in num_flows
     ]
