@@ -302,8 +302,8 @@ def plot_flows_over_time(
     # If we are supposed to mark the bottleneck bandwidth, then create a horizontal
     # line and prepend it to the lines.
     if bottleneck_Mbps is not None:
-        start_time_s = min(xs[0] for _, (xs, _) in lines)
-        end_time_s = max(xs[-1] for _, (xs, _) in lines)
+        start_time_s = min(xs[0] for (xs, _), _ in lines)
+        end_time_s = max(xs[-1] for (xs, _), _ in lines)
         lines.insert(
             0,
             (
