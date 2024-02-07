@@ -589,7 +589,7 @@ def parse_opened_exp(
             bottleneck_events = sorted(bottleneck_events.items(), key=lambda x: x[0])
 
             # Create range-based bottleneck situations.
-            end_time_s = max(flowset["end_time_s"] for flowset in params["flowsets"])
+            end_time_s = max(flowset[4] for flowset in params["flowsets"])
             bottleneck_situations = []
             for idx, bottleneck in enumerate(bottleneck_events):
                 time_s, configs = bottleneck
