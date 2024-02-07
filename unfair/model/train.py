@@ -443,7 +443,7 @@ def prepare_args(args_):
     # any manually-specified values. This allows the caller to specify values
     # only for parameters that they care about while ensuring that all
     # parameters have values.
-    args = copy.copy(defaults.DEFAULTS)
+    args = copy.deepcopy(defaults.DEFAULTS)
     args.update(args_)
     return args
 

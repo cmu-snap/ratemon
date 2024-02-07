@@ -840,7 +840,7 @@ class SvmSklearnWrapper(SvmWrapper):
         dat_in,
         dat_out_classes,
         dat_extra,
-        graph_prms=copy.copy({"sort_by_unfairness": True, "dur_s": None}),
+        graph_prms=copy.deepcopy({"sort_by_unfairness": True, "dur_s": None}),
     ):
         """
         Tests this model on the provided dataset and returns the test accuracy
