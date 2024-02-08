@@ -122,7 +122,7 @@ class PytorchModelWrapper:
 
     def new(self):
         """Returns a new instance of the underlying torch.nn.Module."""
-        raise Exception(
+        raise RuntimeError(
             (
                 'Attempting to call "new()" on the PytorchModelWrapper base '
                 "class itself."
@@ -133,7 +133,9 @@ class PytorchModelWrapper:
         """Print a log message and write it to a model-specific log file."""
         logging.info(msg)
         if self.out_dir is not None and path.exists(self.out_dir):
-            with open(path.join(self.out_dir, "results.txt"), "a+") as fil:
+            with open(
+                path.join(self.out_dir, "results.txt"), "a+", encoding="utf-8"
+            ) as fil:
                 print(msg, file=fil)
 
 

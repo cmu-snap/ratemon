@@ -184,8 +184,7 @@ def extract_fets(dat, split_name, net):
     removed = dat.shape[0] - len_before
     if removed > 0:
         logging.info(
-            f"Removed {removed} rows with unknown out_spc from split "
-            f'"{split_name}".'
+            "Removed %d rows with unknown out_spc from split '%s'.", removed, split_name
         )
 
     logging.debug("in_spc =\n\t%s", "\n\t".join(list(net.in_spc)))
@@ -281,9 +280,11 @@ def scale_fets(dat, scl_grps, standardize=False):
         fet_values = dat[scl_grp_fets]
         # Record the min and max of these columns.
         scl_grps_prms[scl_grp] = [
-            np.mean(utils.clean(fet_values))
-            if standardize
-            else rdc(np.min, fet_values),
+            (
+                np.mean(utils.clean(fet_values))
+                if standardize
+                else rdc(np.min, fet_values)
+            ),
             np.std(utils.clean(fet_values)) if standardize else rdc(np.max, fet_values),
         ]
 
@@ -355,23 +356,28 @@ def create_dataloaders(args, trn, val, tst):
     dataset_trn = utils.Dataset(fets, dat_trn_in, dat_trn_out, dat_trn_extra)
     return (
         # Train dataloader.
-        torch.utils.data.DataLoader(
-            dataset_trn,
-            batch_sampler=utils.BalancedSampler(
-                dataset_trn, bch_trn, drop_last=False, drop_popular=args["drop_popular"]
-            ),
-        )
-        if args["balance"]
-        else torch.utils.data.DataLoader(
-            dataset_trn,
-            # Do not calculate bch_trn above (similarly to bch_tst) because the
-            # BalancedSampler has special handling for the case where bch_trn is
-            # None.
-            batch_size=dat_trn_in.shape[0] if bch_trn is None else bch_trn,
-            # Ordinarily, shuffle should be True. But we shuffle the training
-            # data in prepare_data.py, so we do not need to do so again here.
-            shuffle=False,
-            drop_last=False,
+        (
+            torch.utils.data.DataLoader(
+                dataset_trn,
+                batch_sampler=utils.BalancedSampler(
+                    dataset_trn,
+                    bch_trn,
+                    drop_last=False,
+                    drop_popular=args["drop_popular"],
+                ),
+            )
+            if args["balance"]
+            else torch.utils.data.DataLoader(
+                dataset_trn,
+                # Do not calculate bch_trn above (similarly to bch_tst) because the
+                # BalancedSampler has special handling for the case where bch_trn is
+                # None.
+                batch_size=dat_trn_in.shape[0] if bch_trn is None else bch_trn,
+                # Ordinarily, shuffle should be True. But we shuffle the training
+                # data in prepare_data.py, so we do not need to do so again here.
+                shuffle=False,
+                drop_last=False,
+            )
         ),
         # Validation dataloader.
         torch.utils.data.DataLoader(
