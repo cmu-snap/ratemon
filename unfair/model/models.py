@@ -15,7 +15,6 @@ from sklearn import ensemble
 from sklearn import linear_model
 from sklearn import metrics
 from sklearn import svm
-from sklearn.experimental import enable_hist_gradient_boosting
 import torch
 
 from unfair.model import defaults, features, utils
