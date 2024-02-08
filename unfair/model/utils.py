@@ -443,19 +443,11 @@ class Exp:
             # If this experiment did not use a BESS node, then it did not
             # control the bandwidth, RTT, or queue size and therefore all
             # values derived from these are invalid.
-            self.bw_Mbps = (
-                self.bw_bps
-            ) = (
-                self.rtt_ms
-            ) = (
-                self.rtt_us
-            ) = (
-                self.bdp_b
-            ) = (
+            self.bw_Mbps = self.bw_bps = self.rtt_ms = self.rtt_us = self.bdp_b = (
                 self.queue_p
-            ) = (
-                self.queue_bdp
-            ) = self.calculated_max_rtt_us = self.target_per_flow_bw_Mbps = None
+            ) = self.queue_bdp = self.calculated_max_rtt_us = (
+                self.target_per_flow_bw_Mbps
+            ) = None
 
 
 def args_to_str(args, order, which):
@@ -1835,20 +1827,15 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
         data_pkts = get_data_packets(pkts)
-        # Last idx that is before when the first flow to finish finished. So make sure
-        # to include cutoff_idx in the selected span.
-        cutoff_idx = None
-        for idx, arrival_time_us in enumerate(
-            reversed(data_pkts[features.ARRIVAL_TIME_FET])
-        ):
-            if arrival_time_us <= first_finish_time_us:
-                # idx is actually counting from the end of the list, so change it to
-                # count from the beginning.
-                cutoff_idx = len(data_pkts) - idx - 1
-                break
-        trimmed_data_pkts = (
-            data_pkts if cutoff_idx is None else data_pkts[: cutoff_idx + 1]
+        # Find the highest index before the time at which the first flow finishes.
+        cutoff_idx = find_bound(
+            data_pkts[features.ARRIVAL_TIME_FET],
+            first_finish_time_us,
+            0,
+            len(data_pkts),
+            "before",
         )
+        trimmed_data_pkts = data_pkts[: cutoff_idx + 1]
         trimmed[flow] = (
             # We do not trim the ACK packets because we do not need to.
             (trimmed_data_pkts, get_ack_packets(pkts))
