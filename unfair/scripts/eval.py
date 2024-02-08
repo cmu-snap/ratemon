@@ -559,106 +559,107 @@ def parse_opened_exp(
     jfi = get_jfi(flw_to_pkts, sender_fairness, flw_to_sender)
 
     # Calculate class-based utilization numbers.
-    jfi_by_bottleneck_and_sender = {}
+    # jfi_by_bottleneck_and_sender = {}
     if exp.use_bess:
         # Determine a mapping from class to flows in that class.
         class_to_flws = collections.defaultdict(list)
         category = params["category"]
         classifier = CLASSIFIERS[CATEGORIES[category][0]]
 
-        # If the category is multibottleneck, then we need to break down time into
-        # regions based on the bottleneck.
-        if category == "multibottleneck":
-            # Dict mapping time to a list of bottleneck events at that time.
-            bottleneck_events = collections.defaultdict(dict)
-            # Add all bottleneck events to unified list. Replace rates of 0
-            # (no bottleneck) with the BESS bandwidth.
-            for sender, bottleneck_schedule in params["sender_bottlenecks"].items():
-                for bottleneck_event in bottleneck_schedule:
-                    rate = bottleneck_event["rate_Mbps"]
-                    bottleneck_events[bottleneck_event["time_s"]][sender] = (
-                        rate if rate != 0 else params["bess_bw_Mbps"]
-                    )
-            # Go through the list of events and populate the rate values of any senders
-            # that did not change.
-            times_s = sorted(bottleneck_events.keys())
-            for idx, time_s in enumerate(times_s[:-1]):
-                for sender, rate in bottleneck_events[time_s].items():
-                    if sender not in bottleneck_events[times_s[idx + 1]]:
-                        bottleneck_events[times_s[idx + 1]][sender] = rate
-            # Sort bottleneck events by time.
-            bottleneck_events = sorted(bottleneck_events.items(), key=lambda x: x[0])
+        # # If the category is multibottleneck, then we need to break down time into
+        # # regions based on the bottleneck.
+        # if category == "multibottleneck":
+        #     # Dict mapping time to a list of bottleneck events at that time.
+        #     bottleneck_events = collections.defaultdict(dict)
+        #     # Add all bottleneck events to unified list. Replace rates of 0
+        #     # (no bottleneck) with the BESS bandwidth.
+        #     for sender, bottleneck_schedule in params["sender_bottlenecks"].items():
+        #         for bottleneck_event in bottleneck_schedule:
+        #             rate = bottleneck_event["rate_Mbps"]
+        #             bottleneck_events[bottleneck_event["time_s"]][sender] = (
+        #                 rate if rate != 0 else params["bess_bw_Mbps"]
+        #             )
+        #     # Go through the list of events and populate the rate values of any senders
+        #     # that did not change.
+        #     times_s = sorted(bottleneck_events.keys())
+        #     for idx, time_s in enumerate(times_s[:-1]):
+        #         for sender, rate in bottleneck_events[time_s].items():
+        #             if sender not in bottleneck_events[times_s[idx + 1]]:
+        #                 bottleneck_events[times_s[idx + 1]][sender] = rate
+        #     # Sort bottleneck events by time.
+        #     bottleneck_events = sorted(bottleneck_events.items(), key=lambda x: x[0])
 
-            # Create range-based bottleneck situations.
-            end_time_s = max(flowset[4] for flowset in params["flowsets"])
-            bottleneck_situations = []
-            for idx, bottleneck in enumerate(bottleneck_events):
-                time_s, configs = bottleneck
-                if idx == len(bottleneck_events) - 1:
-                    next_time_s = end_time_s
-                else:
-                    next_time_s = bottleneck_events[idx + 1][0]
-                bottleneck_situations.append((time_s, next_time_s, configs))
-            # Num bottleneck events
-            num_bottlenecks_situations = len(bottleneck_situations)
-            assert (
-                num_bottlenecks_situations == 3
-            ), f"Expected 3 bottleneck situations, but found {num_bottlenecks_situations}."
+        #     # Create range-based bottleneck situations.
+        #     end_time_s = max(flowset[4] for flowset in params["flowsets"])
+        #     bottleneck_situations = []
+        #     for idx, bottleneck in enumerate(bottleneck_events):
+        #         time_s, configs = bottleneck
+        #         if idx == len(bottleneck_events) - 1:
+        #             next_time_s = end_time_s
+        #         else:
+        #             next_time_s = bottleneck_events[idx + 1][0]
+        #         bottleneck_situations.append((time_s, next_time_s, configs))
+        #     # Num bottleneck events
+        #     num_bottlenecks_situations = len(bottleneck_situations)
+        #     assert (
+        #         num_bottlenecks_situations == 3
+        #     ), f"Expected 3 bottleneck situations, but found {num_bottlenecks_situations}."
 
-            # TODO: Consider refactoring this to be a mapping from sender to that sender's bottleneck events (the way it is in the params file).
+        #     # TODO: Consider refactoring this to be a mapping from sender to that sender's bottleneck events (the way it is in the params file).
+        #     #  TODO: Need to track this per flow.
+        #     last_cutoff_idx = 0
+        #     for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
+        #         flw_to_pkts_during_bneck = {}
+        #         for flw, pkts in flw_to_pkts.items():
+        #             cutoff_idx = utils.find_bound(
+        #                 pkts[features.ARRIVAL_TIME_FET],
+        #                 bneck_end_s,
+        #                 last_cutoff_idx,
+        #                 len(pkts),
+        #                 "before",
+        #             )
+        #             flw_to_pkts_during_bneck[flw] = pkts[
+        #                 last_cutoff_idx : cutoff_idx + 1
+        #             ]
+        #         last_cutoff_idx = cutoff_idx + 1
 
-    #        TODO: Need to track this per flow.
-            last_cutoff_idx = 0
-            for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
-                flw_to_pkts_during_bneck = {}
-                for flw, pkts in flw_to_pkts.items():
-                    cutoff_idx = utils.find_bound(
-                            pkts[features.ARRIVAL_TIME_FET],
-                            bneck_end_s,
-                            last_cutoff_idx,
-                            len(pkts),
-                            "before",
-                        )
-                    flw_to_pkts_during_bneck[flw] = pkts[last_cutoff_idx:cutoff_idx + 1]
-                last_cutoff_idx = cutoff_idx + 1
+        #         jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
+        #             "all": get_jfi(
+        #                 flw_to_pkts_during_bneck, sender_fairness, flw_to_sender
+        #             )
+        #         }
 
-                jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
-                    "all": get_jfi(
-                        flw_to_pkts_during_bneck, sender_fairness, flw_to_sender
-                    )
-                }
-
-                # Plot all flows (shared bottleneck).
-                plot_flows_over_time(
-                    exp,
-                    out_flp[:-4] + "_bneckbess.pdf",
-                    flw_to_pkts,
-                    flw_to_cca,
-                    sender_fairness,
-                    flw_to_sender,
-                    xlim=(bneck_start_s, bneck_end_s),
-                    bottleneck_Mbps=params["bess_bw_Mbps"],
-                )
-                # Plot each sender-side bottleneck separately.
-                for sender, flws in sender_to_flws.items():
-                    plot_flows_over_time(
-                        exp,
-                        out_flp[:-4] + f"_bneck{sender}.pdf",
-                        {flw: flw_to_pkts[flw] for flw in flws},
-                        flw_to_cca,
-                        xlim=(bneck_start_s, bneck_end_s),
-                        bottleneck_Mbps=bneck_config[sender],
-                    )
-                    jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
-                        sender: get_jfi(
-                            {
-                                flw: flw_to_pkts_during_bneck[flw]
-                                for flw in sender_to_flws[sender]
-                            },
-                            sender_fairness,
-                            flw_to_sender,
-                        )
-                    }
+        #         # Plot all flows (shared bottleneck).
+        #         plot_flows_over_time(
+        #             exp,
+        #             out_flp[:-4] + "_bneckbess.pdf",
+        #             flw_to_pkts,
+        #             flw_to_cca,
+        #             sender_fairness,
+        #             flw_to_sender,
+        #             xlim=(bneck_start_s, bneck_end_s),
+        #             bottleneck_Mbps=params["bess_bw_Mbps"],
+        #         )
+        #         # Plot each sender-side bottleneck separately.
+        #         for sender, flws in sender_to_flws.items():
+        #             plot_flows_over_time(
+        #                 exp,
+        #                 out_flp[:-4] + f"_bneck{sender}.pdf",
+        #                 {flw: flw_to_pkts[flw] for flw in flws},
+        #                 flw_to_cca,
+        #                 xlim=(bneck_start_s, bneck_end_s),
+        #                 bottleneck_Mbps=bneck_config[sender],
+        #             )
+        #             jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
+        #                 sender: get_jfi(
+        #                     {
+        #                         flw: flw_to_pkts_during_bneck[flw]
+        #                         for flw in sender_to_flws[sender]
+        #                     },
+        #                     sender_fairness,
+        #                     flw_to_sender,
+        #                 )
+        #             }
 
         for flw in params["flowsets"]:
             flow_class = classifier(flw)
@@ -678,7 +679,7 @@ def parse_opened_exp(
         overall_util = 0
         class_to_util = {}
 
-    out = (exp, params, jfi, overall_util, class_to_util, jfi_by_bottleneck_and_sender)
+    out = (exp, params, jfi, overall_util, class_to_util)  # , jfi_by_bottleneck_and_sender)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
