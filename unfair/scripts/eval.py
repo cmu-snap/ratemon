@@ -464,7 +464,7 @@ def parse_opened_exp(
     # Map flow to sender IP address (LAN). Each flow tuple will be unique because
     # the receiver ports are unique across flows from different senders.
     flw_to_sender = {
-        (sender_port, flw[6]): flw[0][7]
+        (sender_port, flw[6]): flw[0][0]
         for flw in params["flowsets"]
         for sender_port in flw[5]
     }
