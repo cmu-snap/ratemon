@@ -841,7 +841,7 @@ class SvmSklearnWrapper(SvmWrapper):
         dat_in,
         dat_out_classes,
         dat_extra,
-        graph_prms=copy.deepcopy({"sort_by_unfairness": True, "dur_s": None}),
+        graph_prms=copy.deepcopy({"sort_by_unfairness": True}),
     ):
         """
         Tests this model on the provided dataset and returns the test accuracy
@@ -859,10 +859,10 @@ class SvmSklearnWrapper(SvmWrapper):
         utils.check_fets(fets, self.in_spc)
 
         sort_by_unfairness = graph_prms["sort_by_unfairness"]
-        dur_s = graph_prms["dur_s"]
-        assert sort_by_unfairness or dur_s is not None, (
-            'If "sort_by_unfairness" is False, then "dur_s" must not be ' "None."
-        )
+        dur_s = (
+            dat_extra[features.ARRIVAL_TIME_FET].max().item()
+            - dat_extra[features.ARRIVAL_TIME_FET].min().item()
+        ) / 1e6
 
         # Run inference. Everything after the following line is just analysis.
         predictions = torch.tensor(self.predict(dat_in))
@@ -880,7 +880,7 @@ class SvmSklearnWrapper(SvmWrapper):
             # Compute the maximum unfairness.
             (0, dat_extra["raw"].max().item())
             if sort_by_unfairness
-            else (0, graph_prms["dur_s"])
+            else (0, dur_s)
         )
 
         if self.graph:
