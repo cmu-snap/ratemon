@@ -302,13 +302,13 @@ def plot_flows_over_time(
     # If we are supposed to mark the bottleneck bandwidth, then create a horizontal
     # line and prepend it to the lines.
     if bottleneck_Mbps is not None:
-        start_time_s = min(xs[0] for (xs, _), _ in lines)
-        end_time_s = max(xs[-1] for (xs, _), _ in lines)
+        start_time_s = min(points[0][0] for points, _ in lines)
+        end_time_s = max(points[-1][0] for points, _ in lines)
         lines.insert(
             0,
             (
+                [(start_time_s, bottleneck_Mbps), (end_time_s, bottleneck_Mbps)],
                 "Bottleneck",
-                ([start_time_s, end_time_s], [bottleneck_Mbps, bottleneck_Mbps]),
             ),
         )
         # Make the line orange.
@@ -559,6 +559,7 @@ def parse_opened_exp(
     jfi = get_jfi(flw_to_pkts, sender_fairness, flw_to_sender)
 
     # Calculate class-based utilization numbers.
+    jfi_by_bottleneck_and_sender = {}
     if exp.use_bess:
         # Determine a mapping from class to flows in that class.
         class_to_flws = collections.defaultdict(list)
@@ -604,7 +605,29 @@ def parse_opened_exp(
                 num_bottlenecks_situations == 3
             ), f"Expected 3 bottleneck situations, but found {num_bottlenecks_situations}."
 
+            # TODO: Consider refactoring this to be a mapping from sender to that sender's bottleneck events (the way it is in the params file).
+
+    #        TODO: Need to track this per flow.
+            last_cutoff_idx = 0
             for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
+                flw_to_pkts_during_bneck = {}
+                for flw, pkts in flw_to_pkts.items():
+                    cutoff_idx = utils.find_bound(
+                            pkts[features.ARRIVAL_TIME_FET],
+                            bneck_end_s,
+                            last_cutoff_idx,
+                            len(pkts),
+                            "before",
+                        )
+                    flw_to_pkts_during_bneck[flw] = pkts[last_cutoff_idx:cutoff_idx + 1]
+                last_cutoff_idx = cutoff_idx + 1
+
+                jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
+                    "all": get_jfi(
+                        flw_to_pkts_during_bneck, sender_fairness, flw_to_sender
+                    )
+                }
+
                 # Plot all flows (shared bottleneck).
                 plot_flows_over_time(
                     exp,
@@ -626,6 +649,16 @@ def parse_opened_exp(
                         xlim=(bneck_start_s, bneck_end_s),
                         bottleneck_Mbps=bneck_config[sender],
                     )
+                    jfi_by_bottleneck_and_sender[(bneck_start_s, bneck_end_s)] = {
+                        sender: get_jfi(
+                            {
+                                flw: flw_to_pkts_during_bneck[flw]
+                                for flw in sender_to_flws[sender]
+                            },
+                            sender_fairness,
+                            flw_to_sender,
+                        )
+                    }
 
         for flw in params["flowsets"]:
             flow_class = classifier(flw)
@@ -645,7 +678,7 @@ def parse_opened_exp(
         overall_util = 0
         class_to_util = {}
 
-    out = (exp, params, jfi, overall_util, class_to_util)
+    out = (exp, params, jfi, overall_util, class_to_util, jfi_by_bottleneck_and_sender)
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
