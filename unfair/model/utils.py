@@ -281,11 +281,17 @@ class Exp:
             ) = toks
             ccas = tuple(ccas.split(","))
             flows = tuple(int(f) for f in flows.split(","))
+            assert ccas, "No CCAs!"
+            assert flows, "No flows!"
             self.cca_1_name = ccas[0]
-            self.cca_2_name = ccas[1]
-            self.cca_back_name = ""
             cca_1_flws = flows[0]
-            cca_2_flws = flows[1]
+            if len(ccas) == 2:
+                self.cca_2_name = ccas[1]
+                cca_2_flws = flows[1]
+            else:
+                self.cca_2_name = ccas[0]
+                cca_2_flws = 0
+            self.cca_back_name = ""
             cca_back_flws = 0
             bitrate_Mbps_1 = "0bitrate"
             bitrate_Mbps_2 = "0bitrate"
