@@ -1798,14 +1798,26 @@ def ebpf_packet_tuple_to_str(dat):
     )
 
 
-def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
-    """Trim the traces when the first flow to finish finishes.
+def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
+    """Trim packet traces to between a start and end time.
 
-    If include_acks is True, then the format of flw_to_pkts is:
+    accept_after_us: Accept packets after this time.
+    accept_before_us: Accept packets before this time.
+
+    The format of flow_to_pkts is one of two options (detected automatically):
+
+    If both data and ACK packets are included:
         { flow : ( [data packets], [ack packets] ) }
-    If include_acks is False, the format of flw_to_pkts is:
+    If only data packets are included:
         { flow : [data packets] }
+
+    Only data packets are trimmed. ACK packets, if present, are not trimmed.
     """
+    assert len(flw_to_pkts) > 0, "No flows provided!"
+    includes_acks = isinstance(next(iter(flw_to_pkts.values())), tuple)
+    assert not includes_acks or (
+        len(next(iter(flw_to_pkts.values()))) == 2
+    ), "Each value in flw_to_pkts should have two entries!"
 
     def get_data_packets(pkts):
         """
@@ -1821,37 +1833,42 @@ def drop_packets_after_first_flow_finishes(flw_to_pkts, includes_acks=False):
         """
         return pkts[1] if includes_acks else None
 
-    assert len(flw_to_pkts) > 0, "No flows provided!"
-    first_finish_time_us = min(
-        [
-            get_data_packets(pkts)[-1][features.ARRIVAL_TIME_FET]
-            for pkts in flw_to_pkts.values()
-        ]
-    )
-
     trimmed = {}
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
         data_pkts = get_data_packets(pkts)
         # Find the highest index before the time at which the first flow finishes.
-        cutoff_idx = find_bound(
-            data_pkts[features.ARRIVAL_TIME_FET],
-            first_finish_time_us,
-            0,
-            len(data_pkts),
-            "before",
-        )
-        trimmed_data_pkts = data_pkts[: cutoff_idx + 1]
+        new_start_idx = 0
+        if accept_after_us is not None:
+            new_start_idx = find_bound(
+                data_pkts[features.ARRIVAL_TIME_FET],
+                accept_after_us,
+                0,
+                len(data_pkts),
+                "before",
+            )
+
+        new_end_idx = len(data_pkts) - 1
+        if accept_before_us is not None:
+            new_start_idx = find_bound(
+                data_pkts[features.ARRIVAL_TIME_FET],
+                accept_before_us,
+                0,
+                len(data_pkts),
+                "after",
+            )
+
+        trimmed_data_pkts = data_pkts[new_start_idx : new_end_idx + 1]
         trimmed[flow] = (
             # We do not trim the ACK packets because we do not need to.
             (trimmed_data_pkts, get_ack_packets(pkts))
             if includes_acks
             else trimmed_data_pkts
         )
-        if cutoff_idx is not None:
-            total_dropped += len(data_pkts) - cutoff_idx - 1
+
+        total_dropped += len(data_pkts) - len(trimmed_data_pkts)
     logging.info(
-        "Dropped %d packets from after the first flow to finish finished.",
+        "Dropped %d data packets while trimming flows.",
         total_dropped,
     )
     return trimmed

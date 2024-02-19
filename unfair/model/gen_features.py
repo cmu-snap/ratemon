@@ -170,8 +170,16 @@ def parse_opened_exp(
         print(f"Warning: No flows with packets in: {exp_flp}")
         return -1
 
-    flw_to_pkts_receiver = utils.drop_packets_after_first_flow_finishes(
-        flw_to_pkts_receiver, includes_acks=True
+    first_finish_time_us = min(
+        [
+            pkts[0][features.ARRIVAL_TIME_FET][-1]
+            for pkts in flw_to_pkts_receiver.values()
+        ]
+    )
+    flw_to_pkts_receiver = utils.trim_packets(
+        flw_to_pkts_receiver,
+        accept_after_us=None,
+        accept_before_us=first_finish_time_us,
     )
 
     # NOTE: Disabled because not used.

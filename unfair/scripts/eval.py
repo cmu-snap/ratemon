@@ -448,8 +448,8 @@ def parse_opened_exp(
         logging.info("Error: No flows to analyze in: %s", exp_flp)
         return -1
 
-    # Determine flow src and dst ports.
     params = get_params(exp_dir)
+    category = params["category"]
 
     # Dictionary mapping a flow to its flow's CCA. Each flow is a tuple of the
     # form: (sender port, receiver port)
@@ -468,6 +468,9 @@ def parse_opened_exp(
         for flw in params["flowsets"]
         for sender_port in flw[5]
     }
+    sender_to_flws = collections.defaultdict(list)
+    for flw, sender in flw_to_sender.items():
+        sender_to_flws[sender].append(flw)
 
     receiver_name_to_ip = {flw[1][0]: flw[1][7] for flw in params["flowsets"]}
     assert receiver_name_to_ip, "Cannot determine receiver(s)."
@@ -489,32 +492,23 @@ def parse_opened_exp(
             if sum(len(p) for p in pkts) > 0:
                 # Only add flow if parse_packets() found at least one packet. This is
                 # to support multiple receivers, where parse_packets() checks each
-                # receiver for all flows even if each only has a subset of flows.
+                # receiver for all flows even if each receiver only has a subset of
+                # flows.
                 flw_to_pkts[flw] = pkts
 
         logging.info("\tParsed packets: %s", receiver_pcap)
 
     # Discard the ACK packets.
     flw_to_pkts = {flw: data_pkts for flw, (data_pkts, ack_pkts) in flw_to_pkts.items()}
-    flw_to_pkts = utils.drop_packets_after_first_flow_finishes(flw_to_pkts)
 
-    # Highest receiver port.
-    # TODO: Need to refactor this to just drop data from before the last flow starts.
-    late_flows_port = max(flw[6] for flw in params["flowsets"])
-    late_flws = [
-        flw for flw in flws if flw[1] == late_flows_port and len(flw_to_pkts[flw]) > 0
-    ]
-    if len(late_flws) == 0:
-        logging.info("\tWarning: No late flows to analyze in: %s", exp_flp)
-        return exp, -1, -1
-    earliest_late_flow_start_time = min(
-        [
-            flw_to_pkts[flw][features.ARRIVAL_TIME_FET][0]
-            for flw in late_flws
-            if len(flw_to_pkts[flw]) > 0
-        ]
+    # Normalize the packet arrival times to the start of the experiment.
+    earliest_start_time_us = min(
+        pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
     )
+    for flw in flw_to_pkts:
+        flw_to_pkts[flw][features.ARRIVAL_TIME_FET] -= earliest_start_time_us
 
+    # Plot flows over time.
     plot_flows_over_time(
         exp,
         out_flp[:-4] + "_flows.pdf",
@@ -523,59 +517,45 @@ def parse_opened_exp(
         sender_fairness,
         flw_to_sender,
     )
-    sender_to_flws = collections.defaultdict(list)
-    for flw, sender in flw_to_sender.items():
-        sender_to_flws[sender].append(flw)
-    for sender, flws in sender_to_flws.items():
-        plot_flows_over_time(
-            exp,
-            out_flp[:-4] + f"_flows-from-{sender}.pdf",
-            {flw: flw_to_pkts[flw] for flw in flws},
-            flw_to_cca,
-        )
+    if category == "background":
+        # For background flow experiments, also plot each sender's flows over time.
+        for sender, flws in sender_to_flws.items():
+            plot_flows_over_time(
+                exp,
+                out_flp[:-4] + f"_flows-from-{sender}.pdf",
+                {flw: flw_to_pkts[flw] for flw in flws},
+                flw_to_cca,
+            )
 
-    # Remove data from before the late flows start.
-    for flw, pkts in flw_to_pkts.items():
-        if len(pkts) == 0:
-            flw_to_pkts[flw] = []
-            continue
-        cutoff_idx = 0
-        for idx, arr_time in enumerate(pkts[features.ARRIVAL_TIME_FET]):
-            if arr_time >= earliest_late_flow_start_time:
-                cutoff_idx = idx
-                break
-        flw_to_pkts[flw] = pkts[cutoff_idx:]
+    # Drop packets from before the last flow starts and after the first flow ends.
+    latest_start_time_us = max(
+        pkts[features.ARRIVAL_TIME_FET][0] for pkts in flw_to_pkts.values()
+    )
+    earliest_end_time_us = min(
+        pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
+    )
 
-    # zipped_arr_times, zipped_dat = utils.zip_timeseries(
-    #     [flw_to_pkts_receiver[flw][features.ARRIVAL_TIME_FET] for flw in flws],
-    #     [flw_to_pkts_receiver[flw] for flw in flws],
-    # )
-    # for idx, arr_time in enumerate(zipped_arr_times):
-    #     if arr_time >= earliest_late_flow_start_time:
-    #         break
-    # zipped_arr_times = zipped_arr_times[idx:]
-    # zipped_dat = zipped_dat[idx:]
+    flw_to_pkts = {
+        flw: utils.trim_packets(pkts, latest_start_time_us, earliest_end_time_us)
+        for flw, pkts in flw_to_pkts.items()
+    }
 
-    jfi = get_jfi(flw_to_pkts, sender_fairness, flw_to_sender)
-
-    # Calculate class-based utilization numbers.
+    overall_util = 0
+    # Flow class to overall utilization of that flow class.
+    class_to_util = {}
+    # Bottleneck time range to average ratio of flow throughput to maxmin fair rate.
+    bneck_to_avg_maxmin_ratio = None
     if exp.use_bess:
+        overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
+
+        # Calculate class-based utilization numbers.
         # Determine a mapping from class to flows in that class.
         class_to_flws = collections.defaultdict(list)
-        category = params["category"]
         classifier = CLASSIFIERS[CATEGORIES[category][0]]
-
-        # If the category is multibottleneck, then we need to break down time into
-        # regions based on the bottleneck.
-        if category == "multibottleneck":
-            identify_bottlenecks()
-
         for flw in params["flowsets"]:
             flow_class = classifier(flw)
             for sender_port in flw[5]:
                 class_to_flws[flow_class].append((sender_port, flw[6]))
-
-        overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
         # Calculate the utilization of each class.
         class_to_util = {
             flow_class: get_avg_util(
@@ -584,17 +564,21 @@ def parse_opened_exp(
             )
             for flow_class, flws in class_to_flws.items()
         }
-    else:
-        overall_util = 0
-        class_to_util = {}
+
+        # Specific analysis for multibottleneck experiments.
+        if category == "multibottleneck":
+            bneck_to_avg_maxmin_ratio = calculate_maxmin_ratios(
+                params, flw_to_pkts, flw_to_sender, sender_to_flws
+            )
 
     out = (
         exp,
         params,
-        jfi,
+        get_jfi(flw_to_pkts, sender_fairness, flw_to_sender),
         overall_util,
         class_to_util,
-    )  # , jfi_by_bottleneck_and_sender)
+        bneck_to_avg_maxmin_ratio,
+    )
 
     # Save the results.
     logging.info("\tSaving: %s", out_flp)
@@ -604,113 +588,7 @@ def parse_opened_exp(
     return out
 
 
-# def identify_bottlenecks(params, flw_to_pkts, sender_fairness, flw_to_sender, sender_to_flws, flw_to_cca, out_flp, exp, jfi_by_bottleneck_and_sender):
-#     bottleneck_to_sender_to_jfi = {}
-
-#     # Dict mapping time to a list of bottleneck events at that time.
-#     bottleneck_events = collections.defaultdict(dict)
-#     # Add all bottleneck events to unified list. Replace rates of 0
-#     # (no bottleneck) with the BESS bandwidth.
-#     for sender, bottleneck_schedule in params["sender_bottlenecks"].items():
-#         for bottleneck_event in bottleneck_schedule:
-#             rate = bottleneck_event["rate_Mbps"]
-#             bottleneck_events[bottleneck_event["time_s"]][sender] = (
-#                 rate if rate != 0 else params["bess_bw_Mbps"]
-#             )
-#     # Go through the list of events and populate the rate values of any senders
-#     # that did not change.
-#     times_s = sorted(bottleneck_events.keys())
-#     for idx, time_s in enumerate(times_s[:-1]):
-#         for sender, rate in bottleneck_events[time_s].items():
-#             if sender not in bottleneck_events[times_s[idx + 1]]:
-#                 bottleneck_events[times_s[idx + 1]][sender] = rate
-#     # Sort bottleneck events by time.
-#     bottleneck_events = sorted(bottleneck_events.items(), key=lambda x: x[0])
-
-#     # Create range-based bottleneck situations.
-#     end_time_s = max(flowset[4] for flowset in params["flowsets"])
-#     bottleneck_situations = []
-#     for idx, bottleneck in enumerate(bottleneck_events):
-#         time_s, configs = bottleneck
-#         if idx == len(bottleneck_events) - 1:
-#             next_time_s = end_time_s
-#         else:
-#             next_time_s = bottleneck_events[idx + 1][0]
-#         bottleneck_situations.append((time_s, next_time_s, configs))
-#     # Num bottleneck events
-#     num_bottlenecks_situations = len(bottleneck_situations)
-#     assert (
-#         num_bottlenecks_situations == 3
-#     ), f"Expected 3 bottleneck situations, but found {num_bottlenecks_situations}."
-
-#     # TODO: Consider refactoring this to be a mapping from sender to that sender's bottleneck events (the way it is in the params file).
-#     #  TODO: Need to track this per flow.
-#     last_cutoff_idx = 0
-#     for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
-#         flw_to_pkts_during_bneck = {}
-#         for flw, pkts in flw_to_pkts.items():
-#             cutoff_idx = utils.find_bound(
-#                 pkts[features.ARRIVAL_TIME_FET],
-#                 bneck_end_s,
-#                 last_cutoff_idx,
-#                 len(pkts),
-#                 "before",
-#             )
-#             flw_to_pkts_during_bneck[flw] = pkts[
-#                 last_cutoff_idx : cutoff_idx + 1
-#             ]
-#         last_cutoff_idx = cutoff_idx + 1
-
-#         bottleneck_to_sender_to_jfi[(bneck_start_s, bneck_end_s)] = {
-#             "shared": get_jfi(
-#                 flw_to_pkts_during_bneck, sender_fairness, flw_to_sender
-#             )
-#         }
-
-#         # Plot all flows (shared bottleneck).
-#         plot_flows_over_time(
-#             exp,
-#             out_flp[:-4] + "_bneckbess.pdf",
-#             flw_to_pkts,
-#             flw_to_cca,
-#             sender_fairness,
-#             flw_to_sender,
-#             xlim=(bneck_start_s, bneck_end_s),
-#             bottleneck_Mbps=params["bess_bw_Mbps"],
-#         )
-#         # Plot each sender-side bottleneck separately.
-#         for sender, flws in sender_to_flws.items():
-#             plot_flows_over_time(
-#                 exp,
-#                 out_flp[:-4] + f"_bneck{sender}.pdf",
-#                 {flw: flw_to_pkts[flw] for flw in flws},
-#                 flw_to_cca,
-#                 xlim=(bneck_start_s, bneck_end_s),
-#                 bottleneck_Mbps=bneck_config[sender],
-#             )
-#             bottleneck_to_sender_to_jfi[(bneck_start_s, bneck_end_s)] = {
-#                 sender: get_jfi(
-#                     {
-#                         flw: flw_to_pkts_during_bneck[flw]
-#                         for flw in sender_to_flws[sender]
-#                     },
-#                     sender_fairness,
-#                     flw_to_sender,
-#                 )
-#             }
-
-
-def maxmin_ratios(
-    params,
-    flw_to_pkts,
-    sender_fairness,
-    flw_to_sender,
-    sender_to_flws,
-    flw_to_cca,
-    out_flp,
-    exp,
-    jfi_by_bottleneck_and_sender,
-):
+def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     # For each bottleneck situation
     #     For each flow
     #         Determine maxmin-fair rate
@@ -719,108 +597,134 @@ def maxmin_ratios(
     #     Average the ratios
     # Return array with one average ratio per bottleneck situation
 
-    # Dict mapping time to a list of bottleneck events at that time.
-    bneckstart_to_sender_to_rate = collections.defaultdict(dict)
     # Add all bottleneck events to unified list. Replace rates of 0
     # (no bottleneck) with the BESS bandwidth.
-    for sender, bottleneck_schedule in params["sender_bottlenecks"].items():
-        for bottleneck_event in bottleneck_schedule:
-            rate = bottleneck_event["rate_Mbps"] * 1e6
-            bneckstart_to_sender_to_rate[bottleneck_event["time_s"]][sender] = (
-                rate if rate != 0 else float("inf")
+    # Dict mapping time to a list of bottleneck events at that time.
+    startsec_to_sender_to_ratebps = collections.defaultdict(dict)
+    for sender, bneck_schedule in params["sender_bottlenecks"].items():
+        for bneck_event in bneck_schedule:
+            rate_bps = bneck_event["rate_Mbps"] * 1e6
+            startsec_to_sender_to_ratebps[bneck_event["time_s"]][sender] = (
+                float("inf") if rate_bps == 0 else rate_bps
             )
     # Go through the list of events and populate the rate values of any senders
     # that did not change.
-    times_s = sorted(bneckstart_to_sender_to_rate.keys())
-    for idx, time_s in enumerate(times_s[:-1]):
-        for sender, rate in bneckstart_to_sender_to_rate[time_s].items():
-            if sender not in bneckstart_to_sender_to_rate[times_s[idx + 1]]:
-                bneckstart_to_sender_to_rate[times_s[idx + 1]][sender] = rate
+    start_times_s = sorted(startsec_to_sender_to_ratebps.keys())
+    for idx, start_s in enumerate(start_times_s[:-1]):
+        for sender, rate_bps in startsec_to_sender_to_ratebps[start_s].items():
+            next_start_s = start_times_s[idx + 1]
+            if sender not in startsec_to_sender_to_ratebps[next_start_s]:
+                startsec_to_sender_to_ratebps[next_start_s][sender] = rate_bps
     # Sort bottleneck events by time.
-    bneckstart_to_sender_to_rate_list = sorted(
-        bneckstart_to_sender_to_rate.items(), key=lambda x: x[0]
+    startsec_to_sender_to_ratebps_sorted = sorted(
+        startsec_to_sender_to_ratebps.items(), key=lambda x: x[0]
     )
 
-    # Create range-based bottleneck situations.
-    end_time_s = max(flowset[4] for flowset in params["flowsets"])
-    bottleneck_situations = []
-    for idx, bottleneck in enumerate(bneckstart_to_sender_to_rate_list):
-        time_s, configs = bottleneck
-        if idx == len(bneckstart_to_sender_to_rate_list) - 1:
-            next_time_s = end_time_s
-        else:
-            next_time_s = bneckstart_to_sender_to_rate_list[idx + 1][0]
-        bottleneck_situations.append((time_s, next_time_s, configs))
-    # Num bottleneck events
-    num_bottlenecks_situations = len(bottleneck_situations)
+    # Create bottleneck situations. A bottleneck situation is a time range with a set
+    # of sender rates.
+    end_s = max(flowset[4] for flowset in params["flowsets"])
+    bneck_situations = []
+    for idx, bneck in enumerate(startsec_to_sender_to_ratebps_sorted):
+        start_s, sender_to_ratebps = bneck
+        next_start_s = (
+            # If this is the last bottleneck situation, then set the end time to the
+            # experiment end time.
+            end_s
+            if idx == len(startsec_to_sender_to_ratebps_sorted) - 1
+            # Otherwise (this is NOT the last bottleneck situation), set the end time to
+            # the start time of the next bottleneck situation.
+            else startsec_to_sender_to_ratebps_sorted[idx + 1][0]
+        )
+        bneck_situations.append((start_s, next_start_s, sender_to_ratebps))
     assert (
-        num_bottlenecks_situations == 3
-    ), f"Expected 3 bottleneck situations, but found {num_bottlenecks_situations}."
+        len(bneck_situations) == 3
+    ), f"Error: Expected 3 bottleneck situations, but found: {len(bneck_situations)}"
 
-    # Need to determine the maxmin fair rate for each flow in each bottleneck situation
-    bneck_to_sender_to_maxmin_bps = {}
-    for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
-        bneck = (bneck_start_s, bneck_end_s)
-        # Fill in the maxmin fair rate contributed by the sender bottlenecks.
+    # Determine the maxmin fair rate for each flow in each bottleneck situation
+    bneck_to_sender_to_maxminbps = {}
+    for start_s, end_s, sender_to_ratebps in bneck_situations:
+        bneck = (start_s, end_s)
+        # Calculate the maxmin fair rate at the sender bottlenecks.
         for sender, flws in sender_to_flws.items():
-            bneck_to_sender_to_maxmin_bps[(bneck_start_s, bneck_end_s)][sender] = (
-                bneck_config[sender] / len(flws)
-            )
+            bneck_to_sender_to_maxminbps[bneck][sender] = sender_to_ratebps[
+                sender
+            ] / len(flws)
 
         # Calculate the maxmin fair rate including the shared bottleneck. Remember, a
         # flow only has one maxmin fair rate. So we override the existing values in
-        # bneck_to_sender_to_maxmin_bps.
+        # bneck_to_sender_to_maxminbps.
 
         # Assume there are only two senders. Then we have three cases:
         #   1) No sender bottlenecks. Maxmin fair rate is entirely determined by the
-        #      shared bottleneck.
+        #      shared bottleneck. Flows divide the shared bottleneck equally.
         #   2) One sender bottleneck. Subtract from the shared bottleneck the rate of
         #      the sender with the bottleneck. Then divide the remainder equally
-        #      between the other sender.
+        #      between the other sender's flows.
         #   3) Two sender bottlenecks. Do nothing, as the maxmin rates are already set
         #      based on the sender bottlenecks and the shared bottleneck does not
         #      matter.
+        #      Note: Case 3 assumes that the sender bottlenecks together are less than
+        #            the shared bottleneck.
 
-        assert len(bneck_to_sender_to_maxmin_bps[bneck]) == 2
-        senders, maxmin_rates_bps = zip(*bneck_to_sender_to_maxmin_bps[bneck].items())
+        assert (
+            len(bneck_to_sender_to_maxminbps[bneck]) == 2
+        ), "Error: Must be exactly two senders!"
+        senders, maxmin_rates_bps = zip(*bneck_to_sender_to_maxminbps[bneck].items())
 
-        min_idx = np.argmin(maxmin_rates_bps)
-        min_sender = senders[min_idx]
-        min_rate_bps = maxmin_rates_bps[min_idx]
+        # Look up the sender with the smaller maxmin rate.
+        smaller_idx = np.argmin(maxmin_rates_bps)
+        smaller_sender = senders[smaller_idx]
+        # Note that this is per-flow.
+        smaller_maxmin_rate_bps = maxmin_rates_bps[smaller_idx]
 
-        max_idx = np.argmin(maxmin_rates_bps)
-        max_sender = senders[max_idx]
-        max_rate_bps = maxmin_rates_bps[max_idx]
+        # Look up the sender with the larger maxmin rate.
+        larger_idx = np.argmin(maxmin_rates_bps)
+        larger_sender = senders[larger_idx]
+        # Note that this is per-flow.
+        larger_maxmin_rate_bps = maxmin_rates_bps[larger_idx]
 
         # Case 1 above.
-        if min_rate_bps == float("inf") and max_rate_bps == float("inf"):
+        if smaller_maxmin_rate_bps == float("inf") and larger_maxmin_rate_bps == float(
+            "inf"
+        ):
             rate_bps = (
                 params["bess_bw_Mbps"]
-                / (len(sender_to_flws[min_sender]) + len(sender_to_flws[max_sender]))
+                / (
+                    len(sender_to_flws[smaller_sender])
+                    + len(sender_to_flws[larger_sender])
+                )
                 * 1e6
             )
-            bneck_to_sender_to_maxmin_bps[bneck][min_sender] = rate_bps
-            bneck_to_sender_to_maxmin_bps[bneck][max_sender] = rate_bps
+            bneck_to_sender_to_maxminbps[bneck][smaller_sender] = rate_bps
+            bneck_to_sender_to_maxminbps[bneck][larger_sender] = rate_bps
         # Case 2 above.
-        if min_rate_bps != float("inf") and max_rate_bps == float("inf"):
-            remainder = params["bess_bw_Mbps"] * 1e6 - bneck_config[min_sender]
-            bneck_to_sender_to_maxmin_bps[bneck][max_sender] = remainder / len(
-                sender_to_flws[max_sender]
+        elif smaller_maxmin_rate_bps != float(
+            "inf"
+        ) and larger_maxmin_rate_bps == float("inf"):
+            remainder = params["bess_bw_Mbps"] * 1e6 - sender_to_ratebps[smaller_sender]
+            bneck_to_sender_to_maxminbps[bneck][larger_sender] = remainder / len(
+                sender_to_flws[larger_sender]
             )
         # Case 3 above.
-        # Do nothing.
+        else:
+            assert (
+                sender_to_ratebps[smaller_sender] + sender_to_ratebps[larger_sender]
+            ) < (params["bess_bw_Mbps"] * 1e6), (
+                "Error: Sum of the sender bottlenecks "
+                "must be less than the shared bottleneck!"
+            )
 
     # For each bottleneck situation, compare each flow's actual throughput to its
     # maxmin fair rate.
     flw_to_last_cutoff_idx = collections.defaultdict(int)
     bneck_to_avg_maxmin_ratio = {}
-    for bneck_start_s, bneck_end_s, bneck_config in bottleneck_situations:
-        bneck = (bneck_start_s, bneck_end_s)
+    for start_s, end_s, _ in bneck_situations:
+        bneck = (start_s, end_s)
         flw_to_maxmin_ratio = {}
         for flw, pkts in flw_to_pkts.items():
             cutoff_idx = utils.find_bound(
                 pkts[features.ARRIVAL_TIME_FET],
-                bneck_end_s,
+                end_s * 1e6,
                 flw_to_last_cutoff_idx[flw],
                 len(pkts),
                 "before",
@@ -828,7 +732,7 @@ def maxmin_ratios(
             tpus_bps = utils.safe_tput_bps(
                 pkts, flw_to_last_cutoff_idx[flw], cutoff_idx
             )
-            maxmin_rate_bps = bneck_to_sender_to_maxmin_bps[bneck][flw_to_sender[flw]]
+            maxmin_rate_bps = bneck_to_sender_to_maxminbps[bneck][flw_to_sender[flw]]
             flw_to_maxmin_ratio[flw] = tpus_bps / maxmin_rate_bps
             flw_to_last_cutoff_idx[flw] = cutoff_idx + 1
         bneck_to_avg_maxmin_ratio[bneck] = np.average(
@@ -1040,9 +944,10 @@ def main(args):
     categories = set()
     for params, _, _, _ in results.values():
         categories.add(params["category"])
-    assert (
-        len(categories) == 1
-    ), f"Experiments must belong to the same category, but these were found: {categories}"
+    assert len(categories) == 1, (
+        "Error: Experiments must belong to the same category, "
+        f"but these were found: {categories}"
+    )
     category = categories.pop()
     # Extract the classifier and evaluation function for the given category.
     _, eval_func = CATEGORIES[category]
