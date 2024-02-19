@@ -720,8 +720,14 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     bneck_to_avg_maxmin_ratio = {}
     for start_s, end_s, _ in bneck_situations:
         bneck = (start_s, end_s)
+        print("bneck", bneck)
         flw_to_maxmin_ratio = {}
         for flw, pkts in flw_to_pkts.items():
+            print("flw", flw)
+            print("len(pkts)", len(pkts))
+            print("flw start", pkts[0][features.ARRIVAL_TIME_FET])
+            print("flw end", pkts[-1][features.ARRIVAL_TIME_FET])
+            print("last cutoff idx", flw_to_last_cutoff_idx[flw])
             cutoff_idx = utils.find_bound(
                 pkts[features.ARRIVAL_TIME_FET],
                 end_s * 1e6,
@@ -729,12 +735,14 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
                 len(pkts) - 1,
                 "before",
             )
+            print("cutoff idx", cutoff_idx)
             tpus_bps = utils.safe_tput_bps(
                 pkts, flw_to_last_cutoff_idx[flw], cutoff_idx
             )
             maxmin_rate_bps = bneck_to_sender_to_maxminbps[bneck][flw_to_sender[flw]]
             flw_to_maxmin_ratio[flw] = tpus_bps / maxmin_rate_bps
             flw_to_last_cutoff_idx[flw] = cutoff_idx + 1
+            print()
         bneck_to_avg_maxmin_ratio[bneck] = np.average(
             list(flw_to_maxmin_ratio.values())
         )
