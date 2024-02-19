@@ -940,7 +940,7 @@ def main(args):
     # Determine the experiment category and make sure that all experiments are from the
     # same category.
     categories = set()
-    for params, _, _, _ in results.values():
+    for params, _, _, _, _ in results.values():
         categories.add(params["category"])
     assert len(categories) == 1, (
         "Error: Experiments must belong to the same category, "
@@ -1394,7 +1394,68 @@ def eval_shared(args, our_label, matched):
 
 def eval_multibottleneck(args, our_label, matched):
     """Generate graphs for the multibottleneck flows experiments."""
-    raise NotImplementedError()
+    bneck_to_avg_maxmin_ratios_disabled = collections.defaultdict(list)
+    bneck_to_avg_maxmin_ratios_enabled = collections.defaultdict(list)
+    for _, (disabled_results, enabled_results) in matched.items():
+        (
+            _,
+            _,
+            _,
+            _,
+            bneck_to_avg_maxmin_ratio_disabled,
+        ) = disabled_results
+        (
+            _,
+            _,
+            _,
+            _,
+            bneck_to_avg_maxmin_ratio_enabled,
+        ) = enabled_results
+
+        assert set(bneck_to_avg_maxmin_ratio_disabled.keys()) == set(
+            bneck_to_avg_maxmin_ratio_enabled.keys()
+        ), "Bottlenecks do not match between disabled and enabled experiments!"
+        for bneck, avg_maxmin_ratio in bneck_to_avg_maxmin_ratio_disabled.items():
+            bneck_to_avg_maxmin_ratios_disabled[bneck].append(avg_maxmin_ratio)
+        for bneck, avg_maxmin_ratio in bneck_to_avg_maxmin_ratio_enabled.items():
+            bneck_to_avg_maxmin_ratios_enabled[bneck].append(avg_maxmin_ratio)
+
+    assert set(bneck_to_avg_maxmin_ratios_disabled.keys()) == set(
+        bneck_to_avg_maxmin_ratios_enabled.keys()
+    )
+    bnecks = sorted(bneck_to_avg_maxmin_ratios_disabled.keys(), key=lambda x: x[0])
+
+    # For each bottleneck disuation, graph a CDF of the avg maxmin ratios across flows.
+    for bneck_idx, bneck in enumerate(bnecks):
+        plot_cdf(
+            args,
+            lines=[
+                bneck_to_avg_maxmin_ratios_disabled[bneck],
+                bneck_to_avg_maxmin_ratios_enabled[bneck],
+            ],
+            labels=["Original", our_label],
+            x_label="Ratio of throughput to maxmin fair rate (ideal = 1)",
+            x_max=100,
+            filename=f"bneck{bneck_idx}_maxmin_ratio.pdf",
+            colors=[COLORS_MAP["red"], COLORS_MAP["blue"]],
+        )
+
+    bneck_to_change = {}
+    for bneck in bnecks:
+        avg_disabled = np.average(bneck_to_avg_maxmin_ratios_disabled[bneck])
+        avg_enabled = np.average(bneck_to_avg_maxmin_ratios_enabled[bneck])
+        percent_change = (avg_enabled - avg_disabled) / avg_disabled * 100
+        bneck_to_change[bneck] = {
+            "avg_disabled": avg_disabled,
+            "avg_enabled": avg_enabled,
+            "percent_change": percent_change,
+        }
+
+    with open(
+        path.join(args.out_dir, "bneck_to_change.json"), "w", encoding="utf-8"
+    ) as fil:
+        json.dump(bneck_to_change, fil, indent=4)
+    return 0
 
 
 def eval_background(args, our_label, matched):
