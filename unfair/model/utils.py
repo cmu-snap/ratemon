@@ -1721,6 +1721,7 @@ def find_bound(vals, target, min_idx, max_idx, which):
     vals must be monotonically increasing.
     """
     assert min_idx >= 0
+    assert max_idx < len(vals)
     assert max_idx >= min_idx
     assert which in {"before", "after"}
     if min_idx == max_idx:
@@ -1844,7 +1845,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
                 data_pkts[features.ARRIVAL_TIME_FET],
                 accept_after_us,
                 0,
-                len(data_pkts),
+                len(data_pkts) - 1,
                 "before",
             )
 
@@ -1854,7 +1855,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
                 data_pkts[features.ARRIVAL_TIME_FET],
                 accept_before_us,
                 0,
-                len(data_pkts),
+                len(data_pkts) - 1,
                 "after",
             )
 

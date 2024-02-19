@@ -705,11 +705,13 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
             )
         # Case 3 above.
         else:
-            assert (
+            total_sender_bneck_bps = (
                 sender_to_ratebps[smaller_sender] + sender_to_ratebps[larger_sender]
-            ) < (params["bess_bw_Mbps"] * 1e6), (
-                "Error: Sum of the sender bottlenecks "
-                "must be less than the shared bottleneck!"
+            )
+            assert total_sender_bneck_bps < (params["bess_bw_Mbps"] * 1e6), (
+                f"Error: Sum of the sender bottlenecks ({total_sender_bneck_bps} bps) "
+                "must be less than the shared bottleneck "
+                f"({params['bess_bw_Mbps'] * 1e6} bps)!"
             )
 
     # For each bottleneck situation, compare each flow's actual throughput to its
@@ -724,7 +726,7 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
                 pkts[features.ARRIVAL_TIME_FET],
                 end_s * 1e6,
                 flw_to_last_cutoff_idx[flw],
-                len(pkts),
+                len(pkts) - 1,
                 "before",
             )
             tpus_bps = utils.safe_tput_bps(
