@@ -1002,12 +1002,14 @@ def eval_shared(args, our_label, matched):
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
+            _,
         ) = disabled_results
         (
             _,
             jfi_enabled,
             overall_util_enabled,
             class_to_util_enabled,
+            _,
         ) = enabled_results
 
         assert tuple(sorted(class_to_util_disabled.keys())) == (0, 20)
@@ -1467,12 +1469,14 @@ def eval_background(args, our_label, matched):
             jfi_disabled,
             overall_util_disabled,
             class_to_util_disabled,
+            _,
         ) = disabled_results
         (
             _,
             jfi_enabled,
             overall_util_enabled,
             class_to_util_enabled,
+            _,
         ) = enabled_results
 
         assert tuple(sorted(class_to_util_disabled.keys())) == ("receiver", "sink")
