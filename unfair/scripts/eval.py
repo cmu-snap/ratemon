@@ -534,11 +534,9 @@ def parse_opened_exp(
     earliest_end_time_us = min(
         pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
     )
-
-    flw_to_pkts = {
-        flw: utils.trim_packets(pkts, latest_start_time_us, earliest_end_time_us)
-        for flw, pkts in flw_to_pkts.items()
-    }
+    flw_to_pkts = utils.trim_packets(
+        flw_to_pkts, latest_start_time_us, earliest_end_time_us
+    )
 
     overall_util = 0
     # Flow class to overall utilization of that flow class.
