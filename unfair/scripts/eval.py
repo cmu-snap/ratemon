@@ -681,6 +681,13 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         # Note that this is per-flow.
         larger_maxmin_rate_bps = maxmin_rates_bps[larger_idx]
 
+        print("small sender", smaller_sender)
+        print("large sender", larger_sender)
+        print("small sender bneck bps", sender_to_ratebps[smaller_sender])
+        print("large sender bneck bps", sender_to_ratebps[larger_sender])
+        print("shared bneck Mbps", params["bess_bw_Mbps"])
+        print("shared bneck bps", params["bess_bw_Mbps"] * 1e6)
+
         # Case 1 above.
         if smaller_maxmin_rate_bps == float("inf") and larger_maxmin_rate_bps == float(
             "inf"
@@ -723,6 +730,8 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         print("bneck", bneck)
         flw_to_maxmin_ratio = {}
         for flw, pkts in flw_to_pkts.items():
+            # assert pkts[cutoff_idx][features.ARRIVAL_TIME_FET]
+
             print("flw", flw)
             print("len(pkts)", len(pkts))
             print("flw start", pkts[0][features.ARRIVAL_TIME_FET])

@@ -1838,7 +1838,8 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
     total_dropped = 0
     for flow, pkts in flw_to_pkts.items():
         data_pkts = get_data_packets(pkts)
-        # Find the highest index before the time at which the first flow finishes.
+
+        # Find the first indes greater than accept_after_us.
         new_start_idx = 0
         if accept_after_us is not None:
             new_start_idx = find_bound(
@@ -1860,6 +1861,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
             )
 
         trimmed_data_pkts = data_pkts[new_start_idx : new_end_idx + 1]
+        print("trimming", len(data_pkts), new_start_idx, new_end_idx, len(trimmed_data_pkts))
         trimmed[flow] = (
             # We do not trim the ACK packets because we do not need to.
             (trimmed_data_pkts, get_ack_packets(pkts))
@@ -1867,7 +1869,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
             else trimmed_data_pkts
         )
 
-        total_dropped += len(data_pkts) - len(trimmed_data_pkts)
+        total_dropped += (len(data_pkts) - len(trimmed_data_pkts))
     logging.info(
         "Dropped %d data packets while trimming flows.",
         total_dropped,
