@@ -639,7 +639,7 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     ), f"Error: Expected 3 bottleneck situations, but found: {len(bneck_situations)}"
 
     # Determine the maxmin fair rate for each flow in each bottleneck situation
-    bneck_to_sender_to_maxminbps = {}
+    bneck_to_sender_to_maxminbps = collections.defaultdict(dict)
     for start_s, end_s, sender_to_ratebps in bneck_situations:
         bneck = (start_s, end_s)
         # Calculate the maxmin fair rate at the sender bottlenecks.
