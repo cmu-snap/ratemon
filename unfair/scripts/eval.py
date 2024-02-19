@@ -503,7 +503,7 @@ def parse_opened_exp(
 
     # Normalize the packet arrival times to the start of the experiment.
     earliest_start_time_us = min(
-        pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
+        pkts[features.ARRIVAL_TIME_FET][0] for pkts in flw_to_pkts.values()
     )
     for flw in flw_to_pkts:
         flw_to_pkts[flw][features.ARRIVAL_TIME_FET] -= earliest_start_time_us
@@ -534,6 +534,8 @@ def parse_opened_exp(
     earliest_end_time_us = min(
         pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
     )
+    print("latest_start_time_us", latest_start_time_us)
+    print("earliest_end_time_us", earliest_end_time_us)
     flw_to_pkts = utils.trim_packets(
         flw_to_pkts, latest_start_time_us, earliest_end_time_us
     )
@@ -676,7 +678,7 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         smaller_maxmin_rate_bps = maxmin_rates_bps[smaller_idx]
 
         # Look up the sender with the larger maxmin rate.
-        larger_idx = np.argmin(maxmin_rates_bps)
+        larger_idx = np.argmax(maxmin_rates_bps)
         larger_sender = senders[larger_idx]
         # Note that this is per-flow.
         larger_maxmin_rate_bps = maxmin_rates_bps[larger_idx]
