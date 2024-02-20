@@ -1470,7 +1470,13 @@ def eval_multibottleneck(args, our_label, matched):
             ],
             labels=["Original", our_label],
             x_label="Ratio of throughput to maxmin fair rate (ideal = 1)",
-            x_max=100,
+            x_max=(
+                1.01
+                * max(
+                    bneck_to_avg_maxmin_ratios_disabled[bneck],
+                    bneck_to_avg_maxmin_ratios_enabled[bneck],
+                )
+            ),
             filename=f"bneck{bneck_idx}_maxmin_ratio.pdf",
             colors=[COLORS_MAP["red"], COLORS_MAP["blue"]],
         )
