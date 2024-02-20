@@ -678,10 +678,18 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         smaller_maxmin_rate_bps = maxmin_rates_bps[smaller_idx]
 
         # Look up the sender with the larger maxmin rate.
-        larger_idx = np.argmax(maxmin_rates_bps)
+        larger_idx = (
+            {0, 1}
+            - {
+                smaller_idx,
+            }
+        ).pop()
         larger_sender = senders[larger_idx]
         # Note that this is per-flow.
         larger_maxmin_rate_bps = maxmin_rates_bps[larger_idx]
+
+        assert smaller_idx != larger_idx
+        assert tuple(sorted([smaller_idx, larger_idx])) == (0, 1)
 
         print("small sender", smaller_sender)
         print("large sender", larger_sender)
@@ -691,9 +699,7 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         print("shared bneck bps", params["bess_bw_Mbps"] * 1e6)
 
         # Case 1 above.
-        if smaller_maxmin_rate_bps == float("inf") and larger_maxmin_rate_bps == float(
-            "inf"
-        ):
+        if smaller_maxmin_rate_bps == float("inf"):
             rate_bps = (
                 params["bess_bw_Mbps"]
                 / (
@@ -705,9 +711,9 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
             bneck_to_sender_to_maxminbps[bneck][smaller_sender] = rate_bps
             bneck_to_sender_to_maxminbps[bneck][larger_sender] = rate_bps
         # Case 2 above.
-        elif smaller_maxmin_rate_bps != float(
-            "inf"
-        ) and larger_maxmin_rate_bps == float("inf"):
+        elif (smaller_maxmin_rate_bps != float("inf")) and (
+            larger_maxmin_rate_bps == float("inf")
+        ):
             remainder = params["bess_bw_Mbps"] * 1e6 - sender_to_ratebps[smaller_sender]
             bneck_to_sender_to_maxminbps[bneck][larger_sender] = remainder / len(
                 sender_to_flws[larger_sender]
