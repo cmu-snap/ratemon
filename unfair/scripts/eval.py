@@ -528,20 +528,12 @@ def parse_opened_exp(
             )
 
     # Drop packets from before the last flow starts and after the first flow ends.
-    print("start times:")
-    for flw, pkts in flw_to_pkts.items():
-        print("\t", flw, pkts[features.ARRIVAL_TIME_FET][0])
     latest_start_time_us = max(
         pkts[features.ARRIVAL_TIME_FET][0] for pkts in flw_to_pkts.values()
     )
-    print("latest_start_time_us", latest_start_time_us)
-    print("end times:")
-    for flw, pkts in flw_to_pkts.items():
-        print("\t", flw, pkts[features.ARRIVAL_TIME_FET][-1])
     earliest_end_time_us = min(
         pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
     )
-    print("earliest_end_time_us", earliest_end_time_us)
     flw_to_pkts = utils.trim_packets(
         flw_to_pkts, latest_start_time_us, earliest_end_time_us
     )
@@ -697,13 +689,6 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
         assert smaller_idx != larger_idx
         assert tuple(sorted([smaller_idx, larger_idx])) == (0, 1)
 
-        print("small sender", smaller_sender)
-        print("large sender", larger_sender)
-        print("small sender bneck bps", sender_to_ratebps[smaller_sender])
-        print("large sender bneck bps", sender_to_ratebps[larger_sender])
-        print("shared bneck Mbps", params["bess_bw_Mbps"])
-        print("shared bneck bps", params["bess_bw_Mbps"] * 1e6)
-
         # Case 1 above.
         if smaller_maxmin_rate_bps == float("inf"):
             rate_bps = (
@@ -741,16 +726,8 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     bneck_to_avg_maxmin_ratio = {}
     for start_s, end_s, _ in bneck_situations:
         bneck = (start_s, end_s)
-        print("bneck", bneck)
         flw_to_maxmin_ratio = {}
         for flw, pkts in flw_to_pkts.items():
-            # assert pkts[cutoff_idx][features.ARRIVAL_TIME_FET]
-
-            print("flw", flw)
-            print("len(pkts)", len(pkts))
-            print("flw start", pkts[0][features.ARRIVAL_TIME_FET])
-            print("flw end", pkts[-1][features.ARRIVAL_TIME_FET])
-            print("last cutoff idx", flw_to_last_cutoff_idx[flw])
             cutoff_idx = utils.find_bound(
                 pkts[features.ARRIVAL_TIME_FET],
                 end_s * 1e6,
@@ -758,14 +735,12 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
                 len(pkts) - 1,
                 "before",
             )
-            print("cutoff idx", cutoff_idx)
             tpus_bps = utils.safe_tput_bps(
                 pkts, flw_to_last_cutoff_idx[flw], cutoff_idx
             )
             maxmin_rate_bps = bneck_to_sender_to_maxminbps[bneck][flw_to_sender[flw]]
             flw_to_maxmin_ratio[flw] = tpus_bps / maxmin_rate_bps
             flw_to_last_cutoff_idx[flw] = cutoff_idx + 1
-            print()
         bneck_to_avg_maxmin_ratio[bneck] = np.average(
             list(flw_to_maxmin_ratio.values())
         )
