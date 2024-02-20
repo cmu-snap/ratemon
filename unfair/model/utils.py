@@ -1839,7 +1839,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
     for flow, pkts in flw_to_pkts.items():
         data_pkts = get_data_packets(pkts)
 
-        # Find the first indes greater than accept_after_us.
+        # Find the first index before accept_after_us.
         new_start_idx = 0
         if accept_after_us is not None:
             new_start_idx = find_bound(
@@ -1847,9 +1847,10 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
                 accept_after_us,
                 0,
                 len(data_pkts) - 1,
-                "before",
+                "after",
             )
 
+        # Find the first index after accept_before_us.
         new_end_idx = len(data_pkts) - 1
         if accept_before_us is not None:
             new_start_idx = find_bound(
@@ -1857,7 +1858,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
                 accept_before_us,
                 0,
                 len(data_pkts) - 1,
-                "after",
+                "before",
             )
 
         trimmed_data_pkts = data_pkts[new_start_idx : new_end_idx + 1]

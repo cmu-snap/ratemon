@@ -528,13 +528,19 @@ def parse_opened_exp(
             )
 
     # Drop packets from before the last flow starts and after the first flow ends.
+    print("start times:")
+    for flw, pkts in flw_to_pkts.items():
+        print("\t", flw, pkts[features.ARRIVAL_TIME_FET][0])
     latest_start_time_us = max(
         pkts[features.ARRIVAL_TIME_FET][0] for pkts in flw_to_pkts.values()
     )
+    print("latest_start_time_us", latest_start_time_us)
+    print("end times:")
+    for flw, pkts in flw_to_pkts.items():
+        print("\t", flw, pkts[features.ARRIVAL_TIME_FET][-1])
     earliest_end_time_us = min(
         pkts[features.ARRIVAL_TIME_FET][-1] for pkts in flw_to_pkts.values()
     )
-    print("latest_start_time_us", latest_start_time_us)
     print("earliest_end_time_us", earliest_end_time_us)
     flw_to_pkts = utils.trim_packets(
         flw_to_pkts, latest_start_time_us, earliest_end_time_us
