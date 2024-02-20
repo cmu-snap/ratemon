@@ -517,15 +517,14 @@ def parse_opened_exp(
         sender_fairness,
         flw_to_sender,
     )
-    if category == "background":
-        # For background flow experiments, also plot each sender's flows over time.
-        for sender, flws in sender_to_flws.items():
-            plot_flows_over_time(
-                exp,
-                out_flp[:-4] + f"_flows-from-{sender}.pdf",
-                {flw: flw_to_pkts[flw] for flw in flws},
-                flw_to_cca,
-            )
+    # Plot each sender separately.
+    for sender, flws in sender_to_flws.items():
+        plot_flows_over_time(
+            exp,
+            out_flp[:-4] + f"_flows-from-{sender}.pdf",
+            {flw: flw_to_pkts[flw] for flw in flws},
+            flw_to_cca,
+        )
 
     # Drop packets from before the last flow starts and after the first flow ends.
     latest_start_time_us = max(
@@ -542,7 +541,7 @@ def parse_opened_exp(
     # Flow class to overall utilization of that flow class.
     class_to_util = {}
     # Bottleneck time range to average ratio of flow throughput to maxmin fair rate.
-    bneck_to_avg_maxmin_ratio = None
+    bneck_to_maxmin_ratios = None
     if exp.use_bess:
         overall_util = get_avg_util(exp.bw_bps, flw_to_pkts)
 
@@ -565,7 +564,7 @@ def parse_opened_exp(
 
         # Specific analysis for multibottleneck experiments.
         if category == "multibottleneck":
-            bneck_to_avg_maxmin_ratio = calculate_maxmin_ratios(
+            bneck_to_maxmin_ratios = calculate_maxmin_ratios(
                 params, flw_to_pkts, flw_to_sender, sender_to_flws
             )
 
@@ -575,7 +574,7 @@ def parse_opened_exp(
         get_jfi(flw_to_pkts, sender_fairness, flw_to_sender),
         overall_util,
         class_to_util,
-        bneck_to_avg_maxmin_ratio,
+        bneck_to_maxmin_ratios,
     )
 
     # Save the results.
@@ -723,7 +722,7 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     # For each bottleneck situation, compare each flow's actual throughput to its
     # maxmin fair rate.
     flw_to_last_cutoff_idx = collections.defaultdict(int)
-    bneck_to_avg_maxmin_ratio = {}
+    bneck_to_maxmin_ratios = {}
     for start_s, end_s, _ in bneck_situations:
         bneck = (start_s, end_s)
         flw_to_maxmin_ratio = {}
@@ -741,10 +740,8 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
             maxmin_rate_bps = bneck_to_sender_to_maxminbps[bneck][flw_to_sender[flw]]
             flw_to_maxmin_ratio[flw] = tpus_bps / maxmin_rate_bps
             flw_to_last_cutoff_idx[flw] = cutoff_idx + 1
-        bneck_to_avg_maxmin_ratio[bneck] = np.average(
-            list(flw_to_maxmin_ratio.values())
-        )
-    return bneck_to_avg_maxmin_ratio
+        bneck_to_maxmin_ratios[bneck] = list(flw_to_maxmin_ratio.values())
+    return bneck_to_maxmin_ratios
 
 
 def get_jfi(flw_to_pkts, sender_fairness=False, flw_to_sender=None):
@@ -1404,52 +1401,52 @@ def eval_shared(args, our_label, matched):
 
 def eval_multibottleneck(args, our_label, matched):
     """Generate graphs for the multibottleneck flows experiments."""
-    bneck_to_avg_maxmin_ratios_disabled = collections.defaultdict(list)
-    bneck_to_avg_maxmin_ratios_enabled = collections.defaultdict(list)
+    bneck_to_all_maxmin_ratios_disabled = collections.defaultdict(list)
+    bneck_to_all_maxmin_ratios_enabled = collections.defaultdict(list)
     for _, (disabled_results, enabled_results) in matched.items():
         (
             _,
             _,
             _,
             _,
-            bneck_to_avg_maxmin_ratio_disabled,
+            bneck_to_maxmin_ratios_disabled,
         ) = disabled_results
         (
             _,
             _,
             _,
             _,
-            bneck_to_avg_maxmin_ratio_enabled,
+            bneck_to_maxmin_ratios_enabled,
         ) = enabled_results
 
-        assert set(bneck_to_avg_maxmin_ratio_disabled.keys()) == set(
-            bneck_to_avg_maxmin_ratio_enabled.keys()
+        assert set(bneck_to_maxmin_ratios_disabled.keys()) == set(
+            bneck_to_maxmin_ratios_enabled.keys()
         ), "Bottlenecks do not match between disabled and enabled experiments!"
-        for bneck, avg_maxmin_ratio in bneck_to_avg_maxmin_ratio_disabled.items():
-            bneck_to_avg_maxmin_ratios_disabled[bneck].append(avg_maxmin_ratio)
-        for bneck, avg_maxmin_ratio in bneck_to_avg_maxmin_ratio_enabled.items():
-            bneck_to_avg_maxmin_ratios_enabled[bneck].append(avg_maxmin_ratio)
+        for bneck, maxmin_ratios in bneck_to_maxmin_ratios_disabled.items():
+            bneck_to_all_maxmin_ratios_disabled[bneck].extend(maxmin_ratios)
+        for bneck, maxmin_ratios in bneck_to_maxmin_ratios_enabled.items():
+            bneck_to_all_maxmin_ratios_enabled[bneck].extend(maxmin_ratios)
 
-    assert set(bneck_to_avg_maxmin_ratios_disabled.keys()) == set(
-        bneck_to_avg_maxmin_ratios_enabled.keys()
+    assert set(bneck_to_all_maxmin_ratios_disabled.keys()) == set(
+        bneck_to_all_maxmin_ratios_enabled.keys()
     )
-    bnecks = sorted(bneck_to_avg_maxmin_ratios_disabled.keys(), key=lambda x: x[0])
+    bnecks = sorted(bneck_to_all_maxmin_ratios_disabled.keys(), key=lambda x: x[0])
 
-    # For each bottleneck disuation, graph a CDF of the avg maxmin ratios across flows.
+    # For each bottleneck disuation, graph a CDF of the maxmin ratios.
     for bneck_idx, bneck in enumerate(bnecks):
         plot_cdf(
             args,
             lines=[
-                bneck_to_avg_maxmin_ratios_disabled[bneck],
-                bneck_to_avg_maxmin_ratios_enabled[bneck],
+                bneck_to_all_maxmin_ratios_disabled[bneck],
+                bneck_to_all_maxmin_ratios_enabled[bneck],
             ],
             labels=["Original", our_label],
             x_label="Ratio of throughput to maxmin fair rate (ideal = 1)",
             x_max=(
                 1.01
                 * max(
-                    *bneck_to_avg_maxmin_ratios_disabled[bneck],
-                    *bneck_to_avg_maxmin_ratios_enabled[bneck],
+                    *bneck_to_all_maxmin_ratios_disabled[bneck],
+                    *bneck_to_all_maxmin_ratios_enabled[bneck],
                 )
             ),
             filename=f"bneck{bneck_idx}_maxmin_ratio.pdf",
@@ -1459,8 +1456,8 @@ def eval_multibottleneck(args, our_label, matched):
     bneck_to_change = {}
     for bneck_idx, bneck in enumerate(bnecks):
         start_s, end_s = bneck
-        avg_disabled = np.average(bneck_to_avg_maxmin_ratios_disabled[bneck])
-        avg_enabled = np.average(bneck_to_avg_maxmin_ratios_enabled[bneck])
+        avg_disabled = np.average(bneck_to_all_maxmin_ratios_disabled[bneck])
+        avg_enabled = np.average(bneck_to_all_maxmin_ratios_enabled[bneck])
         percent_change = (avg_enabled - avg_disabled) / avg_disabled * 100
         bneck_to_change[bneck_idx] = {
             "start_s": start_s,
