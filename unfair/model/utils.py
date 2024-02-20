@@ -1853,7 +1853,7 @@ def trim_packets(flw_to_pkts, accept_after_us=None, accept_before_us=None):
         # Find the first index after accept_before_us.
         new_end_idx = len(data_pkts) - 1
         if accept_before_us is not None:
-            new_start_idx = find_bound(
+            new_end_idx = find_bound(
                 data_pkts[features.ARRIVAL_TIME_FET],
                 accept_before_us,
                 0,
