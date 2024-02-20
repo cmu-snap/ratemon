@@ -1476,11 +1476,14 @@ def eval_multibottleneck(args, our_label, matched):
         )
 
     bneck_to_change = {}
-    for bneck in bnecks:
+    for bneck_idx, bneck in enumerate(bnecks):
+        start_s, end_s = bneck
         avg_disabled = np.average(bneck_to_avg_maxmin_ratios_disabled[bneck])
         avg_enabled = np.average(bneck_to_avg_maxmin_ratios_enabled[bneck])
         percent_change = (avg_enabled - avg_disabled) / avg_disabled * 100
-        bneck_to_change[bneck] = {
+        bneck_to_change[bneck_idx] = {
+            "start_s": start_s,
+            "end_s": end_s,
             "avg_disabled": avg_disabled,
             "avg_enabled": avg_enabled,
             "percent_change": percent_change,
