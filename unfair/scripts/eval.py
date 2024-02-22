@@ -33,6 +33,9 @@ LINESTYLES = ["solid", "dashed", "dashdot"]
 LINEWIDTH = 2.5
 PREFIX = ""
 PERCENTILES = [5, 10, 25, 50, 75, 90, 99.9]
+# Bucket size for computing average throughput. To avoid showing transient burstiness,
+# this should be larger than the largest possible RTT.
+BUCKET_DUR_US = 1e6
 
 
 def get_queue_mult(exp, vals):
@@ -216,7 +219,7 @@ def plot_flows_over_time(
     initial_time = min(
         np.min(pkts[features.ARRIVAL_TIME_FET]) for pkts in flw_to_pkts.values()
     )
-    # Put packets into buckets of 100 milliseconds.
+    # Put packets into buckets of BUCKET_DUR_US.
     for flw, pkts in flw_to_pkts.items():
         throughputs = []
         current_bucket = []
@@ -227,10 +230,10 @@ def plot_flows_over_time(
 
             start_idx = current_bucket[0]
             start_time = pkts[start_idx][features.ARRIVAL_TIME_FET]
-            # Create a bucket for every 100 milliseconds.
+            # Create a bucket for every BUCKET_DUR_US.
             if (
                 len(current_bucket) > 1
-                and pkt[features.ARRIVAL_TIME_FET] - start_time > 500e3
+                and pkt[features.ARRIVAL_TIME_FET] - start_time > BUCKET_DUR_US
             ):
                 end_idx = current_bucket[-1]
                 end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
