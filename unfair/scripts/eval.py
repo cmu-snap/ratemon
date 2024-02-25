@@ -327,7 +327,7 @@ def plot_flows_over_time(
         exp.bw_Mbps if exp.use_bess else None,
         out_flp,
         legendloc=("center" if sender_fairness else "upper right"),
-        linewidth=(2 if sender_fairness else 1),
+        linewidth=(1 if sender_fairness else 1),
         colors=colors,
         bbox_to_anchor=((0.5, 1.15) if sender_fairness else None),
         legend_ncol=(2 if sender_fairness else 1),
