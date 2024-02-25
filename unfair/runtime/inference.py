@@ -130,7 +130,8 @@ def make_decision_sender_fairness(
         fets[-1][
             features.make_win_metric(features.RTT_FET, models.MathisFairness.win_size)
         ],
-        ler / (4 + 5e4 * ler),
+        # ler / (4 + 5e4 * ler),
+        ler,
     )
 
     # Divide the Mathis fair throughput equally between the flows.
