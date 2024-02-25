@@ -125,11 +125,13 @@ def make_decision_sender_fairness(
         )
     ]
 
+    avg_rtt_us = fets[-1][
+        features.make_win_metric(features.RTT_FET, models.MathisFairness.win_size)
+    ]
+
     modified_mathis_tput_bps_ler = utils.safe_mathis_tput_bps(
         defaults.MSS_B,
-        fets[-1][
-            features.make_win_metric(features.RTT_FET, models.MathisFairness.win_size)
-        ],
+        avg_rtt_us,
         # ler / (4 + 5e4 * ler),
         ler,
     )
@@ -140,7 +142,8 @@ def make_decision_sender_fairness(
     new_decision = (
         defaults.Decision.PACED,
         per_flow_tput_bps,
-        utils.bdp_B(per_flow_tput_bps, min_rtt_us / 1e6),
+        # utils.bdp_B(per_flow_tput_bps, min_rtt_us / 1e6),
+        utils.bdp_B(per_flow_tput_bps, avg_rtt_us / 1e6),
     )
     return new_decision
 
@@ -266,9 +269,11 @@ def make_decision_flow_fairness(
                 args.reaction_strategy,
                 # If the flow was already paced, then based the new paced throughput on
                 # the old paced throughput.
-                flow_to_decisions[flowkey][1]
-                if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
-                else tput_bps,
+                (
+                    flow_to_decisions[flowkey][1]
+                    if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                    else tput_bps
+                ),
             )
             new_decision = (
                 defaults.Decision.PACED,
@@ -284,9 +289,11 @@ def make_decision_flow_fairness(
                     args.reaction_strategy,
                     # If the flow was already paced, then base the new paced
                     # throughput on the old paced throughput.
-                    flow_to_decisions[flowkey][1]
-                    if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
-                    else tput_bps,
+                    (
+                        flow_to_decisions[flowkey][1]
+                        if flow_to_decisions[flowkey][0] == defaults.Decision.PACED
+                        else tput_bps
+                    ),
                 )
                 new_decision = (
                     defaults.Decision.PACED,
