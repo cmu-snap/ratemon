@@ -179,7 +179,7 @@ def plot_lines(
                     # If this is a sender fairness graph but not the first
                     # sender, or a cubic flow in a flow fairness graph...
                     "solid"
-                    if "Sender 2" in label or label == "cubic"
+                    if "Service 2" in label or label == "cubic"
                     else "dashdot"
                 ),
                 label=label,
@@ -235,6 +235,7 @@ def plot_flows_over_time(
                 len(current_bucket) > 1
                 and pkt[features.ARRIVAL_TIME_FET] - start_time > BUCKET_DUR_US
             ):
+                # End this bucket. Calculate the bucket's throughput and create a new bucket.
                 end_idx = current_bucket[-1]
                 end_time = pkts[end_idx][features.ARRIVAL_TIME_FET]
                 # print("start:", start_idx)
@@ -292,7 +293,7 @@ def plot_flows_over_time(
                 #     print("sample_idx", sample_idx)
                 #     raise
         lines = [
-            (throughputs, f"Sender {sender_idx + 1}: {num_flows} {cca}")
+            (throughputs, f"Service {sender_idx + 1}: {num_flows} {cca}")
             for sender_idx, (cca, num_flows, throughputs) in enumerate(
                 sender_to_tputs.values()
             )
