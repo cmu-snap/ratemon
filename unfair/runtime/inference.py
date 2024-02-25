@@ -125,6 +125,12 @@ def make_decision_sender_fairness(
         )
     ]
 
+    lr = fets[-1][
+        features.make_win_metric(
+            features.LOSS_RATE_FET, models.MathisFairness.win_size
+        )
+    ]
+
     avg_rtt_us = fets[-1][
         features.make_win_metric(features.RTT_FET, models.MathisFairness.win_size)
     ]
@@ -133,7 +139,8 @@ def make_decision_sender_fairness(
         defaults.MSS_B,
         avg_rtt_us,
         # ler / (4 + 5e4 * ler),
-        ler,
+        # ler,
+        lr,
     )
 
     # Divide the Mathis fair throughput equally between the flows.
