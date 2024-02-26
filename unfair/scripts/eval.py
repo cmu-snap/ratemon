@@ -1527,12 +1527,12 @@ def eval_background(args, our_label, matched):
         )
 
     (
-        _,  # jfis_disabled,
-        _,  # jfis_enabled,
+        jfis_disabled,
+        jfis_enabled,
         _,  # jfi_deltas,
         _,  # jfi_deltas_percent,
-        _,  # overall_utils_disabled,
-        _,  # overall_utils_enabled,
+        overall_utils_disabled,
+        overall_utils_enabled,
         _,  # overall_util_deltas_percent,
         foreground_flows_utils_disabled,
         foreground_flows_utils_enabled,
@@ -1595,6 +1595,29 @@ def eval_background(args, our_label, matched):
         filename="background_flows_util_cdf.pdf",
         # title='CDF of background flow link utilization,\nwith and without RateMon',
         colors=[COLORS_MAP["orange"], COLORS_MAP["red"], COLORS_MAP["blue"]],
+    )
+    plot_cdf(
+        args,
+        lines=[jfis_disabled, jfis_enabled],
+        labels=["Original", our_label],
+        x_label="JFI",
+        x_max=1.0,
+        filename="jfi_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=COLORS[:2],
+        # title="CDF of JFI,\nwith and without RateMon",
+    )
+    plot_cdf(
+        args,
+        lines=[overall_utils_disabled, overall_utils_enabled],
+        labels=["Original", our_label],
+        x_label="Overall link utilization (%)",
+        x_max=100,
+        filename="util_cdf.pdf",
+        linestyles=["dashed", "dashdot"],
+        colors=COLORS[:2],
+        legendloc="upper left",
+        # title="CDF of overall link utilization,\nwith and without RateMon",
     )
     return 0
 
