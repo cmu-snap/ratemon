@@ -1,4 +1,4 @@
-"""Monitors incoming TCP FLOWS to detect unfairness."""
+"""Monitors incoming TCP flow to detect if they are above their target rate."""
 
 from argparse import ArgumentParser
 import atexit
@@ -16,10 +16,10 @@ import typing
 import netifaces as ni
 import pcapy
 
-from unfair.model import features, models, utils
-from unfair.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
-from unfair.runtime.mitigation_strategy import MitigationStrategy
-from unfair.runtime.reaction_strategy import ReactionStrategy
+from rwnd.model import features, models, utils
+from rwnd.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
+from rwnd.runtime.mitigation_strategy import MitigationStrategy
+from rwnd.runtime.reaction_strategy import ReactionStrategy
 
 
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")
@@ -277,7 +277,7 @@ def check_flows(args, longest_window, que, inference_flags):
 
 
 def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
-    """Determine whether a flow is unfair and how to mitigate it.
+    """Determine whether a flow is above its target rate and how to mitigate it.
 
     Runs inference on a flow's packets and determines the appropriate ACK
     pacing for the flow. Updates the flow's fairness record.
@@ -430,7 +430,7 @@ def pcapy_sniff(args, done):
 
 def parse_args():
     """Parse arguments."""
-    parser = ArgumentParser(description="Squelch unfair flows.")
+    parser = ArgumentParser(description="Constrain flows above their target rate.")
     parser.add_argument(
         "-p",
         "--poll-interval-ms",
@@ -486,7 +486,7 @@ def parse_args():
         "--mitigation-strategy",
         choices=mitigation_strategy.choices(),
         default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
-        help="The unfairness mitigation strategy to use.",
+        help="The mitigation strategy to use.",
         required=False,
         type=str,
     )

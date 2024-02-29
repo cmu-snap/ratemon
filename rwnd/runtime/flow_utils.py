@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from unfair.model import defaults, loss_event_rate, utils
+from rwnd.model import defaults, loss_event_rate, utils
 
 
 class FlowKey(ctypes.Structure):

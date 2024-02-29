@@ -36,7 +36,7 @@ PACKET_SIZE_B = 1380
 DUR_s = 240
 # Delay until ACK pacing begins.
 WARMUP_s = 60
-# Whether to enable unfairness mitigation.
+# Whether to enable RateMon.
 ENABLE_MITIGATION = False
 # Whether to capture pcap traces.
 PCAP = True

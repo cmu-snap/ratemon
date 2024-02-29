@@ -16,7 +16,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from unfair.model import defaults, features, gen_features, utils
+from rwnd.model import defaults, features, gen_features, utils
 
 FIGSIZE = (5, 2.2)
 FIGSIZE_BOX = (5, 3.5)
@@ -959,10 +959,10 @@ def main(args):
     # Extract the classifier and evaluation function for the given category.
     _, eval_func = CATEGORIES[category]
 
-    # Experiments in which the unfairmon was enabled.
-    enabled = {exp for exp in results if exp.use_unfairmon}
-    # Experiments in which the unfairmon was disabled.
-    disabled = {exp for exp in results if not exp.use_unfairmon}
+    # Experiments in which the ratemon was enabled.
+    enabled = {exp for exp in results if exp.use_ratemon}
+    # Experiments in which the ratemon was disabled.
+    disabled = {exp for exp in results if not exp.use_ratemon}
 
     # Match each enabled experiment with its corresponding disabled experiment.
     # matched is a dict mapping the name of the experiment to a tuple of the form:
@@ -972,7 +972,7 @@ def main(args):
     #     ( jfi, overall util, map from class to util )
     matched = {}
     for enabled_exp in enabled:
-        # Find the corresponding experiment with the unfairmon disabled.
+        # Find the corresponding experiment with the ratemon disabled.
         target_disabled_name = enabled_exp.name.replace("unfairTrue", "unfairFalse")
         # Strip off trailing timestamp (everything after final "-").
         target_disabled_name = target_disabled_name[
@@ -985,7 +985,7 @@ def main(args):
                 break
         if target_disabled_exp is None:
             logging.info(
-                "Warning: Cannot find experiment with unfairmon disabled: %s",
+                "Warning: Cannot find experiment with ratemon disabled: %s",
                 target_disabled_name,
             )
             continue
@@ -1682,7 +1682,7 @@ def parse_args():
 #     Flow start time, e.g., incumbent vs. newcomer
 #     Sender, e.g., sender-0 vs. sender-1.
 #     Receiver, e.g., receiver-0 vs. sink.
-# A flow's class is separate from whether unfairmon is enabled or disabled at the
+# A flow's class is separate from whether ratemon is enabled or disabled at the
 # experiment level
 CLASSIFIERS = {
     "sender": lambda flw: flw[0][0],

@@ -12,7 +12,7 @@ import traceback
 
 
 # Path to the ns-3 top-level directory.
-# Warning: If you move this file from the directory "unfair/model", then you
+# Warning: If you move this file from the directory "rwnd/model", then you
 #          must update this variable.
 NS3_DIR = path.join(path.dirname(path.realpath(__file__)), "..", "ns-3-unfair")
 # The name of the ns-3 application to run.

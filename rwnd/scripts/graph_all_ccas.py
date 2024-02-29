@@ -9,8 +9,8 @@ import sys
 
 import numpy as np
 
-from unfair.scripts import eval as evl
-from unfair.model import utils
+from rwnd.scripts import eval as evl
+from rwnd.model import utils
 
 
 def load_results(args):
@@ -110,7 +110,7 @@ def main(args):
                 for _, vals in sorted(results.items(), key=lambda p: p[0][1])
             ],
         ],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", "RateMon"],
         x_label="Newcomer CCA (cubic vs. X)",
         y_label="JFI",
         x_tick_labels=[
@@ -133,13 +133,13 @@ def main(args):
             [val for vals in results.values() for val in vals[0]],
             [val for vals in results.values() for val in vals[1]],
         ],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", "RateMon"],
         x_label="JFI",
         x_max=1.0,
         filename="jfi_cdf.pdf",
         linestyles=["dashed", "dashdot"],
         colors=evl.COLORS,
-        # title="CDF of JFI,\nwith and without unfairness monitor",
+        # title="CDF of JFI,\nwith and without RateMon",
     )
     evl.plot_cdf(
         args,
@@ -147,14 +147,14 @@ def main(args):
             [val for vals in results.values() for val in vals[4]],
             [val for vals in results.values() for val in vals[5]],
         ],
-        labels=["Original", "UnfairMon"],
+        labels=["Original", "RateMon"],
         x_label="Overall link utilization (%)",
         x_max=100,
         filename="util_cdf.pdf",
         linestyles=["dashed", "dashdot"],
         colors=evl.COLORS,
         legendloc="upper left",
-        # title="CDF of overall link utilization,\nwith and without unfairness monitor",
+        # title="CDF of overall link utilization,\nwith and without RateMon",
     )
     raise RuntimeError("Cannot use exp.cca_1_flws.")
     evl.plot_cdf(
@@ -169,11 +169,11 @@ def main(args):
             [val for vals in results.values() for val in vals[7]],
             [val for vals in results.values() for val in vals[8]],
         ],
-        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        labels=["Perfectly Fair", "Original", "RateMon"],
         x_label="Total link utilization of incumbent flows (%)",
         x_max=100,
         filename="fair_flows_util_cdf.pdf",
-        # title='CDF of "incumbent" flows link utilization,\nwith and without unfairness monitor',
+        # title='CDF of "incumbent" flows link utilization,\nwith and without RateMon',
         colors=[
             evl.COLORS_MAP["orange"],
             evl.COLORS_MAP["red"],
@@ -193,11 +193,11 @@ def main(args):
             [val for vals in results.values() for val in vals[10]],
             [val for vals in results.values() for val in vals[11]],
         ],
-        labels=["Perfectly Fair", "Original", "UnfairMon"],
+        labels=["Perfectly Fair", "Original", "RateMon"],
         x_label="Link utilization of newcomer flow (%)",
         x_max=100,
         filename="unfair_flows_util_cdf.pdf",
-        # title='CDF of newcomer flow link utilization,\nwith and without unfairness monitor',
+        # title='CDF of newcomer flow link utilization,\nwith and without RateMon',
         colors=[
             evl.COLORS_MAP["orange"],
             evl.COLORS_MAP["red"],

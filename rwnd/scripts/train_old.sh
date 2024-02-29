@@ -15,16 +15,16 @@ set -o errexit
 exp_dir="$1"
 out_dir="$2"
 tag="$3"
-unfair_dir="$(cd "$(dirname "$0")"/.. && pwd)"
-workspace_dir="$(dirname "$unfair_dir")"
+rwnd_dir="$(cd "$(dirname "$0")"/.. && pwd)"
+workspace_dir="$(dirname "$rwnd_dir")"
 export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 
-# python "$unfair_dir/model/gen_features.py" \
+# python "$rwnd_dir/model/gen_features.py" \
 #     --exp-dir="$exp_dir" \
 #     --untar-dir="$exp_dir" \
 #     --out-dir="$exp_dir" \
 #     --parallel=20
-# python "$unfair_dir/model/prepare_data.py" \
+# python "$rwnd_dir/model/prepare_data.py" \
 #     --data-dir="$exp_dir" \
 #     --out-dir="$out_dir" \
 #     --model=HistGbdtSklearn \
@@ -33,14 +33,12 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 #     --test-split=30 \
 #     --warmup-percent=5 \
 #     --sample-percent=20
-# 100 250 500 1000 250 5000 10000 31 -1
-# 25000 50000 100000 200000
-for max_leaf_nodes in 250; do
-    OMP_NUM_THREADS=10 python "$unfair_dir/model/train.py" \
+for max_leaf_nodes in 100 250 500 1000 250 5000 10000 31 -1; do
+    python "$rwnd_dir/model/train.py" \
         --out-dir="${out_dir}/vary_max_leaf_nodes/${max_leaf_nodes}" \
         --data-dir="${out_dir}" \
         --model=HistGbdtSklearn \
-        --sample-percent=40 \
+        --sample-percent=100 \
         --no-rand \
         --conf-trials=1 \
         --max-iter=10000 \

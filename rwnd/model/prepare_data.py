@@ -17,7 +17,7 @@ import sys
 
 import numpy as np
 
-from unfair.model import cl_args, defaults, features, models, utils
+from rwnd.model import cl_args, defaults, features, models, utils
 
 
 SPLIT_NAMES = ["train", "val", "test"]

@@ -8,7 +8,7 @@
             "name": "(d) runtime",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "-h"
@@ -26,7 +26,7 @@
             "name": "(r) runtime",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
@@ -36,7 +36,7 @@
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=100",
                 "--batch-size=10",
-                "--log=/tmp/unfairmon.log",
+                "--log=/tmp/rwnd.log",
                 "--skip-localhost",
                 "--listen-ports=9999",
                 "--debug",
@@ -56,7 +56,7 @@
             "name": "(r) runtime, schedule",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
@@ -66,7 +66,7 @@
                 "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/unfairmon_main.log",
+                "--log=/tmp/rwnd.log",
                 // "--disable-inference"
             ],
             "autoReload": {
@@ -87,14 +87,14 @@
             "args": [
                 "-o",
                 "/tmp/tmp.prof",
-                "${workspaceFolder}/unfair/runtime/unfair_runtime.py",
+                "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/unfairmon_main.log",
+                "--log=/tmp/rwnd.log",
                 // "--skip-localhost",
                 "--constrain-port",
                 "--debug",
@@ -113,7 +113,7 @@
             "name": "(r) train cubic bbr",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/model/train.py",
+            "program": "${workspaceFolder}/rwnd/model/train.py",
             "console": "integratedTerminal",
             "args": [
                 "--no-rand",
@@ -147,7 +147,7 @@
             "name": "(r) prepare_data",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/model/prepare_data.py",
+            "program": "${workspaceFolder}/rwnd/model/prepare_data.py",
             "console": "integratedTerminal",
             "args": [
                 "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
@@ -172,7 +172,7 @@
             "name": "(r) gen_features",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/model/gen_features.py",
+            "program": "${workspaceFolder}/rwnd/model/gen_features.py",
             "console": "integratedTerminal",
             "args": [
                 "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/experiments",
@@ -195,7 +195,7 @@
             "name": "(r) eval",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/unfair/scripts/eval.py",
+            "program": "${workspaceFolder}/rwnd/scripts/eval.py",
             "console": "integratedTerminal",
             "args": [
                 "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",

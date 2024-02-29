@@ -2,7 +2,7 @@
 
 import itertools
 
-from unfair.model import defaults
+from rwnd.model import defaults
 
 
 def make_ewma_metric(metric, alpha):

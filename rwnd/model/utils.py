@@ -29,7 +29,7 @@ from sklearn import feature_selection
 from sklearn import inspection
 import torch
 
-from unfair.model import defaults, features
+from rwnd.model import defaults, features
 
 
 # Values considered unsafe for division and min().
@@ -274,7 +274,7 @@ class Exp:
                 ccas,
                 flows,
                 ping_ms,
-                use_unfairmon,
+                use_ratemon,
                 use_bess,
                 _,
                 _,
@@ -306,7 +306,7 @@ class Exp:
                 queue_p,
                 cca_1_flws,
                 cca_2_flws,
-                use_unfairmon,
+                use_ratemon,
                 _,
                 # end_time,
                 _,
@@ -329,7 +329,7 @@ class Exp:
                 cca_1_flws,
                 cca_2_flws,
                 ping_ms,
-                use_unfairmon,
+                use_ratemon,
                 use_bess,
                 _,
                 # end_time,
@@ -353,7 +353,7 @@ class Exp:
                 bitrate_Mbps_1,
                 bitrate_Mbps_2,
                 ping_ms,
-                use_unfairmon,
+                use_ratemon,
                 use_bess,
                 _,
                 # end_time,
@@ -378,7 +378,7 @@ class Exp:
                 bitrate_Mbps_2,
                 bitrate_Mbps_back,
                 ping_ms,
-                use_unfairmon,
+                use_ratemon,
                 use_bess,
                 _,
                 # end_time,
@@ -416,8 +416,8 @@ class Exp:
         # Baseline ping RTT between sender and receiver.
         self.ping_ms = float(ping_ms[:-4])
         self.ping_us = self.ping_ms * 1e3
-        # Whether the unfairness monitor was used in this experiment.
-        self.use_unfairmon = use_unfairmon == "unfairTrue"
+        # Whether RateMon was used in this experiment.
+        self.use_ratemon = use_ratemon == "unfairTrue"
         # Whether bess was used for bottleneck emulation in this experiment.
         self.use_bess = use_bess == "bessTrue"
         # Experiment duration (s).

@@ -8,7 +8,7 @@ import numpy as np
 from numpy.lib import recfunctions
 import torch
 
-from unfair.model import defaults, features, models, utils
+from rwnd.model import defaults, features, models, utils
 
 
 def get_dataloaders(args, net):

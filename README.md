@@ -1,2 +1,2 @@
-# unfair
-Receiver-side mechanisms to address unfair TCP senders
+# rwnd
+Receiver-side mechanisms for rate control of TCP flows.

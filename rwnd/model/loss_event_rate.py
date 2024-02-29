@@ -3,7 +3,7 @@
 import collections
 import logging
 
-from unfair.model import features
+from rwnd.model import features
 
 
 class LossTracker:

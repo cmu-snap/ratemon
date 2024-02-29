@@ -15,11 +15,11 @@ set -o errexit
 exp_dir="$1"
 out_dir="$2"
 tag="$3"
-unfair_dir="$(cd "$(dirname "$0")"/.. && pwd)"
-workspace_dir="$(dirname "$unfair_dir")"
+rwnd_dir="$(cd "$(dirname "$0")"/.. && pwd)"
+workspace_dir="$(dirname "$rwnd_dir")"
 export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 
-# python "$unfair_dir/model/gen_features.py" \
+# python "$rwnd_dir/model/gen_features.py" \
 #     --exp-dir="$exp_dir" \
 #     --untar-dir="$exp_dir" \
 #     --out-dir="$exp_dir" \
@@ -30,7 +30,7 @@ prepare() {
     cur_exp_dir="$exp_dir/cubic-$1"
     tmp_dir="/tmp/prepare_data/cubic-$1"
     mkdir -p "$tmp_dir"
-    python "$unfair_dir/model/prepare_data.py" \
+    python "$rwnd_dir/model/prepare_data.py" \
         --data-dir="$cur_exp_dir" \
         --out-dir="$tmp_dir" \
         --model=HistGbdtSklearn \
@@ -48,7 +48,7 @@ for cca in "highspeed" "illinois" "vivace"; do
     prepare "$cca"
 done
 
-# python "$unfair_dir/model/train.py" \
+# python "$rwnd_dir/model/train.py" \
 #     --out-dir="$out_dir" \
 #     --data-dir="$out_dir"\
 #     --model=HistGbdtSklearn \

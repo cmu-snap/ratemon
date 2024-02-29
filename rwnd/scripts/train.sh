@@ -52,12 +52,12 @@ set +u
 source "$venv_dir/bin/activate"
 set -u
 
-unfair_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/../.."
+rwnd_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)/../.."
 pushd /tmp
 
 # Step 4: Select features from initial model
 echo "Training model with all features. Progress: tail -f /tmp/train.log"
-bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' \
+bash -x -c "PYTHONPATH='$rwnd_dir' python '$rwnd_dir/rwnd/model/train.py' \
     --no-rand \
     --tag='$model_tag' \
     --data-dir='$train_data_dir' \
@@ -88,7 +88,7 @@ mv -fv "/tmp/train.log" "$full_models_dir/${model_tag}_train.log"
 
 # Step 5: Train model with selected features
 echo "Training model with selected features. Progress: tail -f /tmp/train.log"
-bash -x -c "PYTHONPATH='$unfair_dir' python '$unfair_dir/unfair/model/train.py' \
+bash -x -c "PYTHONPATH='$rwnd_dir' python '$rwnd_dir/rwnd/model/train.py' \
     --no-rand \
     --tag='${model_tag}_selected-features' \
     --data-dir='$train_data_dir' \

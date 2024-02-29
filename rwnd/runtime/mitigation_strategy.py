@@ -1,10 +1,10 @@
-"""Defines unfairness mitigation strategies."""
+"""Defines mitigation strategies for flows that are above their target rate."""
 
 from enum import IntEnum
 
 
 class MitigationStrategy(IntEnum):
-    """Defines unfairness mitigation strategies."""
+    """Defines mitigation strategies for flows that are above their target rate."""
 
     RWND_TUNING = 0
     ACK_PACING = 1

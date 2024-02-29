@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trains an unfairness model.
+"""Trains a FlowPolicy model.
 
 Based on:
 https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
@@ -31,7 +31,7 @@ import time
 
 import torch
 
-from unfair.model import cl_args, data, defaults, models, utils
+from rwnd.model import cl_args, data, defaults, models, utils
 
 
 # The threshold of the new throughout to the old throughput above which a

@@ -15,9 +15,9 @@ import numpy as np
 from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
 
-from unfair.model import data, defaults, features, gen_features, models, utils
-from unfair.runtime import flow_utils, reaction_strategy
-from unfair.runtime.reaction_strategy import ReactionStrategy
+from rwnd.model import data, defaults, features, gen_features, models, utils
+from rwnd.runtime import flow_utils, reaction_strategy
+from rwnd.runtime.reaction_strategy import ReactionStrategy
 
 
 def predict(net, in_fets, debug=False):
@@ -176,7 +176,7 @@ def make_decision_sender_fairness(
     #     ]
     # ).any():
     #     logging.info("Mode 2")
-    #     # The current measurement is that the sender is not unfair, but at
+    #     # The current measurement is that the sender is not above target, but at
     #     # least one of its flows is already being paced. If the bottlenck is
     #     # not fully utilized, then allow the flows to speed up.
     #     #
@@ -246,7 +246,7 @@ def make_decision_sender_fairness(
 
     # else:
     #     logging.info("Mode 3")
-    #     # The sender is not unfair or it is unfair but the link is not fully
+    #     # The sender is not above target or it is above target but the link is not fully
     #     # utilized, and none of its flows behaved badly in the past, so leave
     #     # it alone.
     #     new_decision = (defaults.Decision.NOT_PACED, None, None)
@@ -312,7 +312,7 @@ def make_decision_flow_fairness(
                 # then all is well. Retain the existing pacing decision.
                 new_decision = flow_to_decisions[flowkey]
         else:
-            # This flow is not already being paced and is not behaving unfairly, so
+            # This flow is not already being paced and is not above rate, so
             # leave it alone.
             new_decision = (defaults.Decision.NOT_PACED, None, None)
     return new_decision
@@ -355,7 +355,7 @@ def apply_decision(flowkey, new_decision, flow_to_decisions, flow_to_rwnd):
 def make_decision(
     args, flowkeys, min_rtt_us, fets, label, flow_to_decisions, flow_to_rwnd
 ):
-    """Make a flow unfairness mitigation decision.
+    """Make a rate control mitigation decision.
 
     Base the decision on the flow's label and existing decision. Use the flow's features
     to calculate any necessary flow metrics, such as the throughput.
@@ -417,7 +417,7 @@ def load_bpf():
     # Load BPF text.
     bpf_flp = path.join(
         path.abspath(path.dirname(__file__)),
-        "unfair_runtime.c",
+        "rwnd_runtime.c",
     )
     if not path.isfile(bpf_flp):
         logging.error("Could not find BPF program: %s", bpf_flp)

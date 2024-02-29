@@ -19,7 +19,7 @@ import traceback
 import json
 import numpy as np
 
-from unfair.model import cl_args, defaults, features, loss_event_rate, utils
+from rwnd.model import cl_args, defaults, features, loss_event_rate, utils
 
 
 def get_time_bounds(pkts, direction="data"):
