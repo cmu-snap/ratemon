@@ -23,7 +23,7 @@ from ratemon.runtime.reaction_strategy import ReactionStrategy
 def predict(net, in_fets, debug=False):
     """Run inference on a flow's packets.
 
-    Returns a label (below fair, approximately fair, above fair), the updated
+    Returns a label (below target, near target, above target), the updated
     min_rtt_us, and the features of the last packet.
     """
     in_fets = utils.clean(in_fets)
@@ -159,7 +159,7 @@ def make_decision_servicepolicy(
     #     features.make_win_metric(features.LOSS_RATE_FET, models.MathisFairness.win_size)
     # ]
 
-    # if label == defaults.Class.ABOVE_FAIR and loss_rate >= 1e-9:
+    # if label == defaults.Class.ABOVE_TARGET and loss_rate >= 1e-9:
     #     logging.info("Mode 1")
     #     # This sender is sending too fast according to the Mathis model, and we
     #     # know that the bottleneck is fully utilized because there has been loss
@@ -270,7 +270,7 @@ def make_decision_flow_fairness(
         )
     else:
         tput_bps = utils.safe_tput_bps(fets, 0, len(fets) - 1)
-        if label == defaults.Class.ABOVE_FAIR:
+        if label == defaults.Class.ABOVE_TARGET:
             # This flow is sending too fast. Force the sender to slow down.
             new_tput_bps = reaction_strategy.react_down(
                 args.reaction_strategy,
@@ -289,7 +289,7 @@ def make_decision_flow_fairness(
             )
         elif flow_to_decisions[flowkey][0] == defaults.Decision.PACED:
             # We are already pacing this flow.
-            if label == defaults.Class.BELOW_FAIR:
+            if label == defaults.Class.BELOW_TARGET:
                 # If we are already pacing this flow but we are being too
                 # aggressive, then let it send faster.
                 new_tput_bps = reaction_strategy.react_up(

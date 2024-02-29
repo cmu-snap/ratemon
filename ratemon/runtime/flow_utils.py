@@ -82,7 +82,7 @@ class Flow:
         self.min_rtt_us = sys.maxsize
         # The timestamp of the last packet on which we have run inference.
         self.latest_time_sec = time.time()
-        self.label = defaults.Class.APPROX_FAIR
+        self.label = defaults.Class.NEAR_TARGET
         self.decision = (defaults.Decision.NOT_PACED, None)
         self.loss_tracker = loss_event_rate.LossTracker(self, loss_event_windows)
 

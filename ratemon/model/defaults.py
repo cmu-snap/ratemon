@@ -117,12 +117,12 @@ COPA_HEADER_SIZE_B = struct.calcsize(COPA_HEADER_FMT)
 class Class(IntEnum):
     """Classes for three-class models.
 
-    Flow throughput is lower than, approximately, or above fair.
+    Flow throughput is below, near, or above the target rate.
     """
 
-    BELOW_FAIR = 0
-    APPROX_FAIR = 1
-    ABOVE_FAIR = 2
+    BELOW_TARGET = 0
+    NEAR_TARGET = 1
+    ABOVE_TARGET = 2
 
     @staticmethod
     def ratio_to_class(ratio):
@@ -137,11 +137,11 @@ class Class(IntEnum):
             ratio = ratio[0]
 
         if ratio < 1 - FAIR_THRESH:
-            cls = Class.BELOW_FAIR
+            cls = Class.BELOW_TARGET
         elif ratio <= 1 + FAIR_THRESH:
-            cls = Class.APPROX_FAIR
+            cls = Class.NEAR_TARGET
         elif ratio > 1 + FAIR_THRESH:
-            cls = Class.ABOVE_FAIR
+            cls = Class.ABOVE_TARGET
         else:
             raise Exception("This case should never be reached.")
         return cls
