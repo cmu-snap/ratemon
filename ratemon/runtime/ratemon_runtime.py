@@ -189,7 +189,7 @@ def check_flows(args, longest_window, que, inference_flags):
     with FLOWS.lock:
         for fourtuple, flow in FLOWS.items():
             # A fourtuple might add other fourtuples to to_check if
-            # args.sender_fairness is True.
+            # args.servicepolicy is True.
             if fourtuple in to_check:
                 continue
 
@@ -216,7 +216,7 @@ def check_flows(args, longest_window, que, inference_flags):
                         logging.info("No incoming packets for flow %s", flow)
 
                     if flow.is_ready(args.smoothing_window, longest_window):
-                        if args.sender_fairness:
+                        if args.servicepolicy:
                             # Only want to add this flow if all the flows from this
                             # sender are ready.
                             if FLOWS.sender_okay(
@@ -334,11 +334,11 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
                         flow.min_rtt_us,
                         win_to_loss_event_rate,
                     )
-                    if args.sender_fairness:
+                    if args.servicepolicy:
                         que.put(
                             (
-                                # inference-sender-fairness-<epoch>-<sender IP>-<num flows to expect>
-                                f"inference-sender-fairness-{epoch}-{flow.flowkey.remote_addr}-{len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr))}",
+                                # inference-servicepolicy-<epoch>-<sender IP>-<num flows to expect>
+                                f"inference-servicepolicy-{epoch}-{flow.flowkey.remote_addr}-{len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr))}",
                                 *info,
                             ),
                             block=False,
@@ -530,7 +530,7 @@ def parse_args():
         type=int,
     )
     parser.add_argument(
-        "--sender-fairness",
+        "--servicepolicy",
         action="store_true",
         help=(
             "Combine all flows from one sender and enforce fairness between "
@@ -556,8 +556,8 @@ def parse_args():
 
     assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
     assert (
-        args.sender_fairness or args.model_file is not None
-    ), "Specify one of '--model-file' or '--sender-fairness'. "
+        args.servicepolicy or args.model_file is not None
+    ), "Specify one of '--model-file' or '--servicepolicy'. "
     return args
 
 
@@ -566,7 +566,7 @@ def run(args):
     # Need to load the model to check the input features to see the longest window.
     in_spc = (
         models.MathisFairness()
-        if args.sender_fairness
+        if args.servicepolicy
         else models.load_model(args.model_file)
     ).in_spc
 

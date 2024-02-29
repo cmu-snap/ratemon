@@ -93,7 +93,7 @@ def parse_opened_exp(
     out_flp,
     skip_smoothed,
     select_tail_percent=None,
-    sender_fairness=False,
+    servicepolicy=False,
 ):
     """Parse an experiment. Return the smallest safe window size."""
     print(f"Parsing: {exp_flp}")
@@ -1314,7 +1314,7 @@ def parse_exp(
     out_dir,
     skip_smoothed,
     select_tail_percent,
-    sender_fairness=False,
+    servicepolicy=False,
     always_reparse=False,
     parse_func=parse_opened_exp,
 ):
@@ -1336,7 +1336,7 @@ def parse_exp(
                     out_flp,
                     skip_smoothed,
                     select_tail_percent,
-                    sender_fairness,
+                    servicepolicy,
                 )
             except AssertionError:
                 traceback.print_exc()

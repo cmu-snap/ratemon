@@ -100,7 +100,7 @@ def smooth(labels):
     return label
 
 
-def make_decision_sender_fairness(
+def make_decision_servicepolicy(
     args, flowkeys, min_rtt_us, fets, label, flow_to_decisions
 ):
     """Make a fairness decision for all flows from a sender.
@@ -360,8 +360,8 @@ def make_decision(
     Base the decision on the flow's label and existing decision. Use the flow's features
     to calculate any necessary flow metrics, such as the throughput.
     """
-    if args.sender_fairness:
-        new_decision = make_decision_sender_fairness(
+    if args.servicepolicy:
+        new_decision = make_decision_servicepolicy(
             args, flowkeys, min_rtt_us, fets, label, flow_to_decisions
         )
     else:
@@ -514,7 +514,7 @@ def parse_from_inference_queue(
     val, flow_to_rwnd, flow_to_decisions, flow_to_prev_features
 ):
     """Parse a message from the inference queue."""
-    sender_fairness = False
+    servicepolicy = False
     epoch = num_flows_expected = None
     opcode, fourtuple = val[:2]
     flowkey = flow_utils.FlowKey(*fourtuple)
@@ -528,8 +528,8 @@ def parse_from_inference_queue(
             win_to_loss_event_rate,
         ) = val[2:]
 
-        if opcode.startswith("inference-sender-fairness"):
-            sender_fairness = True
+        if opcode.startswith("inference-servicepolicy"):
+            servicepolicy = True
             epoch, num_flows_expected = opcode.split("-")[-2:]
             epoch = int(epoch)
             num_flows_expected = int(num_flows_expected)
@@ -553,7 +553,7 @@ def parse_from_inference_queue(
         win_to_loss_event_rate,
         fourtuple,
         flowkey,
-        sender_fairness,
+        servicepolicy,
         epoch,
         num_flows_expected,
     )
@@ -621,7 +621,7 @@ def build_features(
 
 def wait_or_batch(
     net,
-    sender_fairness,
+    servicepolicy,
     batch,
     waiting_room,
     fourtuple,
@@ -633,8 +633,8 @@ def wait_or_batch(
     epoch,
     num_flows_expected,
 ):
-    """Decide whether a flow should wait (if doing sender fairness) or be batched."""
-    if not sender_fairness:
+    """Decide whether a flow should wait (if doing servicepolicy) or be batched."""
+    if not servicepolicy:
         batch.append(([fourtuple], [flowkey], min_rtt_us, all_fets, in_fets))
         logging.info(
             "Adding %d packets from flow %s to batch.",
@@ -654,7 +654,7 @@ def wait_or_batch(
             [],
         )
     logging.info(
-        "Adding %d packets from flow %s to sender fairness waiting room.",
+        "Adding %d packets from flow %s to servicepolicy waiting room.",
         len(in_fets),
         flowkey,
     )
@@ -686,7 +686,7 @@ def wait_or_batch(
         )
     )
     logging.info(
-        "Sender fairness waiting room for sender %s is full. "
+        "Servicepolicy waiting room for sender %s is full. "
         "Adding %d merged packets to batch.",
         utils.int_to_ip_str(merged_flowkeys[0].remote_addr),
         len(merged_in_fets),
@@ -781,7 +781,7 @@ def loop_iteration(
 
     Includes: checking if the current batch is ready and running it, pulling a
     message from the inference queue, computing features, and deciding if the
-    flow should wait (sender fairness) or be batched immediately.
+    flow should wait (servicepolicy) or be batched immediately.
     """
     # First, check whether we should run inference on the current batch.
     if maybe_run_batch(
@@ -847,7 +847,7 @@ def loop_iteration(
         win_to_loss_event_rate,
         fourtuple,
         flowkey,
-        sender_fairness,
+        servicepolicy,
         epoch,
         num_flows_expected,
     ) = parse_res
@@ -876,7 +876,7 @@ def loop_iteration(
 
     packets_covered_by_batch += wait_or_batch(
         net,
-        sender_fairness,
+        servicepolicy,
         batch,
         waiting_room,
         fourtuple,
@@ -898,7 +898,7 @@ def loop_iteration(
 def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
     """Receive packets and run inference on them."""
     logging.info("Loading model: %s", args.model_file)
-    if args.sender_fairness:
+    if args.servicepolicy:
         net = models.MathisFairness()
     else:
         net = models.load_model(args.model_file)

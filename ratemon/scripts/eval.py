@@ -176,7 +176,7 @@ def plot_lines(
                 ys,
                 alpha=0.75,
                 linestyle=(
-                    # If this is a sender fairness graph but not the first
+                    # If this is a servicepolicy graph but not the first
                     # sender, or a cubic flow in a flow fairness graph...
                     "solid"
                     if "Service 2" in label or label == "cubic"
@@ -210,7 +210,7 @@ def plot_flows_over_time(
     out_flp,
     flw_to_pkts,
     flw_to_cca,
-    sender_fairness=False,
+    servicepolicy=False,
     flw_to_sender=None,
     xlim=None,
     bottleneck_Mbps=None,
@@ -257,9 +257,9 @@ def plot_flows_over_time(
 
         lines.append((throughputs, flw))
 
-    # If sender_fairness, then graph the total throughput of each sender instead of the
+    # If servicepolicy, then graph the total throughput of each sender instead of the
     # throughput of each flow.
-    if sender_fairness and flw_to_sender is not None:
+    if servicepolicy and flw_to_sender is not None:
         sender_to_tputs = dict()
         # Accumulate the throughput of each sender.
         for throughputs, flw in lines:
@@ -301,7 +301,7 @@ def plot_flows_over_time(
     else:
         lines = [(throughputs, flw_to_cca[flw]) for (throughputs, flw) in lines]
 
-    colors = [COLORS_MAP["blue"], COLORS_MAP["red"]] if sender_fairness else None
+    colors = [COLORS_MAP["blue"], COLORS_MAP["red"]] if servicepolicy else None
 
     # If we are supposed to mark the bottleneck bandwidth, then create a horizontal
     # line and prepend it to the lines.
@@ -326,11 +326,11 @@ def plot_flows_over_time(
         None,
         exp.bw_Mbps if exp.use_bess else None,
         out_flp,
-        legendloc=("center" if sender_fairness else "upper right"),
-        linewidth=(1 if sender_fairness else 1),
+        legendloc=("center" if servicepolicy else "upper right"),
+        linewidth=(1 if servicepolicy else 1),
         colors=colors,
-        bbox_to_anchor=((0.5, 1.15) if sender_fairness else None),
-        legend_ncol=(2 if sender_fairness else 1),
+        bbox_to_anchor=((0.5, 1.15) if servicepolicy else None),
+        legend_ncol=(2 if servicepolicy else 1),
         figsize=(5, 2.6),
     )
 
@@ -421,7 +421,7 @@ def parse_opened_exp(
     out_flp,
     skip_smoothed,
     select_tail_percent,
-    sender_fairness,
+    servicepolicy,
 ):
     # skip_smoothed is not used but is kept to maintain API compatibility
     # with gen_features.parse_opened_exp().
@@ -518,7 +518,7 @@ def parse_opened_exp(
         out_flp[:-4] + "_flows.pdf",
         flw_to_pkts,
         flw_to_cca,
-        sender_fairness,
+        servicepolicy,
         flw_to_sender,
     )
     # Plot each sender separately.
@@ -575,7 +575,7 @@ def parse_opened_exp(
     out = (
         exp,
         params,
-        get_jfi(flw_to_pkts, sender_fairness, flw_to_sender),
+        get_jfi(flw_to_pkts, servicepolicy, flw_to_sender),
         overall_util,
         class_to_util,
         bneck_to_maxmin_ratios,
@@ -748,12 +748,12 @@ def calculate_maxmin_ratios(params, flw_to_pkts, flw_to_sender, sender_to_flws):
     return bneck_to_maxmin_ratios
 
 
-def get_jfi(flw_to_pkts, sender_fairness=False, flw_to_sender=None):
+def get_jfi(flw_to_pkts, servicepolicy=False, flw_to_sender=None):
     flw_to_tput_bps = {
         flw: 0 if len(pkts) == 0 else utils.safe_tput_bps(pkts, 0, len(pkts) - 1)
         for flw, pkts in flw_to_pkts.items()
     }
-    if sender_fairness:
+    if servicepolicy:
         assert flw_to_sender is not None
         sender_to_tput_bps = collections.defaultdict(float)
         for flw, tput_bps in flw_to_tput_bps.items():
@@ -891,7 +891,7 @@ def main(args):
     print("Logging to:", log_flp)
     logging.info("Evaluating experiments in: %s", args.exp_dir)
 
-    our_label = "ServicePolicy" if args.sender_fairness else "FlowPolicy"
+    our_label = "ServicePolicy" if args.servicepolicy else "FlowPolicy"
 
     # Find all experiments.
     pcaps = [
@@ -901,7 +901,7 @@ def main(args):
             path.join(args.out_dir, "individual_results"),
             False,  # skip_smoothed
             args.select_tail_percent,
-            args.sender_fairness,
+            args.servicepolicy,
             True,  # always_reparse
             parse_opened_exp,
         )
@@ -1664,7 +1664,7 @@ def parse_args():
         type=str,
     )
     parser.add_argument(
-        "--sender-fairness",
+        "--servicepolicy",
         action="store_true",
         help="Evaluate fairness across senders instead of across flows.",
     )
