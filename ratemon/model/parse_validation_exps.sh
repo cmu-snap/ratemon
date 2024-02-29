@@ -4,13 +4,13 @@
 # validate the CloudLab parallel testbed.
 #
 # Usage: ./parse_validation_exps.sh \
-#     <cmu-snap:rwnd repo dir> <iterations dir> <scratch (untar) dir> \
+#     <cmu-snap:ratemon repo dir> <iterations dir> <scratch (untar) dir> \
 #     <direction to parse (forward or reverse)>
 
 set -o errexit
 set -o nounset
 
-RWND_DIR=$1
+RATEMON_DIR=$1
 ITERS_DIR=$2
 UNTAR_DIR=$3
 DIRECTION=$4
@@ -23,7 +23,7 @@ parse_iter_batchsize () {
     ITER=$1
     BATCH_SIZE=$2
     EXP_DIR="$ITERS_DIR/iter_$ITER/batchsize_$BATCH_SIZE"
-    python "$RWND_DIR/model/parse_cloudlab.py" --exp-dir "$EXP_DIR" \
+    python "$RATEMON_DIR/model/parse_cloudlab.py" --exp-dir "$EXP_DIR" \
            --untar-dir "$UNTAR_DIR" --out-dir "$EXP_DIR" \
            --skip-smoothed-features
 }

@@ -31,7 +31,7 @@ import time
 
 import torch
 
-from rwnd.model import cl_args, data, defaults, models, utils
+from ratemon.model import cl_args, data, defaults, models, utils
 
 
 # The threshold of the new throughout to the old throughput above which a

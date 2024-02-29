@@ -3,7 +3,7 @@
 import collections
 import logging
 
-from rwnd.model import features
+from ratemon.model import features
 
 
 class LossTracker:

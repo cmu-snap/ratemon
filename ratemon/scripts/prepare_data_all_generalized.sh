@@ -4,7 +4,7 @@ set -eou pipefail
 
 base_dir="$HOME/fawnstore2/out/cloudlab/2021-5-12"
 
-source "$HOME/src/rwnd/.venv/bin/activate"
+source "$HOME/src/ratemon/.venv/bin/activate"
 
 for dir in "$base_dir"/*; do
     pair="$(echo "$dir" | cut -d'/' -f 8)"
@@ -13,7 +13,7 @@ for dir in "$base_dir"/*; do
     fi
     out_dir="$dir/new_splits"
     echo "Preparing data for: $dir -> $out_dir"
-    PYTHONPATH="$HOME/src/rwnd" python "$HOME/src/rwnd/rwnd/model/prepare_data.py" \
+    PYTHONPATH="$HOME/src/ratemon" python "$HOME/src/ratemon/ratemon/model/prepare_data.py" \
         --data-dir="$dir" \
         --train-split=70 \
         --val-split=0 \

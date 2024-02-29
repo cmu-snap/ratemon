@@ -2,7 +2,7 @@
 
 import itertools
 
-from rwnd.model import defaults
+from ratemon.model import defaults
 
 
 def make_ewma_metric(metric, alpha):

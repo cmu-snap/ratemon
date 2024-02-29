@@ -16,7 +16,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from rwnd.model import defaults, features, gen_features, utils
+from ratemon.model import defaults, features, gen_features, utils
 
 FIGSIZE = (5, 2.2)
 FIGSIZE_BOX = (5, 3.5)

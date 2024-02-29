@@ -3,7 +3,7 @@
 import os
 from os import path
 
-from rwnd.model import defaults, models
+from ratemon.model import defaults, models
 
 
 def add_out(psr, psr_verify=lambda args: args):

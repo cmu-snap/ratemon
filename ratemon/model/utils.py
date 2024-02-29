@@ -29,7 +29,7 @@ from sklearn import feature_selection
 from sklearn import inspection
 import torch
 
-from rwnd.model import defaults, features
+from ratemon.model import defaults, features
 
 
 # Values considered unsafe for division and min().

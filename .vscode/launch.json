@@ -8,7 +8,7 @@
             "name": "(d) runtime",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "-h"
@@ -26,7 +26,7 @@
             "name": "(r) runtime",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
@@ -36,7 +36,7 @@
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=100",
                 "--batch-size=10",
-                "--log=/tmp/rwnd.log",
+                "--log=/tmp/ratemon.log",
                 "--skip-localhost",
                 "--listen-ports=9999",
                 "--debug",
@@ -56,17 +56,17 @@
             "name": "(r) runtime, schedule",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/rwnd_schedule_step.csv",
+                "--schedule=${workspaceFolder}/test/ratemon_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/rwnd.log",
+                "--log=/tmp/ratemon.log",
                 // "--disable-inference"
             ],
             "autoReload": {
@@ -87,14 +87,14 @@
             "args": [
                 "-o",
                 "/tmp/tmp.prof",
-                "${workspaceFolder}/rwnd/runtime/rwnd_runtime.py",
+                "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
                 "--inference-interval-ms=1000",
-                "--log=/tmp/rwnd.log",
+                "--log=/tmp/ratemon.log",
                 // "--skip-localhost",
                 "--constrain-port",
                 "--debug",
@@ -113,7 +113,7 @@
             "name": "(r) train cubic bbr",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/model/train.py",
+            "program": "${workspaceFolder}/ratemon/model/train.py",
             "console": "integratedTerminal",
             "args": [
                 "--no-rand",
@@ -147,7 +147,7 @@
             "name": "(r) prepare_data",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/model/prepare_data.py",
+            "program": "${workspaceFolder}/ratemon/model/prepare_data.py",
             "console": "integratedTerminal",
             "args": [
                 "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
@@ -172,7 +172,7 @@
             "name": "(r) gen_features",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/model/gen_features.py",
+            "program": "${workspaceFolder}/ratemon/model/gen_features.py",
             "console": "integratedTerminal",
             "args": [
                 "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/experiments",
@@ -195,7 +195,7 @@
             "name": "(r) eval",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/rwnd/scripts/eval.py",
+            "program": "${workspaceFolder}/ratemon/scripts/eval.py",
             "console": "integratedTerminal",
             "args": [
                 "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",

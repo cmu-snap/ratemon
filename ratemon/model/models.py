@@ -17,7 +17,7 @@ from sklearn import metrics
 from sklearn import svm
 import torch
 
-from rwnd.model import defaults, features, utils
+from ratemon.model import defaults, features, utils
 
 
 SMOOTHING_THRESHOLD = 0.4

@@ -16,10 +16,10 @@ import typing
 import netifaces as ni
 import pcapy
 
-from rwnd.model import features, models, utils
-from rwnd.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
-from rwnd.runtime.mitigation_strategy import MitigationStrategy
-from rwnd.runtime.reaction_strategy import ReactionStrategy
+from ratemon.model import features, models, utils
+from ratemon.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
+from ratemon.runtime.mitigation_strategy import MitigationStrategy
+from ratemon.runtime.reaction_strategy import ReactionStrategy
 
 
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")

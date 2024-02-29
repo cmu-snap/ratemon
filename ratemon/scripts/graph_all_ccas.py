@@ -9,8 +9,8 @@ import sys
 
 import numpy as np
 
-from rwnd.scripts import eval as evl
-from rwnd.model import utils
+from ratemon.scripts import eval as evl
+from ratemon.model import utils
 
 
 def load_results(args):

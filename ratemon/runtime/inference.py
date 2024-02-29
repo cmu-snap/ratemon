@@ -15,9 +15,9 @@ import numpy as np
 from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
 
-from rwnd.model import data, defaults, features, gen_features, models, utils
-from rwnd.runtime import flow_utils, reaction_strategy
-from rwnd.runtime.reaction_strategy import ReactionStrategy
+from ratemon.model import data, defaults, features, gen_features, models, utils
+from ratemon.runtime import flow_utils, reaction_strategy
+from ratemon.runtime.reaction_strategy import ReactionStrategy
 
 
 def predict(net, in_fets, debug=False):
@@ -417,7 +417,7 @@ def load_bpf():
     # Load BPF text.
     bpf_flp = path.join(
         path.abspath(path.dirname(__file__)),
-        "rwnd_runtime.c",
+        "ratemon_runtime.c",
     )
     if not path.isfile(bpf_flp):
         logging.error("Could not find BPF program: %s", bpf_flp)
