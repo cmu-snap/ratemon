@@ -17,7 +17,12 @@ import netifaces as ni
 import pcapy
 
 from ratemon.model import features, models, utils
-from ratemon.runtime import flow_utils, inference, mitigation_strategy, reaction_strategy
+from ratemon.runtime import (
+    flow_utils,
+    inference,
+    mitigation_strategy,
+    reaction_strategy,
+)
 from ratemon.runtime.mitigation_strategy import MitigationStrategy
 from ratemon.runtime.reaction_strategy import ReactionStrategy
 

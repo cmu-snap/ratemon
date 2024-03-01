@@ -58,7 +58,7 @@ BPF_TABLE_PINNED("hash", struct flow_t, u8, flow_to_win_scale, 1024, "/sys/fs/bp
 // BPF_TABLE_PINNED(_table_type, _key_type, _leaf_type, _name, _max_entries, "/sys/fs/bpf/xyz");
 
 // Inspired by: https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
-int handle_egress(struct __sk_buff *skb)
+int do_rwnd_at_egress(struct __sk_buff *skb)
 {
     if (skb == NULL)
     {
@@ -186,7 +186,7 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops)
         // This is not an IPv4 packet. We only support IPv4 packets because the struct
         // we use as a map key stores IP addresses as 32 bits. This is purely an
         // implementation detail.
-        bpf_trace_printk("Warning: Not using IPv4 for flow on local port %u\n", skops->local_port);
+        bpf_trace_printk("Warning: Not using IPv4 for flow on local port %u: family=%u\n", skops->local_port, skops->family);
         return SOCKOPS_OK;
     }
 
