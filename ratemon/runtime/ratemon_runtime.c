@@ -268,3 +268,28 @@ int read_win_scale(struct bpf_sock_ops *skops)
     }
     return SOCKOPS_OK;
 }
+
+struct bpf_iter__tcp {
+	__bpf_md_ptr(struct bpf_iter_meta *, meta);
+	__bpf_md_ptr(struct sock_common *, sk_common);
+	uid_t uid __aligned(8);
+};
+
+BPF_ITER(tcp)
+{
+    struct sock_common *sk_common = ctx->sk_common;
+    bpf_trace_printk("Iterating\n");
+    return 0;
+}
+
+// BPF_ITER(task)
+// {
+//   struct seq_file *seq = ctx->meta->seq;
+//   struct task_struct *task = ctx->task;
+
+//   if (task == (void *)0)
+//     return 0;
+
+//   //   ... task->pid, task->tgid, task->comm, ...
+//   return 0;
+// }
