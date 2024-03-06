@@ -80,7 +80,7 @@ class Flow:
         # Smallest RTT ever observed for this flow (microseconds). Used to calculate
         # the BDP. Updated whenever we compute features for this flow.
         self.min_rtt_us = sys.maxsize
-        # The timestamp of the last packet on which we have run inference.
+        # The timestamp of the last packet on which we have evaluated the policy.
         self.latest_time_sec = time.time()
         self.label = defaults.Class.NEAR_TARGET
         self.decision = (defaults.Decision.NOT_PACED, None)

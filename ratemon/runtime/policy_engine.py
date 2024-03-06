@@ -1,4 +1,4 @@
-"""This module defines a process that will receive packets and run inference on them."""
+"""This module defines a process that will evaluate a policy on received packets."""
 
 import collections
 import ctypes
@@ -16,14 +16,14 @@ from ratemon.runtime import ebpf, flow_utils, policies
 from ratemon.runtime.policies import Policy
 
 
-def run(args, que, inference_flags, done):
-    """Receive packets and run inference on them.
+def run(args, que, flags, done):
+    """Receive packets and evaluate the policy on them.
 
     This function is designed to be the target of a process.
     """
 
     def signal_handler(sig, frame):
-        logging.info("Inference process: You pressed Ctrl+C!")
+        logging.info("Policy engine: You pressed Ctrl+C!")
         done.set()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -33,20 +33,20 @@ def run(args, que, inference_flags, done):
         flow_to_rwnd, cleanup = ebpf.configure_ebpf(args)
         if flow_to_rwnd is None:
             return
-        inference_loop(args, flow_to_rwnd, que, inference_flags, done)
+        main_loop(args, flow_to_rwnd, que, flags, done)
     except KeyboardInterrupt:
-        logging.info("Inference process: You pressed Ctrl+C!")
+        logging.info("Policy engine: You pressed Ctrl+C!")
         done.set()
     except Exception as exc:
-        logging.exception("Unknown error in inference process!")
+        logging.exception("Unknown error in policy engine!")
         raise exc
     finally:
         if cleanup is not None:
             cleanup()
 
 
-def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
-    """Receive packets and run inference on them."""
+def main_loop(args, flow_to_rwnd, que, flags, done):
+    """Receive packets and run evaluate the policy on them."""
     logging.info("Loading model: %s", args.model_file)
     net = (
         models.ServicePolicyModel()
@@ -73,25 +73,21 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
             )
         )
     )
-    logging.info("inference dtype %s", dtype)
-    # Maximum duration to delay inference to wait to accumulate a batch.
+    logging.info("Policy engine dtype %s", dtype)
+    # Maximum duration to delay evaluation to wait to accumulate a batch.
     max_batch_time_s = max(
         0.1,
-        (
-            args.inference_interval_ms / 1e3
-            if args.inference_interval_ms is not None
-            else 1
-        ),
+        (args.check_interval_ms / 1e3 if args.check_interval_ms is not None else 1),
     )
-    logging.info("Inference process ready!")
+    logging.info("Policy engine ready!")
 
     # Total packets covered by the current batch. The actual number of packets
-    # on which inference will be computed is dependent on the smoothing window
+    # on which the policy will be computed is dependent on the smoothing window
     # and will be smaller than this.
     packets_covered_by_batch = 0
     # Time at which the current batch started.
     batch_start_time_s = time.time()
-    # Time spent waiting for the inference queue, which should not count
+    # Time spent waiting for the policy engine queue, which should not count
     # towards time spent computing on the batch.
     batch_wait_time_s = 0
     batch = []
@@ -115,7 +111,7 @@ def inference_loop(args, flow_to_rwnd, que, inference_flags, done):
                 flow_to_prev_features,
                 flow_to_decisions,
                 flow_to_rwnd,
-                inference_flags,
+                flags,
                 que,
                 packets_covered_by_batch,
                 max_batch_time_s,
@@ -135,34 +131,34 @@ def loop_iteration(
     flow_to_prev_features,
     flow_to_decisions,
     flow_to_rwnd,
-    inference_flags,
+    flags,
     que,
     packets_covered_by_batch,
     max_batch_time_s,
     batch_start_time_s,
     batch_wait_time_s,
 ):
-    """Run one iteration of the inference loop.
+    """Run one iteration of the policy engine main loop.
 
     Includes: checking if the current batch is ready and running it, pulling a
-    message from the inference queue, computing features, and deciding if the
+    message from the policy engine queue, computing features, and deciding if the
     flow should wait (ServicePolicy) or be batched immediately (FlowPolicy).
     """
-    # First, check whether we should run inference on the current batch.
+    # First, check whether we should process the current batch.
     if maybe_run_batch(
         args,
         net,
         batch,
         flow_to_decisions,
         flow_to_rwnd,
-        inference_flags,
+        flags,
         max_batch_time_s,
         batch_start_time_s,
     ):
         batch_proc_time_s = time.time() - batch_start_time_s - batch_wait_time_s
         pps = packets_covered_by_batch / batch_proc_time_s
         logging.info(
-            "Inference performance: %.2f ms, %.2f pps, %.2f Mbps",
+            "Policy engine performance: %.2f ms, %.2f pps, %.2f Mbps",
             batch_proc_time_s * 1e3,
             pps,
             pps * defaults.PACKET_LEN_B * 8 / 1e6,
@@ -170,7 +166,7 @@ def loop_iteration(
         # Reset: (packets_covered_by_batch, batch_start_time_s, batch_wait_time_s)
         return (0, time.time(), 0)
 
-    # Get the next message from the inference queue.
+    # Get the next message from the policy engine queue.
     wait_start_time_s = time.time()
     val = None
     try:
@@ -192,7 +188,7 @@ def loop_iteration(
             batch_wait_time_s,
         )
 
-    parse_res = parse_from_inference_queue(
+    parse_res = parse_from_queue(
         args.policy,
         val,
         flow_to_rwnd,
@@ -226,7 +222,7 @@ def loop_iteration(
         start_time_us,
         min_rtt_us,
         win_to_loss_event_rate,
-        inference_flags,
+        flags,
         flow_to_prev_features,
         fourtuple,
         flowkey,
@@ -266,16 +262,16 @@ def maybe_run_batch(
     batch,
     flow_to_decisions,
     flow_to_rwnd,
-    inference_flags,
+    flags,
     max_batch_time_s,
     batch_start_time_s,
 ):
     """Check if a batch is ready and process it."""
     packets_in_batch = sum(len(in_fets) for _, _, _, _, in_fets in batch)
     # Check if the batch is not ready yet, and if so, return False.
-    # If the batch is full, then run inference. Also run inference if it has been a
-    # long time since we ran inference last. A "long time" is defined as the max of
-    # 1 second and the inference interval (if the inference interval is defined).
+    # If the batch is full, then process it. Also process it if it has been a
+    # long time since we processed it  last. A "long time" is defined as the max of
+    # 1 second and the check interval (if the check interval is defined).
     batch_time_s = time.time() - batch_start_time_s
     if not batch or (
         packets_in_batch < args.batch_size and batch_time_s < max_batch_time_s
@@ -289,9 +285,9 @@ def maybe_run_batch(
         )
         return False
 
-    logging.info("Running inference on a batch of %d flow(s).", len(batch))
+    logging.info("Running policy engine on a batch of %d flow(s).", len(batch))
     try:
-        batch_inference(
+        batch_eval(
             args,
             net,
             batch,
@@ -302,14 +298,14 @@ def maybe_run_batch(
         # Assertion errors mean this batch of packets violated some
         # precondition, but we are safe to skip them and continue.
         logging.warning(
-            "Inference failed due to a non-fatal assertion failure:\n%s",
+            "Policy engine failed due to a non-fatal assertion failure:\n%s",
             traceback.format_exc(),
         )
     except Exception as exp:
         # An unexpected error occurred. It is not safe to continue. Reraise the
         # exception to kill the process.
         logging.error(
-            "Inference failed due to an unexpected error:\n%s",
+            "Policy engine failed due to an unexpected error:\n%s",
             traceback.format_exc(),
         )
         raise exp
@@ -317,17 +313,17 @@ def maybe_run_batch(
         for fourtuples, flowkeys, _, _, _ in batch:
             for fourtuple, flowkey in zip(fourtuples, flowkeys):
                 logging.info(
-                    "Clearing inference flag due to finished inference for flow: %s",
+                    "Clearing flag due to finished processing for flow: %s",
                     flowkey,
                 )
-                inference_flags[fourtuple].value = 0
+                flags[fourtuple].value = 0
         # Clear the batch.
         batch.clear()
 
     return True
 
 
-def batch_inference(
+def batch_eval(
     args,
     net,
     batch,
@@ -335,9 +331,9 @@ def batch_inference(
     flow_to_rwnd,
 ):
     """
-    Run inference on a batch of flows.
+    Run the policy engine on a batch of flows.
 
-    Note that each flow will occur only once in this batch due to inference_flags
+    Note that each flow will occur only once in this batch due to flags
     control.
     """
     num_pkts = sum(len(in_fets) for _, _, _, _, in_fets in batch)
@@ -400,10 +396,9 @@ def merge_fourtuples(fourtuples):
 
 
 def predict(net, in_fets, debug=False):
-    """Run inference on a flow's packets.
+    """Evaluate the FlowPolicy model on a batch of packets.
 
-    Returns a label (below target, near target, above target), the updated
-    min_rtt_us, and the features of the last packet.
+    Returns a list of labels (below target, near target, above target).
     """
     in_fets = utils.clean(in_fets)
     if debug:
@@ -480,15 +475,15 @@ def apply_decision(flowkey, new_decision, flow_to_decisions, flow_to_rwnd):
         flow_to_decisions[flowkey] = new_decision
 
 
-def parse_from_inference_queue(
+def parse_from_queue(
     policy, val, flow_to_rwnd, flow_to_decisions, flow_to_prev_features
 ):
-    """Parse a message from the inference queue."""
+    """Parse a message from the policy engine input queue."""
     epoch = num_flows_expected = None
     opcode, fourtuple = val[:2]
     flowkey = flow_utils.FlowKey(*fourtuple)
 
-    if opcode.startswith("inference"):
+    if opcode.startswith("packets"):
         (
             pkts,
             packets_lost,
@@ -501,7 +496,7 @@ def parse_from_inference_queue(
             assert len(val) == 10
             epoch, _, num_flows_expected = val[7:10]
     elif opcode == "remove":
-        logging.info("Inference process: Removing flow %s", flowkey)
+        logging.info("Policy engine: Removing flow %s", flowkey)
         if flowkey in flow_to_rwnd:
             del flow_to_rwnd[flowkey]
         if flowkey in flow_to_decisions:
@@ -534,7 +529,7 @@ def build_features(
     start_time_us,
     min_rtt_us,
     win_to_loss_event_rate,
-    inference_flags,
+    flags,
     flow_to_prev_features,
     fourtuple,
     flowkey,
@@ -572,8 +567,8 @@ def build_features(
             flowkey,
             traceback.format_exc(),
         )
-        logging.info("Clearing inference flag due to error for flow: %s", flowkey)
-        inference_flags[fourtuple].value = 0
+        logging.info("Clearing flag due to error for flow: %s", flowkey)
+        flags[fourtuple].value = 0
         return None
     except Exception as exp:
         # An unexpected error occurred. It is not safe to continue. Reraise the

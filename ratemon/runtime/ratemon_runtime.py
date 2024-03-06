@@ -20,9 +20,9 @@ import pcapy
 from ratemon.model import features, models, utils
 from ratemon.runtime import (
     flow_utils,
-    inference,
     mitigation_strategy,
     policies,
+    policy_engine,
     reaction_strategy,
 )
 from ratemon.runtime.policies import Policy
@@ -38,7 +38,7 @@ OLD_THRESH_SEC = 1 * 60
 
 # Maps each flow (four-tuple) to a list of packets for that flow. New
 # packets are appended to the ends of these lists. Periodically, a flow's
-# packets are consumed by the inference engine and that flow's list is
+# packets are consumed by the policy engine and that flow's list is
 # reset to empty.
 FLOWS = flow_utils.FlowDB()
 
@@ -50,7 +50,7 @@ LOSS_EVENT_INTERVALS: typing.List[int] = []
 EPOCH = 0
 
 
-def _main():
+def main():
     args = parse_args()
     logging.basicConfig(
         filename=args.log,
@@ -63,9 +63,9 @@ def _main():
         MANAGER = manager
         try:
             return run(args)
-        except Exception as exc:
-            logging.exception("Unknown error in main process!")
-            raise exc
+        except:
+            logging.exception("Unknown error in RateMon runtime!")
+            return 1
 
 
 def parse_args():
@@ -80,7 +80,7 @@ def parse_args():
     )
     parser.add_argument(
         "-i",
-        "--inference-interval-ms",
+        "--check-interval-ms",
         help="Hard interval to enforce between checking flows (start to start; ms).",
         required=False,
         type=float,
@@ -93,12 +93,6 @@ def parse_args():
         help='The network interface to attach to (e.g., "eno1").',
         required=True,
         type=str,
-    )
-    parser.add_argument(
-        "-s",
-        "--disable-inference",
-        action="store_true",
-        help="Disable periodic inference.",
     )
     parser.add_argument(
         "-f", "--model-file", help="The trained model to use.", required=False, type=str
@@ -123,7 +117,7 @@ def parse_args():
     parser.add_argument(
         "--batch-size",
         default=10,
-        help="The number of flows to run inference on in parallel.",
+        help="The number of flows to process in parallel.",
         required=False,
         type=int,
     )
@@ -131,17 +125,14 @@ def parse_args():
         "--listen-ports",
         nargs="+",
         default=[],
-        help="List of ports to which inference will be limited",
+        help="List of ports to monitor.",
         required=False,
         type=int,
     )
     parser.add_argument(
         "--smoothing-window",
         default=1,
-        help=(
-            "Run inference on this many packets from each flow, "
-            "and smooth the results."
-        ),
+        help="Process this many packets from each flow and smooth the results.",
         required=False,
         type=int,
     )
@@ -251,24 +242,24 @@ def run(args):
     # Create sychronized data structures.
     assert isinstance(MANAGER, multiprocessing.managers.SyncManager)
     que = MANAGER.Queue()
-    inference_flags = MANAGER.dict()
+    flags = MANAGER.dict()
     # Flag to trigger threads/processes to terminate.
     done = MANAGER.Event()
     done.clear()
 
-    # Create the thread that will monitor flows and decide when to run inference.
+    # Create the thread that will monitor flows and decide when to run the policy.
     check_thread = threading.Thread(
         target=check_loop,
-        args=(args, longest_window, que, inference_flags, done),
+        args=(args, longest_window, que, flags, done),
     )
     check_thread.start()
 
     original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # Create the process that will run inference.
-    inference_proc = multiprocessing.Process(
-        target=inference.run, args=(args, que, inference_flags, done)
+    # Create the process that will run the policy engine.
+    policy_proc = multiprocessing.Process(
+        target=policy_engine.run, args=(args, que, flags, done)
     )
-    inference_proc.start()
+    policy_proc.start()
     signal.signal(signal.SIGINT, original_sigint_handler)
 
     # Look up my IP address to use when filtering packets.
@@ -290,10 +281,11 @@ def run(args):
         done.set()
 
     check_thread.join()
-    inference_proc.join()
+    policy_proc.join()
+    return 0
 
 
-def check_loop(args, longest_window, que, inference_flags, done):
+def check_loop(args, longest_window, que, flags, done):
     """Periodically evaluate flow fairness.
 
     Intended to be run as the target function of a thread.
@@ -301,15 +293,15 @@ def check_loop(args, longest_window, que, inference_flags, done):
     try:
         while not done.is_set():
             last_check = time.time()
-            check_flows(args, longest_window, que, inference_flags)
+            check_flows(args, longest_window, que, flags)
 
-            if args.inference_interval_ms is not None:
+            if args.check_interval_ms is not None:
                 time.sleep(
                     max(
                         0,
                         # The time remaining in the interval, accounting for the time
                         # spent checking the flows.
-                        args.inference_interval_ms / 1e3 - (time.time() - last_check),
+                        args.check_interval_ms / 1e3 - (time.time() - last_check),
                     )
                 )
     except KeyboardInterrupt:
@@ -322,7 +314,7 @@ def check_loop(args, longest_window, que, inference_flags, done):
         logging.info("Out of check loop")
 
 
-def check_flows(args, longest_window, que, inference_flags):
+def check_flows(args, longest_window, que, flags):
     """Identify flows that are ready to be checked, and check them.
 
     Remove old and empty flows.
@@ -379,23 +371,24 @@ def check_flows(args, longest_window, que, inference_flags):
                                 logging.info(
                                     (
                                         "Sender %s is ready. "
-                                        "Submitting flows for inference: %s"
+                                        "Submitting flows to policy engine: %s"
                                     ),
                                     utils.int_to_ip_str(flow.flowkey.remote_addr),
                                     flows_to_add,
                                 )
 
                         else:
-                            # Plan to run inference on this flow.
+                            # Plan to run the policy on this flow.
                             logging.info(
-                                "Flow is ready, submitting for interence: %s", fourtuple
+                                "Flow is ready. Submitting to policy engine: %s",
+                                fourtuple,
                             )
                             to_check.add(fourtuple)
                     elif flow.latest_time_sec and (
                         time.time() - flow.latest_time_sec > OLD_THRESH_SEC
                     ):
-                        # Remove old flows that have not been selected for inference in
-                        # a while.
+                        # Remove old flows that have not been sent to the policy engine
+                        # in a while.
                         to_remove.add(fourtuple)
                 finally:
                     flow.ingress_lock.release()
@@ -405,8 +398,8 @@ def check_flows(args, longest_window, que, inference_flags):
         for fourtuple in to_remove:
             logging.info("Removing flow: %s", utils.flow_to_str(fourtuple))
             del FLOWS[fourtuple]
-            if fourtuple in inference_flags:
-                del inference_flags[fourtuple]
+            if fourtuple in flags:
+                del flags[fourtuple]
             que.put(("remove", fourtuple))
 
     for fourtuple in to_check:
@@ -415,38 +408,32 @@ def check_flows(args, longest_window, que, inference_flags):
         # to the next flow.
         if flow.ingress_lock.acquire(blocking=False):
             try:
-                check_flow(
-                    fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH
-                )
+                check_flow(fourtuple, args, longest_window, que, flags, epoch=EPOCH)
             finally:
                 flow.ingress_lock.release()
         else:
             logging.warning("Could not acquire lock for flow: %s", flow)
 
 
-def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
-    """Determine whether a flow is above its target rate and how to mitigate it.
-
-    Runs inference on a flow's packets and determines the appropriate ACK
-    pacing for the flow. Updates the flow's fairness record.
-    """
+def check_flow(fourtuple, args, longest_window, que, flags, epoch=0):
+    """Determine whether a flow is ready to be sent to the policy engine."""
     flow = FLOWS[fourtuple]
     with flow.ingress_lock:
         # Record the time when we check this flow.
         flow.latest_time_sec = time.time()
 
-        if fourtuple not in inference_flags:
+        if fourtuple not in flags:
             assert isinstance(MANAGER, multiprocessing.managers.SyncManager)
-            inference_flags[fourtuple] = MANAGER.Value(typecode="i", value=0)
-        # Submit new packets for inference only if inference is not already scheduled
-        # or running for this flow.
-        if inference_flags[fourtuple].value == 0:
-            inference_flags[fourtuple].value = 1
+            flags[fourtuple] = MANAGER.Value(typecode="i", value=0)
+        # Submit new packets to the policy engine only if this flow has not already
+        # been submitted.
+        if flags[fourtuple].value == 0:
+            flags[fourtuple].value = 1
 
             # Calculate packets lost and loss event rate. Do this on all packets
             # because the loss event rate is based on current RTT, not minRTT, so
-            # just the packets we send to inference will not be enough. Note that
-            # the loss event rate results are just for the last packet.
+            # just the packets we send to the policy engine will not be enough. Note
+            # that the loss event rate results are just for the last packet.
             (
                 packets_lost,
                 win_to_loss_event_rate,
@@ -467,42 +454,43 @@ def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
             packets_lost = packets_lost[idx - 1 :]
 
             logging.info(
-                "Scheduling inference on most recent %d packets for flow: %s",
+                "Sending to policy engine the most recent %d packets for flow: %s",
                 len(flow.incoming_packets),
                 flow,
             )
-            if args.disable_inference:
-                inference_flags[fourtuple].value = 0
-            else:
-                try:
+            try:
+                info = (
+                    fourtuple,
+                    flow.incoming_packets,
+                    packets_lost,
+                    flow.start_time_us,
+                    flow.min_rtt_us,
+                    win_to_loss_event_rate,
+                )
+                if args.policy == Policy.SERVICEPOLICY:
                     info = (
-                        fourtuple,
-                        flow.incoming_packets,
-                        packets_lost,
-                        flow.start_time_us,
-                        flow.min_rtt_us,
-                        win_to_loss_event_rate,
+                        *info,
+                        epoch,
+                        # Sender IP.
+                        flow.flowkey.remote_addr,
+                        # Num flows to expect.
+                        len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr)),
                     )
-                    if args.policy == Policy.SERVICEPOLICY:
-                        info = (
-                            *info,
-                            epoch,
-                            # Sender IP.
-                            flow.flowkey.remote_addr,
-                            # Num flows to expect.
-                            len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr)),
-                        )
-                    que.put(
-                        ("inference", *info),
-                        block=False,
-                    )
-                except queue.Full:
-                    logging.warning("Warning: Inference queue full!")
+                que.put(
+                    ("packets", *info),
+                    block=False,
+                )
+            except queue.Full:
+                logging.warning("Warning: RateMon policy engine queue is full!")
 
-                flow.incoming_packets = []
+            flow.incoming_packets = []
         else:
             logging.info(
-                "Skipping inference because flow is already being processed: %s", flow
+                (
+                    "Not submitting to policy engine because "
+                    "flow has already been submitted: %s"
+                ),
+                flow,
             )
 
 
@@ -681,4 +669,4 @@ def receive_packet_pcapy(header, packet):
 
 
 if __name__ == "__main__":
-    sys.exit(_main())
+    sys.exit(main())

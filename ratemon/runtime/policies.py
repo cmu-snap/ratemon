@@ -1,6 +1,7 @@
 """Different types of receiver policy, depending on workload."""
 
 from enum import IntEnum
+import logging
 
 from ratemon.model import features, utils, defaults
 from ratemon.runtime import reaction_strategy
@@ -70,7 +71,9 @@ def make_decision(
     Base the decision on the flow's label and existing decision. Use the flow's features
     to calculate any necessary flow metrics, such as the throughput.
     """
-    if policy == Policy.SERVICEPOLICY:
+    if policy == Policy.NOPOLICY:
+        new_decision = (defaults.Decision.NOT_PACED, None, None)
+    elif policy == Policy.SERVICEPOLICY:
         new_decision = make_decision_servicepolicy(flowkeys, min_rtt_us, net, fets)
     elif policy == Policy.FLOWPOLICY:
         assert len(flowkeys) == 1
@@ -79,7 +82,6 @@ def make_decision(
         )
     elif policy == Policy.STATIC_RWND:
         new_decision = make_decision_staticrwnd(schedule)
-        raise NotImplementedError(f"Policy {to_str(policy)} not implemented!")
     elif policy == Policy.SCHEDULED_RWND:
         raise NotImplementedError(f"Policy {to_str(policy)} not implemented!")
     else:
@@ -239,6 +241,7 @@ def make_decision_flowpolicy(
     FIXME: Why are the BDP calculations coming out so small? Is the throughput
            just low due to low application demand?
     """
+    logging.info("Label for flow %s: %s", flowkey, label)
     tput_bps = utils.safe_tput_bps(fets, 0, len(fets) - 1)
     if label == defaults.Class.ABOVE_TARGET:
         # This flow is sending too fast. Force the sender to slow down.

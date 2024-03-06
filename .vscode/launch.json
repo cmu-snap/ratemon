@@ -6,7 +6,7 @@
     "configurations": [
         {
             "name": "(d) runtime",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
@@ -24,7 +24,7 @@
         },
         {
             "name": "(r) runtime",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
@@ -34,14 +34,13 @@
                 "--interface=eno1",
                 "--reaction-strategy=mimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=100",
+                "--check-interval-ms=100",
                 "--batch-size=10",
                 "--log=/tmp/ratemon.log",
                 "--skip-localhost",
                 "--listen-ports=9999",
                 "--debug",
                 "--smoothing-window=10",
-                // "--disable-inference"
             ],
             "autoReload": {
                 "enable": false
@@ -54,7 +53,7 @@
         },
         {
             "name": "(r) runtime, schedule",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
             "console": "integratedTerminal",
@@ -65,9 +64,8 @@
                 "--reaction-strategy=file",
                 "--schedule=${workspaceFolder}/test/ratemon_schedule_step.csv",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000",
+                "--check-interval-ms=1000",
                 "--log=/tmp/ratemon.log",
-                // "--disable-inference"
             ],
             "autoReload": {
                 "enable": false
@@ -80,7 +78,7 @@
         },
         {
             "name": "(r) runtime, cprofile",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "cProfile",
             "console": "integratedTerminal",
@@ -93,12 +91,11 @@
                 "--interface=ens3",
                 "--reaction-strategy=aimd",
                 "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--inference-interval-ms=1000",
+                "--check-interval-ms=1000",
                 "--log=/tmp/ratemon.log",
                 // "--skip-localhost",
                 "--constrain-port",
                 "--debug",
-                // "--disable-inference"
             ],
             "autoReload": {
                 "enable": false
@@ -111,7 +108,7 @@
         },
         {
             "name": "(r) train cubic bbr",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/model/train.py",
             "console": "integratedTerminal",
@@ -145,7 +142,7 @@
         },
         {
             "name": "(r) prepare_data",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/model/prepare_data.py",
             "console": "integratedTerminal",
@@ -170,7 +167,7 @@
         },
         {
             "name": "(r) gen_features",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/model/gen_features.py",
             "console": "integratedTerminal",
@@ -193,7 +190,7 @@
         },
         {
             "name": "(r) eval",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/ratemon/scripts/eval.py",
             "console": "integratedTerminal",

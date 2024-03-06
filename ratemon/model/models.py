@@ -232,7 +232,8 @@ class BinaryModelWrapper(PytorchModelWrapper):
         the last packet in the window.
         """
         self.log("Creating arrival time buckets...")
-        # Bucket duration. 100x the min RTT (as determined by the experiment parameters).
+        # Bucket duration. 100x the min RTT (as determined by the experiment
+        # parameters).
         dur_us = 100 * 2 * (exp.edge_delays[0] * 2 + exp.btl_delay_us)
         # Determine the safe starting index. Do not pick indices
         # between 0 and start_idx to make sure that all windows ending
@@ -1346,6 +1347,7 @@ class MathisFairness:
             # Note order from in_spc, above.
             for _, _, _, mathis_tput_bps_ler, _, tput_bps in dat_in
         ]
+
 
 class ServicePolicyModel:
     """Similar to MathisFairness, but does not support prediction.

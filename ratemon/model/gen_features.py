@@ -983,7 +983,8 @@ def parse_opened_exp(
     print(f"\tWindow errors in: {exp_flp}")
     for win in features.WINDOWS:
         print(
-            f"\t\t{win}: per-flow: {win_to_errors[win][0]}, overall: {win_to_errors[win][1]}"
+            f"\t\t{win}: per-flow: {win_to_errors[win][0]}, "
+            f"overall: {win_to_errors[win][1]}"
         )
     smallest_safe_win = 0
     for win in sorted(features.WINDOWS):
@@ -1031,7 +1032,7 @@ def parse_received_packets(
     previous_fets=None,
     win_metrics_start_idx=0,
 ):
-    """Generate features for the inference runtime.
+    """Generate features for the RateMon runtime.
 
     Requires the absolute start time of the flow (microseconds measured against the
     same epoch as the packet timestamps in ARRIVAL_TIME_FET) and the existing minimum
@@ -1341,9 +1342,9 @@ def parse_exp(
             except AssertionError:
                 traceback.print_exc()
                 return -1
-            except:
+            except Exception as exc:
                 traceback.print_exc()
-                raise
+                raise exc
 
     return -1
 
