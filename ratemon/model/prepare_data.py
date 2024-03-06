@@ -36,7 +36,7 @@ class Split:
 
         flp = utils.get_split_data_flp(out_dir, name)
         if split_exists(out_dir, name):
-            raise Exception(f"Split already exists: {flp}")
+            raise RuntimeError(f"Split already exists: {flp}")
         logging.info(
             '\tInitializing split "%s" (%f%%, sampling %f%%%s) at: %s',
             self.name,
@@ -256,6 +256,7 @@ def merge(exp_flps, out_dir, num_pkts, dtype, split_fracs, warmup_frac, sample_f
                 dat_combined = dat_flw
             else:
                 dat_combined = np.concatenate((dat_combined, dat_flw))
+        assert dat_combined is not None
         dat = dat_combined
 
         # Select only the features that the model requires.

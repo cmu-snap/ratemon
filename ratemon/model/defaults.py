@@ -120,9 +120,12 @@ class Class(IntEnum):
     Flow throughput is below, near, or above the target rate.
     """
 
+    # The order must be *below, near, above* to maintain compatibility with already
+    # trained models.
     BELOW_TARGET = 0
     NEAR_TARGET = 1
     ABOVE_TARGET = 2
+    NO_CLASS = 3
 
     @staticmethod
     def ratio_to_class(ratio):
@@ -143,7 +146,7 @@ class Class(IntEnum):
         elif ratio > 1 + FAIR_THRESH:
             cls = Class.ABOVE_TARGET
         else:
-            raise Exception("This case should never be reached.")
+            raise RuntimeError("This case should never be reached.")
         return cls
 
 

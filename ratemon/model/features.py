@@ -59,11 +59,11 @@ def make_smoothed_features():
         (make_win_metric(metric, win), typ)
         for (metric, typ), win in itertools.product(WINDOWED_FETS, WINDOWS)
     ]
-    # Drop features that use loss event rate with a window of less than 4. Loss even
+    # Drop features that use loss event rate with a window of less than 4. Loss event
     # rate is defined for a window of 8, so 4 is already a bit small.
     return [
-        fet
-        for fet in smoothed_features
+        (fet, typ)
+        for fet, typ in smoothed_features
         if not (
             "windowed" in fet
             and (
@@ -92,7 +92,7 @@ def feature_name_to_type(target_fet_name):
     for fet_name, fet_type in ALL_FETS:
         if target_fet_name == fet_name:
             return fet_type
-    raise Exception(f"Unknown feature: {target_fet_name}")
+    raise RuntimeError(f"Unknown feature: {target_fet_name}")
 
 
 def convert_to_float(dtype):
@@ -291,7 +291,7 @@ def fill_dependencies(in_spc):
                 to_add.add(LOSS_RATE_FET)
         if MATHIS_TPUT_LOSS_EVENT_RATE_FET in name:
             if "ewma" in name:
-                raise Exception(f"Cannot have loss event rate EWMA metric: {name}")
+                raise RuntimeError(f"Cannot have loss event rate EWMA metric: {name}")
             else:
                 to_add.add(
                     make_win_metric(SQRT_LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])
@@ -327,7 +327,7 @@ def fill_dependencies(in_spc):
             to_add.add(SQRT_LOSS_RATE_FET)
         if SQRT_LOSS_EVENT_RATE_FET in name:
             if "ewma" in name:
-                raise Exception(f"Cannot have loss event rate EWMA metric: {name}")
+                raise RuntimeError(f"Cannot have loss event rate EWMA metric: {name}")
             else:
                 to_add.add(
                     make_win_metric(LOSS_EVENT_RATE_FET, parse_win_metric(name)[1])

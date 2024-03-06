@@ -247,7 +247,7 @@ def main():
     elif mdl_flp.endswith("pth"):
         mdl = torch.jit.load(mdl_flp)
     else:
-        raise Exception(f"Unknown model type: {mdl_flp}")
+        raise RuntimeError(f"Unknown model type: {mdl_flp}")
     net.net = mdl
     net.graph = True
 

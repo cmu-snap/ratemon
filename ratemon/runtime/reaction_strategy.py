@@ -9,14 +9,12 @@ class ReactionStrategy(IntEnum):
 
     AIMD = 0
     MIMD = 1
-    FILE = 2
 
 
-ALL = [ReactionStrategy.AIMD, ReactionStrategy.MIMD, ReactionStrategy.FILE]
+ALL = [ReactionStrategy.AIMD, ReactionStrategy.MIMD]
 _STRATEGY_TO_STR = {
     ReactionStrategy.AIMD: "aimd",
     ReactionStrategy.MIMD: "mimd",
-    ReactionStrategy.FILE: "file",
 }
 _STR_TO_STRATEGY = {string: strat for strat, string in _STRATEGY_TO_STR.items()}
 
@@ -47,8 +45,6 @@ def react_up(strategy, current):
         new = current + 1e6
     elif strategy == ReactionStrategy.MIMD:
         new = current * 1.3
-    elif strategy == ReactionStrategy.FILE:
-        raise RuntimeError(f'Reaction strategy "{to_str(strategy)}" cannot react.')
     else:
         raise RuntimeError(f"Unknown reaction strategy: {strategy}")
     return new
@@ -60,8 +56,6 @@ def react_down(strategy, current):
         new = current / 2
     elif strategy == ReactionStrategy.MIMD:
         new = current / 1.75
-    elif strategy == ReactionStrategy.FILE:
-        raise RuntimeError(f'Reaction strategy "{to_str(strategy)}" cannot react.')
     else:
         raise RuntimeError(f"Unknown reaction strategy: {strategy}")
     return new
@@ -77,7 +71,7 @@ def parse_pacing_schedule(flp):
         (<start time (seconds)>, <RWND>)
     and is sorted by start time.
     """
-    now = time.time()
+    now_s = time.time()
     schedule = []
     with open(flp, "r", encoding="utf-8") as fil:
         for line in fil:
@@ -85,8 +79,12 @@ def parse_pacing_schedule(flp):
             if line[0] == "#":
                 continue
             toks = line.split(",")
+            assert len(toks) == 2
+            start_time_s, rwnd_B = toks
+            start_time_s = float(start_time_s)
+            rwnd_B = int(rwnd_B)
             try:
-                schedule.append((now + float(toks[0]), float(toks[1])))
+                schedule.append((now_s + start_time_s, rwnd_B))
             except ValueError as exc:
                 raise RuntimeError(f"Improperly formed schedule line: {line}") from exc
 

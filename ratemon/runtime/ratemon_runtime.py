@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 import atexit
 import logging
 import multiprocessing
+import multiprocessing.managers
 from os import path
 import queue
 import signal
@@ -21,8 +22,10 @@ from ratemon.runtime import (
     flow_utils,
     inference,
     mitigation_strategy,
+    policies,
     reaction_strategy,
 )
+from ratemon.runtime.policies import Policy
 from ratemon.runtime.mitigation_strategy import MitigationStrategy
 from ratemon.runtime.reaction_strategy import ReactionStrategy
 
@@ -47,13 +50,540 @@ LOSS_EVENT_INTERVALS: typing.List[int] = []
 EPOCH = 0
 
 
+def _main():
+    args = parse_args()
+    logging.basicConfig(
+        filename=args.log,
+        filemode="w",
+        format="%(asctime)s %(levelname)s \t| %(message)s",
+        level=logging.DEBUG,
+    )
+    with multiprocessing.Manager() as manager:
+        global MANAGER
+        MANAGER = manager
+        try:
+            return run(args)
+        except Exception as exc:
+            logging.exception("Unknown error in main process!")
+            raise exc
+
+
+def parse_args():
+    """Parse arguments."""
+    parser = ArgumentParser(description="Constrain flows above their target rate.")
+    parser.add_argument(
+        "-p",
+        "--poll-interval-ms",
+        help="Packet poll interval (sleep time; ms).",
+        required=False,
+        type=float,
+    )
+    parser.add_argument(
+        "-i",
+        "--inference-interval-ms",
+        help="Hard interval to enforce between checking flows (start to start; ms).",
+        required=False,
+        type=float,
+    )
+    parser.add_argument(
+        "-d", "--debug", action="store_true", help="Print debugging info"
+    )
+    parser.add_argument(
+        "--interface",
+        help='The network interface to attach to (e.g., "eno1").',
+        required=True,
+        type=str,
+    )
+    parser.add_argument(
+        "-s",
+        "--disable-inference",
+        action="store_true",
+        help="Disable periodic inference.",
+    )
+    parser.add_argument(
+        "-f", "--model-file", help="The trained model to use.", required=False, type=str
+    )
+    parser.add_argument(
+        "--cgroup",
+        help=(
+            "The cgroup that will contain processes to monitor. "
+            "Practically speaking, this is the path to a directory. "
+            "BCC and eBPF must know this to monitor/set TCP header options, "
+            "(in particular, the TCP window scale)."
+        ),
+        required=True,
+        type=str,
+    )
+    parser.add_argument(
+        "--skip-localhost", action="store_true", help="Skip packets to/from localhost."
+    )
+    parser.add_argument(
+        "--log", help="The main log file to write to.", required=True, type=str
+    )
+    parser.add_argument(
+        "--batch-size",
+        default=10,
+        help="The number of flows to run inference on in parallel.",
+        required=False,
+        type=int,
+    )
+    parser.add_argument(
+        "--listen-ports",
+        nargs="+",
+        default=[],
+        help="List of ports to which inference will be limited",
+        required=False,
+        type=int,
+    )
+    parser.add_argument(
+        "--smoothing-window",
+        default=1,
+        help=(
+            "Run inference on this many packets from each flow, "
+            "and smooth the results."
+        ),
+        required=False,
+        type=int,
+    )
+    parser.add_argument(
+        "--policy",
+        choices=policies.choices(),
+        help="Different types of receiver policy, depending on workload.",
+        required=True,
+    )
+    parser.add_argument(
+        "--schedule",
+        help=(
+            "(--policy==staticrwnd) A CSV file specifying an RWND tuning schedule to "
+            "use. Each line should be of the form: <start time (seconds)>,<RWND>. "
+            "*Note* Allow at least 10 seconds for warmup."
+        ),
+        required=False,
+        type=str,
+    )
+    parser.add_argument(
+        "--reaction-strategy",
+        choices=reaction_strategy.choices(),
+        default=reaction_strategy.to_str(ReactionStrategy.MIMD),
+        help="The reaction/feedback strategy to use.",
+        required=False,
+        type=str,
+    )
+    parser.add_argument(
+        "--mitigation-strategy",
+        choices=mitigation_strategy.choices(),
+        default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
+        help="The mitigation strategy to use.",
+        required=False,
+        type=str,
+    )
+    args = parser.parse_args()
+    args.policy = policies.to_policy(args.policy)
+    args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
+    args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
+
+    assert (
+        args.policy != Policy.STATIC_RWND or args.schedule is not None
+    ), "Must specify schedule file."
+    if args.schedule is not None:
+        assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
+        args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
+    assert (
+        args.batch_size > 0
+    ), f'"--batch-size" must be greater than 0, but is: {args.batch_size}'
+    assert (
+        args.smoothing_window >= 1
+    ), f"Smoothing window must be >= 1, but is: {args.smoothing_window}"
+
+    assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
+    assert (
+        args.policy == Policy.FLOWPOLICY
+    ) and args.model_file is not None, (
+        f"{policies.to_str(Policy.FLOWPOLICY)} requires '--model-file'. "
+    )
+
+    return args
+
+
+def run(args):
+    """Core logic."""
+    # Need to load the model to check the input features to see the longest window.
+    in_spc = (
+        models.ServicePolicyModel()
+        if args.policy == Policy.SERVICEPOLICY
+        else models.load_model(args.model_file)
+    ).in_spc
+
+    longest_window = max(
+        features.parse_win_metric(fet)[1]
+        for fet in in_spc
+        if "windowed" in fet and "minRtt" in fet
+    )
+    logging.info("Longest minRTT window: %d", longest_window)
+
+    # Fill in feature dependencies.
+    all_features = list(
+        zip(
+            *list(
+                set(features.PARSE_PACKETS_FETS)
+                | set(
+                    features.feature_names_to_dtype(features.fill_dependencies(in_spc))
+                )
+            )
+        )
+    )[0]
+
+    global LOSS_EVENT_INTERVALS
+    LOSS_EVENT_INTERVALS = list(
+        {
+            features.parse_win_metric(fet)[1]
+            for fet in all_features
+            if "windowed" in fet
+            and (
+                fet.startswith(features.LOSS_EVENT_RATE_FET)
+                or fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
+                or fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
+            )
+        }
+    )
+    logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
+
+    # Create sychronized data structures.
+    assert isinstance(MANAGER, multiprocessing.managers.SyncManager)
+    que = MANAGER.Queue()
+    inference_flags = MANAGER.dict()
+    # Flag to trigger threads/processes to terminate.
+    done = MANAGER.Event()
+    done.clear()
+
+    # Create the thread that will monitor flows and decide when to run inference.
+    check_thread = threading.Thread(
+        target=check_loop,
+        args=(args, longest_window, que, inference_flags, done),
+    )
+    check_thread.start()
+
+    original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # Create the process that will run inference.
+    inference_proc = multiprocessing.Process(
+        target=inference.run, args=(args, que, inference_flags, done)
+    )
+    inference_proc.start()
+    signal.signal(signal.SIGINT, original_sigint_handler)
+
+    # Look up my IP address to use when filtering packets.
+    global MY_IP
+    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
+
+    def signal_handler(sig, frame):
+        logging.info("Main process: You pressed Ctrl+C!")
+        done.set()
+        # raise RuntimeError()
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # The current thread will sniff packets.
+    try:
+        pcapy_sniff(args, done)
+    except KeyboardInterrupt:
+        logging.info("Cancelled.")
+        done.set()
+
+    check_thread.join()
+    inference_proc.join()
+
+
+def check_loop(args, longest_window, que, inference_flags, done):
+    """Periodically evaluate flow fairness.
+
+    Intended to be run as the target function of a thread.
+    """
+    try:
+        while not done.is_set():
+            last_check = time.time()
+            check_flows(args, longest_window, que, inference_flags)
+
+            if args.inference_interval_ms is not None:
+                time.sleep(
+                    max(
+                        0,
+                        # The time remaining in the interval, accounting for the time
+                        # spent checking the flows.
+                        args.inference_interval_ms / 1e3 - (time.time() - last_check),
+                    )
+                )
+    except KeyboardInterrupt:
+        logging.info("Cancelled.")
+        done.set()
+    except Exception as exc:
+        logging.exception("Other exception")
+        raise exc
+    finally:
+        logging.info("Out of check loop")
+
+
+def check_flows(args, longest_window, que, inference_flags):
+    """Identify flows that are ready to be checked, and check them.
+
+    Remove old and empty flows.
+    """
+    global EPOCH
+    EPOCH += 1
+
+    to_remove = set()
+    to_check = set()
+
+    # Need to acquire FLOWS.lock while iterating over FLOWS.
+    with FLOWS.lock:
+        for fourtuple, flow in FLOWS.items():
+            # A fourtuple might add other fourtuples to to_check if
+            # we are using ServicePolicy.
+            if fourtuple in to_check:
+                continue
+
+            # Try to acquire the lock for this flow. If unsuccessful, do not block; move
+            # on to the next flow.
+            if flow.ingress_lock.acquire(blocking=False):
+                try:
+                    if flow.incoming_packets:
+                        logging.info(
+                            (
+                                "Flow %s - packets: %d, min_rtt: %.2f us, "
+                                "longest window: %d, required span: %.2f s, "
+                                "span: %.2f s"
+                            ),
+                            flow,
+                            len(flow.incoming_packets),
+                            flow.min_rtt_us,
+                            longest_window,
+                            flow.min_rtt_us * longest_window / 1e6,
+                            (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
+                            / 1e6,
+                        )
+                    else:
+                        logging.info("No incoming packets for flow %s", flow)
+
+                    if flow.is_ready(args.smoothing_window, longest_window):
+                        if args.policy == Policy.SERVICEPOLICY:
+                            # Only want to add this flow if all the flows from this
+                            # sender are ready.
+                            if FLOWS.sender_okay(
+                                flow.flowkey.remote_addr,
+                                args.smoothing_window,
+                                longest_window,
+                            ):
+                                flows_to_add = FLOWS.get_flows_from_sender(
+                                    flow.flowkey.remote_addr
+                                )
+                                to_check |= flows_to_add
+                                logging.info(
+                                    (
+                                        "Sender %s is ready. "
+                                        "Submitting flows for inference: %s"
+                                    ),
+                                    utils.int_to_ip_str(flow.flowkey.remote_addr),
+                                    flows_to_add,
+                                )
+
+                        else:
+                            # Plan to run inference on this flow.
+                            logging.info(
+                                "Flow is ready, submitting for interence: %s", fourtuple
+                            )
+                            to_check.add(fourtuple)
+                    elif flow.latest_time_sec and (
+                        time.time() - flow.latest_time_sec > OLD_THRESH_SEC
+                    ):
+                        # Remove old flows that have not been selected for inference in
+                        # a while.
+                        to_remove.add(fourtuple)
+                finally:
+                    flow.ingress_lock.release()
+            else:
+                logging.warning("Could not acquire lock for flow: %s", flow)
+        # Garbage collection.
+        for fourtuple in to_remove:
+            logging.info("Removing flow: %s", utils.flow_to_str(fourtuple))
+            del FLOWS[fourtuple]
+            if fourtuple in inference_flags:
+                del inference_flags[fourtuple]
+            que.put(("remove", fourtuple))
+
+    for fourtuple in to_check:
+        flow = FLOWS[fourtuple]
+        # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
+        # to the next flow.
+        if flow.ingress_lock.acquire(blocking=False):
+            try:
+                check_flow(
+                    fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH
+                )
+            finally:
+                flow.ingress_lock.release()
+        else:
+            logging.warning("Could not acquire lock for flow: %s", flow)
+
+
+def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
+    """Determine whether a flow is above its target rate and how to mitigate it.
+
+    Runs inference on a flow's packets and determines the appropriate ACK
+    pacing for the flow. Updates the flow's fairness record.
+    """
+    flow = FLOWS[fourtuple]
+    with flow.ingress_lock:
+        # Record the time when we check this flow.
+        flow.latest_time_sec = time.time()
+
+        if fourtuple not in inference_flags:
+            assert isinstance(MANAGER, multiprocessing.managers.SyncManager)
+            inference_flags[fourtuple] = MANAGER.Value(typecode="i", value=0)
+        # Submit new packets for inference only if inference is not already scheduled
+        # or running for this flow.
+        if inference_flags[fourtuple].value == 0:
+            inference_flags[fourtuple].value = 1
+
+            # Calculate packets lost and loss event rate. Do this on all packets
+            # because the loss event rate is based on current RTT, not minRTT, so
+            # just the packets we send to inference will not be enough. Note that
+            # the loss event rate results are just for the last packet.
+            (
+                packets_lost,
+                win_to_loss_event_rate,
+            ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
+            logging.info("win_to_loss_event_rate: %s", win_to_loss_event_rate)
+
+            # Discard all but the minimum number of packets required to calculate
+            # the longest window's features, and the number of packets required
+            # for the smoothing window.
+            end_time_us = flow.incoming_packets[-args.smoothing_window][4]
+            for idx in range(1, len(flow.incoming_packets) - args.smoothing_window):
+                if (
+                    end_time_us - flow.incoming_packets[idx][4]
+                    < flow.min_rtt_us * longest_window
+                ):
+                    break
+            flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+            packets_lost = packets_lost[idx - 1 :]
+
+            logging.info(
+                "Scheduling inference on most recent %d packets for flow: %s",
+                len(flow.incoming_packets),
+                flow,
+            )
+            if args.disable_inference:
+                inference_flags[fourtuple].value = 0
+            else:
+                try:
+                    info = (
+                        fourtuple,
+                        flow.incoming_packets,
+                        packets_lost,
+                        flow.start_time_us,
+                        flow.min_rtt_us,
+                        win_to_loss_event_rate,
+                    )
+                    if args.policy == Policy.SERVICEPOLICY:
+                        info = (
+                            *info,
+                            epoch,
+                            # Sender IP.
+                            flow.flowkey.remote_addr,
+                            # Num flows to expect.
+                            len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr)),
+                        )
+                    que.put(
+                        ("inference", *info),
+                        block=False,
+                    )
+                except queue.Full:
+                    logging.warning("Warning: Inference queue full!")
+
+                flow.incoming_packets = []
+        else:
+            logging.info(
+                "Skipping inference because flow is already being processed: %s", flow
+            )
+
+
+def pcapy_sniff(args, done):
+    """Use pcapy to sniff packets from a specific interface."""
+    # Set the snapshot length to the maximum size of the Ethernet, IPv4, and TCP
+    # headers. Do not put the interface into promiscuous mode. Set the timeout to
+    # 1000 ms, which actually allows batching up to 1000 ms
+    # of packets from the kernel.
+    pcap = pcapy.open_live(args.interface, 14 + 60 + 60, 0, 1000)
+
+    def pcapy_cleanup():
+        """Close the pcapy reader."""
+        logging.info("Stopping pcapy sniffing...")
+        pcap.close()
+
+    atexit.register(pcapy_cleanup)
+
+    # Drop non-IPv4/TCP packets.
+    filt = "ip and tcp and not port 22"
+    # Drop packets that we do not care about.
+    if args.skip_localhost:
+        filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
+    if args.listen_ports:
+        port_filt_l = [
+            f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
+            f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
+            for port in args.listen_ports
+        ]
+        filt += f" and ({' or '.join(port_filt_l)})"
+    logging.info("Using tcpdump filter: %s", filt)
+    pcap.setfilter(filt)
+
+    logging.info("Running...press Control-C to end")
+    print("Running...press Control-C to end")
+    last_time_s = time.time()
+    last_exit_check_s = time.time()
+    num_packets = 0
+    num_bytes = 0
+    last_num_packets = 0
+    last_total_bytes = 0
+    i = 0
+    while True:  # not done.is_set():
+        now_s = time.time()
+
+        # Only check done once every 10000 packets or 1 second.
+        if i % 10000 == 0 or now_s - last_exit_check_s > 1:
+            if done.is_set():
+                break
+            last_exit_check_s = time.time()
+
+        # Note that this is a blocking call. If we do not receive a packet, then this
+        # will never return and we will never check the above exit conditions.
+        new_packets, new_bytes = receive_packet_pcapy(*pcap.next())
+
+        num_packets += new_packets
+        num_bytes += new_bytes
+        delta_time_s = now_s - last_time_s
+        if delta_time_s >= 10:
+            delta_num_packets = num_packets - last_num_packets
+            delta_total_bytes = num_bytes - last_total_bytes
+            logging.info(
+                "Ingress performance --- %.2f pps, %.2f Mbps",
+                delta_num_packets / delta_time_s,
+                8 * delta_total_bytes / delta_time_s / 1e6,
+            )
+            last_time_s = now_s
+            last_num_packets = num_packets
+            last_total_bytes = num_bytes
+
+        i += 1
+
+
 def receive_packet_pcapy(header, packet):
     """Process a packet sniffed by pcapy.
 
     Extract relevant fields, compute the RTT (for incoming packets), and sort the
     packet into the appropriate flow.
 
-    Inspired by: https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
+    Inspired by:
+    https://www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension/
     """
     # Note: We do not need to check that this packet IPv4 and TCP because we already do
     #       that with a filter.
@@ -148,527 +678,6 @@ def receive_packet_pcapy(header, packet):
         # Track outgoing tsval for use later.
         flow.sent_tsvals[tsval] = time_us
     return 0, 0
-
-
-def check_loop(args, longest_window, que, inference_flags, done):
-    """Periodically evaluate flow fairness.
-
-    Intended to be run as the target function of a thread.
-    """
-    try:
-        while not done.is_set():
-            last_check = time.time()
-            check_flows(args, longest_window, que, inference_flags)
-
-            if args.inference_interval_ms is not None:
-                time.sleep(
-                    max(
-                        0,
-                        # The time remaining in the interval, accounting for the time
-                        # spent checking the flows.
-                        args.inference_interval_ms / 1e3 - (time.time() - last_check),
-                    )
-                )
-    except KeyboardInterrupt:
-        logging.info("Cancelled.")
-        done.set()
-    except:
-        logging.exception("Other exception")
-        raise
-    finally:
-        logging.info("Out of check loop")
-
-
-def check_flows(args, longest_window, que, inference_flags):
-    """Identify flows that are ready to be checked, and check them.
-
-    Remove old and empty flows.
-    """
-    global EPOCH
-    EPOCH += 1
-
-    to_remove = set()
-    to_check = set()
-
-    # Need to acquire FLOWS.lock while iterating over FLOWS.
-    with FLOWS.lock:
-        for fourtuple, flow in FLOWS.items():
-            # A fourtuple might add other fourtuples to to_check if
-            # args.servicepolicy is True.
-            if fourtuple in to_check:
-                continue
-
-            # Try to acquire the lock for this flow. If unsuccessful, do not block; move
-            # on to the next flow.
-            if flow.ingress_lock.acquire(blocking=False):
-                try:
-                    if flow.incoming_packets:
-                        logging.info(
-                            (
-                                "Flow %s - packets: %d, min_rtt: %.2f us, "
-                                "longest window: %d, required span: %.2f s, "
-                                "span: %.2f s"
-                            ),
-                            flow,
-                            len(flow.incoming_packets),
-                            flow.min_rtt_us,
-                            longest_window,
-                            flow.min_rtt_us * longest_window / 1e6,
-                            (flow.incoming_packets[-1][4] - flow.incoming_packets[0][4])
-                            / 1e6,
-                        )
-                    else:
-                        logging.info("No incoming packets for flow %s", flow)
-
-                    if flow.is_ready(args.smoothing_window, longest_window):
-                        if args.servicepolicy:
-                            # Only want to add this flow if all the flows from this
-                            # sender are ready.
-                            if FLOWS.sender_okay(
-                                flow.flowkey.remote_addr,
-                                args.smoothing_window,
-                                longest_window,
-                            ):
-                                flows_to_add = FLOWS.get_flows_from_sender(
-                                    flow.flowkey.remote_addr
-                                )
-                                to_check |= flows_to_add
-                                logging.info(
-                                    (
-                                        "Sender %s is ready. "
-                                        "Submitting flows for inference: %s"
-                                    ),
-                                    utils.int_to_ip_str(flow.flowkey.remote_addr),
-                                    flows_to_add,
-                                )
-
-                        else:
-                            # Plan to run inference on this flow.
-                            logging.info(
-                                "Flow is ready, submitting for interence: %s", fourtuple
-                            )
-                            to_check.add(fourtuple)
-                    elif flow.latest_time_sec and (
-                        time.time() - flow.latest_time_sec > OLD_THRESH_SEC
-                    ):
-                        # Remove old flows that have not been selected for inference in
-                        # a while.
-                        to_remove.add(fourtuple)
-                finally:
-                    flow.ingress_lock.release()
-            else:
-                logging.warning("Could not acquire lock for flow: %s", flow)
-        # Garbage collection.
-        for fourtuple in to_remove:
-            logging.info("Removing flow: %s", utils.flow_to_str(fourtuple))
-            del FLOWS[fourtuple]
-            if fourtuple in inference_flags:
-                del inference_flags[fourtuple]
-            que.put(("remove", fourtuple))
-
-    for fourtuple in to_check:
-        flow = FLOWS[fourtuple]
-        # Try to acquire the lock for this flow. If unsuccessful, do not block. Move on
-        # to the next flow.
-        if flow.ingress_lock.acquire(blocking=False):
-            try:
-                check_flow(
-                    fourtuple, args, longest_window, que, inference_flags, epoch=EPOCH
-                )
-            finally:
-                flow.ingress_lock.release()
-        else:
-            logging.warning("Could not acquire lock for flow: %s", flow)
-
-
-def check_flow(fourtuple, args, longest_window, que, inference_flags, epoch=0):
-    """Determine whether a flow is above its target rate and how to mitigate it.
-
-    Runs inference on a flow's packets and determines the appropriate ACK
-    pacing for the flow. Updates the flow's fairness record.
-    """
-    flow = FLOWS[fourtuple]
-    with flow.ingress_lock:
-        # Record the time when we check this flow.
-        flow.latest_time_sec = time.time()
-
-        if fourtuple not in inference_flags:
-            inference_flags[fourtuple] = MANAGER.Value(typecode="i", value=0)
-        # Submit new packets for inference only if inference is not already scheduled
-        # or running for this flow.
-        if inference_flags[fourtuple].value == 0:
-            inference_flags[fourtuple].value = 1
-
-            # Calculate packets lost and loss event rate. Do this on all packets
-            # because the loss event rate is based on current RTT, not minRTT, so
-            # just the packets we send to inference will not be enough. Note that
-            # the loss event rate results are just for the last packet.
-            (
-                packets_lost,
-                win_to_loss_event_rate,
-            ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
-            logging.info("win_to_loss_event_rate: %s", win_to_loss_event_rate)
-
-            # Discard all but the minimum number of packets required to calculate
-            # the longest window's features, and the number of packets required
-            # for the smoothing window.
-            end_time_us = flow.incoming_packets[-args.smoothing_window][4]
-            for idx in range(1, len(flow.incoming_packets) - args.smoothing_window):
-                if (
-                    end_time_us - flow.incoming_packets[idx][4]
-                    < flow.min_rtt_us * longest_window
-                ):
-                    break
-            flow.incoming_packets = flow.incoming_packets[idx - 1 :]
-            packets_lost = packets_lost[idx - 1 :]
-
-            logging.info(
-                "Scheduling inference on most recent %d packets for flow: %s",
-                len(flow.incoming_packets),
-                flow,
-            )
-            if args.disable_inference:
-                inference_flags[fourtuple].value = 0
-            else:
-                try:
-                    info = (
-                        fourtuple,
-                        flow.incoming_packets,
-                        packets_lost,
-                        flow.start_time_us,
-                        flow.min_rtt_us,
-                        win_to_loss_event_rate,
-                    )
-                    if args.servicepolicy:
-                        que.put(
-                            (
-                                # inference-servicepolicy-<epoch>-<sender IP>-<num flows to expect>
-                                f"inference-servicepolicy-{epoch}-{flow.flowkey.remote_addr}-{len(FLOWS.get_flows_from_sender(flow.flowkey.remote_addr))}",
-                                *info,
-                            ),
-                            block=False,
-                        )
-                    else:
-                        que.put(
-                            ("inference", *info),
-                            block=False,
-                        )
-                except queue.Full:
-                    logging.warning("Warning: Inference queue full!")
-
-                flow.incoming_packets = []
-        else:
-            logging.info(
-                "Skipping inference because flow is already being processed: %s", flow
-            )
-
-
-def pcapy_sniff(args, done):
-    """Use pcapy to sniff packets from a specific interface."""
-    # Set the snapshot length to the maximum size of the Ethernet, IPv4, and TCP
-    # headers. Do not put the interface into promiscuous mode. Set the timeout to
-    # 1000 ms, which actually allows batching up to 1000 ms
-    # of packets from the kernel.
-    pcap = pcapy.open_live(args.interface, 14 + 60 + 60, 0, 1000)
-
-    def pcapy_cleanup():
-        """Close the pcapy reader."""
-        logging.info("Stopping pcapy sniffing...")
-        pcap.close()
-
-    atexit.register(pcapy_cleanup)
-
-    # Drop non-IPv4/TCP packets.
-    filt = "ip and tcp and not port 22"
-    # Drop packets that we do not care about.
-    if args.skip_localhost:
-        filt += f" and not host {utils.int_to_ip_str(LOCALHOST)}"
-    if args.listen_ports:
-        port_filt_l = [
-            f"(dst host {utils.int_to_ip_str(MY_IP)} and dst port {port}) or "
-            f"(src host {utils.int_to_ip_str(MY_IP)} and src port {port})"
-            for port in args.listen_ports
-        ]
-        filt += f" and ({' or '.join(port_filt_l)})"
-    logging.info("Using tcpdump filter: %s", filt)
-    pcap.setfilter(filt)
-
-    logging.info("Running...press Control-C to end")
-    print("Running...press Control-C to end")
-    last_time_s = time.time()
-    last_exit_check_s = time.time()
-    num_packets = 0
-    num_bytes = 0
-    last_num_packets = 0
-    last_total_bytes = 0
-    i = 0
-    while True:  # not done.is_set():
-        now_s = time.time()
-
-        # Only check done once every 10000 packets or 1 second.
-        if i % 10000 == 0 or now_s - last_exit_check_s > 1:
-            if done.is_set():
-                break
-            last_exit_check_s = time.time()
-
-        # Note that this is a blocking call. If we do not receive a packet, then this
-        # will never return and we will never check the above exit conditions.
-        new_packets, new_bytes = receive_packet_pcapy(*pcap.next())
-
-        num_packets += new_packets
-        num_bytes += new_bytes
-        delta_time_s = now_s - last_time_s
-        if delta_time_s >= 10:
-            delta_num_packets = num_packets - last_num_packets
-            delta_total_bytes = num_bytes - last_total_bytes
-            logging.info(
-                "Ingress performance --- %.2f pps, " "%.2f Mbps",
-                delta_num_packets / delta_time_s,
-                8 * delta_total_bytes / delta_time_s / 1e6,
-            )
-            last_time_s = now_s
-            last_num_packets = num_packets
-            last_total_bytes = num_bytes
-
-        i += 1
-
-
-def parse_args():
-    """Parse arguments."""
-    parser = ArgumentParser(description="Constrain flows above their target rate.")
-    parser.add_argument(
-        "-p",
-        "--poll-interval-ms",
-        help="Packet poll interval (sleep time; ms).",
-        required=False,
-        type=float,
-    )
-    parser.add_argument(
-        "-i",
-        "--inference-interval-ms",
-        help="Hard interval to enforce between checking flows (start to start; ms).",
-        required=False,
-        type=float,
-    )
-    parser.add_argument(
-        "-d", "--debug", action="store_true", help="Print debugging info"
-    )
-    parser.add_argument(
-        "--interface",
-        help='The network interface to attach to (e.g., "eno1").',
-        required=True,
-        type=str,
-    )
-    parser.add_argument(
-        "-s",
-        "--disable-inference",
-        action="store_true",
-        help="Disable periodic inference.",
-    )
-    parser.add_argument(
-        "-f", "--model-file", help="The trained model to use.", required=False, type=str
-    )
-    parser.add_argument(
-        "--reaction-strategy",
-        choices=reaction_strategy.choices(),
-        default=reaction_strategy.to_str(ReactionStrategy.MIMD),
-        help="The reaction/feedback strategy to use.",
-        required=False,
-        type=str,
-    )
-    parser.add_argument(
-        "--schedule",
-        help=(
-            f"A CSV file specifying a pacing schedule to use with the "
-            f'"{reaction_strategy.to_str(ReactionStrategy.FILE)}" reaction strategy. '
-            "Each line should be of the form: <start time (seconds)>,<RWND>. "
-            "*Note* Allow at least 10 seconds for warmup."
-        ),
-        required=False,
-        type=str,
-    )
-    parser.add_argument(
-        "--mitigation-strategy",
-        choices=mitigation_strategy.choices(),
-        default=mitigation_strategy.to_str(MitigationStrategy.RWND_TUNING),
-        help="The mitigation strategy to use.",
-        required=False,
-        type=str,
-    )
-    parser.add_argument(
-        "--cgroup",
-        help=(
-            "The cgroup that will contain processes to monitor. "
-            "Practically speaking, this is the path to a directory. "
-            "BCC and eBPF must know this to monitor/set TCP header options, "
-            "(in particular, the TCP window scale)."
-        ),
-        required=True,
-        type=str,
-    )
-    parser.add_argument(
-        "--skip-localhost", action="store_true", help="Skip packets to/from localhost."
-    )
-    parser.add_argument(
-        "--log", help="The main log file to write to.", required=True, type=str
-    )
-    parser.add_argument(
-        "--batch-size",
-        default=10,
-        help="The number of flows to run inference on in parallel.",
-        required=False,
-        type=int,
-    )
-    parser.add_argument(
-        "--listen-ports",
-        nargs="+",
-        default=[],
-        help="List of ports to which inference will be limited",
-        required=False,
-        type=int,
-    )
-    parser.add_argument(
-        "--smoothing-window",
-        default=1,
-        help="Run inference on this many packets from each flow, and smooth the results.",
-        required=False,
-        type=int,
-    )
-    parser.add_argument(
-        "--servicepolicy",
-        action="store_true",
-        help=(
-            "Combine all flows from one sender and enforce fairness between "
-            "senders, regardless of how many flows they use."
-        ),
-    )
-    args = parser.parse_args()
-    args.reaction_strategy = reaction_strategy.to_strat(args.reaction_strategy)
-    args.mitigation_strategy = mitigation_strategy.to_strat(args.mitigation_strategy)
-
-    assert (
-        args.reaction_strategy != ReactionStrategy.FILE or args.schedule is not None
-    ), "Must specify schedule file."
-    if args.schedule is not None:
-        assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
-        args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
-    assert (
-        args.batch_size > 0
-    ), f'"--batch-size" must be greater than 0, but is: {args.batch_size}'
-    assert (
-        args.smoothing_window >= 1
-    ), f"Smoothing window must be >= 1, but is: {args.smoothing_window}"
-
-    assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
-    assert (
-        args.servicepolicy or args.model_file is not None
-    ), "Specify one of '--model-file' or '--servicepolicy'. "
-    return args
-
-
-def run(args):
-    """Core logic."""
-    # Need to load the model to check the input features to see the longest window.
-    in_spc = (
-        models.MathisFairness()
-        if args.servicepolicy
-        else models.load_model(args.model_file)
-    ).in_spc
-
-    longest_window = max(
-        features.parse_win_metric(fet)[1]
-        for fet in in_spc
-        if "windowed" in fet and "minRtt" in fet
-    )
-    logging.info("Longest minRTT window: %d", longest_window)
-
-    # Fill in feature dependencies.
-    all_features = list(
-        zip(
-            *list(
-                set(features.PARSE_PACKETS_FETS)
-                | set(
-                    features.feature_names_to_dtype(features.fill_dependencies(in_spc))
-                )
-            )
-        )
-    )[0]
-
-    global LOSS_EVENT_INTERVALS
-    LOSS_EVENT_INTERVALS = list(
-        {
-            features.parse_win_metric(fet)[1]
-            for fet in all_features
-            if "windowed" in fet
-            and (
-                fet.startswith(features.LOSS_EVENT_RATE_FET)
-                or fet.startswith(features.SQRT_LOSS_EVENT_RATE_FET)
-                or fet.startswith(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET)
-            )
-        }
-    )
-    logging.info("Loss event intervals: %s", LOSS_EVENT_INTERVALS)
-
-    # Create sychronized data structures.
-    que = MANAGER.Queue()
-    inference_flags = MANAGER.dict()
-    # Flag to trigger threads/processes to terminate.
-    done = MANAGER.Event()
-    done.clear()
-
-    # Create the thread that will monitor flows and decide when to run inference.
-    check_thread = threading.Thread(
-        target=check_loop,
-        args=(args, longest_window, que, inference_flags, done),
-    )
-    check_thread.start()
-
-    original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
-    # Create the process that will run inference.
-    inference_proc = multiprocessing.Process(
-        target=inference.run, args=(args, que, inference_flags, done)
-    )
-    inference_proc.start()
-    signal.signal(signal.SIGINT, original_sigint_handler)
-
-    # Look up my IP address to use when filtering packets.
-    global MY_IP
-    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
-
-    def signal_handler(sig, frame):
-        logging.info("Main process: You pressed Ctrl+C!")
-        done.set()
-        # raise Exception()
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # The current thread will sniff packets.
-    try:
-        pcapy_sniff(args, done)
-    except KeyboardInterrupt:
-        logging.info("Cancelled.")
-        done.set()
-
-    check_thread.join()
-    inference_proc.join()
-
-
-def _main():
-    args = parse_args()
-    logging.basicConfig(
-        filename=args.log,
-        filemode="w",
-        format="%(asctime)s %(levelname)s \t| %(message)s",
-        level=logging.DEBUG,
-    )
-    with multiprocessing.Manager() as manager:
-        global MANAGER
-        MANAGER = manager
-        try:
-            return run(args)
-        except:
-            logging.exception("Unknown error in main process!")
-            raise
 
 
 if __name__ == "__main__":

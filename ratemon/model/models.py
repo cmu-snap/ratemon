@@ -1034,7 +1034,7 @@ class LrSklearnWrapper(SvmSklearnWrapper):
                 n_jobs=-1,
             )
         else:
-            raise Exception(f"Unknown RFE type: {rfe_type}")
+            raise RuntimeError(f"Unknown RFE type: {rfe_type}")
         return final_net
 
     def new(self, **kwargs):
@@ -1343,8 +1343,30 @@ class MathisFairness:
         assert dat_in.shape[1] == len(MathisFairness.in_spc)
         return [
             defaults.Class.ratio_to_class(utils.safe_div(tput_bps, mathis_tput_bps_ler))
+            # Note order from in_spc, above.
             for _, _, _, mathis_tput_bps_ler, _, tput_bps in dat_in
         ]
+
+class ServicePolicyModel:
+    """Similar to MathisFairness, but does not support prediction.
+
+    Used to maintain API compatibility and store in_spc.
+    """
+
+    win_size = 8
+
+    in_spc = (
+        features.make_win_metric(features.RTT_FET, win_size),
+        features.make_win_metric(features.LOSS_EVENT_RATE_FET, win_size),
+        features.make_win_metric(features.LOSS_RATE_FET, win_size),
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_EVENT_RATE_FET, win_size),
+        features.make_win_metric(features.MATHIS_TPUT_LOSS_RATE_FET, win_size),
+        features.make_win_metric(features.TPUT_FET, win_size),
+    )
+
+    def predict(self, dat_in):
+        """Predicts the fairness of a flow."""
+        raise NotImplementedError("ServicePolicyModel does not support prediction.")
 
 
 #################################################################
