@@ -61,7 +61,7 @@ def react_down(strategy, current):
     return new
 
 
-def parse_pacing_schedule(flp):
+def parse_static_rwnd_schedule(flp):
     """Parse a pacing schedule file into a list.
 
     The file must be a CSV file where each line is of the form:
@@ -92,7 +92,7 @@ def parse_pacing_schedule(flp):
     return sorted(schedule, key=lambda p: p[0])
 
 
-def get_scheduled_pacing(schedule):
+def get_static_rwnd(schedule):
     """Extract the scheduled RWND value for the current time.
 
     The schedule is a list as described in parse_pacing_schedule().

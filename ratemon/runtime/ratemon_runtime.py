@@ -17,7 +17,7 @@ import typing
 import netifaces as ni
 import pcapy
 
-from ratemon.model import features, models, utils
+from ratemon.model import features, utils
 from ratemon.runtime import (
     flow_utils,
     mitigation_strategy,
@@ -141,6 +141,7 @@ def parse_args():
         choices=policies.choices(),
         help="Different types of receiver policy, depending on workload.",
         required=True,
+        type=str,
     )
     parser.add_argument(
         "--schedule",
@@ -178,7 +179,7 @@ def parse_args():
     ), "Must specify schedule file."
     if args.schedule is not None:
         assert path.isfile(args.schedule), f"File does not exist: {args.schedule}"
-        args.schedule = reaction_strategy.parse_pacing_schedule(args.schedule)
+        args.schedule = reaction_strategy.parse_static_rwnd_schedule(args.schedule)
     assert (
         args.batch_size > 0
     ), f'"--batch-size" must be greater than 0, but is: {args.batch_size}'
@@ -188,8 +189,8 @@ def parse_args():
 
     assert path.isdir(args.cgroup), f'"--cgroup={args.cgroup}" is not a directory.'
     assert (
-        args.policy == Policy.FLOWPOLICY
-    ) and args.model_file is not None, (
+        args.policy != Policy.FLOWPOLICY
+    ) or args.model_file is not None, (
         f"{policies.to_str(Policy.FLOWPOLICY)} requires '--model-file'. "
     )
 
@@ -199,16 +200,14 @@ def parse_args():
 def run(args):
     """Core logic."""
     # Need to load the model to check the input features to see the longest window.
-    in_spc = (
-        models.ServicePolicyModel()
-        if args.policy == Policy.SERVICEPOLICY
-        else models.load_model(args.model_file)
-    ).in_spc
-
+    in_spc = policies.get_model_for_policy(args.policy, args.model_file).in_spc
     longest_window = max(
-        features.parse_win_metric(fet)[1]
-        for fet in in_spc
-        if "windowed" in fet and "minRtt" in fet
+        (
+            features.parse_win_metric(fet)[1]
+            for fet in in_spc
+            if "windowed" in fet and "minRtt" in fet
+        ),
+        default=0,
     )
     logging.info("Longest minRTT window: %d", longest_window)
 
@@ -254,34 +253,36 @@ def run(args):
     )
     check_thread.start()
 
-    original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
     # Create the process that will run the policy engine.
     policy_proc = multiprocessing.Process(
         target=policy_engine.run, args=(args, que, flags, done)
     )
     policy_proc.start()
-    signal.signal(signal.SIGINT, original_sigint_handler)
+    # signal.signal(signal.SIGINT, original_sigint_handler)
 
-    # Look up my IP address to use when filtering packets.
-    global MY_IP
-    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
+    # Create the thread that will sniff packets from the network interface.
+    sniff_thread = threading.Thread(target=pcapy_sniff_main, args=(args, done))
+    sniff_thread.start()
+
+    logging.info("Running...press Control-C to end")
+    print("Running...press Control-C to end")
 
     def signal_handler(sig, frame):
         logging.info("Main process: You pressed Ctrl+C!")
         done.set()
+        print(
+            "RateMon stopping. If RateMon does not stop, then it is likely blocked "
+            "waiting to receive a packet. Send a packet to unblock RateMon, "
+            "or send SIGKILL."
+        )
         # raise RuntimeError()
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    # The current thread will sniff packets.
-    try:
-        pcapy_sniff(args, done)
-    except KeyboardInterrupt:
-        logging.info("Cancelled.")
-        done.set()
-
     check_thread.join()
     policy_proc.join()
+    sniff_thread.join()
     return 0
 
 
@@ -430,28 +431,32 @@ def check_flow(fourtuple, args, longest_window, que, flags, epoch=0):
         if flags[fourtuple].value == 0:
             flags[fourtuple].value = 1
 
-            # Calculate packets lost and loss event rate. Do this on all packets
-            # because the loss event rate is based on current RTT, not minRTT, so
-            # just the packets we send to the policy engine will not be enough. Note
-            # that the loss event rate results are just for the last packet.
-            (
-                packets_lost,
-                win_to_loss_event_rate,
-            ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
-            logging.info("win_to_loss_event_rate: %s", win_to_loss_event_rate)
+            if flow.loss_tracker is not None:
+                # Calculate packets lost and loss event rate. Do this on all packets
+                # because the loss event rate is based on current RTT, not minRTT, so
+                # just the packets we send to the policy engine will not be enough. Note
+                # that the loss event rate results are just for the last packet.
+                (
+                    packets_lost,
+                    win_to_loss_event_rate,
+                ) = flow.loss_tracker.loss_event_rate(flow.incoming_packets)
+                logging.info("win_to_loss_event_rate: %s", win_to_loss_event_rate)
 
-            # Discard all but the minimum number of packets required to calculate
-            # the longest window's features, and the number of packets required
-            # for the smoothing window.
-            end_time_us = flow.incoming_packets[-args.smoothing_window][4]
-            for idx in range(1, len(flow.incoming_packets) - args.smoothing_window):
-                if (
-                    end_time_us - flow.incoming_packets[idx][4]
-                    < flow.min_rtt_us * longest_window
-                ):
-                    break
-            flow.incoming_packets = flow.incoming_packets[idx - 1 :]
-            packets_lost = packets_lost[idx - 1 :]
+                # Discard all but the minimum number of packets required to calculate
+                # the longest window's features, and the number of packets required
+                # for the smoothing window.
+                end_time_us = flow.incoming_packets[-args.smoothing_window][4]
+                for idx in range(1, len(flow.incoming_packets) - args.smoothing_window):
+                    if (
+                        end_time_us - flow.incoming_packets[idx][4]
+                        < flow.min_rtt_us * longest_window
+                    ):
+                        break
+                flow.incoming_packets = flow.incoming_packets[idx - 1 :]
+                packets_lost = packets_lost[idx - 1 :]
+            else:
+                packets_lost = 0
+                win_to_loss_event_rate = {}
 
             logging.info(
                 "Sending to policy engine the most recent %d packets for flow: %s",
@@ -494,6 +499,20 @@ def check_flow(fourtuple, args, longest_window, que, flags, epoch=0):
             )
 
 
+def pcapy_sniff_main(args, done):
+    # The current thread will sniff packets.
+
+    # Look up my IP address to use when filtering packets.
+    global MY_IP
+    MY_IP = utils.ip_str_to_int(ni.ifaddresses(args.interface)[ni.AF_INET][0]["addr"])
+
+    try:
+        pcapy_sniff(args, done)
+    except KeyboardInterrupt:
+        logging.info("Cancelled.")
+        done.set()
+
+
 def pcapy_sniff(args, done):
     """Use pcapy to sniff packets from a specific interface."""
     # Set the snapshot length to the maximum size of the Ethernet, IPv4, and TCP
@@ -524,8 +543,6 @@ def pcapy_sniff(args, done):
     logging.info("Using tcpdump filter: %s", filt)
     pcap.setfilter(filt)
 
-    logging.info("Running...press Control-C to end")
-    print("Running...press Control-C to end")
     last_time_s = time.time()
     last_exit_check_s = time.time()
     num_packets = 0

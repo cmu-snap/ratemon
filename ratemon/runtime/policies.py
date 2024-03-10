@@ -3,7 +3,7 @@
 from enum import IntEnum
 import logging
 
-from ratemon.model import features, utils, defaults
+from ratemon.model import defaults, models, features, utils
 from ratemon.runtime import reaction_strategy
 
 
@@ -53,6 +53,23 @@ def to_policy(string):
 def choices():
     """Get the string representations of this enum's choices."""
     return [to_str(policy) for policy in POLICIES]
+
+
+def get_model_for_policy(policy, model_file):
+    if policy == Policy.NOPOLICY:
+        model = models.VoidModel()
+    elif policy == Policy.SERVICEPOLICY:
+        model = models.ServicePolicyModel()
+    elif policy == Policy.FLOWPOLICY:
+        assert model_file is not None
+        model = models.load_model(model_file)
+    elif policy == Policy.STATIC_RWND:
+        model = models.VoidModel()
+    elif policy == Policy.SCHEDULED_RWND:
+        model = models.VoidModel()
+    else:
+        raise RuntimeError(f"Unknown policy: {to_str(policy)}")
+    return model
 
 
 def make_decision(
@@ -296,5 +313,5 @@ def make_decision_staticrwnd(schedule):
     return (
         defaults.Decision.PACED,
         None,
-        reaction_strategy.get_scheduled_pacing(schedule),
+        reaction_strategy.get_static_rwnd(schedule),
     )

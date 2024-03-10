@@ -1371,6 +1371,18 @@ class ServicePolicyModel:
         raise NotImplementedError("ServicePolicyModel does not support prediction.")
 
 
+class VoidModel:
+    """An empty model. Used to maintain API compatibility."""
+
+    # win_size = 8
+
+    in_spc = ()
+
+    def predict(self, dat_in):
+        """Predicts the fairness of a flow."""
+        raise NotImplementedError("VoidModel does not support prediction.")
+
+
 #################################################################
 # Old models. Present for archival purposes only. These are not #
 # guaranteed to function.                                       #

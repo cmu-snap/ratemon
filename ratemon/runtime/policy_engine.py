@@ -48,11 +48,7 @@ def run(args, que, flags, done):
 def main_loop(args, flow_to_rwnd, que, flags, done):
     """Receive packets and run evaluate the policy on them."""
     logging.info("Loading model: %s", args.model_file)
-    net = (
-        models.ServicePolicyModel()
-        if args.policy == Policy.SERVICEPOLICY
-        else models.load_model(args.model_file)
-    )
+    net = policies.get_model_for_policy(args.policy, args.model_file)
     logging.info("Model features:\n\t%s", "\n\t".join(net.in_spc))
     flow_to_prev_features = {}
     # Maps flowkey to (decision, desired throughput, corresponding RWND)
@@ -378,8 +374,8 @@ def batch_eval(
             all_fets,
             smooth(flw_labels),
             flow_to_decisions,
-            args.schedule,
             args.reaction_strategy,
+            args.schedule,
         )
         if new_decision is not None:
             for flowkey in flowkeys:

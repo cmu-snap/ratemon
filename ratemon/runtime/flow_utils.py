@@ -84,7 +84,10 @@ class Flow:
         self.latest_time_sec = time.time()
         self.label = defaults.Class.NEAR_TARGET
         self.decision = (defaults.Decision.NOT_PACED, None)
-        self.loss_tracker = loss_event_rate.LossTracker(self, loss_event_windows)
+        if loss_event_windows:
+            self.loss_tracker = loss_event_rate.LossTracker(self, loss_event_windows)
+        else:
+            self.loss_tracker = None
 
     def __str__(self):
         """Create a string representation of this flow."""
