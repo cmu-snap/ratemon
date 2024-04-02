@@ -30,8 +30,8 @@ def main(args):
         print(f"Error: 'end' key not found in JSON file: {args.in_file}")
         return 1
 
-    bps = res["end"]["bits_per_second"]
-    rxmits = res["end"]["retransmits"]
+    bps = res["end"]["sum_sent"]["bits_per_second"]
+    rxmits = res["end"]["sum_sent"]["retransmits"]
     msg = f"Throughput: {bps / 1e9:.2f} Gbps\nRetransmits: {rxmits}"
     print(msg)
     with open(args.out_file, "w", encoding="utf-8") as fil:
