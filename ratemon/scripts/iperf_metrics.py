@@ -33,18 +33,26 @@ def main(args):
         print(f"Error: 'end' key not found in JSON file: {args.in_file}")
         return 1
 
-    bps = res["end"]["sum_sent"]["bits_per_second"]
-    rxmits = res["end"]["sum_sent"]["retransmits"]
-    cpu_total = res["end"]["cpu_utilization_percent"]["host_total"]
-    cpu_user = res["end"]["cpu_utilization_percent"]["host_user"]
-    cpu_system = res["end"]["cpu_utilization_percent"]["host_system"]
+    bps = res["end"]["sum_received"]["bits_per_second"]
+    rxmits_per_sec = res["end"]["sum_sent"]["retransmits"] / (
+        res["end"]["sum_sent"]["end"] - res["end"]["sum_sent"]["start"]
+    )
+    sender_cpu_total = res["end"]["cpu_utilization_percent"]["host_total"]
+    sender_cpu_user = res["end"]["cpu_utilization_percent"]["host_user"]
+    sender_cpu_system = res["end"]["cpu_utilization_percent"]["host_system"]
+    receiver_cpu_total = res["end"]["cpu_utilization_percent"]["remote_total"]
+    receiver_cpu_user = res["end"]["cpu_utilization_percent"]["remote_user"]
+    receiver_cpu_system = res["end"]["cpu_utilization_percent"]["remote_system"]
 
     msg = (
         f"throughput (Gbps):{bps / 1e9:.2f}\n"
-        f"retransmits (total):{rxmits}\n"
-        f"cpu total (%):{cpu_total:.2f}\n"
-        f"cpu user (%):{cpu_user:.2f}\n"
-        f"cpu system (%):{cpu_system:.2f}"
+        f"retransmits (per second):{rxmits_per_sec:.2f}\n"
+        f"sender cpu total (%):{sender_cpu_total:.2f}\n"
+        f"sender cpu user (%):{sender_cpu_user:.2f}\n"
+        f"sender cpu system (%):{sender_cpu_system:.2f}\n"
+        f"receiver cpu total (%):{receiver_cpu_total:.2f}\n"
+        f"receiver cpu user (%):{receiver_cpu_user:.2f}\n"
+        f"receiver cpu system (%):{receiver_cpu_system:.2f}"
     )
     print(msg)
     with open(args.out_file, "w", encoding="utf-8") as fil:
