@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 
-PERCENTILES = [10, 25, 50, 75, 90, 95, 99, 100]
+PERCENTILES = [10., 25., 50., 75., 90., 95., 99., 99.9, 99.99, 100.]
 
 
 def parse_args():
@@ -31,7 +31,10 @@ def main(args):
     metrics = dict(zip(PERCENTILES, np.percentile(lens, PERCENTILES)))
     metrics["avg"] = np.mean(lens)
     msg = "Percentiles:\n\t" + "\n\t".join(
-        f"{a}: {b}" for a, b in sorted(metrics.items(), key=lambda x: x[0])
+        f"{a}: {b:.2f}"
+        for a, b in sorted(
+            metrics.items(), key=(lambda x: x[0] if isinstance(x[0], float) else -1)
+        )
     )
     print(msg)
     with open(args.out_file, "w", encoding="utf-8") as fil:
