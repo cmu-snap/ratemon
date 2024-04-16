@@ -142,6 +142,4 @@ test/models
 
 # BPF build output
 ratemon/runtime/new/.output
-ratemon/runtime/new/minimal
-ratemon/runtime/new/bootstrap
 ratemon/runtime/new/ratemon_test
