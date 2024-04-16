@@ -3,7 +3,7 @@ import os
 from os import path
 import time
 
-from bcc import BPF, BPFAttachType
+from bcc import BPF, BPFAttachType, BPFProgType
 import numpy as np
 from pyroute2 import IPRoute, protocols
 from pyroute2.netlink.exceptions import NetlinkError
@@ -78,6 +78,22 @@ def configure_ebpf(args):
     # Overwrite advertised window size in outgoing packets.
     egress_fn = bpf.load_func("do_rwnd_at_egress", BPF.SCHED_ACT)
     action = dict(kind="bpf", fd=egress_fn.fd, name=egress_fn.name, action="ok")
+
+    # int prog_fd;
+
+    prod_fd = bpf.load_func("bpf_iter__task", BPFProgtype.TRACING);
+    int link_fd = bcc_iter_attach(prog_fd, NULL, 0);
+    if (link_fd < 0) {
+        std::cerr << "bcc_iter_attach failed: " << link_fd << std::endl;
+        return 1;
+    }
+
+    int iter_fd = bcc_iter_create(link_fd);
+    if (iter_fd < 0) {
+        std::cerr << "bcc_iter_create failed: " << iter_fd << std::endl;
+        close(link_fd);
+        return 1;
+    }
 
     try:
         # Add the action to a u32 match-all filter

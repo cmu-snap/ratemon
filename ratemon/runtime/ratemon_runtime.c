@@ -54,6 +54,11 @@ BPF_TABLE_PINNED("hash", struct flow_t, u32, flow_to_rwnd, 1024,
 // BPF_HASH(flow_to_win_scale, struct flow_t, u8);
 BPF_TABLE_PINNED("hash", struct flow_t, u8, flow_to_win_scale, 1024,
                  "/sys/fs/bpf/flow_to_win_scale");
+// Test map
+// BPF_TABLE_PINNED("array", u32, test_map, 1024, "/sys/fs/bpf/test_map");
+// // Array of paused sockets, for use by BPF_ITER(bpf_map).
+// BPF_TABLE_PINNED("array", struct sock, paused_socks, 1024,
+//                  "/sys/fs/bpf/paused_socks");
 
 // BPF_TABLE_PINNED(_table_type, _key_type, _leaf_type, _name, _max_entries,
 // "/sys/fs/bpf/xyz");
@@ -274,17 +279,17 @@ int read_win_scale(struct bpf_sock_ops *skops) {
   return SOCKOPS_OK;
 }
 
-struct bpf_iter__tcp {
-  __bpf_md_ptr(struct bpf_iter_meta *, meta);
-  __bpf_md_ptr(struct sock_common *, sk_common);
-  uid_t uid __aligned(8);
-};
+// struct bpf_iter__tcp {
+//   __bpf_md_ptr(struct bpf_iter_meta *, meta);
+//   __bpf_md_ptr(struct sock_common *, sk_common);
+//   uid_t uid __aligned(8);
+// };
 
-BPF_ITER(tcp) {
-  struct sock_common *sk_common = ctx->sk_common;
-  bpf_trace_printk("Iterating\n");
-  return 0;
-}
+// BPF_ITER(tcp) {
+//   struct sock_common *sk_common = ctx->sk_common;
+//   bpf_trace_printk("Iterating\n");
+//   return 0;
+// }
 
 // BPF_ITER(task)
 // {
@@ -295,5 +300,14 @@ BPF_ITER(tcp) {
 //     return 0;
 
 //   //   ... task->pid, task->tgid, task->comm, ...
+//   return 0;
+// }
+
+// BPF_ITER(bpf_map) {
+//   struct bpf_map *map = ctx->map;
+//   u32 *key = ctx->key;
+//   u32 *val = ctx->value;
+//   if (key == (void *)0 || val == (void *)0) return 0;
+//   bpf_trace_printk("Iterating %d %d\n", key, val);
 //   return 0;
 // }
