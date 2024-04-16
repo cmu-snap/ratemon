@@ -199,10 +199,11 @@ int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
   u32 r = 0;
   BPF_CORE_READ_INTO(&r, *val, rcv_nxt);
 
-  u64 ret = bpf_tcp_send_ack(*val, r);
-  if (ret != 0) {
-    bpf_printk("TCP send ack failed");
-  }
+  // This only works in struct_ops!
+  // u64 ret = bpf_tcp_send_ack(*val, r);
+  // if (ret != 0) {
+  //   bpf_printk("TCP send ack failed");
+  // }
 
   bpf_printk("test_map_3: seq_num: %u, key %u, value %u", seq_num, *key, r);
 
