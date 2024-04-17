@@ -103,11 +103,20 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
+  struct bpf_link *bpf_cubic_link = 0;
+  bpf_cubic_link = bpf_map__attach_struct_ops(skel->maps.bpf_cubic);
+  if (bpf_cubic_link == NULL) {
+    fprintf(stdout, "Failed to attach bpf_cubic\n");
+    err = -1;
+    goto cleanup;
+  }
+
   // Disable auto-attach for the test_iter_1 program, since we already attached
   // it manually above.
   bpf_program__set_autoattach(skel->progs.test_iter_1, false);
   bpf_program__set_autoattach(skel->progs.test_iter_2, false);
   bpf_program__set_autoattach(skel->progs.test_iter_3, false);
+  // bpf_program__set_autoattach(skel->progs.bpf_cubic_undo_cwnd, false);
   // Attach tracepoint handler
   err = ratemon_test_bpf__attach(skel);
   if (err) {

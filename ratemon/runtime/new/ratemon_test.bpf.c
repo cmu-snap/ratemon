@@ -182,8 +182,8 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   u32 new_idx = (*idx + 1) % TEST_MAP_MAX;
   bpf_map_update_elem(&test_map_3_idx, &zero, &new_idx, BPF_ANY);
 
-  bpf_printk("TCP rcv established receiver %u -> %u %u", skc_dport, skc_num,
-             tcp_header_len);
+  // bpf_printk("TCP rcv established receiver %u -> %u %u", skc_dport, skc_num,
+  //            tcp_header_len);
   return 0;
 }
 
@@ -205,9 +205,68 @@ int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
   //   bpf_printk("TCP send ack failed");
   // }
 
-  bpf_printk("test_map_3: seq_num: %u, key %u, value %u", seq_num, *key, r);
+  // bpf_printk("test_map_3: seq_num: %u, key %u, value %u", seq_num, *key, r);
 
   BPF_SEQ_PRINTF(seq, "2");
 
   return 0;
 }
+
+// #define max(a, b) (((a) > (b)) ? (a) : (b))
+
+SEC("struct_ops/bpf_cubic_init")
+void bpf_cubic_init(struct sock *sk) { bpf_printk("bpf_cubic_init"); }
+
+SEC("struct_ops/bpf_cubic_recalc_ssthresh")
+__u32 bpf_cubic_recalc_ssthresh(struct sock *sk) {
+  bpf_printk("bpf_cubic_recalc_ssthresh");
+  return 100;
+  // if (sk == NULL) return 10;
+  // const struct tcp_sock *tp = (struct tcp_sock *)sk;
+  // u32 sc = 0;
+  // BPF_CORE_READ_INTO(&sc, tp, snd_cwnd);
+  // return sc;
+}
+
+SEC("struct_ops/bpf_cubic_cong_avoid")
+void bpf_cubic_cong_avoid(struct sock *sk, __u32 ack, __u32 acked) {
+  bpf_printk("bpf_cubic_cong_avoid");
+}
+
+SEC("struct_ops/bpf_cubic_state")
+void bpf_cubic_state(struct sock *sk, __u8 new_state) {
+  bpf_printk("bpf_cubic_state");
+}
+
+SEC("struct_ops/bpf_cubic_undo_cwnd")
+__u32 bpf_cubic_undo_cwnd(struct sock *sk) {
+  bpf_printk("bpf_cubic_undo_cwnd");
+  return 100;
+  // if (sk == NULL) return 10;
+  // const struct tcp_sock *tp = (struct tcp_sock *)sk;
+  // u32 sc = 0;
+  // BPF_CORE_READ_INTO(&sc, tp, snd_cwnd);
+  // return sc;
+}
+
+SEC("struct_ops/bpf_cubic_cwnd_event")
+void bpf_cubic_cwnd_event(struct sock *sk, enum tcp_ca_event event) {
+  bpf_printk("bpf_cubic_cwnd_event");
+}
+
+SEC("struct_ops/bpf_cubic_acked")
+void bpf_cubic_acked(struct sock *sk, const struct ack_sample *sample) {
+  bpf_printk("bpf_cubic_acked");
+}
+
+SEC(".struct_ops")
+struct tcp_congestion_ops bpf_cubic = {
+    .init = (void *)bpf_cubic_init,
+    .ssthresh = (void *)bpf_cubic_recalc_ssthresh,
+    .cong_avoid = (void *)bpf_cubic_cong_avoid,
+    .set_state = (void *)bpf_cubic_state,
+    .undo_cwnd = (void *)bpf_cubic_undo_cwnd,
+    .cwnd_event = (void *)bpf_cubic_cwnd_event,
+    .pkts_acked = (void *)bpf_cubic_acked,
+    .name = "bpf_cubic",
+};
