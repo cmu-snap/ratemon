@@ -63,6 +63,36 @@ struct {
 
 int my_pid = 0;
 
+struct flow {
+  u32 local_addr;
+  u32 remote_addr;
+  u16 local_port;
+  u16 remote_port;
+};
+
+// Need this, because for some reason vmlinux.h does not define bpf_timer.
+struct bpf_timer {
+  __u64 __opaque[2];
+};
+
+struct timer_elem {
+  struct bpf_timer timer;
+};
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 8192);
+  __type(key, struct flow);
+  __type(value, struct timer_elem);
+} timer_map SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 8192);
+  __type(key, struct flow);
+  __type(value, struct sock *);
+} flow_to_sock SEC(".maps");
+
 SEC("tp/syscalls/sys_enter_write")
 int handle_tp(void *ctx) {
   int pid = bpf_get_current_pid_tgid() >> 32;
@@ -215,10 +245,10 @@ int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
 // #define max(a, b) (((a) > (b)) ? (a) : (b))
 
 SEC("struct_ops/bpf_cubic_init")
-void bpf_cubic_init(struct sock *sk) { bpf_printk("bpf_cubic_init"); }
+void BPF_PROG(bpf_cubic_init, struct sock *sk) { bpf_printk("bpf_cubic_init"); }
 
 SEC("struct_ops/bpf_cubic_recalc_ssthresh")
-__u32 bpf_cubic_recalc_ssthresh(struct sock *sk) {
+__u32 BPF_PROG(bpf_cubic_recalc_ssthresh, struct sock *sk) {
   bpf_printk("bpf_cubic_recalc_ssthresh");
   return 100;
   // if (sk == NULL) return 10;
@@ -229,17 +259,17 @@ __u32 bpf_cubic_recalc_ssthresh(struct sock *sk) {
 }
 
 SEC("struct_ops/bpf_cubic_cong_avoid")
-void bpf_cubic_cong_avoid(struct sock *sk, __u32 ack, __u32 acked) {
+void BPF_PROG(bpf_cubic_cong_avoid, struct sock *sk, __u32 ack, __u32 acked) {
   bpf_printk("bpf_cubic_cong_avoid");
 }
 
 SEC("struct_ops/bpf_cubic_state")
-void bpf_cubic_state(struct sock *sk, __u8 new_state) {
+void BPF_PROG(bpf_cubic_state, struct sock *sk, __u8 new_state) {
   bpf_printk("bpf_cubic_state");
 }
 
 SEC("struct_ops/bpf_cubic_undo_cwnd")
-__u32 bpf_cubic_undo_cwnd(struct sock *sk) {
+__u32 BPF_PROG(bpf_cubic_undo_cwnd, struct sock *sk) {
   bpf_printk("bpf_cubic_undo_cwnd");
   return 100;
   // if (sk == NULL) return 10;
@@ -250,13 +280,180 @@ __u32 bpf_cubic_undo_cwnd(struct sock *sk) {
 }
 
 SEC("struct_ops/bpf_cubic_cwnd_event")
-void bpf_cubic_cwnd_event(struct sock *sk, enum tcp_ca_event event) {
+void BPF_PROG(bpf_cubic_cwnd_event, struct sock *sk, enum tcp_ca_event event) {
   bpf_printk("bpf_cubic_cwnd_event");
+
+  if (sk == NULL) {
+    return;
+  }
+  struct tcp_sock *tp = (struct tcp_sock *)sk;
+  if (tp == NULL) {
+    return;
+  }
+
+  u32 rcv_nxt = 0;
+  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
+
+  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
+  if (ret != 0) {
+    bpf_printk("TCP send ack failed");
+  }
 }
 
+static int timer_cb1(void *map, struct flow *key, struct bpf_timer *timer) {
+  bpf_printk("timer_cb1");
+
+  if (key == NULL) {
+    bpf_printk("timer_cb1 key is null");
+    return 0;
+  }
+
+  struct sock **skp = bpf_map_lookup_elem(&flow_to_sock, key);
+  if (skp == NULL) {
+    bpf_printk("timer_cb1 skp is null");
+    return 0;
+  }
+  struct sock *sk = *skp;
+  if (sk == NULL) {
+    bpf_printk("timer_cb1 sk is null");
+    return 0;
+  }
+  struct tcp_sock *tp = (struct tcp_sock *)sk;
+  if (tp == NULL) {
+    bpf_printk("timer_cb1 tp is null");
+    return 0;
+  }
+
+  u32 rcv_nxt = 0;
+  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
+
+  if (rcv_nxt == 0) {
+    bpf_printk("rcv_nxt is 0");
+    return 0;
+  }
+
+  //   /*
+  //  * bpf_kptr_xchg
+  //  *
+  //  * 	Exchange kptr at pointer *map_value* with *ptr*, and return the
+  //  * 	old value. *ptr* can be NULL, otherwise it must be a referenced
+  //  * 	pointer which will be released when this helper is called.
+  //  *
+  //  * Returns
+  //  * 	The old value of kptr (which can be NULL). The returned pointer
+  //  * 	if not NULL, is a reference which must be released using its
+  //  * 	corresponding release function, or moved into a BPF map before
+  //  * 	program exit.
+  //  */
+  // static void *(*bpf_kptr_xchg)(void *map_value, void *ptr) = (void *) 194;
+
+  // struct sock *sk2;
+  // struct sock *sk3 = bpf_kptr_xchg(sk, sk2);
+  // if (!sk3) {
+  //   return 0;
+  // }
+
+  // struct tcp_sock *tp3 = (struct tcp_sock *)sk3;
+  // if (tp3 == NULL) {
+  //   bpf_printk("tp3 is null");
+  //   return 0;
+  // }
+
+  // struct bpf_sock_tuple tuple = {};
+  // tuple.ipv4.saddr = bpf_htons(key->local_addr);
+  // tuple.ipv4.daddr = bpf_htons(key->remote_addr);
+  // tuple.ipv4.sport = bpf_htons(key->local_port);
+  // tuple.ipv4.dport = bpf_htons(key->remote_port);
+  // struct bpf_sock *bpf_skc = bpf_sk_lookup_tcp(sk, &tuple, sizeof(tuple.ipv4), -1, 0);
+  // if (bpf_skc == NULL) {
+  //   bpf_printk("bpf_skc is null");
+  //   return 0;
+  // }
+  // struct bpf_tcp_sock *bpf_tp = bpf_tcp_sock(bpf_skc);
+  // if (bpf_tp == NULL) {
+  //   bpf_printk("bpf_tp is null");
+  //   return 0;
+  // }
+
+  // TODO: Is there a way to get the sk other than passing
+  // it through a map? One of the BPF helpers?
+  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
+  if (ret != 0) {
+    bpf_printk("TCP send ack failed");
+  }
+
+  // bpf_map_update_elem(&flow_to_sock, key, &sk3, BPF_ANY);
+
+  bpf_printk("timer_cb1 rcv_nxt %u", rcv_nxt);
+  return 0;
+}
+
+#define CLOCK_MONOTONIC 1
+
 SEC("struct_ops/bpf_cubic_acked")
-void bpf_cubic_acked(struct sock *sk, const struct ack_sample *sample) {
-  bpf_printk("bpf_cubic_acked");
+void BPF_PROG(bpf_cubic_acked, struct sock *sk,
+              const struct ack_sample *sample) {
+  bpf_printk("bpf_cubic_acked 1");
+
+  if (sk == NULL) {
+    return;
+  }
+
+  __be32 skc_rcv_saddr = 0;
+  __be32 skc_daddr = 0;
+  __u16 skc_num = 0;
+  __be16 skc_dport = 0;
+  BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
+  BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
+  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
+  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+
+  struct bpf_timer *t;
+  struct flow timer_map_key = {};
+  timer_map_key.local_addr = bpf_ntohs(skc_rcv_saddr);
+  timer_map_key.remote_addr = bpf_ntohs(skc_daddr);
+  timer_map_key.local_port = skc_num;
+  timer_map_key.remote_port = bpf_ntohs(skc_dport);
+
+  // Put the sock in the flow_to_sock map so that we can fetch it from the timer
+  // callback.
+  struct tcp_sock *tp = (struct tcp_sock *)sk;
+  if (tp == NULL) {
+    return;
+  }
+  bpf_map_update_elem(&flow_to_sock, &timer_map_key, &sk, BPF_ANY);
+
+  bpf_printk("bpf_cubic_acked 2");
+
+  t = bpf_map_lookup_elem(&timer_map, &timer_map_key);
+  if (t == NULL) {
+    struct bpf_timer new_t = {};
+    bpf_map_update_elem(&timer_map, &timer_map_key, &new_t, BPF_ANY);
+    t = bpf_map_lookup_elem(&timer_map, &timer_map_key);
+  }
+  if (t == NULL) {
+    bpf_printk("t is still NULL");
+    return;
+  }
+
+  bpf_printk("bpf_cubic_acked 3");
+
+  bpf_timer_init(t, &timer_map, CLOCK_MONOTONIC);
+
+  bpf_printk("bpf_cubic_acked 3");
+
+  bpf_timer_set_callback(t, timer_cb1);
+  bpf_timer_start(t, 0 /* call timer_cb1 asap */, 0);
+
+  u32 rcv_nxt = 0;
+  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
+
+  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
+  if (ret != 0) {
+    bpf_printk("TCP send ack failed");
+  }
+
+  bpf_printk("bpf_cubic_acked 4");
 }
 
 SEC(".struct_ops")
