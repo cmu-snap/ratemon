@@ -13,6 +13,12 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+#define SOL_SOCKET 1
+#define SO_KEEPALIVE 9
+#define SOL_TCP 6
+#define TCP_KEEPIDLE 4
+#define TCP_INFO 11
+
 // Maps u64 time (ns) to int pid.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -151,14 +157,19 @@ int test_iter_2(struct bpf_iter__bpf_map_elem *ctx) {
   return 0;
 }
 
-// SEC("sockops")
-// int grab_sock(struct bpf_sock_ops *skops) {
-//   switch (skops->op) {
-//     case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-//       return set_hdr_cb_flags(skops);
-//   }
-//   return 1;
-// }
+SEC("sockops")
+int skops_getsockopt(struct bpf_sock_ops *skops) {
+  bpf_printk("skops_getsockops");
+  switch (skops->op) {
+    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: {
+      struct tcp_info info;
+      bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
+      bpf_printk("tcp_info snd_cwnd %u", info.tcpi_snd_cwnd);
+    }
+  }
+  return 1;
+}
 
 // SEC("kprobe/tcp_rcv_established")
 // int grab_sock(struct sock *sk) {
@@ -245,7 +256,35 @@ int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
 // #define max(a, b) (((a) > (b)) ? (a) : (b))
 
 SEC("struct_ops/bpf_cubic_init")
-void BPF_PROG(bpf_cubic_init, struct sock *sk) { bpf_printk("bpf_cubic_init"); }
+void BPF_PROG(bpf_cubic_init, struct sock *sk) {
+  bpf_printk("bpf_cubic_init");
+  if (sk == NULL) {
+    bpf_printk("sk is null");
+    return;
+  }
+
+  int optval_enable = 1;
+  if (bpf_setsockopt(sk, SOL_SOCKET, SO_KEEPALIVE, &optval_enable,
+                     sizeof(optval_enable))) {
+    bpf_printk("Failed setting SO_KEEPALIVE");
+  }
+  int optval_time = 1;
+  if (bpf_setsockopt(sk, SOL_TCP, TCP_KEEPIDLE, &optval_time,
+                     sizeof(optval_time))) {
+    bpf_printk("Failed setting TCP_KEEPIDLE");
+  }
+  bpf_printk("Configured SO_KEEPALIVE and TCP_KEEPIDLE");
+
+  struct tcp_sock *tp = (struct tcp_sock *)sk;
+  if (tp == NULL) {
+    bpf_printk("tp is null");
+    return;
+  }
+
+  u32 keepalive_time = 0;
+  BPF_CORE_READ_INTO(&keepalive_time, tp, keepalive_time);
+  bpf_printk("tp->keepalive_time %u", keepalive_time);
+}
 
 SEC("struct_ops/bpf_cubic_recalc_ssthresh")
 __u32 BPF_PROG(bpf_cubic_recalc_ssthresh, struct sock *sk) {
@@ -359,13 +398,14 @@ static int timer_cb1(void *map, struct flow *key, struct bpf_timer *timer) {
   //   return 0;
   // }
 
+  // // bpf_sk_lookup_tcp is not available in struct_ops
   // struct bpf_sock_tuple tuple = {};
   // tuple.ipv4.saddr = bpf_htons(key->local_addr);
   // tuple.ipv4.daddr = bpf_htons(key->remote_addr);
   // tuple.ipv4.sport = bpf_htons(key->local_port);
   // tuple.ipv4.dport = bpf_htons(key->remote_port);
-  // struct bpf_sock *bpf_skc = bpf_sk_lookup_tcp(sk, &tuple, sizeof(tuple.ipv4), -1, 0);
-  // if (bpf_skc == NULL) {
+  // struct bpf_sock *bpf_skc = bpf_sk_lookup_tcp(sk, &tuple,
+  // sizeof(tuple.ipv4), -1, 0); if (bpf_skc == NULL) {
   //   bpf_printk("bpf_skc is null");
   //   return 0;
   // }
@@ -375,12 +415,12 @@ static int timer_cb1(void *map, struct flow *key, struct bpf_timer *timer) {
   //   return 0;
   // }
 
-  // TODO: Is there a way to get the sk other than passing
-  // it through a map? One of the BPF helpers?
-  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
-  if (ret != 0) {
-    bpf_printk("TCP send ack failed");
-  }
+  // // TODO: Is there a way to get the sk other than passing
+  // // it through a map? One of the BPF helpers?
+  // u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
+  // if (ret != 0) {
+  //   bpf_printk("TCP send ack failed");
+  // }
 
   // bpf_map_update_elem(&flow_to_sock, key, &sk3, BPF_ANY);
 
@@ -467,3 +507,55 @@ struct tcp_congestion_ops bpf_cubic = {
     .pkts_acked = (void *)bpf_cubic_acked,
     .name = "bpf_cubic",
 };
+
+SEC("iter/bpf_map_elem")
+int test_iter_set_await(struct bpf_iter__bpf_map_elem *ctx) {
+  struct seq_file *seq = ctx->meta->seq;
+  u32 seq_num = ctx->meta->seq_num;
+
+  struct flow *key = ctx->key;
+  struct sock **val = ctx->value;
+  if (key == NULL || val == NULL) {
+    bpf_printk("key or val is null");
+    return 0;
+  }
+  struct sock *sk = *val;
+  if (sk == NULL) {
+    bpf_printk("sk is null");
+    return 0;
+  }
+
+  // // Memory access error from verifier
+  // u32 await = 1;
+  // sk->awaiting_wakeup = await;
+  // bpf_printk("Set await");
+
+  // // bpf_getsockopt not available in iter
+  // struct tcp_info info;
+  // bpf_getsockopt(sk, SOL_TCP, TCP_INFO, &info, sizeof(info));
+
+  BPF_SEQ_PRINTF(seq, "4");
+  return 0;
+}
+
+#define from_timer(var, callback_timer, timer_fieldname) \
+  container_of(callback_timer, typeof(*var), timer_fieldname)
+
+SEC("kprobe/tcp_keepalive_timer")
+int BPF_KPROBE(tcp_keepalive_timer, struct timer_list *t) {
+  bpf_printk("KROBE tcp_keepalive_timer");
+  if (t == NULL) {
+    return 0;
+  }
+  struct sock *sk = from_timer(sk, t, sk_timer);
+  if (sk == NULL) {
+    return 0;
+  }
+
+  u32 await;
+  sk->awaiting_wakeup = await;
+
+  bpf_printk("Set await");
+
+  return 0;
+}
