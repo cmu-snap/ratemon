@@ -461,12 +461,26 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  int cg_fd = -1;
-  cg_fd = test__join_cgroup("test_cg");
-  if (cg_fd < 0) {
-    fprintf(stdout, "failed to join cgroup cg_fd: %d errno: %d\n", cg_fd,
-            errno);
+  const char *cgroup_path = "/test_cg";
+  // int cg_fd = -1;
+  // if (test__join_cgroup("test_cg")) {
+  //   fprintf(stdout, "Failed to add PID to cgroup\n");
+  //   return -1;
+  // }
+  if (join_cgroup_from_top(cgroup_path) < 0) {
+    fprintf(stdout, "Failed to add PID to cgroup\n");
+    err = -1;
+    goto cleanup;
   }
+  int cg_fd = open(cgroup_path, O_RDONLY);
+  if (cg_fd <= 0) {
+    fprintf(stdout, "failed to open cgroup %s cg_fd: %d errno: %d\n",
+            cgroup_path, cg_fd, errno);
+    err = -1;
+    goto cleanup;
+  }
+  fprintf(stdout, "cgroup: %s, cg_fd: %d, pid: %d\n", cgroup_path, cg_fd,
+          getpid());
   struct bpf_link *skops_link;
   skops_link = bpf_program__attach_cgroup(skel->progs.skops_getsockopt, cg_fd);
   if (skops_link == NULL) {

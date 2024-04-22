@@ -15,9 +15,11 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 #define SOL_SOCKET 1
 #define SO_KEEPALIVE 9
+#define SOL_IP 0
 #define SOL_TCP 6
 #define TCP_KEEPIDLE 4
 #define TCP_INFO 11
+#define TCP_CONGESTION 13
 
 // Maps u64 time (ns) to int pid.
 struct {
@@ -160,12 +162,60 @@ int test_iter_2(struct bpf_iter__bpf_map_elem *ctx) {
 SEC("sockops")
 int skops_getsockopt(struct bpf_sock_ops *skops) {
   bpf_printk("skops_getsockops");
+  if (skops == NULL) return 1;
+  bpf_printk("%u skops_getsockops", skops->local_port);
+  if (!(skops->local_port == 50000 || skops->local_port == 50001)) return 1;
+
+  // struct bpf_sock *sk = skops->sk;
+  // if (sk == NULL) {
+  //   bpf_printk("sk is null");
+  //   return 1;
+  // }
+
+  char buf[16];
+  if (bpf_getsockopt(skops, SOL_TCP, TCP_CONGESTION, &buf, sizeof(buf))) {
+    bpf_printk("%u cannot get TCP_CONGESTION", skops->local_port);
+  } else {
+    bpf_printk("%u TCP_CONGESTION=%s", skops->local_port, buf);
+  }
+
+  struct tcp_info info;
+  if (bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info))) {
+    bpf_printk("%u cannot get TCP_INFO", skops->local_port);
+  } else {
+    bpf_printk("%u TCP_INFO=snd_cwnd: %u min_rtt: %u", skops->local_port,
+               info.tcpi_snd_cwnd, info.tcpi_min_rtt);
+  }
+
   switch (skops->op) {
     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
     case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: {
-      struct tcp_info info;
-      bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
-      bpf_printk("tcp_info snd_cwnd %u", info.tcpi_snd_cwnd);
+      bpf_printk("skops_getsockops set flag BPF_SOCK_OPS_RTT_CB_FLAG");
+      bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTT_CB_FLAG);
+      // struct tcp_info info;
+      // // socklen_t optlen = sizeof(info);
+
+      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
+      // if (e < 0) {
+      //   bpf_printk("Failed to lookup TCP stats");
+      // } else {
+      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
+      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
+      // }
+      break;
+    }
+    case BPF_SOCK_OPS_RTT_CB: {
+      bpf_printk("skops_getsockops in BPF_SOCK_OPS_RTT_CB");
+      // struct tcp_info info;
+      // // socklen_t optlen = sizeof(info);
+      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
+      // if (e < 0) {
+      //   bpf_printk("Failed to lookup TCP stats");
+      // } else {
+      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
+      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
+      // }
+      break;
     }
   }
   return 1;
@@ -496,6 +546,12 @@ void BPF_PROG(bpf_cubic_acked, struct sock *sk,
   bpf_printk("bpf_cubic_acked 4");
 }
 
+SEC("struct_ops/bpf_cubic_get_info")
+void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
+              union tcp_cc_info *info) {
+  bpf_printk("bpf_cubic_get_info");
+}
+
 SEC(".struct_ops")
 struct tcp_congestion_ops bpf_cubic = {
     .init = (void *)bpf_cubic_init,
@@ -505,6 +561,7 @@ struct tcp_congestion_ops bpf_cubic = {
     .undo_cwnd = (void *)bpf_cubic_undo_cwnd,
     .cwnd_event = (void *)bpf_cubic_cwnd_event,
     .pkts_acked = (void *)bpf_cubic_acked,
+    .get_info = (void *)bpf_cubic_get_info,
     .name = "bpf_cubic",
 };
 
