@@ -59,10 +59,5 @@ int main(int argc, char const* argv[]) {
     printf("Error in closing server socket\n");
     return 1;
   }
-  // close client socket
-  if (close(clientSocket) == -1) {
-    printf("Error in closing client socket\n");
-    return 1;
-  }
   return 0;
 }
