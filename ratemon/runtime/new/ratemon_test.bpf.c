@@ -609,6 +609,9 @@ int BPF_KPROBE(tcp_keepalive_timer, struct timer_list *t) {
     return 0;
   }
 
+  // TODO: Could look up socket in map and decide whether to
+  // set awaiting_wakeup
+
   u32 await;
   sk->awaiting_wakeup = await;
 
