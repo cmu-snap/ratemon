@@ -15,9 +15,14 @@ int main(int argc, char const* argv[]) {
     printf("Error in creating socket\n");
     return 1;
   }
+  if (setsockopt(servSockD, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) ==
+      -1) {
+    printf("Error in setting SO_REUSEADDR\n");
+    return 1;
+  }
 
   // string store data to send to client
-  char serMsg[255] =
+  const char serMsg[255] =
       "Message from the server to the "
       "client \'Hello Client\' ";
 
