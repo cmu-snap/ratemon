@@ -13,6 +13,8 @@
 
 std::unordered_set<int> sockfds;
 
+// For some reason, C++ function name mangling does not prevent us from
+// overriding accept().
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   printf("Intercepted call to 'accept'\n");
 
@@ -43,6 +45,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   return ret;
 }
 
+// Get around C++ function name mangling.
+extern "C" {
 int close(int sockfd) {
   printf("Intercepted call to 'close' for FD=%d\n", sockfd);
 
@@ -61,4 +65,5 @@ int close(int sockfd) {
   }
 
   return ret;
+}
 }
