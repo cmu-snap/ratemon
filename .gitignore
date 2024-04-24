@@ -144,7 +144,6 @@ test/models
 ratemon/runtime/new/.output
 ratemon/runtime/new/ratemon_test
 
-ratemon/runtime/new/client_server/*.o
-ratemon/runtime/new/client_server/*.so
+ratemon/runtime/new/client_server/.output/
 ratemon/runtime/new/client_server/client
 ratemon/runtime/new/client_server/server

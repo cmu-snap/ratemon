@@ -1,23 +1,41 @@
+OUTPUT = .output
 CC = gcc
-CFLAGS = -I. -g
+CXX = g++
+CFLAGS = -g -std=c17 -Wall -Wextra
+CXXFLAGS = -g -std=c++17 -Wall -Wextra
 DEPS = common.h
-CLIENT_OBJ = client.o
-SERVER_OBJ = server.o
+APPS = client server
+INTERPS = libinterptest libinterptest_cpp
 
-%.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
+.PHONY: all
+all: $(APPS) $(INTERPS)
 
-client: $(CLIENT_OBJ)
-	$(CC) -o $@ $^ $(CFLAGS)
+$(OUTPUT):
+	mkdir -p $(@)
 
-server: $(SERVER_OBJ)
-	$(CC) -o $@ $^ $(CFLAGS)
+$(OUTPUT)/%.o: %.c $(DEPS) | $(OUTPUT)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-libinterptest: interptest.c
-	$(CC) -shared -ldl -fPIC interptest.c -o libinterptest.so
+$(APPS): %: $(OUTPUT)/%.o | $(OUTPUT)
+	$(CC) $(CFLAGS) -o $@ $^
 
+$(OUTPUT)/%.so: %.c | $(OUTPUT)
+	$(CC) $(CFLAGS) -shared -ldl -fPIC $^ -o $@
 
-all: client server libinterptest
+$(OUTPUT)/%_cpp.so: %_cpp.cpp | $(OUTPUT)
+	$(CXX) $(CXXFLAGS) -shared -ldl -fPIC $^ -o $@
 
+$(INTERPS): %: $(OUTPUT)/%.so ;
+
+interp_server : server $(OUTPUT)/libinterptest.so
+	LD_PRELOAD=$(OUTPUT)/libinterptest.so ./server
+
+interp_server_cpp : server $(OUTPUT)/libinterptest_cpp.so
+	LD_PRELOAD=$(OUTPUT)/libinterptest_cpp.so ./server
+
+run_client: client
+	./client
+
+.PHONY: clean
 clean:
-	rm -f *.o *.so client server
+	rm -rfv $(OUTPUT) $(APPS)

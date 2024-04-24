@@ -54,6 +54,10 @@ int main(int argc, char const* argv[]) {
 
   printf("Server done sending. Exiting...\n");
 
+  if (close(clientSocket) == -1) {
+    printf("Error in closing client socket\n");
+    return 1;
+  }
   // close server listen socket
   if (close(servSockD) == -1) {
     printf("Error in closing server socket\n");
