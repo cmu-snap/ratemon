@@ -16,23 +16,21 @@
 #include <boost/unordered/concurrent_flat_set.hpp>
 #include <unordered_set>
 
-std::unordered_set<int> sockfds;
+const char *bpf_cubic = "bpf_cubic";
 
 boost::unordered::concurrent_flat_set<int> sockfds_boost;
 
+union tcp_cc_info placeholder_cc_info;
+socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
+
 inline void trigger_ack(int fd) {
-  if (fd == -1) {
-    return;
-  }
-  union tcp_cc_info cc_info;
-  socklen_t cc_info_length = (socklen_t)sizeof(cc_info);
-  if (getsockopt(fd, SOL_TCP, TCP_CC_INFO, (void *)&cc_info, &cc_info_length) ==
-      -1) {
-    printf("Error in getsockopt TCP_CC_INFO\n");
-  }
+  // Do not store the output to check for errors since there is nothing we can
+  // do.
+  getsockopt(fd, SOL_TCP, TCP_CC_INFO, (void *)&placeholder_cc_info,
+             &placeholder_cc_info_length);
 }
 
-inline void visit_fd(int fd) {
+void visit_fd(int fd) {
   printf("%d ", fd);
   trigger_ack(fd);
 }
@@ -69,41 +67,29 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   int ret = real_accept(sockfd, addr, addrlen);
   printf("accept for FD=%d got FD=%d\n", sockfd, ret);
 
-  if (ret != -1) {
-    sockfds.insert(ret);
-    sockfds_boost.insert(ret);
+  if (ret == -1) {
+    return ret;
+  }
 
-    struct tcp_info info;
-    socklen_t tcp_info_length = (socklen_t)sizeof(info);
-    if (getsockopt(ret, SOL_TCP, TCP_INFO, (void *)&info, &tcp_info_length) ==
-        0) {
-      printf("TCP_INFO rtt=%u, rto=%u\n", info.tcpi_rtt, info.tcpi_rto);
-    } else {
-      printf("Error in getsockopt TCP_INFO\n");
-    }
+  sockfds_boost.insert(ret);
 
-    const char *tcp_cong = "bpf_cubic";
-    if (setsockopt(ret, SOL_TCP, TCP_CONGESTION, tcp_cong, strlen(tcp_cong)) ==
-        0) {
-      printf("Set TCP_CONGESTION to %s\n", tcp_cong);
-    } else {
-      printf("Error in setsockopt TCP_CONGESTION\n");
-    }
+  if (setsockopt(ret, SOL_TCP, TCP_CONGESTION, bpf_cubic, strlen(bpf_cubic)) ==
+      -1) {
+    printf("Error in setsockopt TCP_CONGESTION\n");
+  }
 
-    char retrieved_tcp_cong[32];
-    socklen_t retrieved_tcp_cong_len = sizeof(retrieved_tcp_cong);
-    if (getsockopt(ret, SOL_TCP, TCP_CONGESTION, retrieved_tcp_cong,
-                   &retrieved_tcp_cong_len) == 0) {
-      printf("Retrieved TCP_CONGESTION=%s\n", retrieved_tcp_cong);
-    } else {
-      printf("Error in getsockopt TCP_CONGESTION\n");
-    }
-
-    trigger_ack(ret);
+  char retrieved_cca[32];
+  socklen_t retrieved_cca_len = sizeof(retrieved_cca);
+  if (getsockopt(ret, SOL_TCP, TCP_CONGESTION, retrieved_cca,
+                 &retrieved_cca_len) == -1) {
+    printf("Error in getsockopt TCP_CONGESTION\n");
+  }
+  if (!strcmp(retrieved_cca, bpf_cubic)) {
+    printf("Error in setting CCA to bpf_cubic! Actual CCA is: %s\n",
+           retrieved_cca);
   }
 
   sleep(5);
-
   return ret;
 }
 
@@ -121,12 +107,8 @@ int close(int sockfd) {
 
   int ret = real_close(sockfd);
   if (ret != -1) {
-    if (sockfds.find(sockfd) != sockfds.end()) {
-      sockfds.erase(sockfd);
-    }
     sockfds_boost.erase(sockfd);
   }
-
   return ret;
 }
 }
