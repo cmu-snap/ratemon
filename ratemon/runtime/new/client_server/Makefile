@@ -2,7 +2,7 @@ OUTPUT = .output
 CC = gcc
 CXX = g++
 CFLAGS = -g -std=c17 -Wall -Wextra
-CXXFLAGS = -g -std=c++17 -Wall -Wextra
+CXXFLAGS = -g -std=c++20 -Wall -Wextra
 DEPS = common.h
 APPS = client server
 INTERPS = libinterptest libinterptest_cpp
@@ -11,7 +11,7 @@ INTERPS = libinterptest libinterptest_cpp
 all: $(APPS) $(INTERPS)
 
 $(OUTPUT):
-	mkdir -p $(@)
+	mkdir -p $@
 
 $(OUTPUT)/%.o: %.c $(DEPS) | $(OUTPUT)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -32,6 +32,9 @@ interp_server : server $(OUTPUT)/libinterptest.so
 
 interp_server_cpp : server $(OUTPUT)/libinterptest_cpp.so
 	LD_PRELOAD=$(OUTPUT)/libinterptest_cpp.so ./server
+
+run_server: server
+	./server
 
 run_client: client
 	./client
