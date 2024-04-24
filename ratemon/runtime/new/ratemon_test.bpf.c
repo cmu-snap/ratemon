@@ -549,7 +549,28 @@ void BPF_PROG(bpf_cubic_acked, struct sock *sk,
 SEC("struct_ops/bpf_cubic_get_info")
 void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
               union tcp_cc_info *info) {
-  bpf_printk("bpf_cubic_get_info");
+  bpf_printk("bpf_cubic_get_info IT WORKED!!!");
+
+  // u32 r = 0;
+  // BPF_CORE_READ_INTO(&r, *val, rcv_nxt);
+
+  if (sk == NULL) {
+    bpf_printk("sk is null");
+    return;
+  }
+  struct tcp_sock *tp = (struct tcp_sock *)sk;
+  if (tp == NULL) {
+    bpf_printk("tp is null");
+    return;
+  }
+
+  // This only works in struct_ops!
+  u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
+  if (ret != 0) {
+    bpf_printk("TCP send ack failed");
+  }
+
+  bpf_printk("bpf_cubic_get_info SEND ACK!!!");
 }
 
 SEC(".struct_ops")
