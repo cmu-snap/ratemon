@@ -84,7 +84,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
                  &retrieved_cca_len) == -1) {
     printf("Error in getsockopt TCP_CONGESTION\n");
   }
-  if (!strcmp(retrieved_cca, bpf_cubic)) {
+  if (strcmp(retrieved_cca, bpf_cubic)) {
     printf("Error in setting CCA to bpf_cubic! Actual CCA is: %s\n",
            retrieved_cca);
   }
