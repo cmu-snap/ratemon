@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 // clang-format off
-// Needs to be first.
+// vmlinux.h needs to be first.
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -13,236 +13,51 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define SOL_SOCKET 1
-#define SO_KEEPALIVE 9
-#define SOL_IP 0
-#define SOL_TCP 6
-#define TCP_KEEPIDLE 4
-#define TCP_INFO 11
-#define TCP_CONGESTION 13
+// BPF SOCK_OPS program return codes.
+#define SOCKOPS_OK 1
+#define SOCKOPS_ERR 0
 
-// Maps u64 time (ns) to int pid.
+#define TC_ACT_OK 0
+
+// TCP header flags.
+#define TCPHDR_SYN 0x02
+#define TCPHDR_ACK 0x10
+#define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
+
+#define ETH_P_IP 0x0800 /* Internet Protocol packet	*/
+#define TCPOPT_WINDOW 3 /* Window scaling */
+#define AF_INET 2       /* Internet IP Protocol 	*/
+
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
+// Read RWND limit for flow, as set by userspace. Even though the advertised
+// window is only 16 bits in the TCP header, use 32 bits here because we have
+// not taken window scaling into account yet.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, TEST_MAP_MAX);
-  __type(key, u64);
-  __type(value, int);
-} test_map_1 SEC(".maps");
-
-// Array of u64 time (ns). Key is u32 index.
-struct {
-  __uint(type, BPF_MAP_TYPE_ARRAY);
-  __uint(max_entries, TEST_MAP_MAX);
-  __type(key, u32);
-  __type(value, u64);
-} test_map_2 SEC(".maps");
-
-// Single entry, which points to next free entry in test_map_2.
-struct {
-  __uint(type, BPF_MAP_TYPE_ARRAY);
-  __uint(max_entries, 1);
-  __type(key, u32);
-  __type(value, u32);
-} test_map_2_idx SEC(".maps");
-
-// Array of struct sock pointer. Key is u32 index.
-struct {
-  __uint(type, BPF_MAP_TYPE_ARRAY);
-  __uint(max_entries, TEST_MAP_MAX);
-  __type(key, u32);
-  __type(value, struct tcp_sock *);
-} test_map_3 SEC(".maps");
-
-// Array of port numbers. Key is u32 index.
-struct {
-  __uint(type, BPF_MAP_TYPE_ARRAY);
-  __uint(max_entries, TEST_MAP_MAX);
-  __type(key, u32);
-  __type(value, u16);
-} test_map_3a SEC(".maps");
-
-// Single entry, which points to next free entry in test_map_3.
-struct {
-  __uint(type, BPF_MAP_TYPE_ARRAY);
-  __uint(max_entries, 1);
-  __type(key, u32);
-  __type(value, u32);
-} test_map_3_idx SEC(".maps");
-
-int my_pid = 0;
-
-struct flow {
-  u32 local_addr;
-  u32 remote_addr;
-  u16 local_port;
-  u16 remote_port;
-};
-
-// Need this, because for some reason vmlinux.h does not define bpf_timer.
-struct bpf_timer {
-  __u64 __opaque[2];
-};
-
-struct timer_elem {
-  struct bpf_timer timer;
-};
-
-struct {
-  __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 8192);
+  __uint(max_entries, MAX_FLOWS);
   __type(key, struct flow);
-  __type(value, struct timer_elem);
-} timer_map SEC(".maps");
+  __type(value, unsigned int);
+} flow_rwnd SEC(".maps");
 
+// Learn window scaling factor for each flow.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 8192);
+  __uint(max_entries, MAX_FLOWS);
   __type(key, struct flow);
-  __type(value, struct sock *);
-} flow_to_sock SEC(".maps");
+  __type(value, unsigned char);
+} flow_win_scale SEC(".maps");
 
-SEC("tp/syscalls/sys_enter_write")
-int handle_tp(void *ctx) {
-  int pid = bpf_get_current_pid_tgid() >> 32;
-
-  if (pid != my_pid) return 0;
-
-  u64 t = bpf_ktime_get_ns();
-  bpf_map_update_elem(&test_map_1, &t, &pid, BPF_ANY);
-
-  u32 zero = 0;
-  u32 *idx = bpf_map_lookup_elem(&test_map_2_idx, &zero);
-  if (idx == NULL) {
-    bpf_printk("Lookup failed!");
-    return 0;
-  }
-
-  bpf_map_update_elem(&test_map_2, idx, &t, BPF_ANY);
-  u32 new_idx = (*idx + 1) % TEST_MAP_MAX;
-  bpf_map_update_elem(&test_map_2_idx, &zero, &new_idx, BPF_ANY);
-
-  //   bpf_printk("BPF triggered from PID %d at %lu, idx %u.", pid, t, *idx);
-  return 0;
-}
-
-SEC("iter/bpf_map_elem")
-int test_iter_1(struct bpf_iter__bpf_map_elem *ctx) {
-  struct seq_file *seq = ctx->meta->seq;
-  u32 seq_num = ctx->meta->seq_num;
-
-  u64 *key = ctx->key;
-  int *val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
-
-  //   bpf_printk("test_map_1: seq_num: %u, key %lu, value %d", seq_num, *key,
-  //              *val);
-
-  BPF_SEQ_PRINTF(seq, "1");
-
-  return 0;
-}
-
-SEC("iter/bpf_map_elem")
-int test_iter_2(struct bpf_iter__bpf_map_elem *ctx) {
-  struct seq_file *seq = ctx->meta->seq;
-  u32 seq_num = ctx->meta->seq_num;
-
-  u32 *key = ctx->key;
-  u64 *val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
-
-  //   bpf_printk("test_map_2: seq_num: %u, key %u, value %lu", seq_num, *key,
-  //              *val);
-
-  BPF_SEQ_PRINTF(seq, "2");
-
-  return 0;
-}
-
-SEC("sockops")
-int skops_getsockopt(struct bpf_sock_ops *skops) {
-  bpf_printk("skops_getsockops");
-  if (skops == NULL) return 1;
-  bpf_printk("%u skops_getsockops", skops->local_port);
-  if (!(skops->local_port == 50000 || skops->local_port == 50001)) return 1;
-
-  // struct bpf_sock *sk = skops->sk;
-  // if (sk == NULL) {
-  //   bpf_printk("sk is null");
-  //   return 1;
-  // }
-
-  char buf[16];
-  if (bpf_getsockopt(skops, SOL_TCP, TCP_CONGESTION, &buf, sizeof(buf))) {
-    bpf_printk("%u cannot get TCP_CONGESTION", skops->local_port);
-  } else {
-    bpf_printk("%u TCP_CONGESTION=%s", skops->local_port, buf);
-  }
-
-  struct tcp_info info;
-  if (bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info))) {
-    bpf_printk("%u cannot get TCP_INFO", skops->local_port);
-  } else {
-    bpf_printk("%u TCP_INFO=snd_cwnd: %u min_rtt: %u", skops->local_port,
-               info.tcpi_snd_cwnd, info.tcpi_min_rtt);
-  }
-
-  switch (skops->op) {
-    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: {
-      bpf_printk("skops_getsockops set flag BPF_SOCK_OPS_RTT_CB_FLAG");
-      bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTT_CB_FLAG);
-      // struct tcp_info info;
-      // // socklen_t optlen = sizeof(info);
-
-      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
-      // if (e < 0) {
-      //   bpf_printk("Failed to lookup TCP stats");
-      // } else {
-      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
-      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
-      // }
-      break;
-    }
-    case BPF_SOCK_OPS_RTT_CB: {
-      bpf_printk("skops_getsockops in BPF_SOCK_OPS_RTT_CB");
-      // struct tcp_info info;
-      // // socklen_t optlen = sizeof(info);
-      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
-      // if (e < 0) {
-      //   bpf_printk("Failed to lookup TCP stats");
-      // } else {
-      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
-      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
-      // }
-      break;
-    }
-  }
-  return 1;
-}
-
-// SEC("kprobe/tcp_rcv_established")
-// int grab_sock(struct sock *sk) {
-//   if (sk == NULL) {
-//     bpf_printk("TCP rcv established return 1");
-//     return 0;
-//   }
-//   bpf_printk("TCP rcv established receiver %u -> %u",
-//   sk->__sk_common.skc_dport,
-//              sk->__sk_common.skc_num);
-//   // struct tcp_sock *tp;
-//   // tp = (struct tcp_sock *)(sk);
-//   // if (tp == NULL) {
-//   //   bpf_printk("TCP rcv established return 2");
-//   //   return 0;
-//   // }
-//   return 0;
-// }
+struct tcp_opt {
+  __u8 kind;
+  __u8 len;
+  __u8 data;
+} __attribute__((packed));
 
 SEC("kprobe/tcp_rcv_established")
 int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   if (sk == NULL || skb == NULL) {
-    bpf_printk("TCP rcv established return 1");
+    bpf_printk("ERROR tcp_rcv_established sk=%u skb=%u", sk, skb);
     return 0;
   }
 
@@ -250,331 +65,96 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   __be16 skc_dport = 0;
   BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+  bpf_printk("tcp_rcv_established %u->%u", skc_dport, skc_num);
 
-  struct tcp_sock *tp;
-  tp = (struct tcp_sock *)(sk);
+  struct tcp_sock *tp = (struct tcp_sock *)(sk);
   if (tp == NULL) {
-    bpf_printk("TCP rcv established return 2");
+    bpf_printk("ERROR tcp_rcv_established tp=%u", tp);
     return 0;
   }
-
-  __u16 tcp_header_len = 0;
-  BPF_CORE_READ_INTO(&tcp_header_len, tp, tcp_header_len);
-
-  u32 zero = 0;
-  u32 *idx = bpf_map_lookup_elem(&test_map_3_idx, &zero);
-  if (idx == NULL) {
-    bpf_printk("Lookup failed!");
-    return 0;
-  }
-
-  bpf_map_update_elem(&test_map_3, idx, &tp, BPF_ANY);
-  bpf_map_update_elem(&test_map_3a, idx, &tcp_header_len, BPF_ANY);
-  u32 new_idx = (*idx + 1) % TEST_MAP_MAX;
-  bpf_map_update_elem(&test_map_3_idx, &zero, &new_idx, BPF_ANY);
-
-  // bpf_printk("TCP rcv established receiver %u -> %u %u", skc_dport, skc_num,
-  //            tcp_header_len);
   return 0;
 }
 
-SEC("iter/bpf_map_elem")
-int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
-  struct seq_file *seq = ctx->meta->seq;
-  u32 seq_num = ctx->meta->seq_num;
-
-  u32 *key = ctx->key;
-  struct tcp_sock **val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
-
-  u32 r = 0;
-  BPF_CORE_READ_INTO(&r, *val, rcv_nxt);
-
-  // This only works in struct_ops!
-  // u64 ret = bpf_tcp_send_ack(*val, r);
-  // if (ret != 0) {
-  //   bpf_printk("TCP send ack failed");
-  // }
-
-  // bpf_printk("test_map_3: seq_num: %u, key %u, value %u", seq_num, *key, r);
-
-  BPF_SEQ_PRINTF(seq, "2");
-
-  return 0;
-}
-
-// #define max(a, b) (((a) > (b)) ? (a) : (b))
+// Defined in:
+// https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cubic.c
+extern void cubictcp_init(struct sock *sk) __ksym;
+extern __u32 cubictcp_recalc_ssthresh(struct sock *sk) __ksym;
+extern void cubictcp_cong_avoid(struct sock *sk, __u32 ack, __u32 acked) __ksym;
+extern void cubictcp_state(struct sock *sk, __u8 new_state) __ksym;
+extern __u32 tcp_reno_undo_cwnd(struct sock *sk) __ksym;
+extern void cubictcp_cwnd_event(struct sock *sk,
+                                enum tcp_ca_event event) __ksym;
+extern void cubictcp_acked(struct sock *sk,
+                           const struct ack_sample *sample) __ksym;
 
 SEC("struct_ops/bpf_cubic_init")
-void BPF_PROG(bpf_cubic_init, struct sock *sk) {
-  bpf_printk("bpf_cubic_init");
-  if (sk == NULL) {
-    bpf_printk("sk is null");
-    return;
-  }
-
-  int optval_enable = 1;
-  if (bpf_setsockopt(sk, SOL_SOCKET, SO_KEEPALIVE, &optval_enable,
-                     sizeof(optval_enable))) {
-    bpf_printk("Failed setting SO_KEEPALIVE");
-  }
-  int optval_time = 1;
-  if (bpf_setsockopt(sk, SOL_TCP, TCP_KEEPIDLE, &optval_time,
-                     sizeof(optval_time))) {
-    bpf_printk("Failed setting TCP_KEEPIDLE");
-  }
-  bpf_printk("Configured SO_KEEPALIVE and TCP_KEEPIDLE");
-
-  struct tcp_sock *tp = (struct tcp_sock *)sk;
-  if (tp == NULL) {
-    bpf_printk("tp is null");
-    return;
-  }
-
-  u32 keepalive_time = 0;
-  BPF_CORE_READ_INTO(&keepalive_time, tp, keepalive_time);
-  bpf_printk("tp->keepalive_time %u", keepalive_time);
-}
+void BPF_PROG(bpf_cubic_init, struct sock *sk) { cubictcp_init(sk); }
 
 SEC("struct_ops/bpf_cubic_recalc_ssthresh")
 __u32 BPF_PROG(bpf_cubic_recalc_ssthresh, struct sock *sk) {
-  bpf_printk("bpf_cubic_recalc_ssthresh");
-  return 100;
-  // if (sk == NULL) return 10;
-  // const struct tcp_sock *tp = (struct tcp_sock *)sk;
-  // u32 sc = 0;
-  // BPF_CORE_READ_INTO(&sc, tp, snd_cwnd);
-  // return sc;
+  return cubictcp_recalc_ssthresh(sk);
 }
 
 SEC("struct_ops/bpf_cubic_cong_avoid")
 void BPF_PROG(bpf_cubic_cong_avoid, struct sock *sk, __u32 ack, __u32 acked) {
-  bpf_printk("bpf_cubic_cong_avoid");
+  cubictcp_cong_avoid(sk, ack, acked);
 }
 
 SEC("struct_ops/bpf_cubic_state")
 void BPF_PROG(bpf_cubic_state, struct sock *sk, __u8 new_state) {
-  bpf_printk("bpf_cubic_state");
+  cubictcp_state(sk, new_state);
 }
 
 SEC("struct_ops/bpf_cubic_undo_cwnd")
 __u32 BPF_PROG(bpf_cubic_undo_cwnd, struct sock *sk) {
-  bpf_printk("bpf_cubic_undo_cwnd");
-  return 100;
-  // if (sk == NULL) return 10;
-  // const struct tcp_sock *tp = (struct tcp_sock *)sk;
-  // u32 sc = 0;
-  // BPF_CORE_READ_INTO(&sc, tp, snd_cwnd);
-  // return sc;
+  return tcp_reno_undo_cwnd(sk);
 }
 
 SEC("struct_ops/bpf_cubic_cwnd_event")
 void BPF_PROG(bpf_cubic_cwnd_event, struct sock *sk, enum tcp_ca_event event) {
-  bpf_printk("bpf_cubic_cwnd_event");
-
-  if (sk == NULL) {
-    return;
-  }
-  struct tcp_sock *tp = (struct tcp_sock *)sk;
-  if (tp == NULL) {
-    return;
-  }
-
-  u32 rcv_nxt = 0;
-  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
-
-  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
-  if (ret != 0) {
-    bpf_printk("TCP send ack failed");
-  }
+  cubictcp_cwnd_event(sk, event);
 }
-
-static int timer_cb1(void *map, struct flow *key, struct bpf_timer *timer) {
-  bpf_printk("timer_cb1");
-
-  if (key == NULL) {
-    bpf_printk("timer_cb1 key is null");
-    return 0;
-  }
-
-  struct sock **skp = bpf_map_lookup_elem(&flow_to_sock, key);
-  if (skp == NULL) {
-    bpf_printk("timer_cb1 skp is null");
-    return 0;
-  }
-  struct sock *sk = *skp;
-  if (sk == NULL) {
-    bpf_printk("timer_cb1 sk is null");
-    return 0;
-  }
-  struct tcp_sock *tp = (struct tcp_sock *)sk;
-  if (tp == NULL) {
-    bpf_printk("timer_cb1 tp is null");
-    return 0;
-  }
-
-  u32 rcv_nxt = 0;
-  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
-
-  if (rcv_nxt == 0) {
-    bpf_printk("rcv_nxt is 0");
-    return 0;
-  }
-
-  //   /*
-  //  * bpf_kptr_xchg
-  //  *
-  //  * 	Exchange kptr at pointer *map_value* with *ptr*, and return the
-  //  * 	old value. *ptr* can be NULL, otherwise it must be a referenced
-  //  * 	pointer which will be released when this helper is called.
-  //  *
-  //  * Returns
-  //  * 	The old value of kptr (which can be NULL). The returned pointer
-  //  * 	if not NULL, is a reference which must be released using its
-  //  * 	corresponding release function, or moved into a BPF map before
-  //  * 	program exit.
-  //  */
-  // static void *(*bpf_kptr_xchg)(void *map_value, void *ptr) = (void *) 194;
-
-  // struct sock *sk2;
-  // struct sock *sk3 = bpf_kptr_xchg(sk, sk2);
-  // if (!sk3) {
-  //   return 0;
-  // }
-
-  // struct tcp_sock *tp3 = (struct tcp_sock *)sk3;
-  // if (tp3 == NULL) {
-  //   bpf_printk("tp3 is null");
-  //   return 0;
-  // }
-
-  // // bpf_sk_lookup_tcp is not available in struct_ops
-  // struct bpf_sock_tuple tuple = {};
-  // tuple.ipv4.saddr = bpf_htons(key->local_addr);
-  // tuple.ipv4.daddr = bpf_htons(key->remote_addr);
-  // tuple.ipv4.sport = bpf_htons(key->local_port);
-  // tuple.ipv4.dport = bpf_htons(key->remote_port);
-  // struct bpf_sock *bpf_skc = bpf_sk_lookup_tcp(sk, &tuple,
-  // sizeof(tuple.ipv4), -1, 0); if (bpf_skc == NULL) {
-  //   bpf_printk("bpf_skc is null");
-  //   return 0;
-  // }
-  // struct bpf_tcp_sock *bpf_tp = bpf_tcp_sock(bpf_skc);
-  // if (bpf_tp == NULL) {
-  //   bpf_printk("bpf_tp is null");
-  //   return 0;
-  // }
-
-  // // TODO: Is there a way to get the sk other than passing
-  // // it through a map? One of the BPF helpers?
-  // u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
-  // if (ret != 0) {
-  //   bpf_printk("TCP send ack failed");
-  // }
-
-  // bpf_map_update_elem(&flow_to_sock, key, &sk3, BPF_ANY);
-
-  bpf_printk("timer_cb1 rcv_nxt %u", rcv_nxt);
-  return 0;
-}
-
-#define CLOCK_MONOTONIC 1
 
 SEC("struct_ops/bpf_cubic_acked")
 void BPF_PROG(bpf_cubic_acked, struct sock *sk,
               const struct ack_sample *sample) {
   bpf_printk("bpf_cubic_acked 1");
-
-  if (sk == NULL) {
-    return;
-  }
-
-  __be32 skc_rcv_saddr = 0;
-  __be32 skc_daddr = 0;
-  __u16 skc_num = 0;
-  __be16 skc_dport = 0;
-  BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
-  BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
-  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-
-  struct bpf_timer *t;
-  struct flow timer_map_key = {};
-  timer_map_key.local_addr = bpf_ntohs(skc_rcv_saddr);
-  timer_map_key.remote_addr = bpf_ntohs(skc_daddr);
-  timer_map_key.local_port = skc_num;
-  timer_map_key.remote_port = bpf_ntohs(skc_dport);
-
-  // Put the sock in the flow_to_sock map so that we can fetch it from the timer
-  // callback.
-  struct tcp_sock *tp = (struct tcp_sock *)sk;
-  if (tp == NULL) {
-    return;
-  }
-  bpf_map_update_elem(&flow_to_sock, &timer_map_key, &sk, BPF_ANY);
-
-  bpf_printk("bpf_cubic_acked 2");
-
-  t = bpf_map_lookup_elem(&timer_map, &timer_map_key);
-  if (t == NULL) {
-    struct bpf_timer new_t = {};
-    bpf_map_update_elem(&timer_map, &timer_map_key, &new_t, BPF_ANY);
-    t = bpf_map_lookup_elem(&timer_map, &timer_map_key);
-  }
-  if (t == NULL) {
-    bpf_printk("t is still NULL");
-    return;
-  }
-
-  bpf_printk("bpf_cubic_acked 3");
-
-  bpf_timer_init(t, &timer_map, CLOCK_MONOTONIC);
-
-  bpf_printk("bpf_cubic_acked 3");
-
-  bpf_timer_set_callback(t, timer_cb1);
-  bpf_timer_start(t, 0 /* call timer_cb1 asap */, 0);
-
-  u32 rcv_nxt = 0;
-  BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
-
-  u64 ret = bpf_tcp_send_ack(sk, rcv_nxt);
-  if (ret != 0) {
-    bpf_printk("TCP send ack failed");
-  }
-
-  bpf_printk("bpf_cubic_acked 4");
+  cubictcp_acked(sk, sample);
 }
 
 SEC("struct_ops/bpf_cubic_get_info")
 void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
               union tcp_cc_info *info) {
-  bpf_printk("bpf_cubic_get_info IT WORKED!!!");
-
-  // u32 r = 0;
-  // BPF_CORE_READ_INTO(&r, *val, rcv_nxt);
-
   if (sk == NULL) {
-    bpf_printk("sk is null");
+    bpf_printk("ERROR bpf_cubic_get_info sk=%u", sk);
     return;
   }
   struct tcp_sock *tp = (struct tcp_sock *)sk;
   if (tp == NULL) {
-    bpf_printk("tp is null");
+    bpf_printk("ERROR bpf_cubic_get_info tp=%u", tp);
     return;
   }
+
+  __u16 skc_num = 0;
+  __be16 skc_dport = 0;
+  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
+  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+  bpf_printk("bpf_cubic_get_info %u->%u", skc_dport, skc_num);
 
   // This only works in struct_ops!
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
   if (ret != 0) {
-    bpf_printk("TCP send ack failed");
+    bpf_printk("ERROR bpf_cubic_get_info bpf_tcp_send_ack()=%u", ret);
+  } else {
+    bpf_printk("bpf_cubic_get_info SENT ACK!!!");
   }
-
-  bpf_printk("bpf_cubic_get_info SEND ACK!!!");
 }
 
 SEC(".struct_ops")
 struct tcp_congestion_ops bpf_cubic = {
+    // Cannot directly use cubictcp_*() because they are not struct_ops
+    // programs. We need the struct_ops programs above, which then immediately
+    // call cubictcp_*().
     .init = (void *)bpf_cubic_init,
     .ssthresh = (void *)bpf_cubic_recalc_ssthresh,
     .cong_avoid = (void *)bpf_cubic_cong_avoid,
@@ -582,61 +162,179 @@ struct tcp_congestion_ops bpf_cubic = {
     .undo_cwnd = (void *)bpf_cubic_undo_cwnd,
     .cwnd_event = (void *)bpf_cubic_cwnd_event,
     .pkts_acked = (void *)bpf_cubic_acked,
+    // This is the only program that actually does something new.
     .get_info = (void *)bpf_cubic_get_info,
     .name = "bpf_cubic",
 };
 
-SEC("iter/bpf_map_elem")
-int test_iter_set_await(struct bpf_iter__bpf_map_elem *ctx) {
-  struct seq_file *seq = ctx->meta->seq;
-  u32 seq_num = ctx->meta->seq_num;
-
-  struct flow *key = ctx->key;
-  struct sock **val = ctx->value;
-  if (key == NULL || val == NULL) {
-    bpf_printk("key or val is null");
-    return 0;
-  }
-  struct sock *sk = *val;
-  if (sk == NULL) {
-    bpf_printk("sk is null");
-    return 0;
+// Inspired by:
+// https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
+SEC("tc/egress")
+int do_rwnd_at_egress(struct __sk_buff *skb) {
+  if (skb == NULL) {
+    return TC_ACT_OK;
   }
 
-  // // Memory access error from verifier
-  // u32 await = 1;
-  // sk->awaiting_wakeup = await;
-  // bpf_printk("Set await");
+  void *data = (void *)(long)skb->data;
+  void *data_end = (void *)(long)skb->data_end;
+  struct ethhdr *eth = data;
+  struct iphdr *ip;
+  struct tcphdr *tcp;
 
-  // // bpf_getsockopt not available in iter
-  // struct tcp_info info;
-  // bpf_getsockopt(sk, SOL_TCP, TCP_INFO, &info, sizeof(info));
+  // Do a sanity check to make sure that the IP header does not extend past
+  // the end of the packet.
+  if ((void *)eth + sizeof(*eth) > data_end) {
+    return TC_ACT_OK;
+  }
 
-  BPF_SEQ_PRINTF(seq, "4");
-  return 0;
+  // Check that this is IP. Calculate the start of the IP header, and do a
+  // sanity check to make sure that the IP header does not extend past the
+  // end of the packet.
+  if (eth->h_proto != bpf_htons(ETH_P_IP)) {
+    return TC_ACT_OK;
+  }
+  ip = data + sizeof(*eth);
+  if ((void *)ip + sizeof(*ip) > data_end) {
+    return TC_ACT_OK;
+  }
+
+  // Similar for TCP header.
+  if (ip->protocol != IPPROTO_TCP) {
+    return TC_ACT_OK;
+  }
+  tcp = (void *)ip + sizeof(*ip);
+  if ((void *)tcp + sizeof(*tcp) > data_end) {
+    return TC_ACT_OK;
+  }
+
+  // Prepare the lookup key.
+  struct flow flow;
+  flow.local_addr = ip->saddr;
+  flow.remote_addr = ip->daddr;
+  flow.local_port = bpf_ntohs(tcp->source);
+  flow.remote_port = bpf_ntohs(tcp->dest);
+
+  // Look up the RWND value for this flow.
+  u32 *rwnd = bpf_map_lookup_elem(&flow_rwnd, &flow);
+  if (rwnd == NULL) {
+    // We do not know the RWND value to use for this flow.
+    return TC_ACT_OK;
+  }
+  if (*rwnd == 0) {
+    // The RWND is configured to be 0. That does not make sense.
+    bpf_printk("Error: Flow with local port %u, remote port %u, RWND=0D\n",
+               flow.local_port, flow.remote_port);
+    return TC_ACT_OK;
+  }
+
+  u8 *win_scale = bpf_map_lookup_elem(&flow_win_scale, &flow);
+  if (win_scale == NULL) {
+    // We do not know the window scale to use for this flow.
+    bpf_printk("Error: Flow with local port %u, remote port %u, no win scale\n",
+               flow.local_port, flow.remote_port);
+    return TC_ACT_OK;
+  }
+
+  // Apply the window scale to the configured RWND value.
+  u16 to_set = (u16)(*rwnd >> *win_scale);
+  // bpf_printk("Setting RWND for flow with local port %u to %u (win
+  // scale: %u)\n", flow.local_port, to_set, *win_scale);
+  // bpf_printk("Setting RWND to %u (win scale: %u, RWND with win scale:
+  // %u)\n", *rwnd, *win_scale, to_set);
+
+  // Set the RWND value in the TCP header. If the existing advertised window
+  // set by flow control is smaller, then use that instead so that we
+  // preserve flow control..
+  tcp->window = min(tcp->window, bpf_htons(to_set));
+  // tcp->window = bpf_htons((u16)(*rwnd >> *win_scale));
+
+  return TC_ACT_OK;
 }
 
-#define from_timer(var, callback_timer, timer_fieldname) \
-  container_of(callback_timer, typeof(*var), timer_fieldname)
+int set_hdr_cb_flags(struct bpf_sock_ops *skops) {
+  // Set the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+  // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+  if (bpf_sock_ops_cb_flags_set(skops, skops->bpf_sock_ops_cb_flags |
+                                           BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+    return SOCKOPS_ERR;
+  return SOCKOPS_OK;
+}
 
-SEC("kprobe/tcp_keepalive_timer")
-int BPF_KPROBE(tcp_keepalive_timer, struct timer_list *t) {
-  bpf_printk("KROBE tcp_keepalive_timer");
-  if (t == NULL) {
-    return 0;
+int clear_hdr_cb_flags(struct bpf_sock_ops *skops) {
+  // Clear the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
+  // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
+  if (bpf_sock_ops_cb_flags_set(skops, skops->bpf_sock_ops_cb_flags &
+                                           ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG))
+    return SOCKOPS_ERR;
+  return SOCKOPS_OK;
+}
+
+int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
+  // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB
+  // callback by reserving three bytes (the minimim) for a TCP header option.
+  // These three bytes will never actually be used, but reserving space is the
+  // only way for that callback to be triggered.
+  if (((skops->skb_tcp_flags & TCPHDR_SYN) == TCPHDR_SYN) &&
+      bpf_reserve_hdr_opt(skops, 3, 0))
+    return SOCKOPS_ERR;
+  return SOCKOPS_OK;
+}
+
+int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
+  if (skops->family != AF_INET) {
+    // This is not an IPv4 packet. We only support IPv4 packets because the
+    // struct we use as a map key stores IP addresses as 32 bits. This is purely
+    // an implementation detail.
+    bpf_printk("Warning: Not using IPv4 for flow on local port %u: family=%u\n",
+               skops->local_port, skops->family);
+    return SOCKOPS_OK;
   }
-  struct sock *sk = from_timer(sk, t, sk_timer);
-  if (sk == NULL) {
-    return 0;
+
+  // Keep in mind that the window scale is set by the local host on
+  // _outgoing_ SYN and SYNACK packets. The handle_write_hdr_opt() sockops
+  // callback is only triggered for outgoing packets, so all we need to do
+  // is filter for SYN and SYNACK.
+  if ((skops->skb_tcp_flags & TCPHDR_SYN) != TCPHDR_SYN) {
+    // This is not a SYN or SYNACK packet.
+    return SOCKOPS_OK;
   }
 
-  // TODO: Could look up socket in map and decide whether to
-  // set awaiting_wakeup
+  // This is an outgoing SYN or SYNACK packet. It should contain the window
+  // scale. Let's try to look it up.
 
-  u32 await;
-  sk->awaiting_wakeup = await;
+  struct tcp_opt win_scale_opt = {.kind = TCPOPT_WINDOW, .len = 0, .data = 0};
+  int ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
+  if (ret != 3 || win_scale_opt.len != 3 ||
+      win_scale_opt.kind != TCPOPT_WINDOW) {
+    return SOCKOPS_ERR;
+  }
 
-  bpf_printk("Set await");
+  bpf_printk("TCP window scale for flow %u -> %u = %u\n",
+             bpf_ntohl(skops->remote_port), skops->local_port,
+             win_scale_opt.data);
 
-  return 0;
+  // Record this window scale for use when setting the RWND in the egress path.
+  struct flow flow = {.local_addr = skops->local_ip4,
+                      .remote_addr = skops->remote_ip4,
+                      .local_port = (u16)skops->local_port,
+                      .remote_port = (u16)bpf_ntohl(skops->remote_port)};
+  // Use update() instead of insert() in case this port is being reused.
+  // TODO: Change to insert() once the flow cleanup code is implemented.
+  bpf_map_update_elem(&flow_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
+
+  // Clear the flag that enables the header option write callback.
+  return clear_hdr_cb_flags(skops);
+}
+
+SEC("sockops")
+int read_win_scale(struct bpf_sock_ops *skops) {
+  switch (skops->op) {
+    case BPF_SOCK_OPS_TCP_LISTEN_CB:
+      return set_hdr_cb_flags(skops);
+    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+      return handle_hdr_opt_len(skops);
+    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+      return handle_write_hdr_opt(skops);
+  }
+  return SOCKOPS_OK;
 }
