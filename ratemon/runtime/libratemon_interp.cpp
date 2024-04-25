@@ -18,6 +18,7 @@
 #include <unordered_set>
 
 #include "ratemon.h"
+#include "ratemon.skel.h"
 
 const char *bpf_cubic = "bpf_cubic";
 

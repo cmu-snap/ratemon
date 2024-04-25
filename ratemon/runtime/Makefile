@@ -23,7 +23,6 @@ ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
 CXX = g++
 CXXFLAGS = -g -std=c++20 -Wall -Wextra
-DEPS = ratemon.h
 BOOST_INCLUDE = /home/ccanel/src/boost_1_85_0/
 BOOST_LIB = /home/ccanel/src/boost_1_85_0/stage/lib
 
@@ -117,8 +116,8 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
-$(OUTPUT)/%.so: %.cpp | $(OUTPUT)
-	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(BOOST_INCLUDE) $^ -ldl -L${BOOST_LIB} -lboost_thread -o $@
+$(OUTPUT)/%.so: %.cpp $(OUTPUT)/ratemon.skel.h ratemon.h | $(OUTPUT)
+	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) -I$(BOOST_INCLUDE) $< -ldl -L${BOOST_LIB} -lboost_thread -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;
 
