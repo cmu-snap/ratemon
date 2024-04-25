@@ -140,10 +140,9 @@ test/test_cgroup/
 # Test models
 test/models
 
-# BPF build output
-ratemon/runtime/new/.output
-ratemon/runtime/new/ratemon_test
-
-ratemon/runtime/new/client_server/.output/
-ratemon/runtime/new/client_server/client
-ratemon/runtime/new/client_server/server
+# Compiler output
+ratemon/runtime/experimentation/.output
+ratemon/runtime/experimentation/ratemon_test
+ratemon/runtime/experimentation/client_server/.output/
+ratemon/runtime/experimentation/client_server/client
+ratemon/runtime/experimentation/client_server/server
