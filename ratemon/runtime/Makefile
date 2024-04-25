@@ -23,7 +23,7 @@ ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
 CXX = g++
 CXXFLAGS = -g -std=c++20 -Wall -Wextra
-DEPS = common.h
+DEPS = ratemon.h
 BOOST_INCLUDE = /home/ccanel/src/boost_1_85_0/
 BOOST_LIB = /home/ccanel/src/boost_1_85_0/stage/lib
 

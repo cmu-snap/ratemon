@@ -38,7 +38,7 @@ struct {
   __uint(max_entries, MAX_FLOWS);
   __type(key, struct flow);
   __type(value, unsigned int);
-} flow_rwnd SEC(".maps");
+} flow_to_rwnd SEC(".maps");
 
 // Learn window scaling factor for each flow.
 struct {
@@ -46,7 +46,7 @@ struct {
   __uint(max_entries, MAX_FLOWS);
   __type(key, struct flow);
   __type(value, unsigned char);
-} flow_win_scale SEC(".maps");
+} flow_to_win_scale SEC(".maps");
 
 struct tcp_opt {
   __u8 kind;
@@ -215,7 +215,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   flow.remote_port = bpf_ntohs(tcp->dest);
 
   // Look up the RWND value for this flow.
-  u32 *rwnd = bpf_map_lookup_elem(&flow_rwnd, &flow);
+  u32 *rwnd = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
   if (rwnd == NULL) {
     // We do not know the RWND value to use for this flow.
     return TC_ACT_OK;
@@ -227,7 +227,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
-  u8 *win_scale = bpf_map_lookup_elem(&flow_win_scale, &flow);
+  u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
     bpf_printk("Error: Flow with local port %u, remote port %u, no win scale\n",
@@ -320,7 +320,7 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
                       .remote_port = (u16)bpf_ntohl(skops->remote_port)};
   // Use update() instead of insert() in case this port is being reused.
   // TODO: Change to insert() once the flow cleanup code is implemented.
-  bpf_map_update_elem(&flow_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
+  bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
 
   // Clear the flag that enables the header option write callback.
   return clear_hdr_cb_flags(skops);

@@ -13,12 +13,17 @@
 #include <unistd.h>
 
 #include <boost/thread.hpp>
+#include <boost/unordered/concurrent_flat_map.hpp>
 #include <boost/unordered/concurrent_flat_set.hpp>
 #include <unordered_set>
+
+#include "ratemon.h"
 
 const char *bpf_cubic = "bpf_cubic";
 
 boost::unordered::concurrent_flat_set<int> sockfds_boost;
+
+boost::unordered::concurrent_flat_map<struct flow, int> flow_to_fd;
 
 union tcp_cc_info placeholder_cc_info;
 socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
