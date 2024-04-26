@@ -2,6 +2,8 @@
 #define _GNU_SOURCE
 #endif
 
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <dlfcn.h>
 #include <linux/inet_diag.h>
 #include <netinet/in.h>  // structure for storing address information
@@ -14,20 +16,19 @@
 
 #include <boost/thread.hpp>
 #include <boost/unordered/concurrent_flat_map.hpp>
-#include <boost/unordered/concurrent_flat_set.hpp>
+#include <utility>
+// #include <boost/unordered/concurrent_flat_set.hpp>
 #include <unordered_set>
 
 #include "ratemon.h"
 #include "ratemon.skel.h"
 
-const char *bpf_cubic = "bpf_cubic";
-
-boost::unordered::concurrent_flat_set<int> sockfds_boost;
-
-boost::unordered::concurrent_flat_map<struct flow, int> flow_to_fd;
+boost::unordered::concurrent_flat_map<int, struct flow> fd_to_flow;
 
 union tcp_cc_info placeholder_cc_info;
 socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
+
+struct ratemon_bpf *skel = NULL;
 
 inline void trigger_ack(int fd) {
   // Do not store the output to check for errors since there is nothing we can
@@ -36,9 +37,9 @@ inline void trigger_ack(int fd) {
              &placeholder_cc_info_length);
 }
 
-void visit_fd(int fd) {
-  printf("%d ", fd);
-  trigger_ack(fd);
+void visit_fd(std::pair<const int, flow> p) {
+  printf("%d ", p.first);
+  trigger_ack(p.first);
 }
 
 void thread_func() {
@@ -49,7 +50,8 @@ void thread_func() {
     printf("Thead looping...\n");
 
     printf("Visiting FDs: ");
-    sockfds_boost.visit_all(visit_fd);
+    fd_to_flow.visit_all(visit_fd);
+    // fd_to_flow.visit_all([](auto& x) {visit_fd(x);});
     printf("\n");
 
     fflush(stdout);
@@ -70,6 +72,13 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return -1;
   }
 
+  if (skel == NULL) {
+    skel = ratemon_bpf__open();
+    if (skel == NULL) {
+      printf("ERROR when opening BPF skeleton\n");
+    }
+  }
+
   int ret = real_accept(sockfd, addr, addrlen);
   printf("accept for FD=%d got FD=%d\n", sockfd, ret);
 
@@ -77,9 +86,11 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return ret;
   }
 
-  sockfds_boost.insert(ret);
+  struct flow flow = {
+      .local_addr = 0, .remote_addr = 0, .local_port = 0, .remote_port = 0};
+  fd_to_flow.emplace(ret, flow);
 
-  if (setsockopt(ret, SOL_TCP, TCP_CONGESTION, bpf_cubic, strlen(bpf_cubic)) ==
+  if (setsockopt(ret, SOL_TCP, TCP_CONGESTION, BPF_CUBIC, strlen(BPF_CUBIC)) ==
       -1) {
     printf("Error in setsockopt TCP_CONGESTION\n");
   }
@@ -90,8 +101,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
                  &retrieved_cca_len) == -1) {
     printf("Error in getsockopt TCP_CONGESTION\n");
   }
-  if (strcmp(retrieved_cca, bpf_cubic)) {
-    printf("Error in setting CCA to bpf_cubic! Actual CCA is: %s\n",
+  if (strcmp(retrieved_cca, BPF_CUBIC)) {
+    printf("Error in setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
            retrieved_cca);
   }
 
@@ -113,7 +124,7 @@ int close(int sockfd) {
 
   int ret = real_close(sockfd);
   if (ret != -1) {
-    sockfds_boost.erase(sockfd);
+    fd_to_flow.erase(sockfd);
   }
   return ret;
 }

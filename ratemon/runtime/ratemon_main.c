@@ -51,7 +51,7 @@ static int join_cgroup(const char *cgroup_path) {
 int main(int argc, char **argv) {
   struct ratemon_bpf *skel;
   struct bpf_link *bpf_cubic_link, *skops_link_win_scale;
-  int err, ret = 0;
+  int err = 0;
   const char *cgroup_path = "/test_cg";
 
   // Catch SIGINT to end the program.
@@ -71,6 +71,20 @@ int main(int argc, char **argv) {
   err = ratemon_bpf__load(skel);
   if (err) {
     printf("ERROR when loading and verifying BPF skeleton\n");
+    goto cleanup;
+  }
+
+  // Pin maps so they can be reused by libratemon_interp.
+  err = bpf_map__pin(skel->maps.flow_to_rwnd, FLOW_TO_RWND_PIN_PATH);
+  if (err) {
+    printf("ERROR when pinning map flow_to_rwnd at: %s\n",
+           FLOW_TO_RWND_PIN_PATH);
+    goto cleanup;
+  }
+  err = bpf_map__pin(skel->maps.flow_to_win_scale, FLOW_TO_WIN_SCALE_PIN_PATH);
+  if (err) {
+    printf("ERROR when pinning map flow_to_win_scale at: %s\n",
+           FLOW_TO_WIN_SCALE_PIN_PATH);
     goto cleanup;
   }
 
@@ -125,7 +139,8 @@ int main(int argc, char **argv) {
 
 cleanup:
   printf("Destroying BPF programs\n");
-  // bpf_link__detach_struct_ops(bpf_cubic_link);
+  bpf_map__unpin(skel->maps.flow_to_rwnd, NULL);
+  bpf_map__unpin(skel->maps.flow_to_win_scale, NULL);
   ratemon_bpf__destroy(skel);
   return -err;
 }

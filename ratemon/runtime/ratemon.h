@@ -5,6 +5,12 @@
 
 #define MAX_FLOWS 8192
 
+// Map pin paths.
+#define FLOW_TO_RWND_PIN_PATH "/sys/fs/bpf/flow_to_rwnd"
+#define FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
+
+#define BPF_CUBIC "bpf_cubic"
+
 // Key for use in flow-based maps.
 struct flow {
   unsigned int local_addr;

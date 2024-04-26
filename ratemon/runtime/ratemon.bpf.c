@@ -38,6 +38,7 @@ struct {
   __uint(max_entries, MAX_FLOWS);
   __type(key, struct flow);
   __type(value, unsigned int);
+  // __type(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_rwnd SEC(".maps");
 
 // Learn window scaling factor for each flow.
