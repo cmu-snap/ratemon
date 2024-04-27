@@ -84,6 +84,12 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
         printf("ERROR when reusing map fd\n");
       } else {
         flow_to_rwnd = skel->maps.flow_to_rwnd;
+        struct flow flow = {.local_addr = 1,
+                            .remote_addr = 1,
+                            .local_port = 1,
+                            .remote_port = 1};
+        unsigned int rwnd = 10000;
+        bpf_map_update_elem(pinned_map_fd, &flow, &rwnd, BPF_ANY);
         printf("Successfully reused map fd\n");
       }
     }

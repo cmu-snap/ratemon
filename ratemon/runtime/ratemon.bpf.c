@@ -142,6 +142,13 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
   bpf_printk("bpf_cubic_get_info %u->%u", skc_dport, skc_num);
 
+  struct flow flow = {.local_addr = 0,
+                      .remote_addr = 0,
+                      .local_port = skc_num,
+                      .remote_port = skc_dport};
+  unsigned int rwnd = 10000;
+  bpf_map_update_elem(&flow_to_rwnd, &flow, &rwnd, BPF_ANY);
+
   // This only works in struct_ops!
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
   if (ret != 0) {
