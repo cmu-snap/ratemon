@@ -29,6 +29,7 @@ union tcp_cc_info placeholder_cc_info;
 socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
 
 struct ratemon_bpf *skel = NULL;
+struct bpf_map *flow_to_rwnd = NULL;
 
 inline void trigger_ack(int fd) {
   // Do not store the output to check for errors since there is nothing we can
@@ -76,6 +77,31 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     skel = ratemon_bpf__open();
     if (skel == NULL) {
       printf("ERROR when opening BPF skeleton\n");
+    } else {
+      // flow_to_rwnd = skel->maps.flow_to_rwnd;
+
+      int pinned_map_fd = bpf_obj_get(FLOW_TO_RWND_PIN_PATH);
+
+      bpf_map__set_pin_path(skel->maps.flow_to_rwnd, FLOW_TO_RWND_PIN_PATH);
+
+      // struct bpf_object *obj = bpf_object__open(cfg.filename);
+      // struct bpf_map    *map = bpf_object__find_map_by_name(skel->obj,
+      // "flow_to_rwnd"); bpf_object__reuse_map(skel->maps.flow_to_rwnd);
+
+      int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
+      if (err) {
+        printf("ERROR when reusing map fd\n");
+      } else {
+        printf("Successfully reused map fd\n");
+      }
+
+      // int err = ratemon_bpf__load(skel);
+      // if (err) {
+      //   printf("ERROR when loading ratemon BPF\n");
+      // } else {
+      //   flow_to_rwnd = skel->maps.flow_to_rwnd;
+      //   printf("Successfully extracted pinned flow_to_rwnd map\n");
+      // }
     }
   }
 

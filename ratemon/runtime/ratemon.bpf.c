@@ -62,11 +62,11 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     return 0;
   }
 
-  __u16 skc_num = 0;
-  __be16 skc_dport = 0;
-  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  bpf_printk("tcp_rcv_established %u->%u", skc_dport, skc_num);
+  // __u16 skc_num = 0;
+  // __be16 skc_dport = 0;
+  // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
+  // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+  // bpf_printk("tcp_rcv_established %u->%u", skc_dport, skc_num);
 
   struct tcp_sock *tp = (struct tcp_sock *)(sk);
   if (tp == NULL) {
