@@ -143,8 +143,8 @@ test/models
 # Compiler output
 ratemon/runtime/.output
 ratemon/runtime/ratemon_main
-ratemon/runtime/experimentation/.output
-ratemon/runtime/experimentation/ratemon_test
-ratemon/runtime/experimentation/client_server/.output
-ratemon/runtime/experimentation/client_server/client
-ratemon/runtime/experimentation/client_server/server
+ratemon/runtime/experimental/.output
+ratemon/runtime/experimental/ratemon_test
+ratemon/runtime/experimental/client_server/.output
+ratemon/runtime/experimental/client_server/client
+ratemon/runtime/experimental/client_server/server
