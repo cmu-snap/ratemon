@@ -3,12 +3,15 @@
 #ifndef __RATEMON_H
 #define __RATEMON_H
 
+// Max number of flows that BPF can track.
 #define MAX_FLOWS 8192
-
+// Max number of flows that will be active at once.
+#define MAX_ACTIVE_FLOWS 20
+#define EPOCH_US 10000
 // Map pin paths.
 #define FLOW_TO_RWND_PIN_PATH "/sys/fs/bpf/flow_to_rwnd"
 #define FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
-
+// Name of struct_ops CCA that flows must use to be woken up.
 #define BPF_CUBIC "bpf_cubic"
 
 // Key for use in flow-based maps.
