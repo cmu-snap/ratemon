@@ -24,6 +24,9 @@
 #include "ratemon.h"
 #include "ratemon.skel.h"
 
+//
+bool setup = false;
+
 // BPF things.
 struct ratemon_bpf *skel = NULL;
 struct bpf_map *flow_to_rwnd = NULL;
@@ -64,19 +67,26 @@ void thread_func() {
   prev_active_fds.reserve(MAX_ACTIVE_FLOWS);
   new_active_fds.reserve(MAX_ACTIVE_FLOWS);
 
-  printf("Thread started\n");
+  printf("libratemon_interp scheduling thread started\n");
 
   while (true) {
     usleep(EPOCH_US);
     printf("Time to schedule\n");
-    fflush(stdout);
+
+    // If setup has not been performed yet, then we cannot perform scheduling.
+    if (!setup) {
+      printf("WARNING setup not completed, skipping scheduling\n");
+      continue;
+    }
 
     // If fewer than the max number of flows exist and they are all active, then
     // there is no need for scheduling.
-    if (active_fds.size() < MAX_ACTIVE_FLOWS && paused_fds.size() == 0)
+    if (active_fds.size() < MAX_ACTIVE_FLOWS && paused_fds.size() == 0) {
+      printf("WARNING insufficient flows, skipping scheduling\n");
       continue;
+    }
 
-    printf("Sufficient flows to schedule\n");
+    printf("Performing scheduling\n");
 
     // Make a copy of the currently (soon-to-be previously) active flows.
     active_fds.visit_all([&](const int &fd) { prev_active_fds.push_back(fd); });
@@ -115,68 +125,74 @@ void thread_func() {
       });
     }
 
+    // Clear temporary data structures.
     prev_active_fds.clear();
     new_active_fds.clear();
+
+    fflush(stdout);
   }
 }
 
 boost::thread t(thread_func);
 
 // For some reason, C++ function name mangling does not prevent us from
-// overriding accept().
+// overriding accept(), so we do not need 'extern "C"'.
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
-  printf("Intercepted call to 'accept'\n");
-
   static int (*real_accept)(int, struct sockaddr *, socklen_t *) =
       (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "accept");
   if (real_accept == NULL) {
-    printf("Error in dlsym when querying for 'accept': %s\n", dlerror());
+    printf("ERROR when querying dlsym for 'accept': %s\n", dlerror());
     return -1;
   }
-
-  if (skel == NULL) {
-    skel = ratemon_bpf__open();
-    if (skel == NULL) {
-      printf("ERROR when opening BPF skeleton\n");
-    } else {
-      int pinned_map_fd = bpf_obj_get(FLOW_TO_RWND_PIN_PATH);
-      int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
-      if (err) {
-        printf("ERROR when reusing map fd\n");
-      } else {
-        flow_to_rwnd = skel->maps.flow_to_rwnd;
-        flow_to_rwnd_fd = pinned_map_fd;
-        printf("Successfully reused map fd\n");
-      }
-    }
-  }
-
   int new_fd = real_accept(sockfd, addr, addrlen);
-  printf("accept for FD=%d got FD=%d\n", sockfd, new_fd);
-
   if (new_fd == -1) {
+    printf("ERROR in real 'accept'\n");
     return new_fd;
   }
 
-  struct flow flow = {
-      .local_addr = 0, .remote_addr = 0, .local_port = 0, .remote_port = 0};
-  fd_to_flow.emplace(new_fd, flow);
+  if (!setup) {
+    skel = ratemon_bpf__open();
+    if (skel == NULL) {
+      printf("ERROR when opening BPF skeleton\n");
+      return new_fd;
+    }
 
-  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, BPF_CUBIC,
-                 strlen(BPF_CUBIC)) == -1) {
-    printf("Error in setsockopt TCP_CONGESTION\n");
+    int pinned_map_fd = bpf_obj_get(FLOW_TO_RWND_PIN_PATH);
+    int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
+    if (err) {
+      printf("ERROR when reusing map FD\n");
+      return new_fd;
+    }
+
+    flow_to_rwnd = skel->maps.flow_to_rwnd;
+    flow_to_rwnd_fd = pinned_map_fd;
+    printf("Successfully reused map FD\n");
+    setup = true;
   }
 
+  // Set the CCA and make sure it was set correctly.
+  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, BPF_CUBIC,
+                 strlen(BPF_CUBIC)) == -1) {
+    printf("ERROR in setsockopt TCP_CONGESTION\n");
+    return new_fd;
+  }
   char retrieved_cca[32];
   socklen_t retrieved_cca_len = sizeof(retrieved_cca);
   if (getsockopt(new_fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
                  &retrieved_cca_len) == -1) {
-    printf("Error in getsockopt TCP_CONGESTION\n");
+    printf("ERROR in getsockopt TCP_CONGESTION\n");
+    return new_fd;
   }
   if (strcmp(retrieved_cca, BPF_CUBIC)) {
-    printf("Error in setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
+    printf("ERROR when setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
            retrieved_cca);
+    return new_fd;
   }
+
+  // Track the four-tuple, since RWND tuning is applied based on four-tuple.
+  struct flow flow = {
+      .local_addr = 0, .remote_addr = 0, .local_port = 0, .remote_port = 0};
+  fd_to_flow.insert({new_fd, flow});
 
   // Should this flow be active or paused?
   if (active_fds.size() < MAX_ACTIVE_FLOWS) {
@@ -189,33 +205,35 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     bpf_map_update_elem(flow_to_rwnd_fd, &flow, &zero, BPF_ANY);
   }
 
+  printf("Successful 'accept' for FD=%d, got FD=%d\n", sockfd, new_fd);
   return new_fd;
 }
 
 // Get around C++ function name mangling.
 extern "C" {
 int close(int sockfd) {
-  printf("Intercepted call to 'close' for FD=%d\n", sockfd);
-
   static int (*real_close)(int) = (int (*)(int))dlsym(RTLD_NEXT, "close");
   if (real_close == NULL) {
-    fprintf(stderr, "Error in dlsym when querying for 'close': %s\n",
-            dlerror());
+    fprintf(stderr, "ERROR when querying dlsym for 'close': %s\n", dlerror());
     return -1;
   }
-
   int ret = real_close(sockfd);
-  if (ret != -1) {
-    active_fds.erase(sockfd);
-    paused_fds.erase(sockfd);
-    // To get the flow struct for this FD, we must use visit() to look it up in
-    // the concurrent_flat_map. Obviously, do this before removing the FD from
-    // fd_to_flow.
-    fd_to_flow.visit(sockfd, [](const auto &p) {
-      bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
-    });
-    fd_to_flow.erase(sockfd);
+  if (ret == -1) {
+    printf("ERROR in real 'close'\n");
+    return ret;
   }
+
+  active_fds.erase(sockfd);
+  paused_fds.erase(sockfd);
+  // To get the flow struct for this FD, we must use visit() to look it up
+  // in the concurrent_flat_map. Obviously, do this before removing the FD
+  // from fd_to_flow.
+  fd_to_flow.visit(sockfd, [](const auto &p) {
+    bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+  });
+  fd_to_flow.erase(sockfd);
+
+  printf("Successful 'close' for FD=%d\n", sockfd);
   return ret;
 }
 }
