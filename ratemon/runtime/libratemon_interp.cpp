@@ -67,26 +67,26 @@ void thread_func() {
   prev_active_fds.reserve(MAX_ACTIVE_FLOWS);
   new_active_fds.reserve(MAX_ACTIVE_FLOWS);
 
-  printf("libratemon_interp scheduling thread started\n");
+  RM_PRINTF("libratemon_interp scheduling thread started\n");
 
   while (true) {
     usleep(EPOCH_US);
-    printf("Time to schedule\n");
+    RM_PRINTF("Time to schedule\n");
 
     // If setup has not been performed yet, then we cannot perform scheduling.
     if (!setup) {
-      printf("WARNING setup not completed, skipping scheduling\n");
+      RM_PRINTF("WARNING setup not completed, skipping scheduling\n");
       continue;
     }
 
     // If fewer than the max number of flows exist and they are all active, then
     // there is no need for scheduling.
     if (active_fds.size() < MAX_ACTIVE_FLOWS && paused_fds.size() == 0) {
-      printf("WARNING insufficient flows, skipping scheduling\n");
+      RM_PRINTF("WARNING insufficient flows, skipping scheduling\n");
       continue;
     }
 
-    printf("Performing scheduling\n");
+    RM_PRINTF("Performing scheduling\n");
 
     // Make a copy of the currently (soon-to-be previously) active flows.
     active_fds.visit_all([&](const int &fd) { prev_active_fds.push_back(fd); });
@@ -141,51 +141,51 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   static int (*real_accept)(int, struct sockaddr *, socklen_t *) =
       (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "accept");
   if (real_accept == NULL) {
-    printf("ERROR when querying dlsym for 'accept': %s\n", dlerror());
+    RM_PRINTF("ERROR when querying dlsym for 'accept': %s\n", dlerror());
     return -1;
   }
   int new_fd = real_accept(sockfd, addr, addrlen);
   if (new_fd == -1) {
-    printf("ERROR in real 'accept'\n");
+    RM_PRINTF("ERROR in real 'accept'\n");
     return new_fd;
   }
 
   if (!setup) {
     skel = ratemon_bpf__open();
     if (skel == NULL) {
-      printf("ERROR when opening BPF skeleton\n");
+      RM_PRINTF("ERROR when opening BPF skeleton\n");
       return new_fd;
     }
 
     int pinned_map_fd = bpf_obj_get(FLOW_TO_RWND_PIN_PATH);
     int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
     if (err) {
-      printf("ERROR when reusing map FD\n");
+      RM_PRINTF("ERROR when reusing map FD\n");
       return new_fd;
     }
 
     flow_to_rwnd = skel->maps.flow_to_rwnd;
     flow_to_rwnd_fd = pinned_map_fd;
-    printf("Successfully reused map FD\n");
+    RM_PRINTF("Successfully reused map FD\n");
     setup = true;
   }
 
   // Set the CCA and make sure it was set correctly.
   if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, BPF_CUBIC,
                  strlen(BPF_CUBIC)) == -1) {
-    printf("ERROR in setsockopt TCP_CONGESTION\n");
+    RM_PRINTF("ERROR in setsockopt TCP_CONGESTION\n");
     return new_fd;
   }
   char retrieved_cca[32];
   socklen_t retrieved_cca_len = sizeof(retrieved_cca);
   if (getsockopt(new_fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
                  &retrieved_cca_len) == -1) {
-    printf("ERROR in getsockopt TCP_CONGESTION\n");
+    RM_PRINTF("ERROR in getsockopt TCP_CONGESTION\n");
     return new_fd;
   }
   if (strcmp(retrieved_cca, BPF_CUBIC)) {
-    printf("ERROR when setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
-           retrieved_cca);
+    RM_PRINTF("ERROR when setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
+              retrieved_cca);
     return new_fd;
   }
 
@@ -205,7 +205,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     bpf_map_update_elem(flow_to_rwnd_fd, &flow, &zero, BPF_ANY);
   }
 
-  printf("Successful 'accept' for FD=%d, got FD=%d\n", sockfd, new_fd);
+  RM_PRINTF("Successful 'accept' for FD=%d, got FD=%d\n", sockfd, new_fd);
   return new_fd;
 }
 
@@ -214,12 +214,12 @@ extern "C" {
 int close(int sockfd) {
   static int (*real_close)(int) = (int (*)(int))dlsym(RTLD_NEXT, "close");
   if (real_close == NULL) {
-    fprintf(stderr, "ERROR when querying dlsym for 'close': %s\n", dlerror());
+    RM_PRINTF("ERROR when querying dlsym for 'close': %s\n", dlerror());
     return -1;
   }
   int ret = real_close(sockfd);
   if (ret == -1) {
-    printf("ERROR in real 'close'\n");
+    RM_PRINTF("ERROR in real 'close'\n");
     return ret;
   }
 
@@ -233,7 +233,7 @@ int close(int sockfd) {
   });
   fd_to_flow.erase(sockfd);
 
-  printf("Successful 'close' for FD=%d\n", sockfd);
+  RM_PRINTF("Successful 'close' for FD=%d\n", sockfd);
   return ret;
 }
 }

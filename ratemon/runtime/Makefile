@@ -121,6 +121,9 @@ $(OUTPUT)/%.so: %.cpp $(OUTPUT)/ratemon.skel.h ratemon.h | $(OUTPUT)
 
 $(INTERPS): %: $(OUTPUT)/%.so ;
 
+get_ld_paths:
+	$(Q) echo "LD_LIBRARY_PATH=$(BOOST_LIB):${LD_LIBRARY_PATH} LD_PRELOAD=$(OUTPUT)/libratemon_interp.so"
+
 # delete failed targets
 .DELETE_ON_ERROR:
 

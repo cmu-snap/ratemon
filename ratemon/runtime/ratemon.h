@@ -3,6 +3,19 @@
 #ifndef __RATEMON_H
 #define __RATEMON_H
 
+// Comment out the below line to disable verbose logging.
+// #define RM_VERBOSE
+
+#ifdef RM_VERBOSE
+#define RM_PRINTF(...) printf(__VA_ARGS__)
+// #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
+#else
+#define RM_PRINTF(...)
+// #define RM_PRINTK(...)
+#endif
+
+
+
 // Max number of flows that BPF can track.
 #define MAX_FLOWS 8192
 // Max number of flows that will be active at once.

@@ -119,7 +119,6 @@ void BPF_PROG(bpf_cubic_cwnd_event, struct sock *sk, enum tcp_ca_event event) {
 SEC("struct_ops/bpf_cubic_acked")
 void BPF_PROG(bpf_cubic_acked, struct sock *sk,
               const struct ack_sample *sample) {
-  bpf_printk("bpf_cubic_acked 1");
   cubictcp_acked(sk, sample);
 }
 
@@ -136,14 +135,19 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
     return;
   }
 
-  __u16 skc_num = 0;
-  __be16 skc_dport = 0;
+  __be32 skc_daddr;
+  __be32 skc_rcv_saddr;
+  __u16 skc_num;
+  __be16 skc_dport;
+  BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
+  BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
   BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  bpf_printk("bpf_cubic_get_info %u->%u", skc_dport, skc_num);
+  // bpf_printk("bpf_cubic_get_info addr %u->%u", skc_daddr, skc_rcv_saddr);
+  // bpf_printk("bpf_cubic_get_info port %u->%u", skc_dport, skc_num);
 
-  struct flow flow = {.local_addr = 0,
-                      .remote_addr = 0,
+  struct flow flow = {.local_addr = skc_rcv_saddr,
+                      .remote_addr = skc_daddr,
                       .local_port = skc_num,
                       .remote_port = skc_dport};
   unsigned int rwnd = 10000;
@@ -153,8 +157,6 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
   if (ret != 0) {
     bpf_printk("ERROR bpf_cubic_get_info bpf_tcp_send_ack()=%u", ret);
-  } else {
-    bpf_printk("bpf_cubic_get_info SENT ACK!!!");
   }
 }
 
@@ -216,11 +218,10 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   // Prepare the lookup key.
-  struct flow flow;
-  flow.local_addr = ip->saddr;
-  flow.remote_addr = ip->daddr;
-  flow.local_port = bpf_ntohs(tcp->source);
-  flow.remote_port = bpf_ntohs(tcp->dest);
+  struct flow flow = {.local_addr = ip->saddr,
+                      .remote_addr = ip->daddr,
+                      .local_port = bpf_ntohs(tcp->source),
+                      .remote_port = bpf_ntohs(tcp->dest)};
 
   // Look up the RWND value for this flow.
   u32 *rwnd = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
