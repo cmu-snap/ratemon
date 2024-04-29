@@ -135,23 +135,23 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
     return;
   }
 
-  __be32 skc_daddr;
-  __be32 skc_rcv_saddr;
-  __u16 skc_num;
-  __be16 skc_dport;
-  BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
-  BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
-  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+  // __be32 skc_daddr;
+  // __be32 skc_rcv_saddr;
+  // __u16 skc_num;
+  // __be16 skc_dport;
+  // BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
+  // BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
+  // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
+  // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
   // bpf_printk("bpf_cubic_get_info addr %u->%u", skc_daddr, skc_rcv_saddr);
   // bpf_printk("bpf_cubic_get_info port %u->%u", skc_dport, skc_num);
 
-  struct flow flow = {.local_addr = skc_rcv_saddr,
-                      .remote_addr = skc_daddr,
-                      .local_port = skc_num,
-                      .remote_port = skc_dport};
-  unsigned int rwnd = 10000;
-  bpf_map_update_elem(&flow_to_rwnd, &flow, &rwnd, BPF_ANY);
+  // struct flow flow = {.local_addr = skc_rcv_saddr,
+  //                     .remote_addr = skc_daddr,
+  //                     .local_port = skc_num,
+  //                     .remote_port = skc_dport};
+  // unsigned int rwnd = 10000;
+  // bpf_map_update_elem(&flow_to_rwnd, &flow, &rwnd, BPF_ANY);
 
   // This only works in struct_ops!
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);

@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <arpa/inet.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <dlfcn.h>
@@ -71,22 +72,22 @@ void thread_func() {
 
   while (true) {
     usleep(EPOCH_US);
-    RM_PRINTF("Time to schedule\n");
+    // RM_PRINTF("Time to schedule\n");
 
     // If setup has not been performed yet, then we cannot perform scheduling.
     if (!setup) {
-      RM_PRINTF("WARNING setup not completed, skipping scheduling\n");
+      // RM_PRINTF("WARNING setup not completed, skipping scheduling\n");
       continue;
     }
 
     // If fewer than the max number of flows exist and they are all active, then
     // there is no need for scheduling.
     if (active_fds.size() < MAX_ACTIVE_FLOWS && paused_fds.size() == 0) {
-      RM_PRINTF("WARNING insufficient flows, skipping scheduling\n");
+      // RM_PRINTF("WARNING insufficient flows, skipping scheduling\n");
       continue;
     }
 
-    RM_PRINTF("Performing scheduling\n");
+    // RM_PRINTF("Performing scheduling\n");
 
     // Make a copy of the currently (soon-to-be previously) active flows.
     active_fds.visit_all([&](const int &fd) { prev_active_fds.push_back(fd); });
@@ -149,7 +150,16 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     RM_PRINTF("ERROR in real 'accept'\n");
     return new_fd;
   }
+  if (addr != NULL && addr->sa_family != AF_INET) {
+    RM_PRINTF("WARNING got 'accept' for non-AF_INET: sa_family=%u\n",
+              addr->sa_family);
+    if (addr->sa_family == AF_INET6) {
+      RM_PRINTF("WARNING (continued) got 'accept' for AF_INET6!\n");
+    }
+    return new_fd;
+  }
 
+  // Perform BPF setup (only once for all flows in this process).
   if (!setup) {
     skel = ratemon_bpf__open();
     if (skel == NULL) {
@@ -173,14 +183,14 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   // Set the CCA and make sure it was set correctly.
   if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, BPF_CUBIC,
                  strlen(BPF_CUBIC)) == -1) {
-    RM_PRINTF("ERROR in setsockopt TCP_CONGESTION\n");
+    RM_PRINTF("ERROR in 'setsockopt' TCP_CONGESTION\n");
     return new_fd;
   }
   char retrieved_cca[32];
   socklen_t retrieved_cca_len = sizeof(retrieved_cca);
   if (getsockopt(new_fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
                  &retrieved_cca_len) == -1) {
-    RM_PRINTF("ERROR in getsockopt TCP_CONGESTION\n");
+    RM_PRINTF("ERROR in 'getsockopt' TCP_CONGESTION\n");
     return new_fd;
   }
   if (strcmp(retrieved_cca, BPF_CUBIC)) {
@@ -189,9 +199,31 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return new_fd;
   }
 
-  // Track the four-tuple, since RWND tuning is applied based on four-tuple.
-  struct flow flow = {
-      .local_addr = 0, .remote_addr = 0, .local_port = 0, .remote_port = 0};
+  // Determine the four-tuple, which we need to track because RWND tuning is
+  // applied based on four-tuple.
+  struct sockaddr_in local_addr;
+  socklen_t local_addr_len = sizeof(local_addr);
+  // Get the local IP and port.
+  if (getsockname(new_fd, (struct sockaddr *)&local_addr, &local_addr_len) ==
+      -1) {
+    RM_PRINTF("ERROR when calling 'getsockname'\n");
+    return -1;
+  }
+  struct sockaddr_in remote_addr;
+  socklen_t remote_addr_len = sizeof(remote_addr);
+  // Get the peer's (i.e., the remote) IP and port.
+  if (getpeername(new_fd, (struct sockaddr *)&remote_addr, &remote_addr_len) ==
+      -1) {
+    RM_PRINTF("ERROR when calling 'getpeername'\n");
+    return -1;
+  }
+  // Fill in the four-tuple.
+  struct flow flow = {.local_addr = ntohl(local_addr.sin_addr.s_addr),
+                      .remote_addr = ntohl(remote_addr.sin_addr.s_addr),
+                      .local_port = ntohs(local_addr.sin_port),
+                      .remote_port = ntohs(remote_addr.sin_port)};
+  // RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
+  //           flow.local_addr, flow.local_port);
   fd_to_flow.insert({new_fd, flow});
 
   // Should this flow be active or paused?
