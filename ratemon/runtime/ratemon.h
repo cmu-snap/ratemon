@@ -16,9 +16,6 @@
 
 // Max number of flows that BPF can track.
 #define RM_MAX_FLOWS 8192
-// Max number of flows that will be active at once.
-// #define RM_DEFAULT_MAX_ACTIVE_FLOWS 2
-#define RM_EPOCH_US 10000
 // Map pin paths.
 #define RM_FLOW_TO_RWND_PIN_PATH "/sys/fs/bpf/flow_to_rwnd"
 #define RM_FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
@@ -27,6 +24,8 @@
 
 // Environment variable that specifies the max number of active flows.
 #define RM_MAX_ACTIVE_FLOWS_KEY "RM_MAX_ACTIVE_FLOWS"
+// Environment variable that specifies how often to perform flow scheduling.
+#define RM_EPOCH_US_KEY "RM_EPOCH_US"
 
 // Key for use in flow-based maps.
 struct rm_flow {

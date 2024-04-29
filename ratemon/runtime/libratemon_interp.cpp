@@ -53,6 +53,9 @@ socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
 unsigned int max_active_flows =
     (unsigned int)atoi(getenv(RM_MAX_ACTIVE_FLOWS_KEY));
 
+// Look up the environment variable for scheduling epoch.
+unsigned int epoch_us = (unsigned int)atoi(getenv(RM_EPOCH_US_KEY));
+
 inline void trigger_ack(int fd) {
   // Do not store the output to check for errors since there is nothing we can
   // do.
@@ -72,11 +75,19 @@ void thread_func() {
   prev_active_fds.reserve(max_active_flows);
   new_active_fds.reserve(max_active_flows);
 
-  RM_PRINTF("libratemon_interp scheduling thread started, max flows=%u\n",
-            max_active_flows);
+  if (max_active_flows == 0 || epoch_us == 0) {
+    RM_PRINTF("ERROR when querying environment variables '%s' or '%s'\n",
+              RM_MAX_ACTIVE_FLOWS_KEY, RM_EPOCH_US_KEY);
+    return;
+  }
+
+  RM_PRINTF(
+      "libratemon_interp scheduling thread started, max flows=%u, epoch=%u "
+      "us\n",
+      max_active_flows, epoch_us);
 
   while (true) {
-    usleep(RM_EPOCH_US);
+    usleep(epoch_us);
     // RM_PRINTF("Time to schedule\n");
 
     // If setup has not been performed yet, then we cannot perform scheduling.
@@ -112,7 +123,9 @@ void thread_func() {
     // and remove it from both the paused set and the RWND map. Trigger an ACK
     // to wake it up. Note that twice the allowable number of flows will be
     // active briefly.
+    RM_PRINTF("Activating %lu flows: ", new_active_fds.size());
     for (const auto &fd : new_active_fds) {
+      RM_PRINTF("%d ", fd);
       active_fds.insert(fd);
       paused_fds.erase(fd);
       fd_to_flow.visit(fd, [](const auto &p) {
@@ -120,16 +133,20 @@ void thread_func() {
       });
       trigger_ack(fd);
     }
+    RM_PRINTF("\n");
 
     // For each fo the previously active flows, add it to the paused set, remove
     // it from the active set, and install an RWND mapping to actually pause it.
+    RM_PRINTF("Pausing %lu flows: ", prev_active_fds.size());
     for (const auto &fd : prev_active_fds) {
+      RM_PRINTF("%d ", fd);
       paused_fds.insert(fd);
       active_fds.erase(fd);
       fd_to_flow.visit(fd, [](const auto &p) {
         bpf_map_update_elem(flow_to_rwnd_fd, &p.second, &zero, BPF_ANY);
       });
     }
+    RM_PRINTF("\n");
 
     // Clear temporary data structures.
     prev_active_fds.clear();
@@ -144,6 +161,12 @@ boost::thread t(thread_func);
 // For some reason, C++ function name mangling does not prevent us from
 // overriding accept(), so we do not need 'extern "C"'.
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
+  if (max_active_flows == 0 || epoch_us == 0) {
+    RM_PRINTF("ERROR when querying environment variables '%s' or '%s'\n",
+              RM_MAX_ACTIVE_FLOWS_KEY, RM_EPOCH_US_KEY);
+    return -1;
+  }
+
   static int (*real_accept)(int, struct sockaddr *, socklen_t *) =
       (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "accept");
   if (real_accept == NULL) {

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 #define _GNU_SOURCE
 
+#include <argp.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <fcntl.h>
 #include <linux/limits.h>
+#include <linux/types.h>
+#include <net/if.h>
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,6 +17,8 @@
 
 // Signals whether the program should continue running.
 static volatile bool run = true;
+
+const char *ifname = "eno4";
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
                            va_list args) {
@@ -113,7 +118,7 @@ int main(int argc, char **argv) {
   printf("Opened cgroup: %s, cg_fd: %d, pid: %d\n", cgroup_path, cg_fd,
          getpid());
 
-  // Manually attach soc_kops.
+  // Manually attach sock_ops.
   skops_link_win_scale =
       bpf_program__attach_cgroup(skel->progs.read_win_scale, cg_fd);
   if (skops_link_win_scale == NULL) {
@@ -122,6 +127,41 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
   skel->links.read_win_scale = skops_link_win_scale;
+
+  // // Set up tc egress.
+  // // We will attach this program manually.
+  // bpf_program__set_autoattach(skel->progs.do_rwnd_at_egress, false);
+  // unsigned int ifindex = if_nametoindex(ifname);
+  // // Need to create a hook and attach the tc prog to it
+  // // First, create the hook.
+  // unsigned int parent = BPF_TC_PARENT(1, 0);
+  // DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .ifindex = ifindex,
+  //                     .attach_point = BPF_TC_EGRESS, .parent = parent);
+  // printf("parent: %u\n", parent);
+  // err = bpf_tc_hook_create(&hook);
+  // if (err) {
+  //   printf("ERROR when creating TC hook\n");
+  //   goto cleanup;
+  // }
+  // int fd = bpf_program__fd(skel->progs.do_rwnd_at_egress);
+  // if (!fd) {
+  //   printf("ERROR when looking up FD for 'do_rwnd_at_egress'\n");
+  //   goto cleanup;
+  // }
+  // DECLARE_LIBBPF_OPTS(bpf_tc_opts, tc_opts, .handle = 1, .priority = 1,
+  //                     .prog_fd = fd);
+  // struct bpf_prog_info info = {};
+  // __u32 info_len = sizeof(info);
+  // err = bpf_obj_get_info_by_fd(fd, &info, &info_len);
+  // if (err) {
+  //   printf("ERROR when getting 'do_rwnd_at_egress' info\n");
+  //   goto cleanup;
+  // }
+  // err = bpf_tc_attach(&hook, &tc_opts);
+  // if (err) {
+  //   printf("ERROR when attaching 'do_rwnd_at_egress'\n");
+  //   goto cleanup;
+  // }
 
   // Attach all progs not manually attached above.
   err = ratemon_bpf__attach(skel);
@@ -140,6 +180,8 @@ int main(int argc, char **argv) {
 
 cleanup:
   printf("Destroying BPF programs\n");
+  // bpf_tc_detach(&hook, &tc_opts);
+  // bpf_tc_hook_destroy(&hook);
   bpf_map__unpin(skel->maps.flow_to_rwnd, NULL);
   bpf_map__unpin(skel->maps.flow_to_win_scale, NULL);
   ratemon_bpf__destroy(skel);
