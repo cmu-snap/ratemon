@@ -71,7 +71,7 @@ struct {
 
 int my_pid = 0;
 
-struct flow {
+struct rm_flow {
   u32 local_addr;
   u32 remote_addr;
   u16 local_port;
@@ -90,14 +90,14 @@ struct timer_elem {
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 8192);
-  __type(key, struct flow);
+  __type(key, struct rm_flow);
   __type(value, struct timer_elem);
 } timer_map SEC(".maps");
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 8192);
-  __type(key, struct flow);
+  __type(key, struct rm_flow);
   __type(value, struct sock *);
 } flow_to_sock SEC(".maps");
 
@@ -389,7 +389,7 @@ void BPF_PROG(bpf_cubic_cwnd_event, struct sock *sk, enum tcp_ca_event event) {
   }
 }
 
-static int timer_cb1(void *map, struct flow *key, struct bpf_timer *timer) {
+static int timer_cb1(void *map, struct rm_flow *key, struct bpf_timer *timer) {
   bpf_printk("timer_cb1");
 
   if (key == NULL) {
@@ -499,7 +499,7 @@ void BPF_PROG(bpf_cubic_acked, struct sock *sk,
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
 
   struct bpf_timer *t;
-  struct flow timer_map_key = {};
+  struct rm_flow timer_map_key = {};
   timer_map_key.local_addr = bpf_ntohs(skc_rcv_saddr);
   timer_map_key.remote_addr = bpf_ntohs(skc_daddr);
   timer_map_key.local_port = skc_num;
@@ -591,7 +591,7 @@ int test_iter_set_await(struct bpf_iter__bpf_map_elem *ctx) {
   struct seq_file *seq = ctx->meta->seq;
   u32 seq_num = ctx->meta->seq_num;
 
-  struct flow *key = ctx->key;
+  struct rm_flow *key = ctx->key;
   struct sock **val = ctx->value;
   if (key == NULL || val == NULL) {
     bpf_printk("key or val is null");

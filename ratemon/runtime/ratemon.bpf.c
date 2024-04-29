@@ -35,8 +35,8 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 // not taken window scaling into account yet.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, MAX_FLOWS);
-  __type(key, struct flow);
+  __uint(max_entries, RM_MAX_FLOWS);
+  __type(key, struct rm_flow);
   __type(value, unsigned int);
   // __type(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_rwnd SEC(".maps");
@@ -44,8 +44,8 @@ struct {
 // Learn window scaling factor for each flow.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, MAX_FLOWS);
-  __type(key, struct flow);
+  __uint(max_entries, RM_MAX_FLOWS);
+  __type(key, struct rm_flow);
   __type(value, unsigned char);
 } flow_to_win_scale SEC(".maps");
 
@@ -146,7 +146,7 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
   // bpf_printk("bpf_cubic_get_info addr %u->%u", skc_daddr, skc_rcv_saddr);
   // bpf_printk("bpf_cubic_get_info port %u->%u", skc_dport, skc_num);
 
-  // struct flow flow = {.local_addr = skc_rcv_saddr,
+  // struct rm_flow flow = {.local_addr = skc_rcv_saddr,
   //                     .remote_addr = skc_daddr,
   //                     .local_port = skc_num,
   //                     .remote_port = skc_dport};
@@ -218,10 +218,10 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   // Prepare the lookup key.
-  struct flow flow = {.local_addr = ip->saddr,
-                      .remote_addr = ip->daddr,
-                      .local_port = bpf_ntohs(tcp->source),
-                      .remote_port = bpf_ntohs(tcp->dest)};
+  struct rm_flow flow = {.local_addr = ip->saddr,
+                         .remote_addr = ip->daddr,
+                         .local_port = bpf_ntohs(tcp->source),
+                         .remote_port = bpf_ntohs(tcp->dest)};
 
   // Look up the RWND value for this flow.
   u32 *rwnd = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
@@ -323,10 +323,10 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
              win_scale_opt.data);
 
   // Record this window scale for use when setting the RWND in the egress path.
-  struct flow flow = {.local_addr = skops->local_ip4,
-                      .remote_addr = skops->remote_ip4,
-                      .local_port = (u16)skops->local_port,
-                      .remote_port = (u16)bpf_ntohl(skops->remote_port)};
+  struct rm_flow flow = {.local_addr = skops->local_ip4,
+                         .remote_addr = skops->remote_ip4,
+                         .local_port = (u16)skops->local_port,
+                         .remote_port = (u16)bpf_ntohl(skops->remote_port)};
   // Use update() instead of insert() in case this port is being reused.
   // TODO: Change to insert() once the flow cleanup code is implemented.
   bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);

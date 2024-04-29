@@ -75,16 +75,17 @@ int main(int argc, char **argv) {
   }
 
   // Pin maps so they can be reused by libratemon_interp.
-  err = bpf_map__pin(skel->maps.flow_to_rwnd, FLOW_TO_RWND_PIN_PATH);
+  err = bpf_map__pin(skel->maps.flow_to_rwnd, RM_FLOW_TO_RWND_PIN_PATH);
   if (err) {
     printf("ERROR when pinning map flow_to_rwnd at: %s\n",
-           FLOW_TO_RWND_PIN_PATH);
+           RM_FLOW_TO_RWND_PIN_PATH);
     goto cleanup;
   }
-  err = bpf_map__pin(skel->maps.flow_to_win_scale, FLOW_TO_WIN_SCALE_PIN_PATH);
+  err =
+      bpf_map__pin(skel->maps.flow_to_win_scale, RM_FLOW_TO_WIN_SCALE_PIN_PATH);
   if (err) {
     printf("ERROR when pinning map flow_to_win_scale at: %s\n",
-           FLOW_TO_WIN_SCALE_PIN_PATH);
+           RM_FLOW_TO_WIN_SCALE_PIN_PATH);
     goto cleanup;
   }
 

@@ -40,7 +40,7 @@ boost::unordered::concurrent_flat_set<int> active_fds;
 // in flow_to_rwnd.
 boost::unordered::concurrent_flat_set<int> paused_fds;
 // Maps file descriptor to flow struct.
-boost::unordered::concurrent_flat_map<int, struct flow> fd_to_flow;
+boost::unordered::concurrent_flat_map<int, struct rm_flow> fd_to_flow;
 
 // Used to set entries in flow_to_rwnd.
 int zero = 0;
@@ -48,6 +48,10 @@ int zero = 0;
 // As an optimization, reuse the same tcp_cc_info struct and size.
 union tcp_cc_info placeholder_cc_info;
 socklen_t placeholder_cc_info_length = (socklen_t)sizeof(placeholder_cc_info);
+
+// Look up the environment variable for max active flows.
+unsigned int max_active_flows =
+    (unsigned int)atoi(getenv(RM_MAX_ACTIVE_FLOWS_KEY));
 
 inline void trigger_ack(int fd) {
   // Do not store the output to check for errors since there is nothing we can
@@ -65,13 +69,14 @@ void thread_func() {
   // Previously paused flows that will be activated.
   std::vector<int> new_active_fds;
   // Preallocate suffient space.
-  prev_active_fds.reserve(MAX_ACTIVE_FLOWS);
-  new_active_fds.reserve(MAX_ACTIVE_FLOWS);
+  prev_active_fds.reserve(max_active_flows);
+  new_active_fds.reserve(max_active_flows);
 
-  RM_PRINTF("libratemon_interp scheduling thread started\n");
+  RM_PRINTF("libratemon_interp scheduling thread started, max flows=%u\n",
+            max_active_flows);
 
   while (true) {
-    usleep(EPOCH_US);
+    usleep(RM_EPOCH_US);
     // RM_PRINTF("Time to schedule\n");
 
     // If setup has not been performed yet, then we cannot perform scheduling.
@@ -82,7 +87,7 @@ void thread_func() {
 
     // If fewer than the max number of flows exist and they are all active, then
     // there is no need for scheduling.
-    if (active_fds.size() < MAX_ACTIVE_FLOWS && paused_fds.size() == 0) {
+    if (active_fds.size() < max_active_flows && paused_fds.size() == 0) {
       // RM_PRINTF("WARNING insufficient flows, skipping scheduling\n");
       continue;
     }
@@ -167,7 +172,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       return new_fd;
     }
 
-    int pinned_map_fd = bpf_obj_get(FLOW_TO_RWND_PIN_PATH);
+    int pinned_map_fd = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
     int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
     if (err) {
       RM_PRINTF("ERROR when reusing map FD\n");
@@ -181,8 +186,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   }
 
   // Set the CCA and make sure it was set correctly.
-  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, BPF_CUBIC,
-                 strlen(BPF_CUBIC)) == -1) {
+  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, RM_BPF_CUBIC,
+                 strlen(RM_BPF_CUBIC)) == -1) {
     RM_PRINTF("ERROR in 'setsockopt' TCP_CONGESTION\n");
     return new_fd;
   }
@@ -193,8 +198,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     RM_PRINTF("ERROR in 'getsockopt' TCP_CONGESTION\n");
     return new_fd;
   }
-  if (strcmp(retrieved_cca, BPF_CUBIC)) {
-    RM_PRINTF("ERROR when setting CCA to %s! Actual CCA is: %s\n", BPF_CUBIC,
+  if (strcmp(retrieved_cca, RM_BPF_CUBIC)) {
+    RM_PRINTF("ERROR when setting CCA to %s! Actual CCA is: %s\n", RM_BPF_CUBIC,
               retrieved_cca);
     return new_fd;
   }
@@ -218,16 +223,16 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return -1;
   }
   // Fill in the four-tuple.
-  struct flow flow = {.local_addr = ntohl(local_addr.sin_addr.s_addr),
-                      .remote_addr = ntohl(remote_addr.sin_addr.s_addr),
-                      .local_port = ntohs(local_addr.sin_port),
-                      .remote_port = ntohs(remote_addr.sin_port)};
+  struct rm_flow flow = {.local_addr = ntohl(local_addr.sin_addr.s_addr),
+                         .remote_addr = ntohl(remote_addr.sin_addr.s_addr),
+                         .local_port = ntohs(local_addr.sin_port),
+                         .remote_port = ntohs(remote_addr.sin_port)};
   // RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
   //           flow.local_addr, flow.local_port);
   fd_to_flow.insert({new_fd, flow});
 
   // Should this flow be active or paused?
-  if (active_fds.size() < MAX_ACTIVE_FLOWS) {
+  if (active_fds.size() < max_active_flows) {
     // Less than the max number of flows are active, so make this one active.
     active_fds.insert(new_fd);
   } else {
