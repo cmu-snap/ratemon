@@ -18,7 +18,8 @@
 // Signals whether the program should continue running.
 static volatile bool run = true;
 
-const char *ifname = "eno4";
+// Which interface to attach the 'do_rwnd_at_egress' program to.
+// const char *ifname = "eno4";
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
                            va_list args) {
@@ -128,9 +129,15 @@ int main(int argc, char **argv) {
   }
   skel->links.read_win_scale = skops_link_win_scale;
 
-  // // Set up tc egress.
-  // // We will attach this program manually.
-  // bpf_program__set_autoattach(skel->progs.do_rwnd_at_egress, false);
+  // Set up tc egress.
+  // We will attach this program manually.
+  bpf_program__set_autoattach(skel->progs.do_rwnd_at_egress, false);
+
+  // TODO: The following code gives an error in bpf_tc_hook_create(). What is
+  // the right parent? Do we need to create a particular qdisc ahead of time?
+  // The selftests are not clear. See:
+  // https://github.com/torvalds/linux/blob/master/tools/testing/selftests/bpf/prog_tests/tc_bpf.c
+
   // unsigned int ifindex = if_nametoindex(ifname);
   // // Need to create a hook and attach the tc prog to it
   // // First, create the hook.
@@ -163,7 +170,12 @@ int main(int argc, char **argv) {
   //   goto cleanup;
   // }
 
-  // Attach all progs not manually attached above.
+  // In the initial version of scheduling that uses fixed timeslices, we do not
+  // require the kprobe 'tcp_rcv_established', which tracks the last time a flow
+  // received data.
+  bpf_program__set_autoattach(skel->progs.tcp_rcv_established, false);
+
+  // Attach all programs that were not manually attached above.
   err = ratemon_bpf__attach(skel);
   if (err) {
     printf("ERROR when attach BPF skeleton\n");
