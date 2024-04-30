@@ -11,6 +11,7 @@
 #include "ratemon.h"
 // clang-format on
 
+// int _version SEC("version") = 1;
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 // BPF SOCK_OPS program return codes.
@@ -40,7 +41,7 @@ struct {
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
   __type(value, unsigned int);
-  // __type(pinning, LIBBPF_PIN_BY_NAME);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_rwnd SEC(".maps");
 
 // Learn window scaling factor for each flow.
@@ -49,6 +50,7 @@ struct {
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
   __type(value, unsigned char);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_win_scale SEC(".maps");
 
 struct tcp_opt {
@@ -57,33 +59,33 @@ struct tcp_opt {
   __u8 data;
 } __attribute__((packed));
 
-// 'tcp_rcv_established' will be used to track the last time that a flow
-// received data so that we can determine when to classify a flow as idle.
-// TODO: This is not required for the initial version of scheduling that uses
-// fixed timeslices, so ratemon_main.c does not attach this program.
-SEC("kprobe/tcp_rcv_established")
-int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
-  if (sk == NULL || skb == NULL) {
-    bpf_printk("ERROR: 'tcp_rcv_established' sk=%u skb=%u", sk, skb);
-    return 0;
-  }
+// // 'tcp_rcv_established' will be used to track the last time that a flow
+// // received data so that we can determine when to classify a flow as idle.
+// // TODO: This is not required for the initial version of scheduling that uses
+// // fixed timeslices, so ratemon_main.c does not attach this program.
+// SEC("kprobe/tcp_rcv_established")
+// int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
+//   if (sk == NULL || skb == NULL) {
+//     bpf_printk("ERROR: 'tcp_rcv_established' sk=%u skb=%u", sk, skb);
+//     return 0;
+//   }
 
-  // __u16 skc_num = 0;
-  // __be16 skc_dport = 0;
-  // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  // bpf_printk("INFO: tcp_rcv_established %u->%u", skc_dport, skc_num);
+//   // __u16 skc_num = 0;
+//   // __be16 skc_dport = 0;
+//   // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
+//   // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+//   // bpf_printk("INFO: tcp_rcv_established %u->%u", skc_dport, skc_num);
 
-  // TODO: If this sk_buff includes new (i.e., unacked) data, then record the
-  // current time somewhere.
+//   // TODO: If this sk_buff includes new (i.e., unacked) data, then record the
+//   // current time somewhere.
 
-  struct tcp_sock *tp = (struct tcp_sock *)(sk);
-  if (tp == NULL) {
-    bpf_printk("ERROR: 'tcp_rcv_established' tp=%u", tp);
-    return 0;
-  }
-  return 0;
-}
+//   struct tcp_sock *tp = (struct tcp_sock *)(sk);
+//   if (tp == NULL) {
+//     bpf_printk("ERROR: 'tcp_rcv_established' tp=%u", tp);
+//     return 0;
+//   }
+//   return 0;
+// }
 
 // Perform RWND tuning at TC egress. If a flow has an entry in flow_to_rwnd,
 // then install that value in the advertised window field. Inspired by:
