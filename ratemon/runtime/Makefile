@@ -92,7 +92,7 @@ $(VMLINUX):	$(BPFTOOL)
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $@
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH)		      \
 		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)		      \
@@ -105,7 +105,7 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
 	$(BPFTOOL) gen skeleton $< > $@
 
 # Build user-space code
-$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %.skel.h
+$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %_sockops.skel.h %_structops.skel.h
 
 $(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT)
 	$(call msg,CC,$@)
@@ -129,12 +129,10 @@ get_ld_vars:
 # Run ratemon_main and associated setup/teardown.
 # Remove existing struct_ops programs, manually attach RWND tc/egress program,
 # run ratemon_main, remove tc/egress program, clean up struct_ops.
-run_attach: ratemon_main $(OUTPUT)/ratemon.bpf.o
-	bash -xc "for b in `sudo bpftool struct_ops list | cut -d':' -f1`; do sudo bpftool struct_ops unregister id \$${b}; done"
-	sudo tc filter add dev eno4 egress bpf direct-action obj $(OUTPUT)/ratemon.bpf.o sec tc/egress
+run_attach: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
+	sudo tc filter add dev eno4 egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
 	sudo ./ratemon_main
 	sudo tc filter del dev eno4 egress
-	bash -xc "for b in `sudo bpftool struct_ops list | cut -d':' -f1`; do sudo bpftool struct_ops unregister id \$${b}; done"
 
 # delete failed targets
 .DELETE_ON_ERROR:
