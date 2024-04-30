@@ -28,6 +28,8 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 #define TCPOPT_WINDOW 3 /* Window scaling */
 #define AF_INET 2       /* Internet IP Protocol 	*/
 
+#define EINVAL 22
+
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
 // Read RWND limit for flow, as set by userspace. Even though the advertised
@@ -179,44 +181,47 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 // The next several functions are helpers for the sockops program that records
 // the receiver's TCP window scale value.
 
-inline int set_hdr_cb_flags(struct bpf_sock_ops *skops) {
+__always_inline int set_hdr_cb_flags(struct bpf_sock_ops *skops, int flags) {
+  long ret = bpf_sock_ops_cb_flags_set(skops, flags);
+  if (ret == -EINVAL) {
+    // This is not a fullsock.
+    // Note: bpf_sk_fullsock() is not available in sockops, so if this is not a
+    // fullsock there is nothing we can do.
+    bpf_printk(
+        "ERROR: failed to set sockops flags because socket is not full socket");
+    return SOCKOPS_ERR;
+  } else if (ret) {
+    bpf_printk("ERROR: failed to set specific sockops flag: %ld", ret);
+    return SOCKOPS_ERR;
+  }
+  return SOCKOPS_OK;
+}
+
+__always_inline int enable_hdr_cbs(struct bpf_sock_ops *skops) {
   // Set the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
   // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
-  if (bpf_sock_ops_cb_flags_set(
-          skops,
-          skops->bpf_sock_ops_cb_flags | BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG)) {
-    bpf_printk("ERROR when setting sockops flag for writing a header option");
+  if (set_hdr_cb_flags(skops, skops->bpf_sock_ops_cb_flags |
+                                  BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
+      SOCKOPS_ERR) {
+    bpf_printk("ERROR: could not enable sockops header callbacks");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
 }
 
-inline int clear_hdr_cb_flags(struct bpf_sock_ops *skops) {
+__always_inline int disable_hdr_cbs(struct bpf_sock_ops *skops) {
   // Clear the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
   // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
-  if (bpf_sock_ops_cb_flags_set(
-          skops,
-          skops->bpf_sock_ops_cb_flags & ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG)) {
-    bpf_printk("ERROR when clearing sockops flag for writing a header option");
+  if (set_hdr_cb_flags(skops, skops->bpf_sock_ops_cb_flags &
+                                  ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
+      SOCKOPS_ERR) {
+    bpf_printk("ERROR: could not disable sockops header callbacks");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
 }
 
-inline int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
-  // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB
-  // callback by reserving three bytes (the minimim) for a TCP header option.
-  // These three bytes will never actually be used, but reserving space is the
-  // only way for that callback to be triggered.
-  if (((skops->skb_tcp_flags & TCPHDR_SYN) == TCPHDR_SYN) &&
-      bpf_reserve_hdr_opt(skops, 3, 0)) {
-    bpf_printk("ERROR: failed to reserve space for a header option");
-    return SOCKOPS_ERR;
-  }
-  return SOCKOPS_OK;
-}
-
-int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
+__always_inline int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
   // Keep in mind that the window scale is set by the local host on
   // _outgoing_ SYN and SYNACK packets. The handle_write_hdr_opt() sockops
   // callback is only triggered for outgoing packets, so all we need to do
@@ -226,15 +231,43 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     return SOCKOPS_OK;
   }
 
-  // This is an outgoing SYN or SYNACK packet. It should contain the window
-  // scale. Let's try to look it up.
+  // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB
+  // callback by reserving three bytes (the minimim) for a TCP header option.
+  // These three bytes will never actually be used, but reserving space is the
+  // only way for that callback to be triggered.
+  if (bpf_reserve_hdr_opt(skops, 3, 0)) {
+    bpf_printk("ERROR: failed to reserve space for a header option");
+    return SOCKOPS_ERR;
+  }
+  return SOCKOPS_OK;
+}
 
+__always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
+  // Keep in mind that the window scale is set by the local host on
+  // _outgoing_ SYN and SYNACK packets. The handle_write_hdr_opt() sockops
+  // callback is only triggered for outgoing packets, so all we need to do
+  // is filter for SYN and SYNACK.
+  if ((skops->skb_tcp_flags & TCPHDR_SYN) != TCPHDR_SYN) {
+    // This is not a SYN or SYNACK packet.
+    return SOCKOPS_OK;
+  }
+
+  // Look up the TCP window scale.
   struct tcp_opt win_scale_opt = {.kind = TCPOPT_WINDOW, .len = 0, .data = 0};
-  int ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
-  if (ret != 3 || win_scale_opt.len != 3 ||
-      win_scale_opt.kind != TCPOPT_WINDOW) {
+  if (bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0) != 3 ||
+      win_scale_opt.len != 3 || win_scale_opt.kind != TCPOPT_WINDOW) {
     bpf_printk("ERROR: failed to retrieve window scale option");
     return SOCKOPS_ERR;
+  }
+
+  if (skops->family != AF_INET) {
+    // This is not an IPv4 packet. We only support IPv4 packets because the
+    // struct we use as a map key stores IP addresses as 32 bits. This is purely
+    // an implementation detail.
+    bpf_printk("WARNING: not using IPv4 for flow on local port %u: family=%u",
+               skops->local_port, skops->family);
+    disable_hdr_cbs(skops);
+    return SOCKOPS_OK;
   }
 
   struct rm_flow flow = {.local_addr = skops->local_ip4,
@@ -252,24 +285,17 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
 
   // Clear the flag that enables the header option write callback.
-  return clear_hdr_cb_flags(skops);
+  disable_hdr_cbs(skops);
+  return SOCKOPS_OK;
 }
 
 // This sockops program records a flow's TCP window scale, which is set in
 // receiver's outgoing SYNACK packet.
 SEC("sockops")
 int read_win_scale(struct bpf_sock_ops *skops) {
-  if (skops->family != AF_INET) {
-    // This is not an IPv4 packet. We only support IPv4 packets because the
-    // struct we use as a map key stores IP addresses as 32 bits. This is purely
-    // an implementation detail.
-    bpf_printk("WARNING: not using IPv4 for flow on local port %u: family=%u",
-               skops->local_port, skops->family);
-    return SOCKOPS_OK;
-  }
   switch (skops->op) {
     case BPF_SOCK_OPS_TCP_LISTEN_CB:
-      return set_hdr_cb_flags(skops);
+      return enable_hdr_cbs(skops);
     case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
       return handle_hdr_opt_len(skops);
     case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
@@ -278,8 +304,8 @@ int read_win_scale(struct bpf_sock_ops *skops) {
   return SOCKOPS_OK;
 }
 
-// The remainder of this file is all of the struct_ops programs for bpf_cubic.
-// The all simply delegate to the regular tcp_cubic functions, except for
+// The next several functions are the struct_ops programs for bpf_cubic. The all
+// simply delegate to the regular tcp_cubic functions, except for
 // 'bpf_cubic_get_into', as described below.
 
 // These are the regular tcp_cubic function that will be called below.
