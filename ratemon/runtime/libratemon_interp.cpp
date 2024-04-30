@@ -23,14 +23,14 @@
 #include <vector>
 
 #include "ratemon.h"
-#include "ratemon.skel.h"
+#include "ratemon_maps.skel.h"
 
 //
 bool setup = false;
 
 // BPF things.
-struct ratemon_bpf *skel = NULL;
-struct bpf_map *flow_to_rwnd = NULL;
+struct ratemon_maps_bpf *skel = NULL;
+// struct bpf_map *flow_to_rwnd = NULL;
 int flow_to_rwnd_fd = 0;
 
 // File descriptors of flows that are allowed to send and therefore do not have
@@ -189,20 +189,21 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
   // Perform BPF setup (only once for all flows in this process).
   if (!setup) {
-    skel = ratemon_bpf__open();
+    skel = ratemon_maps_bpf__open_and_load();
     if (skel == NULL) {
-      RM_PRINTF("ERROR when opening BPF skeleton\n");
+      RM_PRINTF("ERROR: failed to open/load 'ratemon_maps' BPF skeleton\n");
       return new_fd;
     }
 
     int pinned_map_fd = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
-    int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
-    if (err) {
-      RM_PRINTF("ERROR when reusing map FD\n");
-      return new_fd;
-    }
 
-    flow_to_rwnd = skel->maps.flow_to_rwnd;
+    // int err = bpf_map__reuse_fd(skel->maps.flow_to_rwnd, pinned_map_fd);
+    // if (err) {
+    //   RM_PRINTF("ERROR when reusing map FD\n");
+    //   return new_fd;
+    // }
+
+    // flow_to_rwnd = skel->maps.flow_to_rwnd;
     flow_to_rwnd_fd = pinned_map_fd;
     RM_PRINTF("Successfully reused map FD\n");
     setup = true;
@@ -288,9 +289,9 @@ int close(int sockfd) {
   // To get the flow struct for this FD, we must use visit() to look it up
   // in the concurrent_flat_map. Obviously, do this before removing the FD
   // from fd_to_flow.
-  fd_to_flow.visit(sockfd, [](const auto &p) {
-    bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
-  });
+  // fd_to_flow.visit(sockfd, [](const auto &p) {
+  //   bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+  // });
   fd_to_flow.erase(sockfd);
 
   RM_PRINTF("Successful 'close' for FD=%d\n", sockfd);

@@ -116,7 +116,7 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
-$(OUTPUT)/%.so: %.cpp $(OUTPUT)/ratemon.skel.h ratemon.h | $(OUTPUT)
+$(OUTPUT)/%.so: %.cpp $(OUTPUT)/ratemon_maps.skel.h ratemon.h | $(OUTPUT)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) -I$(BOOST_INCLUDE) $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;

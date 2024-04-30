@@ -500,8 +500,8 @@ void BPF_PROG(bpf_cubic_acked, struct sock *sk,
 
   struct bpf_timer *t;
   struct rm_flow timer_map_key = {};
-  timer_map_key.local_addr = bpf_ntohs(skc_rcv_saddr);
-  timer_map_key.remote_addr = bpf_ntohs(skc_daddr);
+  timer_map_key.local_addr = bpf_ntohl(skc_rcv_saddr);
+  timer_map_key.remote_addr = bpf_ntohl(skc_daddr);
   timer_map_key.local_port = skc_num;
   timer_map_key.remote_port = bpf_ntohs(skc_dport);
 

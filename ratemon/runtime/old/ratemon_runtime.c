@@ -250,6 +250,8 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     return SOCKOPS_ERR;
   }
 
+  // Use bpf_ntohl instead of bpf_ntohs because the port is actually stored as a
+  // u32.
   bpf_trace_printk("TCP window scale for flow %u -> %u = %u\n",
                    bpf_ntohl(skops->remote_port), skops->local_port,
                    win_scale_opt.data);
@@ -258,6 +260,8 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   struct flow_t flow = {.local_addr = skops->local_ip4,
                         .remote_addr = skops->remote_ip4,
                         .local_port = (u16)skops->local_port,
+                        // Use bpf_ntohl instead of bpf_ntohs because the port
+                        // is actually stored as a u32.
                         .remote_port = (u16)bpf_ntohl(skops->remote_port)};
   // Use update() instead of insert() in case this port is being reused.
   // TODO: Change to insert() once the flow cleanup code is implemented.

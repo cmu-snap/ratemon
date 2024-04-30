@@ -18,7 +18,7 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 #define SOCKOPS_OK 1
 #define SOCKOPS_ERR 0
 
-#define AF_INET 2       /* Internet IP Protocol 	*/
+#define AF_INET 2
 
 #define EINVAL 22
 
@@ -130,6 +130,8 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   struct rm_flow flow = {.local_addr = skops->local_ip4,
                          .remote_addr = skops->remote_ip4,
                          .local_port = (u16)skops->local_port,
+                         // Use bpf_ntohl instead of bpf_ntohs because the port
+                         // is actually stored as a u32.
                          .remote_port = (u16)bpf_ntohl(skops->remote_port)};
   bpf_printk(
       "INFO: TCP window scale for flow with remote port %u and local port %u "

@@ -7,8 +7,7 @@
 
 #include "ratemon.h"
 
-#define PIN_GLOBAL_NS		2
-
+#define PIN_GLOBAL_NS 2
 
 // Read RWND limit for flow, as set by userspace. Even though the advertised
 // window is only 16 bits in the TCP header, use 32 bits here because we have

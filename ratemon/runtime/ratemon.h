@@ -29,10 +29,10 @@
 
 // Key for use in flow-based maps.
 struct rm_flow {
-  unsigned int local_addr;
-  unsigned int remote_addr;
-  unsigned short local_port;
-  unsigned short remote_port;
+  __u32 local_addr;
+  __u32 remote_addr;
+  __u16 local_port;
+  __u16 remote_port;
 };
 
 #endif /* __RATEMON_H */
