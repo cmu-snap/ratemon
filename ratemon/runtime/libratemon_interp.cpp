@@ -25,8 +25,8 @@
 #include "ratemon.h"
 #include "ratemon_maps.skel.h"
 
-//
-bool setup = false;
+volatile bool setup = false;
+volatile bool skipped_first = false;
 
 // BPF things.
 struct ratemon_maps_bpf *skel = NULL;
@@ -103,7 +103,10 @@ void thread_func() {
       continue;
     }
 
-    // RM_PRINTF("Performing scheduling\n");
+    RM_PRINTF("Performing scheduling\n");
+
+    prev_active_fds.clear();
+    new_active_fds.clear();
 
     // Make a copy of the currently (soon-to-be previously) active flows.
     active_fds.visit_all([&](const int &fd) { prev_active_fds.push_back(fd); });
@@ -136,7 +139,8 @@ void thread_func() {
     RM_PRINTF("\n");
 
     // For each fo the previously active flows, add it to the paused set, remove
-    // it from the active set, and install an RWND mapping to actually pause it.
+    // it from the active set, install an RWND mapping to actually pause it, and
+    // trigger an ACK to communicate the new RWND value.
     RM_PRINTF("Pausing %lu flows: ", prev_active_fds.size());
     for (const auto &fd : prev_active_fds) {
       RM_PRINTF("%d ", fd);
@@ -145,6 +149,8 @@ void thread_func() {
       fd_to_flow.visit(fd, [](const auto &p) {
         bpf_map_update_elem(flow_to_rwnd_fd, &p.second, &zero, BPF_ANY);
       });
+      // TODO: Do we need to send an ACK to immediately pause the flow?
+      trigger_ack(fd);
     }
     RM_PRINTF("\n");
 
@@ -207,6 +213,15 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     flow_to_rwnd_fd = pinned_map_fd;
     RM_PRINTF("Successfully reused map FD\n");
     setup = true;
+  }
+
+  // Hack for iperf3. The first flow is a control flow that should not be
+  // scheduled. Note that for this hack to work, libratemon_interp must be
+  // restarted between tests.
+  if (fd_to_flow.size() == 0 && !skipped_first) {
+    RM_PRINTF("WARNING skipping first flow\n");
+    skipped_first = true;
+    return new_fd;
   }
 
   // Set the CCA and make sure it was set correctly.
@@ -289,9 +304,9 @@ int close(int sockfd) {
   // To get the flow struct for this FD, we must use visit() to look it up
   // in the concurrent_flat_map. Obviously, do this before removing the FD
   // from fd_to_flow.
-  // fd_to_flow.visit(sockfd, [](const auto &p) {
-  //   bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
-  // });
+  fd_to_flow.visit(sockfd, [](const auto &p) {
+    bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+  });
   fd_to_flow.erase(sockfd);
 
   RM_PRINTF("Successful 'close' for FD=%d\n", sockfd);
