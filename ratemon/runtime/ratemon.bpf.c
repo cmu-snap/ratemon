@@ -62,7 +62,7 @@ struct tcp_opt {
 SEC("kprobe/tcp_rcv_established")
 int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   if (sk == NULL || skb == NULL) {
-    bpf_printk("ERROR tcp_rcv_established sk=%u skb=%u", sk, skb);
+    bpf_printk("ERROR: 'tcp_rcv_established' sk=%u skb=%u", sk, skb);
     return 0;
   }
 
@@ -70,14 +70,14 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // __be16 skc_dport = 0;
   // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
   // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  // bpf_printk("tcp_rcv_established %u->%u", skc_dport, skc_num);
+  // bpf_printk("INFO: tcp_rcv_established %u->%u", skc_dport, skc_num);
 
   // TODO: If this sk_buff includes new (i.e., unacked) data, then record the
   // current time somewhere.
 
   struct tcp_sock *tp = (struct tcp_sock *)(sk);
   if (tp == NULL) {
-    bpf_printk("ERROR tcp_rcv_established tp=%u", tp);
+    bpf_printk("ERROR: 'tcp_rcv_established' tp=%u", tp);
     return 0;
   }
   return 0;
@@ -88,7 +88,7 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
 // https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 SEC("tc/egress")
 int do_rwnd_at_egress(struct __sk_buff *skb) {
-  // bpf_printk("do_rwnd_at_egress");
+  // bpf_printk("INFO: do_rwnd_at_egress");
   if (skb == NULL) {
     return TC_ACT_OK;
   }
@@ -133,7 +133,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   if (rwnd == NULL) {
     // This flow does not have a custom RWND value.
     bpf_printk(
-        "WARNING: Flow with local port %u and remote port %u has no RWND value",
+        "WARNING: flow with local port %u and remote port %u has no RWND value",
         flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
@@ -149,8 +149,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // If the configured RWND value is 0 B, then we can take a shortcut and not
     // bother looking up the window scale.
     tcp->window = 0;
-    bpf_printk("Set RWND for flow with local port %u and remote port %u to 0 B",
-               flow.local_port, flow.remote_port);
+    bpf_printk(
+        "INFO: set RWND for flow with local port %u and remote port %u to 0 B",
+        flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
 
@@ -158,7 +159,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
-    bpf_printk("ERROR: Flow with local port %u, remote port %u, no win scale",
+    bpf_printk("ERROR: flow with local port %u, remote port %u, no win scale",
                flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
@@ -169,8 +170,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
   tcp->window = min(tcp->window, rwnd_with_win_scale);
-  bpf_printk("Set RWND for flow with remote port %u to %u (win scale: %u)",
-             flow.remote_port, rwnd_with_win_scale, *win_scale);
+  bpf_printk(
+      "INFO: set RWND for flow with remote port %u to %u (win scale: %u)",
+      flow.remote_port, rwnd_with_win_scale, *win_scale);
   return TC_ACT_OK;
 }
 
@@ -208,7 +210,7 @@ inline int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
   // only way for that callback to be triggered.
   if (((skops->skb_tcp_flags & TCPHDR_SYN) == TCPHDR_SYN) &&
       bpf_reserve_hdr_opt(skops, 3, 0)) {
-    bpf_printk("ERROR when reserving space for a header option");
+    bpf_printk("ERROR: failed to reserve space for a header option");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
@@ -231,19 +233,20 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   int ret = bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0);
   if (ret != 3 || win_scale_opt.len != 3 ||
       win_scale_opt.kind != TCPOPT_WINDOW) {
-    bpf_printk("ERROR when retrieving window scale option");
+    bpf_printk("ERROR: failed to retrieve window scale option");
     return SOCKOPS_ERR;
   }
 
-  bpf_printk("TCP window scale for flow %u->%u is %u B",
-             bpf_ntohl(skops->remote_port), skops->local_port,
-             win_scale_opt.data);
-
-  // Record this window scale for use when setting the RWND in the egress path.
   struct rm_flow flow = {.local_addr = skops->local_ip4,
                          .remote_addr = skops->remote_ip4,
                          .local_port = (u16)skops->local_port,
                          .remote_port = (u16)bpf_ntohl(skops->remote_port)};
+  bpf_printk(
+      "INFO: TCP window scale for flow with remote port %u and local port %u "
+      "is %u",
+      flow.remote_port, flow.local_port, win_scale_opt.data);
+
+  // Record this window scale for use when setting the RWND in the egress path.
   // Use update() instead of insert() in case this port is being reused.
   // TODO: Change to insert() once the flow cleanup code is implemented.
   bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
@@ -260,7 +263,7 @@ int read_win_scale(struct bpf_sock_ops *skops) {
     // This is not an IPv4 packet. We only support IPv4 packets because the
     // struct we use as a map key stores IP addresses as 32 bits. This is purely
     // an implementation detail.
-    bpf_printk("Warning: Not using IPv4 for flow on local port %u: family=%u",
+    bpf_printk("WARNING: not using IPv4 for flow on local port %u: family=%u",
                skops->local_port, skops->family);
     return SOCKOPS_OK;
   }
@@ -333,12 +336,12 @@ SEC("struct_ops/bpf_cubic_get_info")
 void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
               union tcp_cc_info *info) {
   if (sk == NULL) {
-    bpf_printk("ERROR bpf_cubic_get_info sk=%u", sk);
+    bpf_printk("ERROR: 'bpf_cubic_get_info' sk=%u", sk);
     return;
   }
   struct tcp_sock *tp = (struct tcp_sock *)sk;
   if (tp == NULL) {
-    bpf_printk("ERROR bpf_cubic_get_info tp=%u", tp);
+    bpf_printk("ERROR: 'bpf_cubic_get_info' tp=%u", tp);
     return;
   }
 
@@ -363,7 +366,7 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
   // 'bpf_tcp_send_ack' only works in struct_ops!
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
   if (ret != 0) {
-    bpf_printk("ERROR bpf_cubic_get_info bpf_tcp_send_ack()=%u", ret);
+    bpf_printk("ERROR: 'bpf_cubic_get_info' failed to send ACK: %u", ret);
     return;
   }
 }
