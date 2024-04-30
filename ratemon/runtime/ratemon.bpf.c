@@ -181,7 +181,7 @@ struct tcp_congestion_ops bpf_cubic = {
 // https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 SEC("tc/egress")
 int do_rwnd_at_egress(struct __sk_buff *skb) {
-  bpf_printk("do_rwnd_at_egress");
+  // bpf_printk("do_rwnd_at_egress");
   if (skb == NULL) {
     return TC_ACT_OK;
   }
@@ -228,13 +228,13 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u32 *rwnd = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
   if (rwnd == NULL) {
     // We do not know the RWND value to use for this flow.
-    bpf_printk("ERROR: Flow with local port %u, remote port %u, unknown RWND\n",
+    bpf_printk("ERROR: Flow with local port %u, remote port %u, unknown RWND",
                flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
   if (*rwnd == 0) {
     // The RWND is configured to be 0. That does not make sense.
-    bpf_printk("ERROR: Flow with local port %u, remote port %u, RWND=0B\n",
+    bpf_printk("ERROR: Flow with local port %u, remote port %u, RWND=0B",
                flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
@@ -242,17 +242,16 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
-    bpf_printk("ERROR: Flow with local port %u, remote port %u, no win scale\n",
+    bpf_printk("ERROR: Flow with local port %u, remote port %u, no win scale",
                flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
 
   // Apply the window scale to the configured RWND value.
   u16 to_set = (u16)(*rwnd >> *win_scale);
-  bpf_printk(
-      "Setting RWND for flow with remote port %u to %u (win scale: %u)\n",
-      flow.remote_port, to_set, *win_scale);
-  // bpf_printk("Setting RWND to %u (win scale: %u, RWND with win scale: %u)\n",
+  bpf_printk("Setting RWND for flow with remote port %u to %u (win scale: %u)",
+             flow.remote_port, to_set, *win_scale);
+  // bpf_printk("Setting RWND to %u (win scale: %u, RWND with win scale: %u)",
   // *rwnd, *win_scale, to_set);
 
   // Set the RWND value in the TCP header. If the existing advertised window
@@ -298,7 +297,7 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     // This is not an IPv4 packet. We only support IPv4 packets because the
     // struct we use as a map key stores IP addresses as 32 bits. This is purely
     // an implementation detail.
-    bpf_printk("Warning: Not using IPv4 for flow on local port %u: family=%u\n",
+    bpf_printk("Warning: Not using IPv4 for flow on local port %u: family=%u",
                skops->local_port, skops->family);
     return SOCKOPS_OK;
   }
@@ -322,7 +321,7 @@ int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     return SOCKOPS_ERR;
   }
 
-  bpf_printk("TCP window scale for flow %u -> %u = %u\n",
+  bpf_printk("TCP window scale for flow %u -> %u = %u",
              bpf_ntohl(skops->remote_port), skops->local_port,
              win_scale_opt.data);
 
