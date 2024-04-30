@@ -131,7 +131,7 @@ get_ld_vars:
 # run ratemon_main, remove tc/egress program, clean up struct_ops.
 run_attach: ratemon_main $(OUTPUT)/ratemon.bpf.o
 	bash -xc "for b in `sudo bpftool struct_ops list | cut -d':' -f1`; do sudo bpftool struct_ops unregister id \$${b}; done"
-	sudo tc filter add dev eno4 egress bpf da obj $(OUTPUT)/ratemon.bpf.o sec tc/egress
+	sudo tc filter add dev eno4 egress bpf direct-action obj $(OUTPUT)/ratemon.bpf.o sec tc/egress
 	sudo ./ratemon_main
 	sudo tc filter del dev eno4 egress
 	bash -xc "for b in `sudo bpftool struct_ops list | cut -d':' -f1`; do sudo bpftool struct_ops unregister id \$${b}; done"
