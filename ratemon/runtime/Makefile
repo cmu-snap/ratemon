@@ -20,6 +20,7 @@ VMLINUX := $(OUTPUT)/vmlinux.h
 INCLUDES := -I$(OUTPUT) -I../../../libbpf/include/uapi -I$(dir $(VMLINUX))
 CFLAGS := -g -std=c17 -Wall -Wextra
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+IFACE := eno4
 
 CXX = g++
 CXXFLAGS = -g -std=c++20 -Wall -Wextra
@@ -62,12 +63,19 @@ $(call allow-override,CC,$(CROSS_COMPILE)cc)
 $(call allow-override,LD,$(CROSS_COMPILE)ld)
 
 .PHONY: all
-all: $(APPS) $(INTERPS)
+all: $(APPS) $(INTERPS) $(OUTPUT)/ratemon_tc.bpf.o
 
 .PHONY: clean
 clean:
 	$(call msg,CLEAN)
 	rm -rfv $(OUTPUT) $(APPS)
+	sudo tc filter del dev $(IFACE) egress || true
+	sudo tc qdisc del dev $(IFACE) clsact || true
+	sudo rm -f /sys/fs/bpf/flow_to_rwnd
+	sudo rm -f /sys/fs/bpf/flow_to_win_scale
+	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_rwnd
+	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_win_scale
+
 
 $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 	$(call msg,MKDIR,$@)
@@ -76,9 +84,9 @@ $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 # Build libbpf
 $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
 	$(call msg,LIB,$@)
-	$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1		      \
-		    OBJDIR=$(dir $@)/libbpf DESTDIR=$(dir $@)		      \
-		    INCLUDEDIR= LIBDIR= UAPIDIR=			      \
+	$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1      \
+		    OBJDIR=$(dir $@)/libbpf DESTDIR=$(dir $@) \
+		    INCLUDEDIR= LIBDIR= UAPIDIR=              \
 		    install
 
 # Build bpftool
@@ -94,8 +102,8 @@ $(VMLINUX):	$(BPFTOOL)
 # Build BPF code
 $(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
-	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH)		      \
-		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)		      \
+	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH)                \
+		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)                     \
 		     -c $(filter %.c,$^) -o $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
 	$(BPFTOOL) gen object $@ $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
 
@@ -116,7 +124,7 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
-$(OUTPUT)/%.so: %.cpp $(OUTPUT)/ratemon_maps.skel.h ratemon.h | $(OUTPUT)
+$(OUTPUT)/libratemon_interp.so: %.cpp $(OUTPUT)/ratemon_maps.skel.h ratemon.h | $(OUTPUT)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) -I$(BOOST_INCLUDE) $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;
@@ -129,10 +137,19 @@ get_ld_vars:
 # Run ratemon_main and associated setup/teardown.
 # Remove existing struct_ops programs, manually attach RWND tc/egress program,
 # run ratemon_main, remove tc/egress program, clean up struct_ops.
-run_attach: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
-	sudo tc filter add dev eno4 egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
-	sudo ./ratemon_main
-	sudo tc filter del dev eno4 egress
+attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
+	sudo tc qdisc del dev $(IFACE) clsact || true
+	sudo tc qdisc add dev $(IFACE) clsact
+	sudo tc filter add dev $(IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
+	sudo bpftool map pin name flow_to_rwnd /sys/fs/bpf/flow_to_rwnd
+	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
+	sudo ./ratemon_main || true
+	sudo tc filter del dev $(IFACE) egress
+	sudo rm -f /sys/fs/bpf/flow_to_rwnd
+	sudo rm -f /sys/fs/bpf/flow_to_win_scale
+	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_rwnd
+	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_win_scale
+	sudo tc qdisc del dev $(IFACE) clsact
 
 # delete failed targets
 .DELETE_ON_ERROR:
