@@ -3,11 +3,13 @@
 #ifndef __RATEMON_MAPS_H
 #define __RATEMON_MAPS_H
 
+// clang-format off
+// vmlinux.h needs to be first.
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 #include "ratemon.h"
-
-#define PIN_GLOBAL_NS 2
+// clang-format on
 
 // Read RWND limit for flow, as set by userspace. Even though the advertised
 // window is only 16 bits in the TCP header, use 32 bits here because we have
