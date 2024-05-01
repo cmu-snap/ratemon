@@ -124,7 +124,7 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
-$(OUTPUT)/libratemon_interp.so: libratemon_interp.cpp $(OUTPUT)/ratemon_maps.skel.h ratemon.h | $(OUTPUT)
+$(OUTPUT)/libratemon_interp.so: libratemon_interp.cpp ratemon.h | $(OUTPUT)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) -I$(BOOST_INCLUDE) $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;
