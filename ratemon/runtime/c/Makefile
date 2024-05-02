@@ -26,13 +26,14 @@ ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 # If this is not set with an environment variable, then hardcode it.
 RM_IFACE ?= eno4
 
-CXX = g++
-CXXFLAGS = -g -std=c++20 -Wall -Wextra
-BOOST_INCLUDE = /home/ccanel/src/boost_1_85_0/
-BOOST_LIB = /home/ccanel/src/boost_1_85_0/stage/lib
+CXX := g++
+CXXFLAGS := -g -std=c++20 -Wall -Wextra
+SRC_DIR := $(abspath ../../../../)
+BOOST_INCLUDE := $(SRC_DIR)/boost_1_85_0/
+BOOST_LIB := $(SRC_DIR)/boost_1_85_0/stage/lib
 
-APPS = ratemon_main
-INTERPS = libratemon_interp
+APPS := ratemon_main
+INTERPS := libratemon_interp
 
 # Get Clang's default includes on this system. We'll explicitly add these dirs
 # to the includes list when compiling with `-target bpf` because otherwise some
