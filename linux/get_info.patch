@@ -1,0 +1,97 @@
+commit 71817e76e79d9e34662046950a710769615e1325
+Author: Christopher Canel <c.canel@icloud.com>
+Date:   Thu May 2 18:17:04 2024 +0000
+
+    Expose get_info() to struct_ops
+
+diff --git a/net/ipv4/bpf_tcp_ca.c b/net/ipv4/bpf_tcp_ca.c
+index d3a2dbd13..cef784f93 100644
+--- a/net/ipv4/bpf_tcp_ca.c
++++ b/net/ipv4/bpf_tcp_ca.c
+@@ -22,11 +22,11 @@ static u32 optional_ops[] = {
+ 	offsetof(struct tcp_congestion_ops, pkts_acked),
+ 	offsetof(struct tcp_congestion_ops, min_tso_segs),
+ 	offsetof(struct tcp_congestion_ops, sndbuf_expand),
++	offsetof(struct tcp_congestion_ops, get_info),
+ 	offsetof(struct tcp_congestion_ops, cong_control),
+ };
+ 
+ static u32 unsupported_ops[] = {
+-	offsetof(struct tcp_congestion_ops, get_info),
+ };
+ 
+ static const struct btf_type *tcp_sock_type;
+@@ -242,6 +242,7 @@ BTF_ID(func, dctcp_cwnd_event)
+ BTF_ID(func, dctcp_ssthresh)
+ BTF_ID(func, dctcp_cwnd_undo)
+ BTF_ID(func, dctcp_state)
++BTF_ID(func, dctcp_get_info)
+ #endif
+ #if IS_BUILTIN(CONFIG_TCP_CONG_BBR)
+ BTF_ID(func, bbr_init)
+diff --git a/tools/testing/selftests/bpf/bpf_tcp_helpers.h b/tools/testing/selftests/bpf/bpf_tcp_helpers.h
+index b1ede6f0b..933dd1af5 100644
+--- a/tools/testing/selftests/bpf/bpf_tcp_helpers.h
++++ b/tools/testing/selftests/bpf/bpf_tcp_helpers.h
+@@ -178,6 +178,9 @@ struct tcp_congestion_ops {
+ 	__u32 (*min_tso_segs)(struct sock *sk);
+ 	/* returns the multiplier used in tcp_sndbuf_expand (optional) */
+ 	__u32 (*sndbuf_expand)(struct sock *sk);
++	/* get info for inet_diag (optional) */
++	size_t (*get_info)(struct sock *sk, __u32 ext, int *attr,
++			   union tcp_cc_info *info);
+ 	/* call when packets are delivered to update cwnd and pacing rate,
+ 	 * after all the ca_state processing. (optional)
+ 	 */
+diff --git a/tools/testing/selftests/bpf/progs/bpf_dctcp.c b/tools/testing/selftests/bpf/progs/bpf_dctcp.c
+index 9573be612..397ec4421 100644
+--- a/tools/testing/selftests/bpf/progs/bpf_dctcp.c
++++ b/tools/testing/selftests/bpf/progs/bpf_dctcp.c
+@@ -11,6 +11,7 @@
+ #include <linux/types.h>
+ #include <linux/stddef.h>
+ #include <linux/tcp.h>
++#include <linux/inet_diag.h>
+ #include <bpf/bpf_helpers.h>
+ #include <bpf/bpf_tracing.h>
+ #include "bpf_tcp_helpers.h"
+@@ -219,6 +220,31 @@ __u32 BPF_PROG(dctcp_cwnd_undo, struct sock *sk)
+ 	return max(tcp_sk(sk)->snd_cwnd, ca->loss_cwnd);
+ }
+ 
++SEC("struct_ops/dctcp_get_info")
++size_t BPF_PROG(dctcp_get_info, struct sock *sk, __u32 ext, int *attr, union tcp_cc_info *info)
++{
++	const struct dctcp *ca = inet_csk_ca(sk);
++	const struct tcp_sock *tp = tcp_sk(sk);
++
++	/* Fill it also in case of VEGASINFO due to req struct limits.
++	 * We can still correctly retrieve it later.
++	 */
++	if (ext & (1 << (INET_DIAG_DCTCPINFO - 1)) ||
++	    ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
++		memset(&info->dctcp, 0, sizeof(info->dctcp));
++		info->dctcp.dctcp_enabled = 1;
++		info->dctcp.dctcp_ce_state = (__u16) ca->ce_state;
++		info->dctcp.dctcp_alpha = ca->dctcp_alpha;
++		info->dctcp.dctcp_ab_ecn = tp->mss_cache *
++						(tp->delivered_ce - ca->old_delivered_ce);
++		info->dctcp.dctcp_ab_tot = tp->mss_cache *
++						(tp->delivered - ca->old_delivered);
++		*attr = INET_DIAG_DCTCPINFO;
++		return sizeof(info->dctcp);
++	}
++	return 0;
++}
++
+ extern void tcp_reno_cong_avoid(struct sock *sk, __u32 ack, __u32 acked) __ksym;
+ 
+ SEC("struct_ops/dctcp_reno_cong_avoid")
+@@ -244,6 +270,7 @@ struct tcp_congestion_ops dctcp = {
+ 	.cong_avoid	= (void *)dctcp_cong_avoid,
+ 	.undo_cwnd	= (void *)dctcp_cwnd_undo,
+ 	.set_state	= (void *)dctcp_state,
++	.get_info	= (void *)dctcp_get_info,
+ 	.flags		= TCP_CONG_NEEDS_ECN,
+ 	.name		= "bpf_dctcp",
+ };
