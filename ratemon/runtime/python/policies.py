@@ -4,7 +4,7 @@ from enum import IntEnum
 import logging
 
 from ratemon.model import defaults, models, features, utils
-from ratemon.runtime import reaction_strategy
+from ratemon.runtime.python import reaction_strategy
 
 
 class Policy(IntEnum):

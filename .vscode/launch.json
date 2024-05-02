@@ -8,7 +8,7 @@
             "name": "(d) runtime",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "-h"
@@ -26,7 +26,7 @@
             "name": "(r) runtime",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
@@ -55,7 +55,7 @@
             "name": "(r) runtime, schedule",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
+            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
             "console": "integratedTerminal",
             "args": [
                 "--model=HistGbdtSklearn",
@@ -85,7 +85,7 @@
             "args": [
                 "-o",
                 "/tmp/tmp.prof",
-                "${workspaceFolder}/ratemon/runtime/ratemon_runtime.py",
+                "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
                 "--model=HistGbdtSklearn",
                 "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
                 "--interface=ens3",

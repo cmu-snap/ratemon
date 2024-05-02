@@ -12,8 +12,8 @@ import numpy as np
 
 from ratemon.model import data, defaults, features, gen_features, models, utils
 from ratemon.model.defaults import Class
-from ratemon.runtime import ebpf, flow_utils, policies
-from ratemon.runtime.policies import Policy
+from ratemon.runtime.python import ebpf, flow_utils, policies
+from ratemon.runtime.python.policies import Policy
 
 
 def run(args, que, flags, done):

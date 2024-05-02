@@ -18,16 +18,16 @@ import netifaces as ni
 import pcapy
 
 from ratemon.model import features, utils
-from ratemon.runtime import (
+from ratemon.runtime.python import (
     flow_utils,
     mitigation_strategy,
     policies,
     policy_engine,
     reaction_strategy,
 )
-from ratemon.runtime.policies import Policy
-from ratemon.runtime.mitigation_strategy import MitigationStrategy
-from ratemon.runtime.reaction_strategy import ReactionStrategy
+from ratemon.runtime.python.policies import Policy
+from ratemon.runtime.python.mitigation_strategy import MitigationStrategy
+from ratemon.runtime.python.reaction_strategy import ReactionStrategy
 
 
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")
