@@ -20,7 +20,8 @@ DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install
     bc \
     flex \
     libelf-dev \
-    bison
+    bison \
+    pahole
 
 pushd "$linux_dir"
 cp -fv /boot/config-$(uname -r) .config
