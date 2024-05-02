@@ -23,6 +23,9 @@ DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install
     bison
 
 pushd "$linux_dir"
+cp -fv /boot/config-$(uname -r) .config
+scripts/config --disable SYSTEM_TRUSTED_KEYS
+scripts/config --disable SYSTEM_REVOCATION_KEYS
 make -j"$(nproc)" menuconfig
 make -j"$(nproc)"
 sudo make -j "$(nproc)" modules_install
