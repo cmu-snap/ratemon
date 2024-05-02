@@ -141,10 +141,10 @@ test/test_cgroup/
 test/models
 
 # Compiler output
-ratemon/runtime/.output
-ratemon/runtime/ratemon_main
-ratemon/runtime/experimental/.output
-ratemon/runtime/experimental/ratemon_test
-ratemon/runtime/experimental/client_server/.output
-ratemon/runtime/experimental/client_server/client
-ratemon/runtime/experimental/client_server/server
+ratemon/runtime/c/.output
+ratemon/runtime/c/ratemon_main
+ratemon/runtime/c/experimental/.output
+ratemon/runtime/c/experimental/ratemon_test
+ratemon/runtime/c/experimental/client_server/.output
+ratemon/runtime/c/experimental/client_server/client
+ratemon/runtime/c/experimental/client_server/server
