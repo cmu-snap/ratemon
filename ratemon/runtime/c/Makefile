@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
+
+# Set interface with RM_IFACE environment variable.
+
 OUTPUT := .output
 CLANG ?= clang
 LIBBPF_SRC := $(abspath ../../../libbpf/src)
@@ -20,7 +23,8 @@ VMLINUX := $(OUTPUT)/vmlinux.h
 INCLUDES := -I$(OUTPUT) -I../../../libbpf/include/uapi -I$(dir $(VMLINUX))
 CFLAGS := -g -std=c17 -Wall -Wextra
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
-IFACE := eno4
+# If this is not set with an environment variable, then hardcode it.
+RM_IFACE ?= eno4
 
 CXX = g++
 CXXFLAGS = -g -std=c++20 -Wall -Wextra
@@ -69,8 +73,8 @@ all: $(APPS) $(INTERPS) $(OUTPUT)/ratemon_tc.bpf.o
 clean:
 	$(call msg,CLEAN)
 	rm -rfv $(OUTPUT) $(APPS)
-	sudo tc filter del dev $(IFACE) egress || true
-	sudo tc qdisc del dev $(IFACE) clsact || true
+	sudo tc filter del dev $(RM_IFACE) egress || true
+	sudo tc qdisc del dev $(RM_IFACE) clsact || true
 	sudo rm -f /sys/fs/bpf/flow_to_rwnd
 	sudo rm -f /sys/fs/bpf/flow_to_win_scale
 	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_rwnd
@@ -138,18 +142,18 @@ get_ld_vars:
 # Remove existing struct_ops programs, manually attach RWND tc/egress program,
 # run ratemon_main, remove tc/egress program, clean up struct_ops.
 attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
-	sudo tc qdisc del dev $(IFACE) clsact || true
-	sudo tc qdisc add dev $(IFACE) clsact
-	sudo tc filter add dev $(IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
+	sudo tc qdisc del dev $(RM_IFACE) clsact || true
+	sudo tc qdisc add dev $(RM_IFACE) clsact
+	sudo tc filter add dev $(RM_IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
 	sudo bpftool map pin name flow_to_rwnd /sys/fs/bpf/flow_to_rwnd
 	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
 	sudo ./ratemon_main || true
-	sudo tc filter del dev $(IFACE) egress
+	sudo tc filter del dev $(RM_IFACE) egress
 	sudo rm -f /sys/fs/bpf/flow_to_rwnd
 	sudo rm -f /sys/fs/bpf/flow_to_win_scale
 	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_rwnd
 	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_win_scale
-	sudo tc qdisc del dev $(IFACE) clsact
+	sudo tc qdisc del dev $(RM_IFACE) clsact
 
 # delete failed targets
 .DELETE_ON_ERROR:
