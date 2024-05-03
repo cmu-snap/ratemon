@@ -2,7 +2,7 @@
 
 # Set interface with RM_IFACE environment variable.
 
-OUTPUT := .output
+OUTPUT := $(abspath .output)
 CLANG ?= clang
 LIBBPF_SRC := $(abspath ../../../libbpf/src)
 BPFTOOL_SRC := $(abspath ../../../bpftool/src)
