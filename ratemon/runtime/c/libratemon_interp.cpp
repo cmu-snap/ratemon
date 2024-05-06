@@ -15,9 +15,11 @@
 #include <sys/socket.h>  // for socket APIs
 #include <unistd.h>
 
+#include <algorithm>
 #include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/thread.hpp>
+#include <cassert>
 #include <mutex>
 #include <queue>
 #include <unordered_map>
@@ -29,8 +31,9 @@ boost::asio::io_service io;
 boost::asio::deadline_timer timer(io);
 
 std::mutex lock_control;
-unsigned int max_active_flows = 0;
-unsigned int epoch_us = 0;
+unsigned int max_active_flows = 5;
+unsigned int epoch_us = 10000;
+unsigned int num_to_schedule = 1;
 bool setup = false;
 // FD for the flow_to_rwnd map.
 int flow_to_rwnd_fd = 0;
@@ -74,13 +77,15 @@ void timer_callback(const boost::system::error_code &error) {
     timer.async_wait(&timer_callback);
     return;
   }
-  // At this point, max_active_flows, epoch_us, and flow_to_rwnd_fd should be
-  // set.
-  if (max_active_flows == 0 || epoch_us == 0 || flow_to_rwnd_fd == 0) {
+  // At this point, max_active_flows, epoch_us, num_to_schedule, and
+  // flow_to_rwnd_fd should be set.
+  if (max_active_flows == 0 || epoch_us == 0 || num_to_schedule == 0 ||
+      flow_to_rwnd_fd == 0) {
     RM_PRINTF(
-        "ERROR: cannot continue, invalid max_active_flows=%u, epoch_us=%u, or "
+        "ERROR: cannot continue, invalid max_active_flows=%u, epoch_us=%u, "
+        "num_to_schedule=%u, or "
         "flow_to_rwnd_fd=%d\n",
-        max_active_flows, epoch_us, flow_to_rwnd_fd);
+        max_active_flows, epoch_us, num_to_schedule, flow_to_rwnd_fd);
     timer.expires_from_now(one_sec);
     timer.async_wait(&timer_callback);
     return;
@@ -96,68 +101,107 @@ void timer_callback(const boost::system::error_code &error) {
     return;
   }
 
+  boost::posix_time::ptime now =
+      boost::posix_time::microsec_clock::local_time();
   boost::posix_time::ptime now_plus_epoch =
-      boost::posix_time::microsec_clock::local_time() +
-      boost::posix_time::microseconds(epoch_us);
+      now + boost::posix_time::microseconds(epoch_us);
 
-  // if (boost::posix_time::microsec_clock::local_time() <
-  //     active_fds_queue.front().second) {
-  //   // The next flow should not be paused yet.
-  //   timer.expires_at(active_fds_queue.front().second);
-  //   timer.async_wait(&timer_callback);
-  //   lock_scheduler.unlock();
-  //   return;
-  // }
+  if (now < active_fds_queue.front().second) {
+    // The next flow should not be scheduled yet.
+    timer.expires_at(active_fds_queue.front().second);
+    timer.async_wait(&timer_callback);
+    lock_scheduler.unlock();
+    return;
+  }
 
-  // If there are paused flows, then unpause one and remember that we did that.
-  bool found_paused = false;
-  while (!paused_fds_queue.empty()) {
-    // Activate the next flow. Record the time at which is should be paused.
-    int to_activate = paused_fds_queue.front();
-    paused_fds_queue.pop();
-    if (fd_to_flow.contains(to_activate)) {
-      active_fds_queue.push({to_activate, now_plus_epoch});
-      bpf_map_delete_elem(flow_to_rwnd_fd, &(fd_to_flow[to_activate]));
-      trigger_ack(to_activate);
-      found_paused = true;
-      break;
+  // Need to keep track of the number of active flows before we do any
+  // scheduling so that we do not accidentally pause flows that we just
+  // activated.
+  auto num_active = active_fds_queue.size();
+
+  // Schedule up to num_to_schedule flows, one at a time. But if there are not
+  // enough flows, then schedule the max number in either queue. One iteration
+  // of this loop can service one flow from each queue.
+  for (unsigned int i = 0;
+       i < std::min((long unsigned int)num_to_schedule,
+                    std::max(active_fds_queue.size(), paused_fds_queue.size()));
+       ++i) {
+    // If there are paused flows, then activate one. Loop until we find a paused
+    // flow that is valid, meaning that it has not been removed from fd_to_flow
+    // (i.e., has not been close()'ed).
+    while (!paused_fds_queue.empty()) {
+      int to_activate = paused_fds_queue.front();
+      paused_fds_queue.pop();
+      if (fd_to_flow.contains(to_activate)) {
+        // This flow is valid, so activate it. Record the time at which its
+        // epoch is over.
+        active_fds_queue.push({to_activate, now_plus_epoch});
+        bpf_map_delete_elem(flow_to_rwnd_fd, &(fd_to_flow[to_activate]));
+        trigger_ack(to_activate);
+        break;
+      }
+    }
+
+    // Do not pause more active flows than were active at the start of this
+    // epoch, otherwise we will be pausing flows that we just activated.
+    if (i < num_active) {
+      // We always need to pop the front of the active_fds_queue because it was
+      // that flow's timer which triggered the current scheduling event. We
+      // either schedule that flow again or pause it.
+      int to_pause = active_fds_queue.front().first;
+      active_fds_queue.pop();
+      if (active_fds_queue.size() < max_active_flows &&
+          paused_fds_queue.empty()) {
+        // If there are fewer than the limit flows active and there are no
+        // waiting flows, then scheduling this flow again. But first, check to
+        // make sure that it is still valid (see above).
+        if (fd_to_flow.contains(to_pause)) {
+          active_fds_queue.push({to_pause, now_plus_epoch});
+        }
+      } else {
+        // Pause this flow.
+        paused_fds_queue.push(to_pause);
+        bpf_map_update_elem(flow_to_rwnd_fd, &(fd_to_flow[to_pause]), &zero,
+                            BPF_ANY);
+        trigger_ack(to_pause);
+      }
     }
   }
 
-  // Pause the next active flow.
-  int to_pause = active_fds_queue.front().first;
-  active_fds_queue.pop();
-  if (found_paused) {
-    // If there were other flows waiting and we activated one, then pause this
-    // flow.
-    paused_fds_queue.push(to_pause);
-    bpf_map_update_elem(flow_to_rwnd_fd, &(fd_to_flow[to_pause]), &zero,
-                        BPF_ANY);
-    trigger_ack(to_pause);
-  } else {
-    // If there were no waiting flows, then put this flow back in the active
-    // queue.
-    if (fd_to_flow.contains(to_pause)) {
-      active_fds_queue.push({to_pause, now_plus_epoch});
-    }
-  }
-  lock_scheduler.unlock();
+  // Invariants.
+  // Cannot have more than the max number of active flows.
+  assert(active_fds_queue.size() <= max_active_flows);
+  // If there are no active flows, then there should also be no paused flows.
+  assert(!active_fds_queue.empty() || paused_fds_queue.empty());
 
   // Schedule the next timer callback for when the next flow should be paused.
+  if (active_fds_queue.empty()) {
+    // If we cleaned up all flows, then revert to slow check mode.
+    timer.expires_from_now(one_sec);
+    timer.async_wait(&timer_callback);
+    lock_scheduler.unlock();
+    return;
+  }
+  // Trigger scheduling for the next flow.
   timer.expires_at(active_fds_queue.front().second);
   timer.async_wait(&timer_callback);
+  lock_scheduler.unlock();
   return;
 }
 
 void thread_func() {
+  // This function is designed to be run in a thread. It is responsible for
+  // managing the async timers that perform scheduling.
   timer.expires_from_now(one_sec);
   timer.async_wait(&timer_callback);
+  // Execute the configured events, until there are no more events to execute.
   io.run();
 }
 
 boost::thread thread(thread_func);
 
 bool read_env_uint(const char *key, volatile unsigned int *dest) {
+  // Read an environment variable as an unsigned integer.
   char *val_str = getenv(key);
   if (val_str == NULL) {
     RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
@@ -195,7 +239,9 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return new_fd;
   }
 
-  // Perform BPF setup (only once for all flows in this process).
+  // Perform setup (only once for all flows in this process), such as reading
+  // parameters from environment variables and looking up the BPF map
+  // flow_to_rwnd.
   lock_control.lock();
   if (!setup) {
     if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
@@ -206,7 +252,15 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       lock_control.unlock();
       return new_fd;
     }
+    // Cannot schedule more than max_active_flows at once.
+    if (!read_env_uint(RM_NUM_TO_SCHEDULE_KEY, &num_to_schedule) ||
+        num_to_schedule > max_active_flows) {
+      lock_control.unlock();
+      return new_fd;
+    }
 
+    // Look up the FD for the flow_to_rwnd map. We do not need the BPF skeleton
+    // for this.
     int err = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
     if (err == -1) {
       RM_PRINTF("ERROR: failed to get FD for 'flow_to_rwnd'\n");
@@ -217,8 +271,10 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     RM_PRINTF("INFO: successfully looked up 'flow_to_rwnd' FD\n");
     setup = true;
 
-    RM_PRINTF("INFO: max_active_flows=%u epoch_us=%u\n", max_active_flows,
-              epoch_us);
+    RM_PRINTF(
+        "INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
+        "num_to_schedule=%u\n",
+        max_active_flows, epoch_us, num_to_schedule);
   }
   lock_control.unlock();
 

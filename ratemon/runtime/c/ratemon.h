@@ -10,6 +10,7 @@
 #define RM_PRINTF(...) printf(__VA_ARGS__)
 // #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
+#define NDEBUG // Disable assert() calls.
 #define RM_PRINTF(...)
 // #define RM_PRINTK(...)
 #endif
@@ -26,6 +27,14 @@
 #define RM_MAX_ACTIVE_FLOWS_KEY "RM_MAX_ACTIVE_FLOWS"
 // Environment variable that specifies how often to perform flow scheduling.
 #define RM_EPOCH_US_KEY "RM_EPOCH_US"
+// Environment variable that specifies the number of flows to schedule per
+// epoch. "Schedule" can mean either activate or pause. Note that setting this
+// greater than 1 effectively switches scheduled RWND tuning from a strict
+// timeslice mode (where each flow is active for exactly the scheduling epoch)
+// to a loose mode (where flows are batched and the entire batch is active for
+// at most the oldest flow's epoch, even if other flows in the batch arrived
+// more recently).
+#define RM_NUM_TO_SCHEDULE_KEY "RM_NUM_TO_SCHEDULE"
 
 // Key for use in flow-based maps.
 struct rm_flow {
