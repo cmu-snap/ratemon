@@ -34,6 +34,7 @@ std::mutex lock_control;
 unsigned int max_active_flows = 5;
 unsigned int epoch_us = 10000;
 unsigned int num_to_schedule = 1;
+unsigned short monitor_port = 9000;
 bool setup = false;
 // FD for the flow_to_rwnd map.
 int flow_to_rwnd_fd = 0;
@@ -258,6 +259,13 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       lock_control.unlock();
       return new_fd;
     }
+    unsigned int monitor_port_;
+    if (!read_env_uint(RM_MONITOR_PORT, &monitor_port_) ||
+        monitor_port_ >= 65536) {
+      lock_control.unlock();
+      return new_fd;
+    }
+    monitor_port = (unsigned short)monitor_port_;
 
     // Look up the FD for the flow_to_rwnd map. We do not need the BPF skeleton
     // for this.
@@ -277,25 +285,6 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
         max_active_flows, epoch_us, num_to_schedule);
   }
   lock_control.unlock();
-
-  // Set the CCA and make sure it was set correctly.
-  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, RM_BPF_CUBIC,
-                 strlen(RM_BPF_CUBIC)) == -1) {
-    RM_PRINTF("ERROR: failed to 'setsockopt' TCP_CONGESTION\n");
-    return new_fd;
-  }
-  char retrieved_cca[32];
-  socklen_t retrieved_cca_len = sizeof(retrieved_cca);
-  if (getsockopt(new_fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
-                 &retrieved_cca_len) == -1) {
-    RM_PRINTF("ERROR: failed to 'getsockopt' TCP_CONGESTION\n");
-    return new_fd;
-  }
-  if (strcmp(retrieved_cca, RM_BPF_CUBIC)) {
-    RM_PRINTF("ERROR: failed to set CCA to %s! Actual CCA is: %s\n",
-              RM_BPF_CUBIC, retrieved_cca);
-    return new_fd;
-  }
 
   // Determine the four-tuple, which we need to track because RWND tuning is
   // applied based on four-tuple.
@@ -322,6 +311,31 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
                          .remote_port = ntohs(remote_addr.sin_port)};
   RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
             flow.local_addr, flow.local_port);
+
+  if (flow.local_port != monitor_port) {
+    RM_PRINTF("INFO: ignoring flow on port %u, not on monitor port %u\n",
+              flow.local_port, monitor_port);
+    return new_fd;
+  }
+
+  // Set the CCA and make sure it was set correctly.
+  if (setsockopt(new_fd, SOL_TCP, TCP_CONGESTION, RM_BPF_CUBIC,
+                 strlen(RM_BPF_CUBIC)) == -1) {
+    RM_PRINTF("ERROR: failed to 'setsockopt' TCP_CONGESTION\n");
+    return new_fd;
+  }
+  char retrieved_cca[32];
+  socklen_t retrieved_cca_len = sizeof(retrieved_cca);
+  if (getsockopt(new_fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
+                 &retrieved_cca_len) == -1) {
+    RM_PRINTF("ERROR: failed to 'getsockopt' TCP_CONGESTION\n");
+    return new_fd;
+  }
+  if (strcmp(retrieved_cca, RM_BPF_CUBIC)) {
+    RM_PRINTF("ERROR: failed to set CCA to %s! Actual CCA is: %s\n",
+              RM_BPF_CUBIC, retrieved_cca);
+    return new_fd;
+  }
 
   lock_scheduler.lock();
   fd_to_flow[new_fd] = flow;

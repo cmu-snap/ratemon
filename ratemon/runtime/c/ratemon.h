@@ -10,7 +10,7 @@
 #define RM_PRINTF(...) printf(__VA_ARGS__)
 // #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
-#define NDEBUG // Disable assert() calls.
+#define NDEBUG  // Disable assert() calls.
 #define RM_PRINTF(...)
 // #define RM_PRINTK(...)
 #endif
@@ -35,6 +35,9 @@
 // at most the oldest flow's epoch, even if other flows in the batch arrived
 // more recently).
 #define RM_NUM_TO_SCHEDULE_KEY "RM_NUM_TO_SCHEDULE"
+// Environment variable that specifies the local port to manage using scheduled
+// RWND tuning.
+#define RM_MONITOR_PORT "RM_MONITOR_PORT"
 
 // Key for use in flow-based maps.
 struct rm_flow {
