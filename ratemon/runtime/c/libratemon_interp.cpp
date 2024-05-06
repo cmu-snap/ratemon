@@ -30,7 +30,7 @@
 boost::asio::io_service io;
 boost::asio::deadline_timer timer(io);
 
-std::mutex lock_control;
+std::mutex lock_setup;
 unsigned int max_active_flows = 5;
 unsigned int epoch_us = 10000;
 unsigned int num_to_schedule = 1;
@@ -243,26 +243,26 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   // Perform setup (only once for all flows in this process), such as reading
   // parameters from environment variables and looking up the BPF map
   // flow_to_rwnd.
-  lock_control.lock();
+  lock_setup.lock();
   if (!setup) {
     if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
-      lock_control.unlock();
+      lock_setup.unlock();
       return new_fd;
     }
     if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us)) {
-      lock_control.unlock();
+      lock_setup.unlock();
       return new_fd;
     }
     // Cannot schedule more than max_active_flows at once.
     if (!read_env_uint(RM_NUM_TO_SCHEDULE_KEY, &num_to_schedule) ||
         num_to_schedule > max_active_flows) {
-      lock_control.unlock();
+      lock_setup.unlock();
       return new_fd;
     }
     unsigned int monitor_port_;
     if (!read_env_uint(RM_MONITOR_PORT, &monitor_port_) ||
         monitor_port_ >= 65536) {
-      lock_control.unlock();
+      lock_setup.unlock();
       return new_fd;
     }
     monitor_port = (unsigned short)monitor_port_;
@@ -272,7 +272,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     int err = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
     if (err == -1) {
       RM_PRINTF("ERROR: failed to get FD for 'flow_to_rwnd'\n");
-      lock_control.unlock();
+      lock_setup.unlock();
       return new_fd;
     }
     flow_to_rwnd_fd = err;
@@ -284,7 +284,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
         "num_to_schedule=%u\n",
         max_active_flows, epoch_us, num_to_schedule);
   }
-  lock_control.unlock();
+  lock_setup.unlock();
 
   // Determine the four-tuple, which we need to track because RWND tuning is
   // applied based on four-tuple.
