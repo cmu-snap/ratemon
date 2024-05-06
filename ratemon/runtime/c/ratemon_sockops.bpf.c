@@ -127,8 +127,8 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     return SOCKOPS_OK;
   }
 
-  struct rm_flow flow = {.local_addr = skops->local_ip4,
-                         .remote_addr = skops->remote_ip4,
+  struct rm_flow flow = {.local_addr = bpf_ntohl(skops->local_ip4),
+                         .remote_addr = bpf_ntohl(skops->remote_ip4),
                          .local_port = (u16)skops->local_port,
                          // Use bpf_ntohl instead of bpf_ntohs because the port
                          // is actually stored as a u32.
