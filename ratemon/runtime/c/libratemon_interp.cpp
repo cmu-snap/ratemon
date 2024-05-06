@@ -281,8 +281,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
     RM_PRINTF(
         "INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
-        "num_to_schedule=%u\n",
-        max_active_flows, epoch_us, num_to_schedule);
+        "num_to_schedule=%u, monitor_port=%u\n",
+        max_active_flows, epoch_us, num_to_schedule, monitor_port);
   }
   lock_setup.unlock();
 
