@@ -398,7 +398,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
             flow.local_addr, flow.local_port);
 
-  if (flow.local_port != monitor_port) {
+  if (!(flow.remote_port >= monitor_port &&
+        flow.remote_port <= monitor_port + 1000)) {
     RM_PRINTF("INFO: ignoring flow on port %u, not on monitor port %u\n",
               flow.local_port, monitor_port);
     return new_fd;

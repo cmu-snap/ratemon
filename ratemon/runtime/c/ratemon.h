@@ -35,8 +35,8 @@
 // at most the oldest flow's epoch, even if other flows in the batch arrived
 // more recently).
 #define RM_NUM_TO_SCHEDULE_KEY "RM_NUM_TO_SCHEDULE"
-// Environment variable that specifies the local port to manage using scheduled
-// RWND tuning.
+// Environment variable that specifies the start range of REMOTE ports to manage
+// using scheduled RWND tuning.
 #define RM_MONITOR_PORT "RM_MONITOR_PORT"
 
 // Key for use in flow-based maps.
