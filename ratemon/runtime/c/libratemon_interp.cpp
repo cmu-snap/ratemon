@@ -21,6 +21,8 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/thread.hpp>
 #include <cassert>
+#include <cmath>
+#include <experimental/random>
 #include <mutex>
 #include <queue>
 #include <unordered_map>
@@ -158,7 +160,13 @@ void timer_callback(const boost::system::error_code &error) {
       if (fd_to_flow.contains(to_activate)) {
         // This flow is valid, so activate it. Record the time at which its
         // epoch is over.
-        active_fds_queue.push({to_activate, now_plus_epoch});
+        // Randomly jitter the activation time by +/- 12.5% of the epoch.
+        int rand =
+            std::experimental::randint(0, (int)std::roundl(epoch_us * 0.25)) -
+            (int)std::roundl(epoch_us * 0.125);
+        boost::posix_time::ptime now_plus_epoch_plus_rand =
+            now_plus_epoch + boost::posix_time::microseconds(rand);
+        active_fds_queue.push({to_activate, now_plus_epoch_plus_rand});
         bpf_map_delete_elem(flow_to_rwnd_fd, &(fd_to_flow[to_activate]));
         trigger_ack(to_activate);
         RM_PRINTF("INFO: activated FD=%d\n", to_activate);
@@ -180,7 +188,12 @@ void timer_callback(const boost::system::error_code &error) {
           // If there are fewer than the limit flows active and there are no
           // waiting flows, then scheduling this flow again. But first, check to
           // make sure that it is still valid (see above).
-          active_fds_queue.push({to_pause, now_plus_epoch});
+          int rand =
+              std::experimental::randint(0, (int)std::roundl(epoch_us * 0.25)) -
+              (int)std::roundl(epoch_us * 0.125);
+          boost::posix_time::ptime now_plus_epoch_plus_rand =
+              now_plus_epoch + boost::posix_time::microseconds(rand);
+          active_fds_queue.push({to_pause, now_plus_epoch_plus_rand});
           RM_PRINTF("INFO: reactivated FD=%d\n", to_pause);
         } else {
           // Pause this flow.
