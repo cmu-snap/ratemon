@@ -25,8 +25,8 @@ struct bpf_link *structops_link;
 struct ratemon_sockops_bpf *sockops_skel;
 struct ratemon_structops_bpf *structops_skel;
 
-// Which interface to attach the 'do_rwnd_at_egress' program to.
-// const char *ifname = "eno4";
+// Existing signal handler for SIGINT.
+struct sigaction oldact;
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
                            va_list args) {
@@ -34,7 +34,21 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
 }
 
 // Catch SIGINT and trigger the main function to end.
-void sigint_handler(int dummy) { run = false; }
+void sigint_handler(int signum) {
+  switch (signum) {
+    case SIGINT:
+      RM_PRINTF("INFO: caught SIGINT\n");
+      run = false;
+      RM_PRINTF("Resetting old SIGINT handler\n");
+      sigaction(SIGINT, &oldact, NULL);
+      break;
+    default:
+      RM_PRINTF("ERROR: caught signal %d\n", signum);
+      break;
+  }
+  RM_PRINTF("INFO: re-raising signal %d\n", signum);
+  raise(signum);
+}
 
 // Adapted from:
 // https://github.com/torvalds/linux/blob/master/tools/testing/selftests/bpf/cgroup_helpers.c
@@ -110,7 +124,11 @@ int prepare_structops() {
 
 int main(int argc, char **argv) {
   // Catch SIGINT to end the program.
-  signal(SIGINT, sigint_handler);
+  struct sigaction action;
+  action.sa_handler = sigint_handler;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = SA_RESETHAND;
+  sigaction(SIGINT, &action, &oldact);
 
   /* Set up libbpf errors and debug info callback */
   libbpf_set_print(libbpf_print_fn);
