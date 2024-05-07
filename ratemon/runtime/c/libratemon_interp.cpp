@@ -228,7 +228,7 @@ void thread_func() {
   RM_PRINTF("Scheduler thread ended\n");
 }
 
-// Catch SIGINT and trigger the main function to end.
+// Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
     case SIGINT:
