@@ -225,6 +225,18 @@ void thread_func() {
   timer.async_wait(&timer_callback);
   // Execute the configured events, until there are no more events to execute.
   io.run();
+
+  // Delete all flows from flow_to_rwnd and flow_to_win_scale.
+  lock_scheduler.lock();
+  for (const auto &p : fd_to_flow) {
+    if (flow_to_rwnd_fd != 0) {
+      bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+    }
+    if (flow_to_win_scale_fd != 0) {
+      bpf_map_delete_elem(flow_to_win_scale_fd, &p.second);
+    }
+  }
+  lock_scheduler.unlock();
   RM_PRINTF("Scheduler thread ended\n");
 }
 
@@ -282,6 +294,11 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     if (addr->sa_family == AF_INET6) {
       RM_PRINTF("WARNING: (continued) got 'accept' for AF_INET6!\n");
     }
+    return new_fd;
+  }
+
+  if (!run) {
+    // If we have been signalled to quit, then do nothing more.
     return new_fd;
   }
 
