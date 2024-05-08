@@ -125,7 +125,7 @@ void timer_callback(const boost::system::error_code &error) {
   }
 
   lock_scheduler.lock();
-  RM_PRINTF("Performing scheduling\n");
+  RM_PRINTF("INFO: performing scheduling\n");
 
   if (active_fds_queue.empty() && paused_fds_queue.empty()) {
     if (timer.expires_from_now(one_sec)) {
