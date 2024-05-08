@@ -37,8 +37,10 @@
 #define RM_NUM_TO_SCHEDULE_KEY "RM_NUM_TO_SCHEDULE"
 // Environment variable that specifies the start range of REMOTE ports to manage
 // using scheduled RWND tuning.
-#define RM_MONITOR_PORT_START "RM_MONITOR_PORT_START"
-#define RM_MONITOR_PORT_END "RM_MONITOR_PORT_END"
+#define RM_MONITOR_PORT_START_KEY "RM_MONITOR_PORT_START"
+#define RM_MONITOR_PORT_END_KEY "RM_MONITOR_PORT_END"
+// Path to cgroup for attaching sockops programs.
+#define RM_CGROUP_KEY "RM_CGROUP"
 
 // Key for use in flow-based maps.
 struct rm_flow {

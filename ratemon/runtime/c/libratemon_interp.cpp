@@ -336,14 +336,14 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       return new_fd;
     }
     unsigned int monitor_port_start_;
-    if (!read_env_uint(RM_MONITOR_PORT_START, &monitor_port_start_) ||
+    if (!read_env_uint(RM_MONITOR_PORT_START_KEY, &monitor_port_start_) ||
         monitor_port_start_ >= 65536) {
       lock_setup.unlock();
       return new_fd;
     }
     monitor_port_start = (unsigned short)monitor_port_start_;
     unsigned int monitor_port_end_;
-    if (!read_env_uint(RM_MONITOR_PORT_END, &monitor_port_end_) ||
+    if (!read_env_uint(RM_MONITOR_PORT_END_KEY, &monitor_port_end_) ||
         monitor_port_end_ >= 65536) {
       lock_setup.unlock();
       return new_fd;

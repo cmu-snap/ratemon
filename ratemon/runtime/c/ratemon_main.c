@@ -19,8 +19,6 @@
 // Signals whether the program should continue running.
 static volatile bool run = true;
 
-#define CG_PATH "/test_cg"
-
 struct bpf_link *structops_link;
 struct ratemon_sockops_bpf *sockops_skel;
 struct ratemon_structops_bpf *structops_skel;
@@ -75,7 +73,7 @@ static int join_cgroup(const char *cgroup_path) {
   return rc;
 }
 
-int prepare_sockops() {
+int prepare_sockops(char *cg_path) {
   // Open skeleton and load programs and maps.
   sockops_skel = ratemon_sockops_bpf__open_and_load();
   if (!sockops_skel) {
@@ -83,17 +81,17 @@ int prepare_sockops() {
     return 1;
   }
   // Join cgroup for sock_ops.
-  if (join_cgroup(CG_PATH) < 0) {
-    printf("ERROR: failed to join cgroup: %s\n", CG_PATH);
+  if (join_cgroup(cg_path) < 0) {
+    printf("ERROR: failed to join cgroup: %s\n", cg_path);
     return 1;
   }
-  int cg_fd = open(CG_PATH, O_RDONLY);
+  int cg_fd = open(cg_path, O_RDONLY);
   if (cg_fd <= 0) {
-    printf("ERROR: failed to open cgroup: %s cg_fd: %d errno: %d\n", CG_PATH,
+    printf("ERROR: failed to open cgroup: %s cg_fd: %d errno: %d\n", cg_path,
            cg_fd, errno);
     return 1;
   }
-  printf("INFO: opened cgroup: %s, cg_fd: %d, pid: %d\n", CG_PATH, cg_fd,
+  printf("INFO: opened cgroup: %s, cg_fd: %d, pid: %d\n", cg_path, cg_fd,
          getpid());
   // Attach sock_ops.
   struct bpf_link *skops_link_win_scale =
@@ -122,6 +120,17 @@ int prepare_structops() {
   return 0;
 }
 
+bool read_env_str(const char *key, char **dest) {
+  // Read an environment variable a char *.
+  char *val_str = getenv(key);
+  if (val_str == NULL) {
+    RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
+    return false;
+  }
+  *dest = val_str;
+  return true;
+}
+
 int main(int argc, char **argv) {
   // Catch SIGINT to end the program.
   struct sigaction action;
@@ -133,7 +142,13 @@ int main(int argc, char **argv) {
   /* Set up libbpf errors and debug info callback */
   libbpf_set_print(libbpf_print_fn);
 
-  if (prepare_sockops()) {
+  char cg_path[1024];
+  if (!read_env_str(RM_CGROUP_KEY, &cg_path)) {
+    RM_PRINTF("ERROR: failed to read cgroup path\n");
+    goto cleanup;
+  }
+
+  if (prepare_sockops(cg_path)) {
     RM_PRINTF("ERROR: failed to set up sockops\n");
     goto cleanup;
   }
