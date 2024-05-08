@@ -44,8 +44,6 @@ struct sigaction oldact;
 int flow_to_rwnd_fd = 0;
 // FD for the BPF map "flow_to_win_sca" (short for "flow_to_win_scale").
 int flow_to_win_scale_fd = 0;
-// Manages the io_service.
-boost::thread scheduler_thread;
 // Runs async timers for scheduling
 boost::asio::io_service io;
 // Periodically performs scheduling using timer_callback().
@@ -282,6 +280,9 @@ void thread_func() {
   }
 }
 
+// Manages the io_service.
+boost::thread scheduler_thread(thread_func);
+
 // Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
@@ -410,8 +411,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     action.sa_flags = SA_RESETHAND;
     sigaction(SIGINT, &action, &oldact);
 
-    // Launch the scheduler thread.
-    scheduler_thread = boost::thread(thread_func);
+    // // Launch the scheduler thread.
+    // scheduler_thread = boost::thread(thread_func);
 
     RM_PRINTF(
         "INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
