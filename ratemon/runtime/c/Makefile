@@ -25,6 +25,7 @@ CFLAGS := -g -std=c17 -Wall -Wextra
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 # If this is not set with an environment variable, then hardcode it.
 RM_IFACE ?= eno4
+RM_CGROUP ?= /test_cg
 
 CXX := g++
 CXXFLAGS := -g -std=c++20 -Wall -Wextra
@@ -149,7 +150,7 @@ attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 	sudo tc filter add dev $(RM_IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
 	sudo bpftool map pin name flow_to_rwnd /sys/fs/bpf/flow_to_rwnd
 	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
-	sudo ./ratemon_main || true
+	sudo RM_CGROUP=$(RM_CGROUP) ./ratemon_main || true
 	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress
 	sudo rm -f /sys/fs/bpf/flow_to_rwnd

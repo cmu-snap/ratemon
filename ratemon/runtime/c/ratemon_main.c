@@ -10,6 +10,7 @@
 #include <net/if.h>
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "ratemon.h"
@@ -35,16 +36,16 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
 void sigint_handler(int signum) {
   switch (signum) {
     case SIGINT:
-      RM_PRINTF("INFO: caught SIGINT\n");
+      printf("INFO: caught SIGINT\n");
       run = false;
-      RM_PRINTF("Resetting old SIGINT handler\n");
+      printf("Resetting old SIGINT handler\n");
       sigaction(SIGINT, &oldact, NULL);
       break;
     default:
-      RM_PRINTF("ERROR: caught signal %d\n", signum);
+      printf("ERROR: caught signal %d\n", signum);
       break;
   }
-  RM_PRINTF("INFO: re-raising signal %d\n", signum);
+  printf("INFO: re-raising signal %d\n", signum);
   raise(signum);
 }
 
@@ -120,14 +121,14 @@ int prepare_structops() {
   return 0;
 }
 
-bool read_env_str(const char *key, char **dest) {
+bool read_env_str(const char *key, char *dest) {
   // Read an environment variable a char *.
   char *val_str = getenv(key);
   if (val_str == NULL) {
-    RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
+    printf("ERROR: failed to query environment variable '%s'\n", key);
     return false;
   }
-  *dest = val_str;
+  strcpy(dest, val_str);
   return true;
 }
 
@@ -143,17 +144,17 @@ int main(int argc, char **argv) {
   libbpf_set_print(libbpf_print_fn);
 
   char cg_path[1024];
-  if (!read_env_str(RM_CGROUP_KEY, &cg_path)) {
-    RM_PRINTF("ERROR: failed to read cgroup path\n");
+  if (!read_env_str(RM_CGROUP_KEY, cg_path)) {
+    printf("ERROR: failed to read cgroup path\n");
     goto cleanup;
   }
 
   if (prepare_sockops(cg_path)) {
-    RM_PRINTF("ERROR: failed to set up sockops\n");
+    printf("ERROR: failed to set up sockops\n");
     goto cleanup;
   }
   if (prepare_structops()) {
-    RM_PRINTF("ERROR: failed to set up structops\n");
+    printf("ERROR: failed to set up structops\n");
     goto cleanup;
   }
 
@@ -174,5 +175,5 @@ cleanup:
   bpf_link__destroy(structops_link);
   ratemon_sockops_bpf__destroy(sockops_skel);
   ratemon_structops_bpf__destroy(structops_skel);
-  return 1;
+  return 0;
 }
