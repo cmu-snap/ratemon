@@ -74,7 +74,7 @@ all: $(APPS) $(INTERPS) $(OUTPUT)/ratemon_tc.bpf.o
 clean:
 	$(call msg,CLEAN)
 	rm -rfv $(OUTPUT) $(APPS)
-	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $id; done
+	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress || true
 	sudo tc qdisc del dev $(RM_IFACE) clsact || true
 	sudo rm -f /sys/fs/bpf/flow_to_rwnd
