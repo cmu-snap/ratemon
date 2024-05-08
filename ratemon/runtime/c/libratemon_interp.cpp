@@ -31,8 +31,8 @@
 #include "ratemon.h"
 
 // Protects writes only to max_active_flows, epoch_us, num_to_schedule,
-// monitor_port, flow_to_rwnd_fd, flow_to_win_scale_fd, oldact, and setup. Reads
-// are unprotected.
+// monitor_port_start, monitor_port_end, flow_to_rwnd_fd, flow_to_win_scale_fd,
+// oldact, and setup. Reads are unprotected.
 std::mutex lock_setup;
 // Whether setup has been performed.
 bool setup = false;
@@ -64,7 +64,8 @@ std::unordered_map<int, struct rm_flow> fd_to_flow;
 unsigned int max_active_flows = 5;
 unsigned int epoch_us = 10000;
 unsigned int num_to_schedule = 1;
-unsigned short monitor_port = 9000;
+unsigned short monitor_port_start = 9000;
+unsigned short monitor_port_end = 9999;
 
 // Used to set entries in flow_to_rwnd.
 int zero = 0;
@@ -334,13 +335,20 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       lock_setup.unlock();
       return new_fd;
     }
-    unsigned int monitor_port_;
-    if (!read_env_uint(RM_MONITOR_PORT, &monitor_port_) ||
-        monitor_port_ >= 65536) {
+    unsigned int monitor_port_start_;
+    if (!read_env_uint(RM_MONITOR_PORT_START, &monitor_port_start_) ||
+        monitor_port_start_ >= 65536) {
       lock_setup.unlock();
       return new_fd;
     }
-    monitor_port = (unsigned short)monitor_port_;
+    monitor_port_start = (unsigned short)monitor_port_start_;
+    unsigned int monitor_port_end_;
+    if (!read_env_uint(RM_MONITOR_PORT_END, &monitor_port_end_) ||
+        monitor_port_end_ >= 65536) {
+      lock_setup.unlock();
+      return new_fd;
+    }
+    monitor_port_end = (unsigned short)monitor_port_end_;
 
     // Look up the FD for the flow_to_rwnd map. We do not need the BPF skeleton
     // for this.
@@ -379,8 +387,9 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
     RM_PRINTF(
         "INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
-        "num_to_schedule=%u, monitor_port=%u\n",
-        max_active_flows, epoch_us, num_to_schedule, monitor_port);
+        "num_to_schedule=%u, monitor_port_start=%u, monitor_port_end=%u\n",
+        max_active_flows, epoch_us, num_to_schedule, monitor_port_start,
+        monitor_port_end);
     setup = true;
   }
   lock_setup.unlock();
@@ -411,10 +420,11 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
             flow.local_addr, flow.local_port);
 
-  if (!(flow.remote_port >= monitor_port &&
-        flow.remote_port <= monitor_port + 1000)) {
-    RM_PRINTF("INFO: ignoring flow on port %u, not on monitor port %u\n",
-              flow.local_port, monitor_port);
+  if (!(flow.remote_port >= monitor_port_start &&
+        flow.remote_port <= monitor_port_end)) {
+    RM_PRINTF(
+        "INFO: ignoring flow on port %u, not in monitor port range: [%u, %u]\n",
+        flow.local_port, monitor_port_start, monitor_port_end);
     return new_fd;
   }
 
