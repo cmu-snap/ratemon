@@ -86,7 +86,7 @@ void timer_callback(const boost::system::error_code &error) {
   // time. If there are waiting flows, one will be activated. Flows are paused
   // and activated in round-robin order. Each flow is allowed to be active for
   // epoch_us microseconds.
-  RM_PRINTF("IN TIMER_CALLBACK\n");
+  RM_PRINTF("INFO: in timer_callback\n");
 
   if (error) {
     RM_PRINTF("ERROR: timer_callback error: %s\n", error.message().c_str());
@@ -94,15 +94,14 @@ void timer_callback(const boost::system::error_code &error) {
   }
 
   if (!run) {
-    RM_PRINTF("INFO: exiting...\n");
+    RM_PRINTF("INFO: exiting\n");
     return;
   }
 
   // If setup has not been performed yet, then we cannot perform scheduling.
   if (!setup) {
-    // RM_PRINTF("WARNING setup not completed, skipping scheduling\n");
     if (timer.expires_from_now(one_sec)) {
-      RM_PRINTF("ERROR: cancelled time when should not have!\n");
+      RM_PRINTF("ERROR: cancelled timer when should not have!\n");
     }
     timer.async_wait(&timer_callback);
     RM_PRINTF("INFO: not set up (flag)\n");
@@ -118,7 +117,7 @@ void timer_callback(const boost::system::error_code &error) {
         "flow_to_rwnd_fd=%d\n",
         max_active_flows, epoch_us, num_to_schedule, flow_to_rwnd_fd);
     if (timer.expires_from_now(one_sec)) {
-      RM_PRINTF("ERROR: cancelled time when should not have!\n");
+      RM_PRINTF("ERROR: cancelled timer when should not have!\n");
     }
     timer.async_wait(&timer_callback);
     RM_PRINTF("INFO: not set up (params)\n");
@@ -130,7 +129,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   if (active_fds_queue.empty() && paused_fds_queue.empty()) {
     if (timer.expires_from_now(one_sec)) {
-      RM_PRINTF("ERROR: cancelled time when should not have!\n");
+      RM_PRINTF("ERROR: cancelled timer when should not have!\n");
     }
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
@@ -143,7 +142,7 @@ void timer_callback(const boost::system::error_code &error) {
   if (now < active_fds_queue.front().second) {
     // The next flow should not be scheduled yet.
     if (timer.expires_from_now(active_fds_queue.front().second - now)) {
-      RM_PRINTF("ERROR: cancelled time when should not have!\n");
+      RM_PRINTF("ERROR: cancelled timer when should not have!\n");
     }
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
@@ -234,7 +233,7 @@ void timer_callback(const boost::system::error_code &error) {
   if (active_fds_queue.empty()) {
     // If we cleaned up all flows, then revert to slow check mode.
     if (timer.expires_from_now(one_sec)) {
-      RM_PRINTF("ERROR: cancelled time when should not have!\n");
+      RM_PRINTF("ERROR: cancelled timer when should not have!\n");
     }
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
@@ -243,7 +242,7 @@ void timer_callback(const boost::system::error_code &error) {
   }
   // Trigger scheduling for the next flow.
   if (timer.expires_from_now(active_fds_queue.front().second - now)) {
-    RM_PRINTF("ERROR: cancelled time when should not have!\n");
+    RM_PRINTF("ERROR: cancelled timer when should not have!\n");
   }
   timer.async_wait(&timer_callback);
   lock_scheduler.unlock();
@@ -256,7 +255,7 @@ void thread_func() {
   // managing the async timers that perform scheduling.
   RM_PRINTF("INFO: scheduler thread started\n");
   if (timer.expires_from_now(one_sec)) {
-    RM_PRINTF("ERROR: cancelled time when should not have!\n");
+    RM_PRINTF("ERROR: cancelled timer when should not have!\n");
   }
   timer.async_wait(&timer_callback);
   RM_PRINTF("INFO: scheduler thread initial sleep\n");
