@@ -86,6 +86,8 @@ void timer_callback(const boost::system::error_code &error) {
   // time. If there are waiting flows, one will be activated. Flows are paused
   // and activated in round-robin order. Each flow is allowed to be active for
   // epoch_us microseconds.
+  RM_PRINTF("IN TIMER_CALLBACK\n");
+  
   if (error) {
     RM_PRINTF("ERROR: timer_callback error: %s\n", error.message().c_str());
     return;
@@ -99,8 +101,9 @@ void timer_callback(const boost::system::error_code &error) {
   // If setup has not been performed yet, then we cannot perform scheduling.
   if (!setup) {
     // RM_PRINTF("WARNING setup not completed, skipping scheduling\n");
-    timer.expires_from_now(one_sec);
+    auto x = timer.expires_from_now(one_sec);
     timer.async_wait(&timer_callback);
+    RM_PRINTF("NOT SET UP 1, cancelled %lu!\n", x);
     return;
   }
   // At this point, max_active_flows, epoch_us, num_to_schedule, and
@@ -112,33 +115,36 @@ void timer_callback(const boost::system::error_code &error) {
         "num_to_schedule=%u, or "
         "flow_to_rwnd_fd=%d\n",
         max_active_flows, epoch_us, num_to_schedule, flow_to_rwnd_fd);
-    timer.expires_from_now(one_sec);
+    auto x = timer.expires_from_now(one_sec);
     timer.async_wait(&timer_callback);
+    RM_PRINTF("NOT SET UP 2, cancelled %lu!\n", x);
     return;
   }
 
   lock_scheduler.lock();
   RM_PRINTF("Performing scheduling\n");
 
-  if (active_fds_queue.empty()) {
-    timer.expires_from_now(one_sec);
+  if (active_fds_queue.empty() && paused_fds_queue.empty()) {
+    auto x = timer.expires_from_now(one_sec);
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
+    RM_PRINTF("NO FLOWS, cancelled %lu!\n", x);
     return;
   }
 
   boost::posix_time::ptime now =
       boost::posix_time::microsec_clock::local_time();
-  boost::posix_time::ptime now_plus_epoch =
-      now + boost::posix_time::microseconds(epoch_us);
-
-  if (now < active_fds_queue.front().second) {
+  if (now < active_fds_queue.front().second) { 
     // The next flow should not be scheduled yet.
-    timer.expires_at(active_fds_queue.front().second);
+    // auto x = timer.expires_at(active_fds_queue.front().second);
+    auto x = timer.expires_from_now(active_fds_queue.front().second - now);
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
+    RM_PRINTF("EARLY by %ld us, cancelled %lu!\n", (active_fds_queue.front().second - now).total_microseconds(), x);
     return;
   }
+  boost::posix_time::ptime now_plus_epoch =
+      now + boost::posix_time::microseconds(epoch_us);  
 
   // Need to keep track of the number of active flows before we do any
   // scheduling so that we do not accidentally pause flows that we just
@@ -219,15 +225,17 @@ void timer_callback(const boost::system::error_code &error) {
   // Schedule the next timer callback for when the next flow should be paused.
   if (active_fds_queue.empty()) {
     // If we cleaned up all flows, then revert to slow check mode.
-    timer.expires_from_now(one_sec);
+    auto x = timer.expires_from_now(one_sec);
     timer.async_wait(&timer_callback);
     lock_scheduler.unlock();
+    RM_PRINTF("NONE REMAINING, cancelled %lu!\n", x);
     return;
   }
   // Trigger scheduling for the next flow.
-  timer.expires_at(active_fds_queue.front().second);
+  auto x = timer.expires_from_now(active_fds_queue.front().second - now);
   timer.async_wait(&timer_callback);
   lock_scheduler.unlock();
+  RM_PRINTF("SLEEPING UNTIL NEXT, cancelled %lu!\n", x);
   return;
 }
 
@@ -235,8 +243,9 @@ void thread_func() {
   // This function is designed to be run in a thread. It is responsible for
   // managing the async timers that perform scheduling.
   RM_PRINTF("Scheduler thread started\n");
-  timer.expires_from_now(one_sec);
+  auto x = timer.expires_from_now(one_sec);
   timer.async_wait(&timer_callback);
+  RM_PRINTF("INITIAL ONE SEC, cancelled %lu\n", x);
   // Execute the configured events, until there are no more events to execute.
   io.run();
 
@@ -252,6 +261,10 @@ void thread_func() {
   }
   lock_scheduler.unlock();
   RM_PRINTF("Scheduler thread ended\n");
+
+  if (run) {
+    RM_PRINTF("ERROR: scheduled thread ended before program was signalled to stop!\n");
+  }
 }
 
 // Catch SIGINT and trigger the scheduler thread and timer to end.
@@ -423,8 +436,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   if (!(flow.remote_port >= monitor_port_start &&
         flow.remote_port <= monitor_port_end)) {
     RM_PRINTF(
-        "INFO: ignoring flow on port %u, not in monitor port range: [%u, %u]\n",
-        flow.local_port, monitor_port_start, monitor_port_end);
+        "INFO: ignoring flow on remote port %u, not in monitor port range: [%u, %u]\n",
+        flow.remote_port, monitor_port_start, monitor_port_end);
     return new_fd;
   }
 
@@ -457,9 +470,10 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
                      boost::posix_time::microseconds(epoch_us)});
     RM_PRINTF("INFO: allowing new flow FD=%d\n", new_fd);
     if (active_fds_queue.size() == 1) {
-      timer.cancel();
-      timer.expires_at(active_fds_queue.front().second);
+      // timer.cancel();
+      auto x = timer.expires_from_now(active_fds_queue.front().second - boost::posix_time::microsec_clock::local_time());
       timer.async_wait(&timer_callback);
+      RM_PRINTF("FIRST REAL SCHEDULING, cancelled %lu\n", x);
     }
   } else {
     // The max number of flows are active already, so pause this one.
