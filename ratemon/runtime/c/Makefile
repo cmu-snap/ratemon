@@ -143,12 +143,14 @@ get_ld_vars:
 # Remove existing struct_ops programs, manually attach RWND tc/egress program,
 # run ratemon_main, remove tc/egress program, clean up struct_ops.
 attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
+	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc qdisc del dev $(RM_IFACE) clsact || true
 	sudo tc qdisc add dev $(RM_IFACE) clsact
 	sudo tc filter add dev $(RM_IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
 	sudo bpftool map pin name flow_to_rwnd /sys/fs/bpf/flow_to_rwnd
 	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
 	sudo ./ratemon_main || true
+	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress
 	sudo rm -f /sys/fs/bpf/flow_to_rwnd
 	sudo rm -f /sys/fs/bpf/flow_to_win_scale
