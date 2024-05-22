@@ -32,7 +32,7 @@ def find_col(key1, key2, cols):
     """
     for col in cols:
         if key1 in col and key2 in col:
-            return np.asarray(float(x) for x in col[2:])
+            return np.asarray([float(x) for x in col[2:]])
     raise RuntimeError(f"Key {key1}/{key2} not found!")
 
 
@@ -51,7 +51,7 @@ def main(args):
     l3misses = find_col("System", "L3MISS", cols)
 
     msg = (
-        f"Avg L2 miss rate:{np.mean(l2misses):.4f}"
+        f"Avg L2 miss rate:{np.mean(l2misses):.4f}\n"
         f"Avg L3 miss rate:{np.mean(l3misses):.4f}"
     )
     print(msg)
