@@ -2,7 +2,7 @@
 
 set -eoux pipefail
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
     echo "ERROR: Illegal number of parameters."
     echo "Usage: ./install_linux.sh <main dir> <version default=5.15.156>"
     exit 255
@@ -13,6 +13,7 @@ if [ -z "$2" ]; then
     version="$2"
 fi
 
+sudo apt-get update
 DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install \
     git \
     fakeroot \
