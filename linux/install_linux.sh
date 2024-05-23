@@ -9,6 +9,8 @@ if [ "$#" -ne 1 ]; then
 fi
 main_dir="$1"
 
+version="5.15.107"
+
 DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install \
 git \
     fakeroot \
@@ -24,11 +26,12 @@ git \
 
 # Download Linux 5.15.156 and apply get_info() patch. Do not build it yet.
 pushd "$main_dir"
-wget https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-5.15.156.tar.gz
-tar xf linux-5.15.156.tar.gz
-rm -f linux-5.15.156.tar.gz
-pushd linux-5.15.156
+wget "https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-$version.tar.gz"
+tar xf "linux-$version.tar.gz"
+rm -f "linux-$version.tar.gz"
+pushd "linux-$version"
 git apply "$main_dir/ratemon/linux/get_info.patch"
+cp -fv "/boot/config-$(uname -r)" .config
 scripts/config --disable SYSTEM_TRUSTED_KEYS
 scripts/config --disable SYSTEM_REVOCATION_KEYS
 make -j "$(nproc)" menuconfig
