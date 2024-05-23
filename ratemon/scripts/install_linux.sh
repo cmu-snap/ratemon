@@ -29,6 +29,8 @@ tar xf linux-5.15.156.tar.gz
 rm -f linux-5.15.156.tar.gz
 pushd linux-5.15.156
 git apply "$main_dir/ratemon/linux/get_info.patch"
+scripts/config --disable SYSTEM_TRUSTED_KEYS
+scripts/config --disable SYSTEM_REVOCATION_KEYS
 make -j "$(nproc)" menuconfig
 make -j "$(nproc)"
 sudo make -j "$(nproc)" modules_install
