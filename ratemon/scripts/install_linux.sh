@@ -8,9 +8,22 @@ if [ "$#" -ne 1 ]; then
     exit 255
 fi
 main_dir="$1"
-pushd "$main_dir"
+
+DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install \
+git \
+    fakeroot \
+    build-essential \
+    ncurses-dev \
+    xz-utils \
+    libssl-dev \
+    bc \
+    flex \
+    libelf-dev \
+    bison \
+    pahole
 
 # Download Linux 5.15.156 and apply get_info() patch. Do not build it yet.
+pushd "$main_dir"
 wget https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-5.15.156.tar.gz
 tar xf linux-5.15.156.tar.gz
 rm -f linux-5.15.156.tar.gz
