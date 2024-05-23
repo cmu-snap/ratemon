@@ -4,15 +4,17 @@ set -eoux pipefail
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: Illegal number of parameters."
-    echo "Usage: ./install_linux.sh <main dir>"
+    echo "Usage: ./install_linux.sh <main dir> <version default=5.15.156>"
     exit 255
 fi
 main_dir="$1"
-
-version="5.15.107"
+version="5.15.156"
+if [ -z "$2" ]; then
+    version="$2"
+fi
 
 DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install \
-git \
+    git \
     fakeroot \
     build-essential \
     ncurses-dev \
