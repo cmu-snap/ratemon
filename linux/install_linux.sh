@@ -9,7 +9,7 @@ if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
 fi
 main_dir="$1"
 version="5.15.156"
-if [ -z "$2" ]; then
+if [ -n "$2" ]; then
     version="$2"
 fi
 
