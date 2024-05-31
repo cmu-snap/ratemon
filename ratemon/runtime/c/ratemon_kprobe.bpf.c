@@ -58,10 +58,10 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
   BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  struct rm_flow flow = {.local_addr = skc_rcv_saddr,
-                         .remote_addr = skc_daddr,
+  struct rm_flow flow = {.local_addr = bpf_ntohl(skc_rcv_saddr),
+                         .remote_addr = bpf_ntohl(skc_daddr),
                          .local_port = skc_num,
-                         .remote_port = skc_dport};
+                         .remote_port = bpf_ntohs(skc_dport)};
   // Get the current time and store it for this flow.
   unsigned int now_ns = bpf_ktime_get_ns();
   bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns, BPF_ANY);

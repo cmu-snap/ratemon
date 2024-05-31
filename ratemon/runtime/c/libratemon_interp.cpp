@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>  // for socket APIs
+#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -167,8 +168,10 @@ void timer_callback(const boost::system::error_code &error) {
   // 3. Idle timeout. Look through all active flows and pause any that have been
   // idle for longer than idle_timeout_us. Only do this if there are paused
   // flows.
-  boost::posix_time::ptime now =
-      boost::posix_time::microsec_clock::local_time();
+  // Get the time in a form that we can compare to bpf_ktime_get_ns().
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  unsigned long ktime_now_ns = ts.tv_sec * 1000000000ull + ts.tv_nsec;
   if (idle_timeout_us > 0 && !active_fds_queue.empty()) {
     for (unsigned long i = 0; i < active_fds_queue.size(); ++i) {
       auto a = active_fds_queue.front();
@@ -180,10 +183,8 @@ void timer_callback(const boost::system::error_code &error) {
         active_fds_queue.push(a);
         continue;
       }
-      boost::posix_time::ptime last_data_time = {
-          {1970, 1, 1}, {0, 0, 0, (long)last_data_time_ns}};
       // If the flow has been active within the idle timeout, then keep it.
-      if ((now - last_data_time).total_microseconds() < (long)idle_timeout_us) {
+      if (ktime_now_ns - last_data_time_ns < (long)idle_timeout_us * 1000) {
         active_fds_queue.push(a);
         continue;
       }
@@ -197,6 +198,8 @@ void timer_callback(const boost::system::error_code &error) {
   }
 
   // 3. Calculate how many flows to activate.
+  boost::posix_time::ptime now =
+      boost::posix_time::microsec_clock::local_time();
   // Start with the number of free slots.
   unsigned long num_to_activate = max_active_flows - active_fds_queue.size();
   // If the next flow should be scheduled now, then activate at least
@@ -361,9 +364,10 @@ bool read_env_uint(const char *key, volatile unsigned int *dest,
 bool setup() {
   // Read environment variables with parameters.
   if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) return false;
-  if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us, true /* allow_zero */))
+  if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us)) return false;
+  if (!read_env_uint(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
+                     true /* allow_zero */))
     return false;
-  if (!read_env_uint(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us)) return false;
   // Cannot schedule more than max_active_flows at once.
   if (!read_env_uint(RM_NUM_TO_SCHEDULE_KEY, &num_to_schedule) ||
       num_to_schedule > max_active_flows)
