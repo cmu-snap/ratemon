@@ -11,7 +11,7 @@
 // #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
 #define NDEBUG  // Disable assert() calls.
-#define RM_PRINTF(...)
+#define RM_PRINTF(...) ;
 // #define RM_PRINTK(...)
 #endif
 
@@ -20,7 +20,8 @@
 // Map pin paths.
 #define RM_FLOW_TO_RWND_PIN_PATH "/sys/fs/bpf/flow_to_rwnd"
 #define RM_FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
-#define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH "/sys/fs/bpf/flow_to_last_data_time_ns"
+#define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH \
+  "/sys/fs/bpf/flow_to_last_data_time_ns"
 // Name of struct_ops CCA that flows must use to be woken up.
 #define RM_BPF_CUBIC "bpf_cubic"
 
@@ -28,6 +29,9 @@
 #define RM_MAX_ACTIVE_FLOWS_KEY "RM_MAX_ACTIVE_FLOWS"
 // Environment variable that specifies how often to perform flow scheduling.
 #define RM_EPOCH_US_KEY "RM_EPOCH_US"
+// Duration after which an idle flow will be forcibly paused. 0 disables this
+// feature.
+#define RM_IDLE_TIMEOUT_US_KEY "RM_IDLE_TIMEOUT_US"
 // Environment variable that specifies the number of flows to schedule per
 // epoch. "Schedule" can mean either activate or pause. Note that setting this
 // greater than 1 effectively switches scheduled RWND tuning from a strict
