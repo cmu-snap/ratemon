@@ -11,7 +11,7 @@
 // #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
 #define NDEBUG  // Disable assert() calls.
-#define RM_PRINTF(...) ;
+#define RM_PRINTF(...)
 // #define RM_PRINTK(...)
 #endif
 
