@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 // clang-format off
 // vmlinux.h needs to be first.
@@ -11,7 +12,6 @@
 #include "ratemon_maps.h"
 // clang-format on
 
-// int _version SEC("version") = 1;
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 // BPF SOCK_OPS program return codes.

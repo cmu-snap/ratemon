@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
+# SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 # Set interface with RM_IFACE environment variable.
 
@@ -119,7 +119,7 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
 	$(BPFTOOL) gen skeleton $< > $@
 
 # Build user-space code
-$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %_sockops.skel.h %_structops.skel.h
+$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %_sockops.skel.h %_structops.skel.h %_kprobe.skel.h
 
 $(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT)
 	$(call msg,CC,$@)
@@ -150,13 +150,16 @@ attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 	sudo tc filter add dev $(RM_IFACE) egress bpf direct-action obj $(OUTPUT)/ratemon_tc.bpf.o sec tc/egress
 	sudo bpftool map pin name flow_to_rwnd /sys/fs/bpf/flow_to_rwnd
 	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
+	sudo bpftool map pin name flow_to_last_da /sys/fs/bpf/flow_to_last_data_time_ns
 	sudo RM_CGROUP=$(RM_CGROUP) ./ratemon_main || true
 	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress
-	sudo rm -f /sys/fs/bpf/flow_to_rwnd
-	sudo rm -f /sys/fs/bpf/flow_to_win_scale
-	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_rwnd
-	sudo rm -f /sys/fs/bpf/tc/globals/flow_to_win_scale
+	sudo rm -fv /sys/fs/bpf/flow_to_rwnd
+	sudo rm -fv /sys/fs/bpf/flow_to_win_scale
+	sudo rm -fv /sys/fs/bpf/flow_to_last_data_time_ns
+	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_rwnd
+	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_win_scale
+	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_last_data_time_ns
 	sudo tc qdisc del dev $(RM_IFACE) clsact
 
 # delete failed targets

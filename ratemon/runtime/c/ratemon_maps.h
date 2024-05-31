@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause) */
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 #ifndef __RATEMON_MAPS_H
 #define __RATEMON_MAPS_H
@@ -30,5 +30,15 @@ struct {
   __type(value, unsigned char);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_win_scale SEC(".maps");
+
+// Maps flow to the last time that flow received data. This is used to decide
+// whether a flow is idle.
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, RM_MAX_FLOWS);
+  __type(key, struct rm_flow);
+  __type(value, unsigned long);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
+} flow_to_last_data_time_ns SEC(".maps");
 
 #endif /* __RATEMON_MAPS_H */

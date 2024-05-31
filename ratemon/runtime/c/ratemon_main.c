@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "ratemon.h"
+#include "ratemon_kprobe.skel.h"
 #include "ratemon_sockops.skel.h"
 #include "ratemon_structops.skel.h"
 
@@ -23,6 +24,7 @@ static volatile bool run = true;
 struct bpf_link *structops_link;
 struct ratemon_sockops_bpf *sockops_skel;
 struct ratemon_structops_bpf *structops_skel;
+struct ratemon_kprobe_bpf *kprobe_skel;
 
 // Existing signal handler for SIGINT.
 struct sigaction oldact;
@@ -121,6 +123,21 @@ int prepare_structops() {
   return 0;
 }
 
+int prepare_kprobe() {
+  // Open skeleton and load programs and maps.
+  kprobe_skel = ratemon_kprobe_bpf__open_and_load();
+  if (!kprobe_skel) {
+    printf("ERROR: failed to open/load 'ratemon_kprobe' BPF skeleton\n");
+    return 1;
+  }
+  // Attach kprobe.
+  if (ratemon_kprobe_bpf__attach(kprobe_skel)) {
+    printf("ERROR: failed to attach 'ratemon_kprobe'\n");
+    return 1;
+  }
+  return 0;
+}
+
 bool read_env_str(const char *key, char *dest) {
   // Read an environment variable a char *.
   char *val_str = getenv(key);
@@ -157,6 +174,10 @@ int main(int argc, char **argv) {
     printf("ERROR: failed to set up structops\n");
     goto cleanup;
   }
+  if (prepare_kprobe()) {
+    printf("ERROR: failed to set up kprobe\n");
+    goto cleanup;
+  }
 
   printf(
       "INFO: BPF programs running. "
@@ -175,5 +196,6 @@ cleanup:
   bpf_link__destroy(structops_link);
   ratemon_sockops_bpf__destroy(sockops_skel);
   ratemon_structops_bpf__destroy(structops_skel);
+  ratemon_kprobe_bpf__destroy(kprobe_skel);
   return 0;
 }

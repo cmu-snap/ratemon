@@ -12,40 +12,7 @@
 #include "ratemon_maps.h"
 // clang-format on
 
-// int _version SEC("version") = 1;
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
-
-// // 'tcp_rcv_established' will be used to track the last time that a flow
-// // received data so that we can determine when to classify a flow as idle.
-// // TODO: This is not required for the initial version of scheduling that uses
-// // fixed timeslices, so ratemon_main.c does not attach this program.
-// SEC("kprobe/tcp_rcv_established")
-// int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
-//   if (sk == NULL || skb == NULL) {
-//     bpf_printk("ERROR: 'tcp_rcv_established' sk=%u skb=%u", sk, skb);
-//     return 0;
-//   }
-
-//   // __u16 skc_num = 0;
-//   // __be16 skc_dport = 0;
-//   // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-//   // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-//   // bpf_printk("INFO: tcp_rcv_established %u->%u", skc_dport, skc_num);
-
-//   // TODO: If this sk_buff includes new (i.e., unacked) data, then record the
-//   // current time somewhere.
-
-//   struct tcp_sock *tp = (struct tcp_sock *)(sk);
-//   if (tp == NULL) {
-//     bpf_printk("ERROR: 'tcp_rcv_established' tp=%u", tp);
-//     return 0;
-//   }
-//   return 0;
-// }
-
-// The next several functions are the struct_ops programs for bpf_cubic. The all
-// simply delegate to the regular tcp_cubic functions, except for
-// 'bpf_cubic_get_into', as described below.
 
 // These are the regular tcp_cubic function that will be called below.
 // Defined in:
@@ -59,6 +26,9 @@ extern void cubictcp_cwnd_event(struct sock *sk,
                                 enum tcp_ca_event event) __ksym;
 extern void cubictcp_acked(struct sock *sk,
                            const struct ack_sample *sample) __ksym;
+
+// The next several functions simply delegate to the regular tcp_cubic
+// functions, except for 'bpf_cubic_get_into', as described below.
 
 SEC("struct_ops/bpf_cubic_init")
 void BPF_PROG(bpf_cubic_init, struct sock *sk) { cubictcp_init(sk); }
@@ -109,25 +79,6 @@ void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
     bpf_printk("ERROR: 'bpf_cubic_get_info' tp=%u", tp);
     return;
   }
-
-  // __be32 skc_daddr;
-  // __be32 skc_rcv_saddr;
-  // __u16 skc_num;
-  // __be16 skc_dport;
-  // BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
-  // BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
-  // BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  // BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  // bpf_printk("bpf_cubic_get_info addr %u->%u", skc_daddr, skc_rcv_saddr);
-  // bpf_printk("bpf_cubic_get_info port %u->%u", skc_dport, skc_num);
-
-  // struct rm_flow flow = {.local_addr = skc_rcv_saddr,
-  //                     .remote_addr = skc_daddr,
-  //                     .local_port = skc_num,
-  //                     .remote_port = skc_dport};
-  // unsigned int rwnd = 10000;
-  // bpf_map_update_elem(&flow_to_rwnd, &flow, &rwnd, BPF_ANY);
-
   // 'bpf_tcp_send_ack' only works in struct_ops!
   u64 ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
   if (ret != 0) {
