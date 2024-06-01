@@ -621,7 +621,7 @@ int close(int sockfd) {
       bpf_map_delete_elem(flow_to_last_data_time_fd, &fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
-    unsigned int d = fd_to_flow.erase(sockfd);
+    unsigned long d = fd_to_flow.erase(sockfd);
     RM_PRINTF("INFO: removed FD=%d (%ld elements removed)\n", sockfd, d);
   } else {
     RM_PRINTF("INFO: ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
