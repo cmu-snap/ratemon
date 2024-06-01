@@ -111,6 +111,10 @@ inline void pause_flow(int fd) {
 // Flows are paused and activated in round-robin order. Each flow is allowed to
 // be active for at most epoch_us microseconds. Flows that have been idle for
 // longer than idle_timeout_ns will be paused.
+//
+// There must always be a pending timer event, otherwise the timer thread will
+// expire. So this function must always set a new timer event, unless it is
+// called because the timer was cancelled or the program is supposed to end.
 void timer_callback(const boost::system::error_code &error) {
   RM_PRINTF("INFO: in timer_callback\n");
 
@@ -180,7 +184,7 @@ void timer_callback(const boost::system::error_code &error) {
   // paused_fds_queue:
   s = paused_fds_queue.size();
   for (unsigned long i = 0; i < s; ++i) {
-    auto p = paused_fds_queue.front();
+    int p = paused_fds_queue.front();
     paused_fds_queue.pop();
     if (fd_to_flow.contains(p))
       paused_fds_queue.push(p);
@@ -190,14 +194,6 @@ void timer_callback(const boost::system::error_code &error) {
           "fd_to_flow\n",
           p);
     }
-  }
-
-  RM_PRINTF("INFO: active_fds_queue.size()=%lu, paused_fds_queue.size()=%lu\n",
-            active_fds_queue.size(), paused_fds_queue.size());
-  for (unsigned long i = 0; i < active_fds_queue.size(); ++i) {
-    RM_PRINTF("INFO: active FD=%d\n", active_fds_queue.front().first);
-    active_fds_queue.push(active_fds_queue.front());
-    active_fds_queue.pop();
   }
 
   // 3. Idle timeout. Look through all active flows and pause any that have been
@@ -250,7 +246,7 @@ void timer_callback(const boost::system::error_code &error) {
   boost::posix_time::ptime now_plus_epoch =
       now + boost::posix_time::microseconds(epoch_us);
   for (unsigned long i = 0; i < num_to_activate; ++i) {
-    auto p = paused_fds_queue.front();
+    int p = paused_fds_queue.front();
     paused_fds_queue.pop();
     // Randomly jitter the epoch time by +/- 12.5%.
     active_fds_queue.push({p, now_plus_epoch + boost::posix_time::microseconds(
@@ -260,7 +256,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 4. Pause excessive flows.
   while (active_fds_queue.size() > max_active_flows) {
-    auto a = active_fds_queue.front().first;
+    int a = active_fds_queue.front().first;
     active_fds_queue.pop();
     if (active_fds_queue.size() < max_active_flows &&
         paused_fds_queue.empty()) {
@@ -315,9 +311,10 @@ void timer_callback(const boost::system::error_code &error) {
   return;
 }
 
+// This function is designed to be run in a thread. It is responsible for
+// managing the async timers that perform scheduling. The timer events are
+// executed by this thread, but they can be scheduled by other threads.
 void thread_func() {
-  // This function is designed to be run in a thread. It is responsible for
-  // managing the async timers that perform scheduling.
   RM_PRINTF("INFO: scheduler thread started\n");
   if (timer.expires_from_now(one_sec)) {
     RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
@@ -624,7 +621,7 @@ int close(int sockfd) {
       bpf_map_delete_elem(flow_to_last_data_time_fd, &fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
-    auto d = fd_to_flow.erase(sockfd);
+    unsigned int d = fd_to_flow.erase(sockfd);
     RM_PRINTF("INFO: removed FD=%d (%ld elements removed)\n", sockfd, d);
   } else {
     RM_PRINTF("INFO: ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
