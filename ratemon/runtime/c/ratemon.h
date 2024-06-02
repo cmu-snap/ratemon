@@ -32,14 +32,6 @@
 // Duration after which an idle flow will be forcibly paused. 0 disables this
 // feature.
 #define RM_IDLE_TIMEOUT_US_KEY "RM_IDLE_TIMEOUT_US"
-// Environment variable that specifies the number of flows to schedule per
-// epoch. "Schedule" can mean either activate or pause. Note that setting this
-// greater than 1 effectively switches scheduled RWND tuning from a strict
-// timeslice mode (where each flow is active for exactly the scheduling epoch)
-// to a loose mode (where flows are batched and the entire batch is active for
-// at most the oldest flow's epoch, even if other flows in the batch arrived
-// more recently).
-#define RM_NUM_TO_SCHEDULE_KEY "RM_NUM_TO_SCHEDULE"
 // Environment variable that specifies the start range of REMOTE ports to manage
 // using scheduled RWND tuning.
 #define RM_MONITOR_PORT_START_KEY "RM_MONITOR_PORT_START"
