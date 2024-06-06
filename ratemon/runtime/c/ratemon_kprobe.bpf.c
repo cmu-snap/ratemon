@@ -62,8 +62,17 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
                          .remote_addr = bpf_ntohl(skc_daddr),
                          .local_port = skc_num,
                          .remote_port = bpf_ntohs(skc_dport)};
+  // Check if we should record the last data time for this flow.
+  if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) == NULL) {
+    // This flow is not in the map, so we are not supposed to track its last
+    // data time.
+    return 0;
+  }
   // Get the current time and store it for this flow.
-  unsigned int now_ns = bpf_ktime_get_ns();
-  bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns, BPF_ANY);
+  unsigned long now_ns = bpf_ktime_get_ns();
+  if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
+                          BPF_ANY)) {
+    bpf_printk("ERROR: 'tcp_rcv_established' error updating last data time");
+  }
   return 0;
 }
