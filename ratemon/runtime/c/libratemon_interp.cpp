@@ -34,7 +34,8 @@
 
 // Protects writes only to max_active_flows, epoch_us, idle_timeout_ns,
 // monitor_port_start, monitor_port_end, flow_to_rwnd_fd, flow_to_win_scale_fd,
-// oldact, and setup. Reads are unprotected.
+// flow_to_last_data_time_fd, flow_to_keepalive_fd, oldact, and setup. Reads are
+// unprotected.
 std::mutex lock_setup;
 // Whether setup has been performed.
 bool setup_done = false;
@@ -48,6 +49,8 @@ int flow_to_rwnd_fd = 0;
 int flow_to_win_scale_fd = 0;
 // FD for the BPF map "flow_to_last_da" (short for "flow_to_last_data_time_ns").
 int flow_to_last_data_time_fd = 0;
+// FD for the BPF map "flow_to_keepali" (short for "flow_to_keepalive").
+int flow_to_keepalive_fd = 0;
 // Runs async timers for scheduling
 boost::asio::io_service io;
 // Periodically performs scheduling using timer_callback().
@@ -144,12 +147,14 @@ void timer_callback(const boost::system::error_code &error) {
   }
   // Check that relevant parameters have been set. Otherwise, revert to slow
   // check mode.
-  if (max_active_flows == 0 || epoch_us == 0 || flow_to_rwnd_fd == 0 ||
-      flow_to_last_data_time_fd == 0) {
+  if (!max_active_flows || !epoch_us || !flow_to_rwnd_fd ||
+      !flow_to_last_data_time_fd || !flow_to_keepalive_fd) {
     RM_PRINTF(
         "ERROR: cannot continue, invalid max_active_flows=%u, epoch_us=%u, "
-        "flow_to_rwnd_fd=%d, or flow_to_last_data_time_fd=%d\n",
-        max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_last_data_time_fd);
+        "flow_to_rwnd_fd=%d, flow_to_last_data_time_fd=%d, or "
+        "flow_to_keepalive_fd=%d\n",
+        max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_last_data_time_fd,
+        flow_to_keepalive_fd);
     if (timer.expires_from_now(one_sec)) {
       RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
     }
@@ -159,7 +164,8 @@ void timer_callback(const boost::system::error_code &error) {
 
   // It is now safe to perform scheduling.
   lock_scheduler.lock();
-  RM_PRINTF("INFO: performing scheduling\n");
+  RM_PRINTF("INFO: performing scheduling. active=%lu, paused=%lu\n",
+            active_fds_queue.size(), paused_fds_queue.size());
 
   // Temporary variable for storing the front of active_fds_queue.
   std::pair<int, boost::posix_time::ptime> a;
@@ -226,6 +232,9 @@ void timer_callback(const boost::system::error_code &error) {
             // risk causing a drop in utilization by pausing it immediately.
             if (idle_ns >= idle_timeout_ns) {
               RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n", a.first);
+              // Remove the flow from flow_to_keepalive, signalling that it no
+              // longer has pending demand.
+              bpf_map_delete_elem(flow_to_keepalive_fd, &a.first);
               paused_fds_queue.push(a.first);
               pause_flow(a.first);
               continue;
@@ -250,6 +259,9 @@ void timer_callback(const boost::system::error_code &error) {
         to_pause.push_back(a.first);
       }
     }
+    // Put the flow back in the active queue. For this to occur, we know the
+    // flow is not idle, and it is either not yet at its epoch time or it has
+    // passed its epoch time and it will be extracted and paused later.
     active_fds_queue.push(a);
   }
 
@@ -259,13 +271,23 @@ void timer_callback(const boost::system::error_code &error) {
   // as many entries in paused_fds_queue as needed.
   unsigned long num_to_activate =
       max_active_flows - active_fds_queue.size() + to_pause.size();
+  int dummy;
   for (unsigned long i = 0; i < num_to_activate; ++i) {
     // Loop until we find a paused flow that is valid (not closed).
-    while (!paused_fds_queue.empty()) {
+    unsigned long num_paused = paused_fds_queue.size();
+    for (unsigned long j = 0; j < num_paused; ++j) {
       p = paused_fds_queue.front();
       paused_fds_queue.pop();
       // If this flow has been closed, then skip it.
       if (!fd_to_flow.contains(p)) continue;
+      // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
+      // returns negative error code when the flow is not found), then it has no
+      // pending data and should be skipped.
+      if (bpf_map_lookup_elem(flow_to_keepalive_fd, &p, &dummy)) {
+        // RM_PRINTF("INFO: skipping activating FD=%d, no pending data\n", p);
+        paused_fds_queue.push(p);
+        continue;
+      }
       // Randomly jitter the epoch time by +/- 12.5%.
       active_fds_queue.push(
           {p,
@@ -291,6 +313,7 @@ void timer_callback(const boost::system::error_code &error) {
     while (j < s) {
       a = active_fds_queue.front();
       active_fds_queue.pop();
+      ++j;
       if (a.first == to_pause[i]) {
         // Pause this flow.
         paused_fds_queue.push(a.first);
@@ -299,7 +322,6 @@ void timer_callback(const boost::system::error_code &error) {
       }
       // Examine the next flow in active_fds_queue.
       active_fds_queue.push(a);
-      ++j;
     }
   }
 
@@ -308,30 +330,32 @@ void timer_callback(const boost::system::error_code &error) {
   // Cannot have more than the max number of active flows.
   assert(active_fds_queue.size() <= max_active_flows);
   // If there are no active flows, then there should also be no paused flows.
-  assert(!active_fds_queue.empty() || paused_fds_queue.empty());
+  // No, this is not strictly true anymore. If none of the flows have pending
+  // data (i.e., none are in flow_to_keepalive), then they will all be paused.
+  // assert(!active_fds_queue.empty() || paused_fds_queue.empty());
 #endif
 
   // 5) Calculate when the next timer should expire.
   boost::posix_time::time_duration when;
+  long next_epoch_us =
+      (active_fds_queue.front().second - now).total_microseconds();
   if (active_fds_queue.empty()) {
     // If there are no flows, revert to slow check mode.
-    when = one_sec;
     RM_PRINTF("INFO: no flows remaining, reverting to slow check mode\n");
-  } else if (idle_timeout_ns == 0) {
+    when = one_sec;
+  } else if (!idle_timeout_ns) {
     // If we are not using idle timeout mode...
-    when = active_fds_queue.front().second - now;
-    RM_PRINTF("INFO: scheduling timer for next epoch end\n");
-  } else {
+    RM_PRINTF("INFO: no idle timeout, scheduling timer for next epoch end\n");
+    when = boost::posix_time::microsec(next_epoch_us);
+  } else if (idle_timeout_us < next_epoch_us) {
     // If we are using idle timeout mode...
-    long next_epoch_us =
-        (active_fds_queue.front().second - now).total_microseconds();
-    if (idle_timeout_us < next_epoch_us) {
-      RM_PRINTF("INFO: scheduling timer for next idle timeout\n");
-      when = boost::posix_time::microsec(idle_timeout_us);
-    } else {
-      RM_PRINTF("INFO: scheduling timer for next epoch end\n");
-      when = boost::posix_time::microsec(next_epoch_us);
-    }
+    RM_PRINTF("INFO: scheduling timer for next idle timeout\n");
+    when = boost::posix_time::microsec(idle_timeout_us);
+  } else {
+    RM_PRINTF(
+        "INFO: scheduling timer for next epoch end, sooner than idle "
+        "timeout\n");
+    when = boost::posix_time::microsec(next_epoch_us);
   }
 
   // 6) Start the next timer.
@@ -362,11 +386,13 @@ void thread_func() {
   // Delete all flows from flow_to_rwnd and flow_to_win_scale.
   lock_scheduler.lock();
   for (const auto &p : fd_to_flow) {
-    if (flow_to_rwnd_fd != 0) bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
-    if (flow_to_win_scale_fd != 0)
+    if (flow_to_rwnd_fd) bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+    if (flow_to_win_scale_fd)
       bpf_map_delete_elem(flow_to_win_scale_fd, &p.second);
-    if (flow_to_last_data_time_fd != 0)
+    if (flow_to_last_data_time_fd)
       bpf_map_delete_elem(flow_to_last_data_time_fd, &p.second);
+    if (flow_to_keepalive_fd)
+      bpf_map_delete_elem(flow_to_keepalive_fd, &p.second);
   }
   lock_scheduler.unlock();
   RM_PRINTF("INFO: scheduler thread ended\n");
@@ -469,10 +495,22 @@ bool setup() {
     RM_PRINTF(
         "ERROR: failed to get FD for 'flow_to_last_data_time_ns' from path "
         "'%s'\n",
-        RM_FLOW_TO_RWND_PIN_PATH);
+        RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH);
     return false;
   }
   flow_to_last_data_time_fd = err;
+
+  // Look up the FD for the flow_to_keepalive map. We do not need the
+  // BPF skeleton for this.
+  err = bpf_obj_get(RM_FLOW_TO_KEEPALIVE_PIN_PATH);
+  if (err == -1) {
+    RM_PRINTF(
+        "ERROR: failed to get FD for 'flow_to_keepalive' from path "
+        "'%s'\n",
+        RM_FLOW_TO_KEEPALIVE_PIN_PATH);
+    return false;
+  }
+  flow_to_keepalive_fd = err;
 
   // Catch SIGINT to end the program.
   struct sigaction action;
@@ -648,12 +686,14 @@ int close(int sockfd) {
   lock_scheduler.lock();
   if (fd_to_flow.contains(sockfd)) {
     // Obviously, do this before removing the FD from fd_to_flow.
-    if (flow_to_rwnd_fd != 0)
+    if (flow_to_rwnd_fd)
       bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd]);
-    if (flow_to_win_scale_fd != 0)
+    if (flow_to_win_scale_fd)
       bpf_map_delete_elem(flow_to_win_scale_fd, &fd_to_flow[sockfd]);
-    if (flow_to_last_data_time_fd != 0)
+    if (flow_to_last_data_time_fd)
       bpf_map_delete_elem(flow_to_last_data_time_fd, &fd_to_flow[sockfd]);
+    if (flow_to_keepalive_fd)
+      bpf_map_delete_elem(flow_to_keepalive_fd, &fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
     unsigned long d = fd_to_flow.erase(sockfd);

@@ -38,30 +38,60 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     bpf_printk("ERROR: 'tcp_rcv_established' tp=%u", tp);
     return 0;
   }
-  // If this packet does not contain new data (e.g., it is a pure ACK or a
-  // retransmission), then we are not interested in it.
-  __be32 seq;
+
+  // Safely extract members from tcp_sock, tcphdr, and sk_buff.
+  // tcp_sock:
   u32 rcv_nxt;
-  BPF_CORE_READ_INTO(&seq, th, seq);
   BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
-  if (bpf_ntohl(seq) < rcv_nxt) {
-    bpf_printk("ERROR: 'tcp_rcv_established' packet does not contain new data",
-               tp);
-    return 0;
-  }
-  // Build the flow struct.
+  // tcphdr
+  __be32 seq_;
+  BPF_CORE_READ_INTO(&seq_, th, seq);
+  u32 seq = bpf_ntohl(seq_);
+  u64 doff = BPF_CORE_READ_BITFIELD_PROBED(th, doff);
+  u64 syn = BPF_CORE_READ_BITFIELD_PROBED(th, syn);
+  u64 fin = BPF_CORE_READ_BITFIELD_PROBED(th, fin);
+  u64 rst = BPF_CORE_READ_BITFIELD_PROBED(th, rst);
+  // sk_buff:
+  unsigned int len;
   __be32 skc_daddr;
   __be32 skc_rcv_saddr;
   __u16 skc_num;
   __be16 skc_dport;
+  BPF_CORE_READ_INTO(&len, skb, len);
   BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
   BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);
   BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
   BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
+
+  // Build the flow struct.
   struct rm_flow flow = {.local_addr = bpf_ntohl(skc_rcv_saddr),
                          .remote_addr = bpf_ntohl(skc_daddr),
                          .local_port = skc_num,
                          .remote_port = bpf_ntohs(skc_dport)};
+
+  // Check for TCP keepalive. From Wireshark
+  // (https://www.wireshark.org/docs/wsug_html_chunked/ChAdvTCPAnalysis.html):
+  // A packet is a keepalive "...when the segment size is zero or one, the
+  // current sequence number is one byte less than the next expected sequence
+  // number, and none of SYN, FIN, or RST are set".
+  if ((len - (doff * 4) <= 1) && (seq == rcv_nxt - 1) && !syn && !fin && !rst) {
+    // This is a keepalive packet.
+    bpf_printk("INFO: 'tcp_rcv_established' found keepalive");
+    int one = 1;
+    if (bpf_map_update_elem(&flow_to_keepalive, &flow, &one, BPF_ANY)) {
+      bpf_printk(
+          "ERROR: 'tcp_rcv_established' error updating flow_to_keepalive");
+    }
+  }
+
+  // If this packet does not contain new data (e.g., it is a pure ACK or a
+  // retransmission), then we are not interested in it.
+  if (seq < rcv_nxt) {
+    bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data",
+               tp);
+    return 0;
+  }
+
   // Check if we should record the last data time for this flow.
   if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) == NULL) {
     // This flow is not in the map, so we are not supposed to track its last
@@ -72,7 +102,9 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   unsigned long now_ns = bpf_ktime_get_ns();
   if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
                           BPF_ANY)) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error updating last data time");
+    bpf_printk(
+        "ERROR: 'tcp_rcv_established' error updating "
+        "flow_to_last_data_time_ns");
   }
   return 0;
 }

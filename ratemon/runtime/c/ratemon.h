@@ -22,6 +22,7 @@
 #define RM_FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
 #define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH \
   "/sys/fs/bpf/flow_to_last_data_time_ns"
+#define RM_FLOW_TO_KEEPALIVE_PIN_PATH "/sys/fs/bpf/flow_to_keepalive"
 // Name of struct_ops CCA that flows must use to be woken up.
 #define RM_BPF_CUBIC "bpf_cubic"
 

@@ -41,4 +41,13 @@ struct {
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_last_data_time_ns SEC(".maps");
 
+// Flows in this map have received a recent keepalive and have not gone idle since, so they are considered to be active.
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, RM_MAX_FLOWS);
+  __type(key, struct rm_flow);
+  __type(value, int);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
+} flow_to_keepalive SEC(".maps");
+
 #endif /* __RATEMON_MAPS_H */
