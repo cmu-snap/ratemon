@@ -1,0 +1,20 @@
+commit c5ea657a9f9871786f663f83dbd1a31d4bbd5a41
+Author: Christopher Canel <c.canel@icloud.com>
+Date:   Thu Jun 20 18:23:33 2024 +0000
+
+    Set snd_wnd to 0 when receiving a 0 window ACK
+
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index e51b5d887..7ec58b38b 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -3591,6 +3591,9 @@ static int tcp_ack_update_window(struct sock *sk, const struct sk_buff *skb, u32
+ 
+ 	tcp_snd_una_update(tp, ack);
+ 
++    // If this is a zero window update, then always set snd_wnd to 0.
++	if (nwin == 0) tp->snd_wnd = 0;
++
+ 	return flag;
+ }
+ 
