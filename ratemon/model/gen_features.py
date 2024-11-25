@@ -2,21 +2,21 @@
 """Parses the output of CloudLab experiments."""
 
 import argparse
-from contextlib import contextmanager
-from io import UnsupportedOperation
 import itertools
+import json
 import logging
 import multiprocessing
-import subprocess
 import os
-from os import path
 import random
 import shutil
+import subprocess
 import sys
 import time
 import traceback
+from contextlib import contextmanager
+from io import UnsupportedOperation
+from os import path
 
-import json
 import numpy as np
 
 from ratemon.model import cl_args, defaults, features, loss_event_rate, utils

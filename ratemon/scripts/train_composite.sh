@@ -16,8 +16,8 @@ exp_dir="$1"
 out_dir="$2"
 tag="$3"
 ratemon_dir="$(cd "$(dirname "$0")"/.. && pwd)"
-workspace_dir="$(dirname "$ratemon_dir")"
-export PYTHONPATH="$workspace_dir:$PYTHONPATH"
+workspace_dir="$(dirname "${ratemon_dir}")"
+export PYTHONPATH="${workspace_dir}:${PYTHONPATH}"
 
 # python "$ratemon_dir/model/gen_features.py" \
 #     --exp-dir="$exp_dir" \
@@ -26,26 +26,26 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 #     --parallel=20
 
 prepare() {
-    # Usage: prepare <other CCA name>
-    cur_exp_dir="$exp_dir/cubic-$1"
-    tmp_dir="/tmp/prepare_data/cubic-$1"
-    mkdir -p "$tmp_dir"
-    python "$ratemon_dir/model/prepare_data.py" \
-        --data-dir="$cur_exp_dir" \
-        --out-dir="$tmp_dir" \
-        --model=HistGbdtSklearn \
-        --train-split=70 \
-        --val-split=0 \
-        --test-split=30 \
-        --warmup-percent=5 \
-        --sample-percent=10
-    pushd "$tmp_dir"
-    mv -vf ./* "$cur_exp_dir"
-    popd
+	# Usage: prepare <other CCA name>
+	cur_exp_dir="${exp_dir}/cubic-$1"
+	tmp_dir="/tmp/prepare_data/cubic-$1"
+	mkdir -p "${tmp_dir}"
+	python "${ratemon_dir}/model/prepare_data.py" \
+		--data-dir="${cur_exp_dir}" \
+		--out-dir="${tmp_dir}" \
+		--model=HistGbdtSklearn \
+		--train-split=70 \
+		--val-split=0 \
+		--test-split=30 \
+		--warmup-percent=5 \
+		--sample-percent=10
+	pushd "${tmp_dir}"
+	mv -vf ./* "${cur_exp_dir}"
+	popd
 }
 
 for cca in "highspeed" "illinois" "vivace"; do
-    prepare "$cca"
+	prepare "${cca}"
 done
 
 # python "$ratemon_dir/model/train.py" \
@@ -62,5 +62,5 @@ done
 #     --clusters=10 \
 #     --features-to-pick=20 \
 #     --permutation-importance-repeats=1
-    # --balance \
-    # --drop-popular
+# --balance \
+# --drop-popular

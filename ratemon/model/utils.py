@@ -5,7 +5,6 @@ import json
 import logging
 import math
 import os
-from os import path
 import pickle
 import random
 import socket
@@ -15,22 +14,19 @@ import sys
 import time
 import zipfile
 import zlib
+from os import path
 
-from matplotlib import pyplot as plt
 import numpy as np
 import scapy
-import scapy.layers.l2
 import scapy.layers.inet
+import scapy.layers.l2
 import scapy.utils
-from scipy import stats
-from scipy import cluster
-from sklearn import ensemble
-from sklearn import feature_selection
-from sklearn import inspection
 import torch
+from matplotlib import pyplot as plt
+from scipy import cluster, stats
+from sklearn import ensemble, feature_selection, inspection
 
 from ratemon.model import defaults, features
-
 
 # Values considered unsafe for division and min().
 UNSAFE = {-1, 0, float("inf"), float("NaN")}

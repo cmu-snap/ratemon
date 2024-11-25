@@ -5,11 +5,10 @@ import logging
 import logging.handlers
 import multiprocessing
 import os
-from os import path
 import subprocess
 import time
 import traceback
-
+from os import path
 
 # Path to the ns-3 top-level directory.
 # Warning: If you move this file from the directory "ratemon/model", then you
@@ -26,15 +25,19 @@ LOGGER = path.basename(__file__).split(".")[0]
 
 
 def check_output(cnf, logger, msg):
-    """ Runs a configuration and returns its output. """
-    args = ([path.join(NS3_DIR, "build", "scratch", APP),] +
-            [f"--{arg}={val}" for arg, val in cnf.items()])
+    """Runs a configuration and returns its output."""
+    args = [
+        path.join(NS3_DIR, "build", "scratch", APP),
+    ] + [f"--{arg}={val}" for arg, val in cnf.items()]
     cmd = f"LD_LIBRARY_PATH={os.environ['LD_LIBRARY_PATH']} {' '.join(args)}"
     log = logging.getLogger(logger)
     log.info("Running%s: %s", f" ({msg})" if msg is not None else "", cmd)
     try:
-        res = subprocess.check_output(
-            args, stderr=subprocess.STDOUT, env=os.environ).decode().split("\n")
+        res = (
+            subprocess.check_output(args, stderr=subprocess.STDOUT, env=os.environ)
+            .decode()
+            .split("\n")
+        )
     except subprocess.CalledProcessError:
         traceback.print_exc()
         log.exception("Exception while running:\n%s\n\n", cmd)
@@ -67,15 +70,22 @@ def run(cnf, res_fnc, logger, idx, total):
     """
     # Build the arguments array, run the simulation, and iterate over each line
     # in its output.
-    out = check_output(
-        cnf, logger, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
+    out = check_output(cnf, logger, msg=f"{idx + 1:{f'0{len(str(total))}'}}/{total}")
     if res_fnc is None:
         return None
     return res_fnc(out)
 
 
-def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
-        dry_run=False, sync=False):
+def sim(
+    eid,
+    cnfs,
+    out_dir,
+    res_fnc=None,
+    log_par=None,
+    log_dst=None,
+    dry_run=False,
+    sync=False,
+):
     """
     Simulates a set of configurations. Returns a list of pairs of the form:
         (configuration, result)
@@ -91,7 +101,8 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
             mailhost="localhost",
             fromaddr=f"{os.getlogin()}@maas.cmcl.cs.cmu.edu",
             toaddrs=log_dst,
-            subject=f"[{logger}] {eid}")
+            subject=f"[{logger}] {eid}",
+        )
         hdl.setLevel("ERROR")
         log.addHandler(hdl)
 
@@ -102,7 +113,8 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
     # the ns-3 library can be found.
     os.environ["LD_LIBRARY_PATH"] = (
         f"/usr/lib/gcc/x86_64-linux-gnu/7:{path.join(NS3_DIR, 'build', 'lib')}:"
-        "/opt/libtorch/lib")
+        "/opt/libtorch/lib"
+    )
 
     # Record the configurations.
     with open(path.join(out_dir, "configurations.json"), "w") as fil:
@@ -116,14 +128,13 @@ def sim(eid, cnfs, out_dir, res_fnc=None, log_par=None, log_dst=None,
     tim_srt_s = time.time()
     if sync:
         data = [
-            run(cnf, res_fnc, logger, idx, num_cnfs)
-            for idx, cnf in enumerate(cnfs)]
+            run(cnf, res_fnc, logger, idx, num_cnfs) for idx, cnf in enumerate(cnfs)
+        ]
     else:
         with multiprocessing.Pool() as pool:
             data = pool.starmap(
                 run,
-                ((cnf, res_fnc, logger, idx, num_cnfs)
-                 for idx, cnf in enumerate(cnfs)))
-    log.critical(
-        "Done with simulations - time: %.2f seconds", time.time() - tim_srt_s)
+                ((cnf, res_fnc, logger, idx, num_cnfs) for idx, cnf in enumerate(cnfs)),
+            )
+    log.critical("Done with simulations - time: %.2f seconds", time.time() - tim_srt_s)
     return list(zip(cnfs, data))

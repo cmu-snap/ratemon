@@ -5,18 +5,17 @@ import argparse
 import json
 import multiprocessing
 import os
-from os import path
 import pickle
-from statistics import mean
 import time
-from matplotlib import pyplot
-
-import numpy as np
-import torch
+from os import path
+from statistics import mean
 
 import models
+import numpy as np
+import torch
 import train
 import utils
+from matplotlib import pyplot
 
 manager = multiprocessing.Manager()
 all_accuracy = manager.list()

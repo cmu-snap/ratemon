@@ -105,7 +105,8 @@ SEC("tp/syscalls/sys_enter_write")
 int handle_tp(void *ctx) {
   int pid = bpf_get_current_pid_tgid() >> 32;
 
-  if (pid != my_pid) return 0;
+  if (pid != my_pid)
+    return 0;
 
   u64 t = bpf_ktime_get_ns();
   bpf_map_update_elem(&test_map_1, &t, &pid, BPF_ANY);
@@ -132,7 +133,8 @@ int test_iter_1(struct bpf_iter__bpf_map_elem *ctx) {
 
   u64 *key = ctx->key;
   int *val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
+  if (key == NULL || val == NULL)
+    return 0;
 
   //   bpf_printk("test_map_1: seq_num: %u, key %lu, value %d", seq_num, *key,
   //              *val);
@@ -149,7 +151,8 @@ int test_iter_2(struct bpf_iter__bpf_map_elem *ctx) {
 
   u32 *key = ctx->key;
   u64 *val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
+  if (key == NULL || val == NULL)
+    return 0;
 
   //   bpf_printk("test_map_2: seq_num: %u, key %u, value %lu", seq_num, *key,
   //              *val);
@@ -162,9 +165,11 @@ int test_iter_2(struct bpf_iter__bpf_map_elem *ctx) {
 SEC("sockops")
 int skops_getsockopt(struct bpf_sock_ops *skops) {
   bpf_printk("skops_getsockops");
-  if (skops == NULL) return 1;
+  if (skops == NULL)
+    return 1;
   bpf_printk("%u skops_getsockops", skops->local_port);
-  if (!(skops->local_port == 50000 || skops->local_port == 50001)) return 1;
+  if (!(skops->local_port == 50000 || skops->local_port == 50001))
+    return 1;
 
   // struct bpf_sock *sk = skops->sk;
   // if (sk == NULL) {
@@ -188,35 +193,35 @@ int skops_getsockopt(struct bpf_sock_ops *skops) {
   }
 
   switch (skops->op) {
-    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: {
-      bpf_printk("skops_getsockops set flag BPF_SOCK_OPS_RTT_CB_FLAG");
-      bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTT_CB_FLAG);
-      // struct tcp_info info;
-      // // socklen_t optlen = sizeof(info);
+  case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+  case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB: {
+    bpf_printk("skops_getsockops set flag BPF_SOCK_OPS_RTT_CB_FLAG");
+    bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTT_CB_FLAG);
+    // struct tcp_info info;
+    // // socklen_t optlen = sizeof(info);
 
-      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
-      // if (e < 0) {
-      //   bpf_printk("Failed to lookup TCP stats");
-      // } else {
-      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
-      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
-      // }
-      break;
-    }
-    case BPF_SOCK_OPS_RTT_CB: {
-      bpf_printk("skops_getsockops in BPF_SOCK_OPS_RTT_CB");
-      // struct tcp_info info;
-      // // socklen_t optlen = sizeof(info);
-      // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
-      // if (e < 0) {
-      //   bpf_printk("Failed to lookup TCP stats");
-      // } else {
-      //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
-      //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
-      // }
-      break;
-    }
+    // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
+    // if (e < 0) {
+    //   bpf_printk("Failed to lookup TCP stats");
+    // } else {
+    //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
+    //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
+    // }
+    break;
+  }
+  case BPF_SOCK_OPS_RTT_CB: {
+    bpf_printk("skops_getsockops in BPF_SOCK_OPS_RTT_CB");
+    // struct tcp_info info;
+    // // socklen_t optlen = sizeof(info);
+    // long e = bpf_getsockopt(skops, SOL_TCP, TCP_INFO, &info, sizeof(info));
+    // if (e < 0) {
+    //   bpf_printk("Failed to lookup TCP stats");
+    // } else {
+    //   bpf_printk("tcp_info snd_cwnd: %u snd_wnd: %u min_rtt: %u",
+    //              info.tcpi_snd_cwnd, info.tcpi_snd_wnd, info.tcpi_min_rtt);
+    // }
+    break;
+  }
   }
   return 1;
 }
@@ -285,7 +290,8 @@ int test_iter_3(struct bpf_iter__bpf_map_elem *ctx) {
 
   u32 *key = ctx->key;
   struct tcp_sock **val = ctx->value;
-  if (key == NULL || val == NULL) return 0;
+  if (key == NULL || val == NULL)
+    return 0;
 
   u32 r = 0;
   BPF_CORE_READ_INTO(&r, *val, rcv_nxt);
@@ -616,7 +622,7 @@ int test_iter_set_await(struct bpf_iter__bpf_map_elem *ctx) {
   return 0;
 }
 
-#define from_timer(var, callback_timer, timer_fieldname) \
+#define from_timer(var, callback_timer, timer_fieldname)                       \
   container_of(callback_timer, typeof(*var), timer_fieldname)
 
 SEC("kprobe/tcp_keepalive_timer")

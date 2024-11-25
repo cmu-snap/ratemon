@@ -5,14 +5,13 @@ import argparse
 import itertools
 import logging
 import os
-from os import path
 import time
+from os import path
 
 import cl_args
 import defaults
 import sim
 import utils
-
 
 # Bandwidth (Mbps).
 BW_MIN_Mbps = 10
@@ -57,12 +56,15 @@ LOGGER = path.basename(__file__).split(".")[0]
 
 
 def main():
-    """ This program's entrypoint. """
+    """This program's entrypoint."""
     # Parse command line arguments.
     psr = argparse.ArgumentParser(description="Generates training data.")
     psr.add_argument(
-        "--log-dst", default=EMAIL_DST,
-        help="The email address to which updates will be sent.", type=str)
+        "--log-dst",
+        default=EMAIL_DST,
+        help="The email address to which updates will be sent.",
+        type=str,
+    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     # The ID of the experiment.
@@ -91,31 +93,47 @@ def main():
     log.info("Duration (s): %s", DUR_s)
 
     # Assemble the configurations.
-    cnfs = [{"bottleneck_bandwidth_Mbps": bw_Mbps,
-             "bottleneck_delay_us": dly_us,
-             # Calculate queue capacity as a multiple of the BDP. If the BDP is
-             # less than a single packet, then use 1 packet as the BDP anyway.
-             "bottleneck_queue_p": int(round(
-                 que_mult *
-                 max(1,
-                     utils.bdp_B(bw_Mbps * 1e6, dly_us / 1e6 * 6) / float(PACKET_SIZE_B)))),
-             "unfair_flows": unfair_flws,
-             "unfair_proto": UNFAIR_PROTO,
-             "fair_flows": fair_flws,
-             "fair_proto": FAIR_PROTO,
-             "unfair_edge_delays_us": f"[{dly_us}]",
-             "fair_edge_delays_us": f"[{dly_us}]",
-             "payload_B": PACKET_SIZE_B,
-             "enable_mitigation": "false",
-             "duration_s": DUR_s,
-             "pcap": "true" if PCAP else "false",
-             "out_dir": sim_dir}
-            for (bw_Mbps, dly_us, que_mult, unfair_flws,
-                 fair_flws) in itertools.product(
-                     BWS_Mbps, DELAYS_us, QUEUE_MULTS, UNFAIR_FLOWS,
-                     FAIR_FLOWS)]
-    sim.sim(eid, cnfs, out_dir, log_par=LOGGER, log_dst=args.log_dst,
-            dry_run=DRY_RUN, sync=defaults.SYNC)
+    cnfs = [
+        {
+            "bottleneck_bandwidth_Mbps": bw_Mbps,
+            "bottleneck_delay_us": dly_us,
+            # Calculate queue capacity as a multiple of the BDP. If the BDP is
+            # less than a single packet, then use 1 packet as the BDP anyway.
+            "bottleneck_queue_p": int(
+                round(
+                    que_mult
+                    * max(
+                        1,
+                        utils.bdp_B(bw_Mbps * 1e6, dly_us / 1e6 * 6)
+                        / float(PACKET_SIZE_B),
+                    )
+                )
+            ),
+            "unfair_flows": unfair_flws,
+            "unfair_proto": UNFAIR_PROTO,
+            "fair_flows": fair_flws,
+            "fair_proto": FAIR_PROTO,
+            "unfair_edge_delays_us": f"[{dly_us}]",
+            "fair_edge_delays_us": f"[{dly_us}]",
+            "payload_B": PACKET_SIZE_B,
+            "enable_mitigation": "false",
+            "duration_s": DUR_s,
+            "pcap": "true" if PCAP else "false",
+            "out_dir": sim_dir,
+        }
+        for (bw_Mbps, dly_us, que_mult, unfair_flws, fair_flws) in itertools.product(
+            BWS_Mbps, DELAYS_us, QUEUE_MULTS, UNFAIR_FLOWS, FAIR_FLOWS
+        )
+    ]
+    sim.sim(
+        eid,
+        cnfs,
+        out_dir,
+        log_par=LOGGER,
+        log_dst=args.log_dst,
+        dry_run=DRY_RUN,
+        sync=defaults.SYNC,
+    )
 
     log.info("Results in: %s", out_dir)
     log.critical("Finished.")

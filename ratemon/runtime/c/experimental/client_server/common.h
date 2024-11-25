@@ -1,3 +1,4 @@
+#pragma once
 
 #ifndef __RATEMON_COMMON_H
 #define __RATEMON_COMMON_H

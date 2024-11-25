@@ -4,20 +4,21 @@
 import argparse
 from os import path
 
-from matplotlib import pyplot
-import numpy as np
-
 import cl_args
+import numpy as np
+from matplotlib import pyplot
 
 
 def main():
-    """ This program's entrypoint. """
+    """This program's entrypoint."""
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(
-        description="Visualize a simulation's features.")
+    psr = argparse.ArgumentParser(description="Visualize a simulation's features.")
     psr.add_argument(
-        "--training-data", help="The path to the parsed training data.",
-        required=True, type=str)
+        "--training-data",
+        help="The path to the parsed training data.",
+        required=True,
+        type=str,
+    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     dat_flp = args.training_data
@@ -35,8 +36,9 @@ def main():
         pyplot.hist(dat_in[fet], bins=50, density=True)
         pyplot.xlabel(fet)
         pyplot.ylabel("histogram")
-        pyplot.savefig(path.join(
-            args.out_dir, f"{fet.replace(' ', '_').replace('/', '-')}.pdf"))
+        pyplot.savefig(
+            path.join(args.out_dir, f"{fet.replace(' ', '_').replace('/', '-')}.pdf")
+        )
         pyplot.close()
 
 

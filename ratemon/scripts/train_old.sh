@@ -16,8 +16,8 @@ exp_dir="$1"
 out_dir="$2"
 tag="$3"
 ratemon_dir="$(cd "$(dirname "$0")"/.. && pwd)"
-workspace_dir="$(dirname "$ratemon_dir")"
-export PYTHONPATH="$workspace_dir:$PYTHONPATH"
+workspace_dir="$(dirname "${ratemon_dir}")"
+export PYTHONPATH="${workspace_dir}:${PYTHONPATH}"
 
 # python "$ratemon_dir/model/gen_features.py" \
 #     --exp-dir="$exp_dir" \
@@ -34,21 +34,21 @@ export PYTHONPATH="$workspace_dir:$PYTHONPATH"
 #     --warmup-percent=5 \
 #     --sample-percent=20
 for max_leaf_nodes in 100 250 500 1000 250 5000 10000 31 -1; do
-    python "$ratemon_dir/model/train.py" \
-        --out-dir="${out_dir}/vary_max_leaf_nodes/${max_leaf_nodes}" \
-        --data-dir="${out_dir}" \
-        --model=HistGbdtSklearn \
-        --sample-percent=100 \
-        --no-rand \
-        --conf-trials=1 \
-        --max-iter=10000 \
-        --tag="${tag}_${max_leaf_nodes}" \
-        --max-leaf-nodes="${max_leaf_nodes}" \
-        --early-stop
-    # --analyze-features \
-    # --clusters=10 \
-    # --features-to-pick=20 \
-    # --permutation-importance-repeats=1
-    # --balance \
-    # --drop-popular
+	python "${ratemon_dir}/model/train.py" \
+		--out-dir="${out_dir}/vary_max_leaf_nodes/${max_leaf_nodes}" \
+		--data-dir="${out_dir}" \
+		--model=HistGbdtSklearn \
+		--sample-percent=100 \
+		--no-rand \
+		--conf-trials=1 \
+		--max-iter=10000 \
+		--tag="${tag}_${max_leaf_nodes}" \
+		--max-leaf-nodes="${max_leaf_nodes}" \
+		--early-stop
+	# --analyze-features \
+	# --clusters=10 \
+	# --features-to-pick=20 \
+	# --permutation-importance-repeats=1
+	# --balance \
+	# --drop-popular
 done

@@ -5,19 +5,18 @@ import argparse
 import json
 import multiprocessing
 import os
-from os import path
 import pickle
 import time
-from matplotlib import pyplot
-
-import numpy as np
-import torch
+from os import path
 
 import cl_args
 import defaults
 import models
+import numpy as np
+import torch
 import train
 import utils
+from matplotlib import pyplot
 
 
 def plot_bar(x_axis, y_axis, file_name):

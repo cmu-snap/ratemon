@@ -1,7 +1,5 @@
 """This module contains functionality related to packing ACKs."""
 
-import pyroute2
-
 #
 #
 #
@@ -15,7 +13,6 @@ import pyroute2
 #   - be careful about holding two locks at once
 # - current fairness mitigation state: yes or no
 #   - if yes, information about current action: pacing rate, TC filter info, etc.
-
 
 # tc qdisc add dev lo root handle 1: htb default 30
 
@@ -31,7 +28,6 @@ import pyroute2
 
 # tc filter add dev lo protocol ip parent 1:0 prio 1 u32 match ip src 2.4.6.8/32 match ip sport 3453 match ip dst 1.2.3.4/32 match ip dport 9998 0xffff flowid 1:10
 # tc filter add dev lo protocol ip parent 1:0 prio 1 u32 match ip src 2.4.6.8/32 match ip sport 3454 match ip dst 4.3.2.1/32 match ip dport 9999 0xffff flowid 1:20
-
 
 # An example with htb qdisc, lets assume eth0 == 2::
 

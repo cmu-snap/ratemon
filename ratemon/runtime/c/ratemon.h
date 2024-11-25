@@ -1,3 +1,4 @@
+#pragma once
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 #ifndef __RATEMON_H
@@ -10,7 +11,7 @@
 #define RM_PRINTF(...) printf(__VA_ARGS__)
 // #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
-#define NDEBUG  // Disable assert() calls.
+#define NDEBUG // Disable assert() calls.
 #define RM_PRINTF(...)
 // #define RM_PRINTK(...)
 #endif
@@ -20,7 +21,7 @@
 // Map pin paths.
 #define RM_FLOW_TO_RWND_PIN_PATH "/sys/fs/bpf/flow_to_rwnd"
 #define RM_FLOW_TO_WIN_SCALE_PIN_PATH "/sys/fs/bpf/flow_to_win_scale"
-#define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH \
+#define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH                                     \
   "/sys/fs/bpf/flow_to_last_data_time_ns"
 #define RM_FLOW_TO_KEEPALIVE_PIN_PATH "/sys/fs/bpf/flow_to_keepalive"
 // Name of struct_ops CCA that flows must use to be woken up.

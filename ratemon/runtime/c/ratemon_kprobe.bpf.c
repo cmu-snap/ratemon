@@ -102,9 +102,8 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   unsigned long now_ns = bpf_ktime_get_ns();
   if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
                           BPF_ANY)) {
-    bpf_printk(
-        "ERROR: 'tcp_rcv_established' error updating "
-        "flow_to_last_data_time_ns");
+    bpf_printk("ERROR: 'tcp_rcv_established' error updating "
+               "flow_to_last_data_time_ns");
   }
   return 0;
 }

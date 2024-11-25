@@ -6,7 +6,22 @@ https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
 https://blog.floydhub.com/long-short-term-memory-from-zero-to-hero-with-pytorch/
 """
 
+import argparse
+import copy
+import functools
+import json
 import logging
+import math
+import multiprocessing
+import os
+import pickle
+import sys
+import time
+from os import path
+
+import torch
+
+from ratemon.model import cl_args, data, defaults, models, utils
 
 log_flp = "train.log"
 print(f"Logging to: {log_flp}")
@@ -16,22 +31,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s | %(message)s",
     level=logging.DEBUG,
 )
-
-import argparse
-import copy
-import functools
-import json
-import math
-import multiprocessing
-import os
-from os import path
-import pickle
-import sys
-import time
-
-import torch
-
-from ratemon.model import cl_args, data, defaults, models, utils
 
 
 # The threshold of the new throughout to the old throughput above which a
@@ -321,7 +320,8 @@ def run_sklearn(args, out_dir, out_flp, ldrs):
         dat_in,
         dat_out,
         dat_extra,
-        graph_prms={"out_dir": out_dir, "sort_by_unfairness": True},  # , "dur_s": None},
+        # , "dur_s": None},
+        graph_prms={"out_dir": out_dir, "sort_by_unfairness": True},
     )
     logging.info(f"Finished testing - time: {time.time() - tim_srt_s:.2f} seconds")
 

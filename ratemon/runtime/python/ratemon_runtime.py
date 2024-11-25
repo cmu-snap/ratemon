@@ -1,18 +1,18 @@
 """Monitors incoming TCP flow to detect if they are above their target rate."""
 
-from argparse import ArgumentParser
 import atexit
 import logging
 import multiprocessing
 import multiprocessing.managers
-from os import path
 import queue
 import signal
-from struct import unpack
 import sys
 import threading
 import time
 import typing
+from argparse import ArgumentParser
+from os import path
+from struct import unpack
 
 import netifaces as ni
 import pcapy
@@ -25,10 +25,9 @@ from ratemon.runtime.python import (
     policy_engine,
     reaction_strategy,
 )
-from ratemon.runtime.python.policies import Policy
 from ratemon.runtime.python.mitigation_strategy import MitigationStrategy
+from ratemon.runtime.python.policies import Policy
 from ratemon.runtime.python.reaction_strategy import ReactionStrategy
-
 
 LOCALHOST = utils.ip_str_to_int("127.0.0.1")
 # Flows that have not received a new packet in this many seconds will be

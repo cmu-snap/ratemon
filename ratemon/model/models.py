@@ -4,21 +4,17 @@ import copy
 import logging
 import math
 import os
-from os import path
 import pickle
 import random
+from os import path
 
-from matplotlib import pyplot as plt
 import numpy as np
 import sklearn
-from sklearn import ensemble
-from sklearn import linear_model
-from sklearn import metrics
-from sklearn import svm
 import torch
+from matplotlib import pyplot as plt
+from sklearn import ensemble, linear_model, metrics, svm
 
 from ratemon.model import defaults, features, utils
-
 
 SMOOTHING_THRESHOLD = 0.4
 SLIDING_WINDOW_NUM_RTT = 1
@@ -1296,7 +1292,7 @@ class LstmWrapper(PytorchModelWrapper):
     @staticmethod
     def convert_to_class(dat_out):
         # TODO: Implement.
-        assert False, "Not implemented."
+        raise AssertionError("Not implemented.")
         return dat_out
 
 

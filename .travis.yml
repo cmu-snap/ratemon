@@ -1,6 +1,6 @@
 language: python
 python:
-    - "3.6"
+  - "3.6"
 # Cache pip dependencies.
 cache: pip
 
@@ -10,18 +10,18 @@ cache: pip
 # Handle git submodules manually.
 # Based on: https://github.com/algolia/examples/issues/24
 git:
-    submodules: false
+  submodules: false
 # Use sed to replace the SSH URL with the public URL, then initialize submodules
 # manually.
 before_install:
-    - sed -i "s/git@github.com:/https:\/\/github.com\//" .gitmodules
-    - git submodule update --init --recursive
+  - sed -i "s/git@github.com:/https:\/\/github.com\//" .gitmodules
+  - git submodule update --init --recursive
 
 # Install dependencies.
 install:
-    - sudo apt-get update
-    - sudo apt-get install -y tshark
-    - pip install -r model/requirements.txt
+  - sudo apt-get update
+  - sudo apt-get install -y tshark
+  - pip install -r model/requirements.txt
 # Run tests.
 script:
-    - python -m unittest model/tests.py
+  - python -m unittest model/tests.py

@@ -5,20 +5,18 @@ import argparse
 import itertools
 import multiprocessing
 import os
-from os import path
 import random
 import shutil
 import time
-
-import numpy as np
-from matplotlib import pyplot as plt
+from os import path
 
 import cl_args
 import defaults
 import models
+import numpy as np
 import train
 import utils
-
+from matplotlib import pyplot as plt
 
 # Key to use in the results file.
 RESULTS_KEY = "results"
@@ -48,11 +46,11 @@ NUMS_ITERS = [5, 20, 80]
 
 
 def get_partial_results_flp(cnf):
-    """ Assembles the results filepath for a configuration. """
+    """Assembles the results filepath for a configuration."""
     return path.join(
         cnf["out_dir"],
-        (f"{cnf['num_sims']}_{cnf['keep_percent']}_"
-         f"{cnf['max_iter']}_results.npz"))
+        (f"{cnf['num_sims']}_{cnf['keep_percent']}_" f"{cnf['max_iter']}_results.npz"),
+    )
 
 
 def maybe_run_cnf(cnf, func):
@@ -97,14 +95,14 @@ def cleanup_combine_and_save_results(cnf, res):
     if len(res) != 5:
         los_tst, tim_trn_s = res
         res = np.array(
-            [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"], los_tst,
-             tim_trn_s])
+            [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"], los_tst, tim_trn_s]
+        )
         np.savez_compressed(get_partial_results_flp(cnf), **{RESULTS_KEY: res})
     return res
 
 
 def graph(lines, flp, lbl_leg, lbl_x, lbl_y, lim_y=None):
-    """ Generate a single graph. """
+    """Generate a single graph."""
     for key, line in sorted(lines.items()):
         xs, ys = zip(*line)
         plt.plot(xs, ys, label=f"{key}{lbl_leg}")
@@ -120,13 +118,15 @@ def graph(lines, flp, lbl_leg, lbl_x, lbl_y, lim_y=None):
 
 
 def graph_partial_results(cnfs, out_dir):
-    """ Look for and graph partial results. """
+    """Look for and graph partial results."""
     results = []
     for cnf in cnfs:
         cnf_out_dir = cnf["out_dir"]
         results_flps = [
-            path.join(cnf_out_dir, fln) for fln in os.listdir(cnf_out_dir)
-            if fln.endswith("_results.npz")]
+            path.join(cnf_out_dir, fln)
+            for fln in os.listdir(cnf_out_dir)
+            if fln.endswith("_results.npz")
+        ]
         assert len(results_flps) <= 1
         if results_flps:
             results_flp = results_flps[0]
@@ -140,13 +140,16 @@ def graph_partial_results(cnfs, out_dir):
     results = [res for res in results if not np.isnan(res).any()]
     len_after = len(results)
     print(
-        (f"Found {len_after} valid results! (Dropped "
-         f"{len_before - len_after} containing NaNs.)"))
+        (
+            f"Found {len_after} valid results! (Dropped "
+            f"{len_before - len_after} containing NaNs.)"
+        )
+    )
     graph_results(results, out_dir)
 
 
 def graph_results(results, out_dir):
-    """ Graph the provided results. """
+    """Graph the provided results."""
     # Vary keep_percent. One graph for each number of iterations. A line for
     # each number of simulations.
     #
@@ -160,28 +163,32 @@ def graph_results(results, out_dir):
                 num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
                 if num_sims == num_sims_target and max_iter == max_iters_graph:
                     num_sims_lines[num_sims_target].append(
-                        (keep_prc, los_tst, tim_trn_s))
+                        (keep_prc, los_tst, tim_trn_s)
+                    )
         graph(
             lines={
                 key: [(x, 1 - y) for x, y, _ in val]
-                for key, val in num_sims_lines.items()},
+                for key, val in num_sims_lines.items()
+            },
             flp=path.join(
-                out_dir,
-                f"max_iters_{max_iters_graph}-vary_keep_percent-accuracy.pdf"),
+                out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-accuracy.pdf"
+            ),
             lbl_leg=" simulations",
             lbl_x="Percent kept from each sim",
             lbl_y="Accuracy",
-            lim_y=(0, 1))
+            lim_y=(0, 1),
+        )
         graph(
             lines={
-                key: [(x, y) for x, _, y in val]
-                for key, val in num_sims_lines.items()},
+                key: [(x, y) for x, _, y in val] for key, val in num_sims_lines.items()
+            },
             flp=path.join(
-                out_dir,
-                f"max_iters_{max_iters_graph}-vary_keep_percent-time.pdf"),
+                out_dir, f"max_iters_{max_iters_graph}-vary_keep_percent-time.pdf"
+            ),
             lbl_leg=" simulations",
             lbl_x="Percent kept from each sim",
-            lbl_y="Training time (seconds)")
+            lbl_y="Training time (seconds)",
+        )
 
     # Vary max_iter. One graph for each number of iterations. A line for
     # each number of simulations.
@@ -196,40 +203,45 @@ def graph_results(results, out_dir):
                 num_sims, keep_prc, max_iter, los_tst, tim_trn_s = result
                 if num_sims == num_sims_graph and keep_prc == keep_prc_target:
                     keep_prc_lines[keep_prc_target].append(
-                        (max_iter, los_tst, tim_trn_s))
+                        (max_iter, los_tst, tim_trn_s)
+                    )
 
         graph(
             lines={
                 key: [(x, 1 - y) for x, y, _ in val]
-                for key, val in keep_prc_lines.items()},
+                for key, val in keep_prc_lines.items()
+            },
             flp=path.join(
-                out_dir,
-                f"num_sims_{num_sims_graph}-vary_max_iter-accuracy.pdf"),
+                out_dir, f"num_sims_{num_sims_graph}-vary_max_iter-accuracy.pdf"
+            ),
             lbl_leg="% kept",
             lbl_x="Number of training iterations",
             lbl_y="Accuracy",
-            lim_y=(0, 1))
+            lim_y=(0, 1),
+        )
         graph(
             lines={
-                key: [(x, y) for x, _, y in val]
-                for key, val in keep_prc_lines.items()},
-            flp=path.join(
-                out_dir,
-                f"num_sims_{num_sims_graph}-vary_max_iter-time.pdf"),
+                key: [(x, y) for x, _, y in val] for key, val in keep_prc_lines.items()
+            },
+            flp=path.join(out_dir, f"num_sims_{num_sims_graph}-vary_max_iter-time.pdf"),
             lbl_leg="% kept",
             lbl_x="Number of training iterations",
-            lbl_y="Training time (seconds)")
+            lbl_y="Training time (seconds)",
+        )
 
 
 def main():
-    """ This program's entrypoint. """
-    psr = argparse.ArgumentParser(
-        description="Visualize sklearn training parameters.")
+    """This program's entrypoint."""
+    psr = argparse.ArgumentParser(description="Visualize sklearn training parameters.")
     psr, psr_verify = cl_args.add_training(psr)
     psr.add_argument(
-        "--graph-results", action="store_true",
-        help=("Look through the output directory for completed experiments, "
-              "and graph them."))
+        "--graph-results",
+        action="store_true",
+        help=(
+            "Look through the output directory for completed experiments, "
+            "and graph them."
+        ),
+    )
     args = psr_verify(psr.parse_args())
     args = train.prepare_args(vars(args))
     tim_srt_s = time.time()
@@ -239,31 +251,46 @@ def main():
     # product of their hyper-parameters, which is a heuristic of how
     # long they will take to run.
     cnfs = sorted(
-        [train.prepare_args({
-            "warmup_percent": args["warmup_percent"],
-            "model": args["model"],
-            "kernel": args["kernel"],
-            "degree": args["degree"],
-            "penalty": args["penalty"],
-            "standardize": args["standardize"],
-            "no_rand": args["no_rand"],
-            "max_iter": max_iter,
-            "keep_percent": prc,
-            "num_sims": num_sims,
-            "out_dir": path.join(out_dir, f"{num_sims}_{prc}_{max_iter}")
-        }) for num_sims, prc, max_iter in set(
-            # Fix number of iterations and number of
-            # simulations. Vary percent of each simulation.
-            list(itertools.product(
-                NUMS_SIMS, range(PRC_MIN, PRC_MAX + 1, PRC_DELTA),
-                NUMS_ITERS)) +
-            # Fix percent of each simulation and number of
-            # simulations. Vary number of iterations.
-            list(itertools.product(
-                NUMS_SIMS, KEEP_PRCS,
-                range(NUM_ITERS_MIN, NUM_ITERS_MAX + 1, NUM_ITERS_DELTA))))],
+        [
+            train.prepare_args(
+                {
+                    "warmup_percent": args["warmup_percent"],
+                    "model": args["model"],
+                    "kernel": args["kernel"],
+                    "degree": args["degree"],
+                    "penalty": args["penalty"],
+                    "standardize": args["standardize"],
+                    "no_rand": args["no_rand"],
+                    "max_iter": max_iter,
+                    "keep_percent": prc,
+                    "num_sims": num_sims,
+                    "out_dir": path.join(out_dir, f"{num_sims}_{prc}_{max_iter}"),
+                }
+            )
+            for num_sims, prc, max_iter in set(
+                # Fix number of iterations and number of
+                # simulations. Vary percent of each simulation.
+                list(
+                    itertools.product(
+                        NUMS_SIMS, range(PRC_MIN, PRC_MAX + 1, PRC_DELTA), NUMS_ITERS
+                    )
+                )
+                +
+                # Fix percent of each simulation and number of
+                # simulations. Vary number of iterations.
+                list(
+                    itertools.product(
+                        NUMS_SIMS,
+                        KEEP_PRCS,
+                        range(NUM_ITERS_MIN, NUM_ITERS_MAX + 1, NUM_ITERS_DELTA),
+                    )
+                )
+            )
+        ],
         key=lambda cnf: np.prod(
-            [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"]]))
+            [cnf["num_sims"], cnf["keep_percent"], cnf["max_iter"]]
+        ),
+    )
     print(f"Will test {len(cnfs)} configurations.")
 
     if args["graph_results"]:
@@ -273,8 +300,7 @@ def main():
     # For each possible configuration of number of simulations and
     # percentage of each simulation, create a temporary file
     # containing the parsed data for that configuration.
-    all_prcs = list(set(
-        KEEP_PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
+    all_prcs = list(set(KEEP_PRCS + list(range(PRC_MIN, PRC_MAX + 1, PRC_DELTA))))
     tmp_dat = {}
     for num_sims, prc in itertools.product(NUMS_SIMS, all_prcs):
         base_dir = path.join(out_dir, f"{num_sims}_{prc}")
@@ -294,20 +320,26 @@ def main():
         cnf_out_dir = cnf["out_dir"]
         if not path.exists(cnf_out_dir):
             os.makedirs(cnf_out_dir)
-        tmp_dat_flp, tmp_scl_prms_flp = tmp_dat[
-            (cnf["num_sims"], cnf["keep_percent"])]
-        src_dst.append((
-            (tmp_dat_flp,
-             path.join(cnf_out_dir, path.basename(tmp_dat_flp))),
-            (tmp_scl_prms_flp,
-             path.join(cnf_out_dir, path.basename(tmp_scl_prms_flp)))))
+        tmp_dat_flp, tmp_scl_prms_flp = tmp_dat[(cnf["num_sims"], cnf["keep_percent"])]
+        src_dst.append(
+            (
+                (tmp_dat_flp, path.join(cnf_out_dir, path.basename(tmp_dat_flp))),
+                (
+                    tmp_scl_prms_flp,
+                    path.join(cnf_out_dir, path.basename(tmp_scl_prms_flp)),
+                ),
+            )
+        )
 
     # Check if any of the data has not been generated yet. If any of
     # the data has not been generated yet, then we must regenerate all
     # of the data.
-    if np.array([
+    if np.array(
+        [
             path.exists(dat_dst) and path.exists(scl_prms_dst)
-            for (_, dat_dst), (_, scl_prms_dst) in src_dst]).all():
+            for (_, dat_dst), (_, scl_prms_dst) in src_dst
+        ]
+    ).all():
         print("All data already generated.")
     else:
         print("Generating all new data.")
@@ -341,14 +373,16 @@ def main():
             random.shuffle(sims)
         num_sims_actual = len(sims)
         max_sims = max(NUMS_SIMS)
-        assert num_sims_actual >= max_sims, \
-            (f"Insufficient simulations. Requested {max_sims}, but only "
-             f"{num_sims_actual} available.")
+        assert num_sims_actual >= max_sims, (
+            f"Insufficient simulations. Requested {max_sims}, but only "
+            f"{num_sims_actual} available."
+        )
         sims = sims[:max_sims]
         net = models.MODELS[args["model"]]()
         sim_args = [
             (idx, max_sims, net, sim_flp, out_dir, args["warmup_percent"], 100)
-            for idx, sim_flp in enumerate(sims)]
+            for idx, sim_flp in enumerate(sims)
+        ]
         if defaults.SYNC:
             dat_all = [train.process_exp(*sim_args_) for sim_args_ in sim_args]
         else:
@@ -361,8 +395,9 @@ def main():
         # trends, we need to make sure that we are training on the
         # number of simulations that we intend.
         for dat in dat_all:
-            assert dat is not None, \
-                "Error processing at least one simulation. Check logs (above)."
+            assert (
+                dat is not None
+            ), "Error processing at least one simulation. Check logs (above)."
         # Unpack the data.
         dat_all, sims = zip(*dat_all)
         dat_all = [utils.load_tmp_file(flp) for flp in dat_all]
@@ -376,17 +411,23 @@ def main():
         for (num_sims, prc), (tmp_dat_flp, tmp_scl_prms_flp) in tmp_dat.items():
             # Select the data corresponding to this number of
             # simulations and percent of each simulation.
-            dat_all = list(zip(*utils.filt(
-                dat_in, dat_out, dat_extra, scl_grps, num_sims, prc)))
+            dat_all = list(
+                zip(*utils.filt(dat_in, dat_out, dat_extra, scl_grps, num_sims, prc))
+            )
             # Finish processesing the data and save it in a form that
             # can be read by the training process.
             ignore = train.gen_data(
-                net, args, dat_flp=tmp_dat_flp, scl_prms_flp=tmp_scl_prms_flp,
-                dat=(dat_all, sims), save_data=True)
+                net,
+                args,
+                dat_flp=tmp_dat_flp,
+                scl_prms_flp=tmp_scl_prms_flp,
+                dat=(dat_all, sims),
+                save_data=True,
+            )
             del ignore
 
         # Copy temporary data to configuration output directories.
-        for (dat_src, dat_dst), (scl_prms_src, scl_prms_dst)  in src_dst:
+        for (dat_src, dat_dst), (scl_prms_src, scl_prms_dst) in src_dst:
             shutil.copyfile(dat_src, dat_dst)
             shutil.copyfile(scl_prms_src, scl_prms_dst)
 
@@ -397,8 +438,7 @@ def main():
             shutil.rmtree(tmp_dir)
 
     # Train models.
-    train.run_cnfs(
-        cnfs, defaults.SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
+    train.run_cnfs(cnfs, defaults.SYNC, maybe_run_cnf, cleanup_combine_and_save_results)
 
     # # Remove real data files.
     # for cnf in cnfs:

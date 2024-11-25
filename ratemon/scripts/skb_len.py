@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 
-PERCENTILES = [10., 25., 50., 75., 90., 95., 99., 99.9, 99.99, 100.]
+PERCENTILES = [10.0, 25.0, 50.0, 75.0, 90.0, 95.0, 99.0, 99.9, 99.99, 100.0]
 
 
 def parse_args():

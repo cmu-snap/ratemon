@@ -11,12 +11,10 @@ import functools
 import os
 from os import path
 
-from matplotlib import pyplot as plt
-import numpy as np
-
 import cl_args
+import numpy as np
 import utils
-
+from matplotlib import pyplot as plt
 
 ARRIVAL_TIME_KEY = "arrival time us"
 TPUT_KEY = "average throughput p/s-windowed-minRtt32"
@@ -25,31 +23,33 @@ PKT_SIZE_B = 1380
 
 
 def get_avg_tputs(flp):
-    """ Returns the average throughput for each flow. """
+    """Returns the average throughput for each flow."""
     with np.load(flp) as fil:
         return (
             utils.Exp(flp),
-            [utils.safe_mean(fil[flw][TPUT_KEY]) for flw in fil.files])
+            [utils.safe_mean(fil[flw][TPUT_KEY]) for flw in fil.files],
+        )
 
 
 def plot_f1b(flps, var, out_dir):
-    """ Generate figure 1b from Ray's paper. """
+    """Generate figure 1b from Ray's paper."""
     datapoints = [get_avg_tputs(flp) for flp in flps]
     # Sort the datapoint based on the simulation BDP.
     datapoints = sorted(datapoints, key=lambda datapoint: datapoint[0].queue_p)
     sims, all_ys = zip(*datapoints)
 
     tot_flws = len(all_ys[0])
-    assert tot_flws == 2, \
-        ("This figure  supports simulations with two flows, but the "
-         f"provided simulation contains {tot_flws} flows!")
+    assert tot_flws == 2, (
+        "This figure  supports simulations with two flows, but the "
+        f"provided simulation contains {tot_flws} flows!"
+    )
 
     # Create the x-values by converting each bottleneck queue size
     # into a multiple of the BDP.
     x_vals = [
-        sim.queue_p / (
-            utils.bdp_B(sim.bw_bps, 6 * sim.btl_delay_us / 1e6) / PKT_SIZE_B)
-        for sim in sims]
+        sim.queue_p / (utils.bdp_B(sim.bw_bps, 6 * sim.btl_delay_us / 1e6) / PKT_SIZE_B)
+        for sim in sims
+    ]
 
     plt.figure(figsize=(8, 3))
     # Plot a line for each flow. Reverse the flows so that BBR is
@@ -62,7 +62,8 @@ def plot_f1b(flps, var, out_dir):
             # Line with circle markers.
             "o-",
             # The first flow is BBR and the second is Cubic.
-            label=("1 BBR" if idx == 0 else f"1 {var}"))
+            label=("1 BBR" if idx == 0 else f"1 {var}"),
+        )
 
     plt.xscale("log", basex=2)
     plt.xticks(x_vals, [f"{x:.2f}" if x < 1 else str(round(x)) for x in x_vals])
@@ -76,18 +77,20 @@ def plot_f1b(flps, var, out_dir):
 
 
 def plot_f1c(flps, var, out_dir):
-    """ Generate figure 1c from Ray's paper. """
+    """Generate figure 1c from Ray's paper."""
     tot_flps = len(flps)
-    assert tot_flps == 1, \
-        f"This figure uses a single experiment, but {tot_flps} were provided."
+    assert (
+        tot_flps == 1
+    ), f"This figure uses a single experiment, but {tot_flps} were provided."
     flp = flps[0]
-    sim = utils.Exp(flp)
+    utils.Exp(flp)
     x_vals = np.arange(300 * 1000, dtype=float) / 1000
     with np.load(flp) as fil:
         tot_flws = len(fil.files)
-        assert tot_flws == 17, \
-            ("This figure supports simulations with 17 flows, but the "
-             f"provided simulation contains {tot_flws} flows!")
+        assert tot_flws == 17, (
+            "This figure supports simulations with 17 flows, but the "
+            f"provided simulation contains {tot_flws} flows!"
+        )
         tputs = []
         for flw in range(tot_flws):
             dat = fil[str(flw)][[ARRIVAL_TIME_KEY, TPUT_KEY]]
@@ -100,7 +103,9 @@ def plot_f1c(flps, var, out_dir):
                     # Convert from us to s.
                     xp=dat[ARRIVAL_TIME_KEY] / 1e6,
                     # Convert from packets/second to Mbps.
-                    fp=dat[TPUT_KEY] * PKT_SIZE_B * 8 / 1e6))
+                    fp=dat[TPUT_KEY] * PKT_SIZE_B * 8 / 1e6,
+                )
+            )
 
     # The 16 Cubic flows are first. Add up the throughputs of all of
     # the Cubic flows.
@@ -120,23 +125,26 @@ def plot_f1c(flps, var, out_dir):
 
 
 def main():
-    """ This program's entrypoint. """
+    """This program's entrypoint."""
     # Parse command line arguments.
-    psr = argparse.ArgumentParser(
-        description="Visualize a simulation's features.")
+    psr = argparse.ArgumentParser(description="Visualize a simulation's features.")
     psr.add_argument(
         "--f1b",
-        help=("The path to a directory contained parsed data files for figure "
-              "1b."),
-        required=True, type=str)
+        help=("The path to a directory contained parsed data files for figure " "1b."),
+        required=True,
+        type=str,
+    )
     psr.add_argument(
         "--f1c",
-        help=("The path to a directory containing a parsed data file for figure "
-              "1c."),
-        required=True, type=str)
+        help=(
+            "The path to a directory containing a parsed data file for figure " "1c."
+        ),
+        required=True,
+        type=str,
+    )
     psr.add_argument(
-        "--variant", help="The TCP variant competing with BBR.", required=True,
-        type=str)
+        "--variant", help="The TCP variant competing with BBR.", required=True, type=str
+    )
     psr, psr_verify = cl_args.add_out(psr)
     args = psr_verify(psr.parse_args())
     f1b = args.f1b

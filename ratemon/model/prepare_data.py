@@ -10,15 +10,14 @@ import json
 import logging
 import math
 import os
-from os import path
-import time
 import random
 import sys
+import time
+from os import path
 
 import numpy as np
 
 from ratemon.model import cl_args, defaults, features, models, utils
-
 
 SPLIT_NAMES = ["train", "val", "test"]
 

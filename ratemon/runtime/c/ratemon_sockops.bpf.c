@@ -153,12 +153,12 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
 SEC("sockops")
 int read_win_scale(struct bpf_sock_ops *skops) {
   switch (skops->op) {
-    case BPF_SOCK_OPS_TCP_LISTEN_CB:
-      return enable_hdr_cbs(skops);
-    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
-      return handle_hdr_opt_len(skops);
-    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-      return handle_write_hdr_opt(skops);
+  case BPF_SOCK_OPS_TCP_LISTEN_CB:
+    return enable_hdr_cbs(skops);
+  case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+    return handle_hdr_opt_len(skops);
+  case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+    return handle_write_hdr_opt(skops);
   }
   return SOCKOPS_OK;
 }

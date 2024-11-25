@@ -1,213 +1,211 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "(d) runtime",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
-            "console": "integratedTerminal",
-            "args": [
-                "-h"
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "sudo": true
-        },
-        {
-            "name": "(r) runtime",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/models/model.pickle",
-                "--interface=eno1",
-                "--reaction-strategy=mimd",
-                "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--check-interval-ms=100",
-                "--batch-size=10",
-                "--log=/tmp/ratemon.log",
-                "--skip-localhost",
-                "--listen-ports=9999",
-                "--debug",
-                "--smoothing-window=10",
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "sudo": true
-        },
-        {
-            "name": "(r) runtime, schedule",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
-                "--interface=ens3",
-                "--reaction-strategy=file",
-                "--schedule=${workspaceFolder}/test/ratemon_schedule_step.csv",
-                "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--check-interval-ms=1000",
-                "--log=/tmp/ratemon.log",
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "sudo": true
-        },
-        {
-            "name": "(r) runtime, cprofile",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "cProfile",
-            "console": "integratedTerminal",
-            "args": [
-                "-o",
-                "/tmp/tmp.prof",
-                "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
-                "--model=HistGbdtSklearn",
-                "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
-                "--interface=ens3",
-                "--reaction-strategy=aimd",
-                "--cgroup=${workspaceFolder}/test/test_cgroup",
-                "--check-interval-ms=1000",
-                "--log=/tmp/ratemon.log",
-                // "--skip-localhost",
-                "--constrain-port",
-                "--debug",
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "sudo": true
-        },
-        {
-            "name": "(r) train cubic bbr",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/model/train.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--no-rand",
-                "--tag=debugging",
-                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-08-26/cubic-bbr/prepared/",
-                "--out-dir=/tmp/2022-08-26/cubic-bbr/full_models",
-                "--model=HistGbdtSklearn",
-                "--balance",
-                "--sample-percent=1",
-                "--max-iter=10",
-                "--max-leaf-nodes=10000",
-                "--max-depth=100",
-                "--min-samples-leaf=10",
-                "--early-stop",
-                "--analyze-features",
-                "--feature-selection-type=perm",
-                "--feature-selection-percent=1",
-                "--clusters=10",
-                "--num-features-to-pick=50",
-                "--permutation-importance-repeats=1"
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
-        },
-        {
-            "name": "(r) prepare_data",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/model/prepare_data.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
-                "--train-split=60",
-                "--val-split=10",
-                "--test-split=30",
-                "--warmup-percent=5",
-                "--out-dir=/home/ccanel/out/foobar",
-                "--sample-percent=1",
-                "--disjoint-splits",
-                "--num-exps=10"
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
-        },
-        {
-            "name": "(r) gen_features",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/model/gen_features.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/experiments",
-                "--untar-dir=/tmp/untar",
-                "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/features",
-                "--parallel=38",
-                "--random-order",
-                // "--num-exps=400",
-                "--select-tail-percent=20"
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
-        },
-        {
-            "name": "(r) eval",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/ratemon/scripts/eval.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",
-                "--untar-dir=/tmp/untar",
-                "--parallel=40",
-                "--out-dir=/home/ccanel/out/cloudlab/2022-4-21/out/"
-            ],
-            "autoReload": {
-                "enable": false
-            },
-            "redirectOutput": true,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "sudo": false
-        },
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "(d) runtime",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
+      "console": "integratedTerminal",
+      "args": ["-h"],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "sudo": true
+    },
+    {
+      "name": "(r) runtime",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--model=HistGbdtSklearn",
+        "--model-file=${workspaceFolder}/test/models/model.pickle",
+        "--interface=eno1",
+        "--reaction-strategy=mimd",
+        "--cgroup=${workspaceFolder}/test/test_cgroup",
+        "--check-interval-ms=100",
+        "--batch-size=10",
+        "--log=/tmp/ratemon.log",
+        "--skip-localhost",
+        "--listen-ports=9999",
+        "--debug",
+        "--smoothing-window=10"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "sudo": true
+    },
+    {
+      "name": "(r) runtime, schedule",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--model=HistGbdtSklearn",
+        "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
+        "--interface=ens3",
+        "--reaction-strategy=file",
+        "--schedule=${workspaceFolder}/test/ratemon_schedule_step.csv",
+        "--cgroup=${workspaceFolder}/test/test_cgroup",
+        "--check-interval-ms=1000",
+        "--log=/tmp/ratemon.log"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "sudo": true
+    },
+    {
+      "name": "(r) runtime, cprofile",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "cProfile",
+      "console": "integratedTerminal",
+      "args": [
+        "-o",
+        "/tmp/tmp.prof",
+        "${workspaceFolder}/ratemon/runtime/python/ratemon_runtime.py",
+        "--model=HistGbdtSklearn",
+        "--model-file=${workspaceFolder}/test/HistGbdtSklearn_fewer_features.pickle",
+        "--interface=ens3",
+        "--reaction-strategy=aimd",
+        "--cgroup=${workspaceFolder}/test/test_cgroup",
+        "--check-interval-ms=1000",
+        "--log=/tmp/ratemon.log",
+        // "--skip-localhost",
+        "--constrain-port",
+        "--debug"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "sudo": true
+    },
+    {
+      "name": "(r) train cubic bbr",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/model/train.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--no-rand",
+        "--tag=debugging",
+        "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-08-26/cubic-bbr/prepared/",
+        "--out-dir=/tmp/2022-08-26/cubic-bbr/full_models",
+        "--model=HistGbdtSklearn",
+        "--balance",
+        "--sample-percent=1",
+        "--max-iter=10",
+        "--max-leaf-nodes=10000",
+        "--max-depth=100",
+        "--min-samples-leaf=10",
+        "--early-stop",
+        "--analyze-features",
+        "--feature-selection-type=perm",
+        "--feature-selection-percent=1",
+        "--clusters=10",
+        "--num-features-to-pick=50",
+        "--permutation-importance-repeats=1"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "(r) prepare_data",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/model/prepare_data.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--data-dir=/home/ccanel/fawnstore2/out/cloudlab/2021-5-12/cubic-bbr",
+        "--train-split=60",
+        "--val-split=10",
+        "--test-split=30",
+        "--warmup-percent=5",
+        "--out-dir=/home/ccanel/out/foobar",
+        "--sample-percent=1",
+        "--disjoint-splits",
+        "--num-exps=10"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "(r) gen_features",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/model/gen_features.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--exp-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/experiments",
+        "--untar-dir=/tmp/untar",
+        "--out-dir=/home/ccanel/fawnstore2/out/cloudlab/2022-06-10/cubic-bbr/features",
+        "--parallel=38",
+        "--random-order",
+        // "--num-exps=400",
+        "--select-tail-percent=20"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "(r) eval",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/ratemon/scripts/eval.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--exp-dir=/home/ccanel/out/cloudlab/2022-4-21/",
+        "--untar-dir=/tmp/untar",
+        "--parallel=40",
+        "--out-dir=/home/ccanel/out/cloudlab/2022-4-21/out/"
+      ],
+      "autoReload": {
+        "enable": false
+      },
+      "redirectOutput": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "sudo": false
+    }
+  ]
 }

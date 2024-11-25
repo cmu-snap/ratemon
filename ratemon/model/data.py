@@ -5,8 +5,8 @@ import math
 from os import path
 
 import numpy as np
-from numpy.lib import recfunctions
 import torch
+from numpy.lib import recfunctions
 
 from ratemon.model import defaults, features, models, utils
 

@@ -10,12 +10,11 @@ import os
 from os import path
 
 import numpy as np
-
 import utils
 
 
 def process_one(flp):
-    """ Process a single simulation. """
+    """Process a single simulation."""
     dat = np.load(flp)
     dat = dat[dat.files[0]]
     labels = dat["mathis model label"]
@@ -23,29 +22,43 @@ def process_one(flp):
     exp = utils.Exp(flp)
     return (
         (
-            (labels[valid] ==
-             # To determine the ground truth, compare the actual queue
-             # occupancy to the fair queue occupancy (convert to ints to
-             # generate class labels).
-             (dat["queue occupancy ewma-alpha0.5"][valid] > (
-                 1 / exp.tot_flws)).astype(int)
-             # Count the number of correct predictions by converting
-             # from bools to ints and summing them up.
-            ).astype(int).sum()),
+            (
+                labels[valid]
+                ==
+                # To determine the ground truth, compare the actual queue
+                # occupancy to the fair queue occupancy (convert to ints to
+                # generate class labels).
+                (
+                    dat["queue occupancy ewma-alpha0.5"][valid] > (1 / exp.tot_flws)
+                ).astype(int)
+                # Count the number of correct predictions by converting
+                # from bools to ints and summing them up.
+            )
+            .astype(int)
+            .sum()
+        ),
         len(valid[0]),
-        dat.shape[0])
+        dat.shape[0],
+    )
 
 
 def main():
-    """ This program's entrypoint. """
+    """This program's entrypoint."""
     # Parse command line arguments.
     psr = argparse.ArgumentParser(
-        ("Checks the accuracy of the Mathis Model in predicting a flow's "
-         "fairness. Uses the output of parse_dumbbell.py."))
+        (
+            "Checks the accuracy of the Mathis Model in predicting a flow's "
+            "fairness. Uses the output of parse_dumbbell.py."
+        )
+    )
     psr.add_argument(
         "--exp-dir",
-        help=("The directory in which the experiment results are stored "
-              "(required)."), required=True, type=str)
+        help=(
+            "The directory in which the experiment results are stored " "(required)."
+        ),
+        required=True,
+        type=str,
+    )
     args = psr.parse_args()
     exp_dir = args.exp_dir
     sims = [path.join(exp_dir, sim) for sim in os.listdir(exp_dir)]
@@ -61,9 +74,7 @@ def main():
     print(f"Mathis Model accuracy: {(correct / total) * 100:.2f}%")
     print(f"Total: {total} packets")
     print(f"Discarded {total_all - total} packets.")
-    print(
-        "Accuracy without discarding packets: "
-        f"{(correct / total_all) * 100:.2f}%")
+    print("Accuracy without discarding packets: " f"{(correct / total_all) * 100:.2f}%")
 
 
 if __name__ == "__main__":

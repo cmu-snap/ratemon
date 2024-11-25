@@ -37,15 +37,15 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
 // Catch SIGINT and trigger the main function to end.
 void sigint_handler(int signum) {
   switch (signum) {
-    case SIGINT:
-      printf("INFO: caught SIGINT\n");
-      run = false;
-      printf("Resetting old SIGINT handler\n");
-      sigaction(SIGINT, &oldact, NULL);
-      break;
-    default:
-      printf("ERROR: caught signal %d\n", signum);
-      break;
+  case SIGINT:
+    printf("INFO: caught SIGINT\n");
+    run = false;
+    printf("Resetting old SIGINT handler\n");
+    sigaction(SIGINT, &oldact, NULL);
+    break;
+  default:
+    printf("ERROR: caught signal %d\n", signum);
+    break;
   }
   printf("INFO: re-raising signal %d\n", signum);
   raise(signum);
@@ -179,13 +179,13 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  printf(
-      "INFO: BPF programs running. "
-      "Progress: `sudo cat /sys/kernel/debug/tracing/trace_pipe`. "
-      "Ctrl-C to end.\n");
+  printf("INFO: BPF programs running. "
+         "Progress: `sudo cat /sys/kernel/debug/tracing/trace_pipe`. "
+         "Ctrl-C to end.\n");
 
   // Wait for Ctrl-C.
-  while (run) sleep(1);
+  while (run)
+    sleep(1);
 
 cleanup:
   printf("Destroying BPF programs\n");

@@ -7,11 +7,11 @@ import logging
 import math
 import multiprocessing
 import os
-from os import path
 import pickle
 import random
 import sys
 import time
+from os import path
 
 import matplotlib.pyplot as plt
 import numpy as np

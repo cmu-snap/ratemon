@@ -1,13 +1,13 @@
-#include <netinet/in.h>  // structure for storing address information
+#include <netinet/in.h> // structure for storing address information
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>  // for socket APIs
+#include <sys/socket.h> // for socket APIs
 #include <sys/types.h>
-#include <unistd.h>  // for close()
+#include <unistd.h> // for close()
 
 #include "common.h"
 
-int main(int argc, char const* argv[]) {
+int main(int argc, char const *argv[]) {
   int sockD = socket(AF_INET, SOCK_STREAM, 0);
   if (sockD == -1) {
     printf("Error in creating socket\n");
@@ -16,10 +16,10 @@ int main(int argc, char const* argv[]) {
 
   struct sockaddr_in servAddr;
   servAddr.sin_family = AF_INET;
-  servAddr.sin_port = htons(SERVER_PORT);  // use some unused port number
+  servAddr.sin_port = htons(SERVER_PORT); // use some unused port number
   servAddr.sin_addr.s_addr = INADDR_ANY;
 
-  if (connect(sockD, (struct sockaddr*)&servAddr, sizeof(servAddr)) == -1) {
+  if (connect(sockD, (struct sockaddr *)&servAddr, sizeof(servAddr)) == -1) {
     printf("Error in connecting\n");
     return 1;
   }

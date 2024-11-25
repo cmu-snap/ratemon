@@ -4,12 +4,12 @@
 
 #include <dlfcn.h>
 #include <linux/inet_diag.h>
-#include <netinet/in.h>  // structure for storing address information
+#include <netinet/in.h> // structure for storing address information
 #include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>  // for socket APIs
+#include <sys/socket.h> // for socket APIs
 #include <unistd.h>
 
 #include <boost/thread.hpp>

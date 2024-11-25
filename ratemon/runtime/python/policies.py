@@ -1,9 +1,9 @@
 """Different types of receiver policy, depending on workload."""
 
-from enum import IntEnum
 import logging
+from enum import IntEnum
 
-from ratemon.model import defaults, models, features, utils
+from ratemon.model import defaults, features, models, utils
 from ratemon.runtime.python import reaction_strategy
 
 

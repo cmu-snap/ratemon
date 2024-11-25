@@ -1,13 +1,13 @@
-#include <netinet/in.h>  // structure for storing address information
+#include <netinet/in.h> // structure for storing address information
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>  // for socket APIs
+#include <sys/socket.h> // for socket APIs
 #include <sys/types.h>
-#include <unistd.h>  // for close()
+#include <unistd.h> // for close()
 
 #include "common.h"
 
-int main(int argc, char const* argv[]) {
+int main(int argc, char const *argv[]) {
   // create server socket similar to what was done in
   // client program
   int servSockD = socket(AF_INET, SOCK_STREAM, 0);
@@ -22,9 +22,8 @@ int main(int argc, char const* argv[]) {
   }
 
   // string store data to send to client
-  const char serMsg[255] =
-      "Message from the server to the "
-      "client \'Hello Client\' ";
+  const char serMsg[255] = "Message from the server to the "
+                           "client \'Hello Client\' ";
 
   // define server address
   struct sockaddr_in servAddr;
@@ -33,7 +32,7 @@ int main(int argc, char const* argv[]) {
   servAddr.sin_addr.s_addr = INADDR_ANY;
 
   // bind socket to the specified IP and port
-  if (bind(servSockD, (struct sockaddr*)&servAddr, sizeof(servAddr)) == -1) {
+  if (bind(servSockD, (struct sockaddr *)&servAddr, sizeof(servAddr)) == -1) {
     printf("Error in binding\n");
     return 1;
   }

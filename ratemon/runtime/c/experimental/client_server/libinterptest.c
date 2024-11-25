@@ -1,10 +1,10 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <netinet/in.h>  // structure for storing address information
+#include <netinet/in.h> // structure for storing address information
 #include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>  // for socket APIs
+#include <sys/socket.h> // for socket APIs
 
 int storedSockFd = 0;
 

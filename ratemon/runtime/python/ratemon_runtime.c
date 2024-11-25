@@ -205,47 +205,47 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   if (ret != 3 || win_scale_opt.len != 3 ||
       win_scale_opt.kind != TCPOPT_WINDOW) {
     switch (ret) {
-      case -ENOMSG:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -ENOMSG\n",
-            skops->local_port);
-        break;
-      case -EINVAL:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -EINVAL\n",
-            skops->local_port);
-        break;
-      case -ENOENT:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -ENOENT\n",
-            skops->local_port);
-        break;
-      case -ENOSPC:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -ENOSPC\n",
-            skops->local_port);
-        break;
-      case -EFAULT:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -EFAULT\n",
-            skops->local_port);
-        break;
-      case -EPERM:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: -EPERM\n",
-            skops->local_port);
-        break;
-      default:
-        bpf_trace_printk(
-            "Error: Failure loading window scale option for flow on local port "
-            "%u: failure code = %d\n",
-            skops->local_port, ret);
+    case -ENOMSG:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -ENOMSG\n",
+          skops->local_port);
+      break;
+    case -EINVAL:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -EINVAL\n",
+          skops->local_port);
+      break;
+    case -ENOENT:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -ENOENT\n",
+          skops->local_port);
+      break;
+    case -ENOSPC:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -ENOSPC\n",
+          skops->local_port);
+      break;
+    case -EFAULT:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -EFAULT\n",
+          skops->local_port);
+      break;
+    case -EPERM:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: -EPERM\n",
+          skops->local_port);
+      break;
+    default:
+      bpf_trace_printk(
+          "Error: Failure loading window scale option for flow on local port "
+          "%u: failure code = %d\n",
+          skops->local_port, ret);
     }
     return SOCKOPS_ERR;
   }
@@ -273,12 +273,12 @@ static inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
 
 int read_win_scale(struct bpf_sock_ops *skops) {
   switch (skops->op) {
-    case BPF_SOCK_OPS_TCP_LISTEN_CB:
-      return set_hdr_cb_flags(skops);
-    case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
-      return handle_hdr_opt_len(skops);
-    case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
-      return handle_write_hdr_opt(skops);
+  case BPF_SOCK_OPS_TCP_LISTEN_CB:
+    return set_hdr_cb_flags(skops);
+  case BPF_SOCK_OPS_HDR_OPT_LEN_CB:
+    return handle_hdr_opt_len(skops);
+  case BPF_SOCK_OPS_WRITE_HDR_OPT_CB:
+    return handle_write_hdr_opt(skops);
   }
   return SOCKOPS_OK;
 }

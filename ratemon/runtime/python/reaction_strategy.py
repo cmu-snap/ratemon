@@ -1,7 +1,7 @@
 """Defines feedback mechanisms for reacting to flow fairness decisions."""
 
-from enum import IntEnum
 import time
+from enum import IntEnum
 
 
 class ReactionStrategy(IntEnum):

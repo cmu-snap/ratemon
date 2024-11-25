@@ -2,8 +2,8 @@
 
 import argparse
 import os
-from os import path
 import sys
+from os import path
 
 import matplotlib.pyplot as plt
 

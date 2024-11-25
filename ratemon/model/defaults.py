@@ -1,9 +1,8 @@
 """Default values."""
 
-from enum import IntEnum
 import math
 import struct
-
+from enum import IntEnum
 
 # Parameter defaults.
 DEFAULTS = {

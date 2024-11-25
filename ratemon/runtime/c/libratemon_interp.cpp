@@ -7,13 +7,13 @@
 #include <bpf/libbpf.h>
 #include <dlfcn.h>
 #include <linux/inet_diag.h>
-#include <netinet/in.h>  // structure for storing address information
+#include <netinet/in.h> // structure for storing address information
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>  // for socket APIs
+#include <sys/socket.h> // for socket APIs
 #include <time.h>
 #include <unistd.h>
 
@@ -200,7 +200,8 @@ void timer_callback(const boost::system::error_code &error) {
     a = active_fds_queue.front();
     active_fds_queue.pop();
     // 1.1) If this flow has been closed, remove it.
-    if (!fd_to_flow.contains(a.first)) continue;
+    if (!fd_to_flow.contains(a.first))
+      continue;
     // 1.2) If idle timeout mode is enabled, then check if this flow is
     // past its idle timeout. Skip this check if there are no paused
     // flows.
@@ -279,7 +280,8 @@ void timer_callback(const boost::system::error_code &error) {
       p = paused_fds_queue.front();
       paused_fds_queue.pop();
       // If this flow has been closed, then skip it.
-      if (!fd_to_flow.contains(p)) continue;
+      if (!fd_to_flow.contains(p))
+        continue;
       // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
       // returns negative error code when the flow is not found), then it has no
       // pending data and should be skipped.
@@ -352,9 +354,8 @@ void timer_callback(const boost::system::error_code &error) {
     RM_PRINTF("INFO: scheduling timer for next idle timeout\n");
     when = boost::posix_time::microsec(idle_timeout_us);
   } else {
-    RM_PRINTF(
-        "INFO: scheduling timer for next epoch end, sooner than idle "
-        "timeout\n");
+    RM_PRINTF("INFO: scheduling timer for next epoch end, sooner than idle "
+              "timeout\n");
     when = boost::posix_time::microsec(next_epoch_us);
   }
 
@@ -386,7 +387,8 @@ void thread_func() {
   // Delete all flows from flow_to_rwnd and flow_to_win_scale.
   lock_scheduler.lock();
   for (const auto &p : fd_to_flow) {
-    if (flow_to_rwnd_fd) bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
+    if (flow_to_rwnd_fd)
+      bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
     if (flow_to_win_scale_fd)
       bpf_map_delete_elem(flow_to_win_scale_fd, &p.second);
     if (flow_to_last_data_time_fd)
@@ -398,25 +400,24 @@ void thread_func() {
   RM_PRINTF("INFO: scheduler thread ended\n");
 
   if (run) {
-    RM_PRINTF(
-        "ERROR: scheduled thread ended before program was signalled to "
-        "stop\n");
+    RM_PRINTF("ERROR: scheduled thread ended before program was signalled to "
+              "stop\n");
   }
 }
 
 // Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
-    case SIGINT:
-      RM_PRINTF("INFO: caught SIGINT\n");
-      run = false;
-      scheduler_thread.join();
-      RM_PRINTF("INFO: resetting old SIGINT handler\n");
-      sigaction(SIGINT, &oldact, NULL);
-      break;
-    default:
-      RM_PRINTF("ERROR: caught signal %d\n", signum);
-      break;
+  case SIGINT:
+    RM_PRINTF("INFO: caught SIGINT\n");
+    run = false;
+    scheduler_thread.join();
+    RM_PRINTF("INFO: resetting old SIGINT handler\n");
+    sigaction(SIGINT, &oldact, NULL);
+    break;
+  default:
+    RM_PRINTF("ERROR: caught signal %d\n", signum);
+    break;
   }
   RM_PRINTF("INFO: re-raising signal %d\n", signum);
   raise(signum);
@@ -448,8 +449,10 @@ bool read_env_uint(const char *key, volatile unsigned int *dest,
 // flow_to_rwnd.
 bool setup() {
   // Read environment variables with parameters.
-  if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) return false;
-  if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us)) return false;
+  if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows))
+    return false;
+  if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us))
+    return false;
   unsigned int idle_timeout_us_;
   if (!read_env_uint(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us_,
                      true /* allow_zero */))
@@ -504,10 +507,9 @@ bool setup() {
   // BPF skeleton for this.
   err = bpf_obj_get(RM_FLOW_TO_KEEPALIVE_PIN_PATH);
   if (err == -1) {
-    RM_PRINTF(
-        "ERROR: failed to get FD for 'flow_to_keepalive' from path "
-        "'%s'\n",
-        RM_FLOW_TO_KEEPALIVE_PIN_PATH);
+    RM_PRINTF("ERROR: failed to get FD for 'flow_to_keepalive' from path "
+              "'%s'\n",
+              RM_FLOW_TO_KEEPALIVE_PIN_PATH);
     return false;
   }
   flow_to_keepalive_fd = err;
@@ -522,11 +524,10 @@ bool setup() {
   // Launch the scheduler thread.
   scheduler_thread = boost::thread(thread_func);
 
-  RM_PRINTF(
-      "INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
-      "idle_timeout_ns=%lu, monitor_port_start=%u, monitor_port_end=%u\n",
-      max_active_flows, epoch_us, idle_timeout_ns, monitor_port_start,
-      monitor_port_end);
+  RM_PRINTF("INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
+            "idle_timeout_ns=%lu, monitor_port_start=%u, monitor_port_end=%u\n",
+            max_active_flows, epoch_us, idle_timeout_ns, monitor_port_start,
+            monitor_port_end);
   return true;
 }
 
@@ -631,7 +632,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   }
 
   // If we have been signalled to quit, then do nothing more.
-  if (!run) return fd;
+  if (!run)
+    return fd;
   // One-time setup.
   lock_setup.lock();
   if (!setup_done) {
@@ -644,7 +646,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   lock_setup.unlock();
   // Look up the four-tuple.
   struct rm_flow flow;
-  if (!get_flow(fd, &flow)) return fd;
+  if (!get_flow(fd, &flow))
+    return fd;
   RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
             flow.local_addr, flow.local_port);
   // Ignore flows that are not in the monitor port range.
@@ -658,7 +661,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   }
   fd_to_flow[fd] = flow;
   // Change the CCA to BPF_CUBIC.
-  if (!set_cca(fd, RM_BPF_CUBIC)) return fd;
+  if (!set_cca(fd, RM_BPF_CUBIC))
+    return fd;
   // Initial scheduling for this flow.
   lock_scheduler.lock();
   initial_scheduling(fd);

@@ -47,7 +47,7 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
 
 #define CGROUP_MOUNT_PATH "/mnt/cgroup-test-work-dir"
 
-#define format_cgroup_path(buf, path) \
+#define format_cgroup_path(buf, path)                                          \
   snprintf(buf, sizeof(buf), "%s/%s", CGROUP_MOUNT_PATH, path)
 
 /**
@@ -82,7 +82,8 @@ static int enable_all_controllers(char *cgroup_path) {
   close(fd);
 
   /* No controllers available? We're probably on cgroup v1. */
-  if (len == 0) return 0;
+  if (len == 0)
+    return 0;
 
   snprintf(path, sizeof(path), "%s/cgroup.subtree_control", cgroup_path);
   cfd = open(path, O_RDWR);
@@ -530,10 +531,9 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  printf(
-      "Successfully started! Please run `sudo cat "
-      "/sys/kernel/debug/tracing/trace_pipe` "
-      "to see output of the BPF programs.\n");
+  printf("Successfully started! Please run `sudo cat "
+         "/sys/kernel/debug/tracing/trace_pipe` "
+         "to see output of the BPF programs.\n");
 
   for (;;) {
     /* trigger our BPF program */
@@ -618,10 +618,14 @@ int main(int argc, char **argv) {
   }
 
 cleanup:
-  if (iter_fd_1) close(iter_fd_1);
-  if (iter_fd_2) close(iter_fd_2);
-  if (iter_fd_3) close(iter_fd_3);
-  if (iter_fd_4) close(iter_fd_4);
+  if (iter_fd_1)
+    close(iter_fd_1);
+  if (iter_fd_2)
+    close(iter_fd_2);
+  if (iter_fd_3)
+    close(iter_fd_3);
+  if (iter_fd_4)
+    close(iter_fd_4);
   ratemon_test_bpf__destroy(skel);
   return -err;
 }

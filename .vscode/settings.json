@@ -1,10 +1,8 @@
 {
-    "python.analysis.extraPaths": [
-        "./model"
-    ],
-    "cmake.configureOnOpen": false,
-    "files.associations": {
-        "types.h": "c"
-    },
-    "python.analysis.typeCheckingMode": "basic"
+  "python.analysis.extraPaths": ["./model"],
+  "cmake.configureOnOpen": false,
+  "files.associations": {
+    "types.h": "c"
+  },
+  "python.analysis.typeCheckingMode": "basic"
 }
