@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/g++ -g -std=c++20 -Wall -Wextra -shared -fPIC  $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf",
+    "file": "libratemon_interp.cpp.cpp"
+  }
+]

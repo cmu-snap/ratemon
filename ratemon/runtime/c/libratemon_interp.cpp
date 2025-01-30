@@ -608,6 +608,54 @@ void initial_scheduling(int fd) {
   }
 }
 
+int check_family(struct sockaddr *addr) {
+  if (addr != NULL && addr->sa_family != AF_INET) {
+    RM_PRINTF("WARNING: got non-AF_INET sa_family=%u\n", addr->sa_family);
+    if (addr->sa_family == AF_INET6) {
+      RM_PRINTF("WARNING: (continued) got AF_INET6\n");
+    }
+    return -1;
+  }
+  return 0;
+}
+
+void register_fd_for_monitoring(int fd) {
+  // One-time setup.
+  lock_setup.lock();
+  if (!setup_done) {
+    if (!setup()) {
+      lock_setup.unlock();
+      return;
+    }
+    setup_done = true;
+  }
+  lock_setup.unlock();
+  // Look up the four-tuple.
+  struct rm_flow flow;
+  if (!get_flow(fd, &flow))
+    return;
+  RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
+            flow.local_addr, flow.local_port);
+  // Ignore flows that are not in the monitor port range.
+  if (!(flow.remote_port >= monitor_port_start &&
+        flow.remote_port <= monitor_port_end)) {
+    RM_PRINTF(
+        "INFO: ignoring flow on remote port %u, not in monitor port range: "
+        "[%u, %u]\n",
+        flow.remote_port, monitor_port_start, monitor_port_end);
+    return;
+  }
+  fd_to_flow[fd] = flow;
+  // Change the CCA to BPF_CUBIC.
+  if (!set_cca(fd, RM_BPF_CUBIC))
+    return;
+  // Initial scheduling for this flow.
+  lock_scheduler.lock();
+  initial_scheduling(fd);
+  lock_scheduler.unlock();
+  RM_PRINTF("INFO: successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
+}
+
 // For some reason, C++ function name mangling does not prevent us from
 // overriding accept(), so we do not need 'extern "C"'.
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
@@ -622,52 +670,41 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     RM_PRINTF("ERROR: real 'accept' failed\n");
     return fd;
   }
-  if (addr != NULL && addr->sa_family != AF_INET) {
-    RM_PRINTF("WARNING: got 'accept' for non-AF_INET sa_family=%u\n",
-              addr->sa_family);
-    if (addr->sa_family == AF_INET6) {
-      RM_PRINTF("WARNING: (continued) got 'accept' for AF_INET6\n");
-    }
+  if (check_family(addr) != 0)
     return fd;
-  }
 
   // If we have been signalled to quit, then do nothing more.
   if (!run)
     return fd;
-  // One-time setup.
-  lock_setup.lock();
-  if (!setup_done) {
-    if (!setup()) {
-      lock_setup.unlock();
-      return fd;
-    }
-    setup_done = true;
+
+  register_fd_for_monitoring(fd);
+  return fd;
+}
+
+// TODO: With iperf, the receiver (where we want to run this) is the listener
+// and calls accept(). In ibg, the receiver is the initiator and calls
+// connect(). Therefore, we need to support monitoring a flow from both accept()
+// and connect().
+int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+  static int (*real_connect)(int, struct sockaddr *, socklen_t *) =
+      (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "connect");
+  if (real_connect == NULL) {
+    RM_PRINTF("ERROR: failed to query dlsym for 'connect': %s\n", dlerror());
+    return -1;
   }
-  lock_setup.unlock();
-  // Look up the four-tuple.
-  struct rm_flow flow;
-  if (!get_flow(fd, &flow))
-    return fd;
-  RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
-            flow.local_addr, flow.local_port);
-  // Ignore flows that are not in the monitor port range.
-  if (!(flow.remote_port >= monitor_port_start &&
-        flow.remote_port <= monitor_port_end)) {
-    RM_PRINTF(
-        "INFO: ignoring flow on remote port %u, not in monitor port range: "
-        "[%u, %u]\n",
-        flow.remote_port, monitor_port_start, monitor_port_end);
+  int fd = real_connect(sockfd, addr, addrlen);
+  if (fd == -1) {
+    RM_PRINTF("ERROR: real 'connect' failed\n");
     return fd;
   }
-  fd_to_flow[fd] = flow;
-  // Change the CCA to BPF_CUBIC.
-  if (!set_cca(fd, RM_BPF_CUBIC))
+  if (check_family(addr) != 0)
     return fd;
-  // Initial scheduling for this flow.
-  lock_scheduler.lock();
-  initial_scheduling(fd);
-  lock_scheduler.unlock();
-  RM_PRINTF("INFO: successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
+
+  // If we have been signalled to quit, then do nothing more.
+  if (!run)
+    return fd;
+
+  register_fd_for_monitoring(fd);
   return fd;
 }
 
