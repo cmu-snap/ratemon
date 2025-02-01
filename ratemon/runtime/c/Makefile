@@ -21,14 +21,15 @@ VMLINUX := $(OUTPUT)/vmlinux.h
 # libbpf to avoid dependency on system-wide headers, which could be missing or
 # outdated
 INCLUDES := -I$(OUTPUT) -I../../../libbpf/include/uapi -I$(dir $(VMLINUX))
+CC := clang
 CFLAGS := -g -std=c17 -Wall -Wextra
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 # If this is not set with an environment variable, then hardcode it.
 RM_IFACE ?= eno4
 RM_CGROUP ?= /test_cg
 
-CXX := g++
-CXXFLAGS := -g -std=c++20 -Wall -Wextra
+CXX := clang++
+CXXFLAGS := -g -std=c++23 -Wall -Wextra
 SRC_DIR := $(abspath ../../../../)
 BOOST_INCLUDE := $(SRC_DIR)/boost_1_87_0/
 BOOST_LIB := $(SRC_DIR)/boost_1_87_0/stage/lib
