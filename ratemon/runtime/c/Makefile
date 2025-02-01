@@ -30,8 +30,8 @@ RM_CGROUP ?= /test_cg
 CXX := g++
 CXXFLAGS := -g -std=c++20 -Wall -Wextra
 SRC_DIR := $(abspath ../../../../)
-BOOST_INCLUDE := $(SRC_DIR)/boost_1_85_0/
-BOOST_LIB := $(SRC_DIR)/boost_1_85_0/stage/lib
+BOOST_INCLUDE := $(SRC_DIR)/boost_1_87_0/
+BOOST_LIB := $(SRC_DIR)/boost_1_87_0/stage/lib
 
 APPS := ratemon_main
 INTERPS := libratemon_interp

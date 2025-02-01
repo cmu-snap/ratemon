@@ -52,10 +52,10 @@ int flow_to_last_data_time_fd = 0;
 // FD for the BPF map "flow_to_keepali" (short for "flow_to_keepalive").
 int flow_to_keepalive_fd = 0;
 // Runs async timers for scheduling
-boost::asio::io_service io;
+boost::asio::io_context io;
 // Periodically performs scheduling using timer_callback().
 boost::asio::deadline_timer timer(io);
-// Manages the io_service.
+// Manages the io_context.
 boost::thread scheduler_thread;
 // Protects writes and reads to active_fds_queue, paused_fds_queue, and
 // fd_to_flow.
@@ -608,7 +608,7 @@ void initial_scheduling(int fd) {
   }
 }
 
-int check_family(struct sockaddr *addr) {
+int check_family(const struct sockaddr *addr) {
   if (addr != NULL && addr->sa_family != AF_INET) {
     RM_PRINTF("WARNING: got non-AF_INET sa_family=%u\n", addr->sa_family);
     if (addr->sa_family == AF_INET6) {
@@ -653,7 +653,6 @@ void register_fd_for_monitoring(int fd) {
   lock_scheduler.lock();
   initial_scheduling(fd);
   lock_scheduler.unlock();
-  RM_PRINTF("INFO: successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
 }
 
 // For some reason, C++ function name mangling does not prevent us from
@@ -678,6 +677,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return fd;
 
   register_fd_for_monitoring(fd);
+  RM_PRINTF("INFO: successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
 
@@ -686,8 +686,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 // connect(). Therefore, we need to support monitoring a flow from both accept()
 // and connect().
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
-  static int (*real_connect)(int, struct sockaddr *, socklen_t *) =
-      (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "connect");
+  static int (*real_connect)(int, const struct sockaddr *, socklen_t) =
+      (int (*)(int, const struct sockaddr *, socklen_t))dlsym(RTLD_NEXT, "connect");
   if (real_connect == NULL) {
     RM_PRINTF("ERROR: failed to query dlsym for 'connect': %s\n", dlerror());
     return -1;
@@ -705,6 +705,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     return fd;
 
   register_fd_for_monitoring(fd);
+  RM_PRINTF("INFO: successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);  
   return fd;
 }
 
