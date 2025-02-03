@@ -29,7 +29,7 @@ RM_IFACE ?= eno4
 RM_CGROUP ?= /test_cg
 
 CXX := clang++
-CXXFLAGS := -g -std=c++23 -Wall -Wextra
+CXXFLAGS := -g -stdlib=libstdc++ -std=c++23 -Wall -Wextra
 SRC_DIR := $(abspath ../../../../)
 BOOST_INCLUDE := $(SRC_DIR)/boost_1_87_0/
 BOOST_LIB := $(SRC_DIR)/boost_1_87_0/stage/lib
