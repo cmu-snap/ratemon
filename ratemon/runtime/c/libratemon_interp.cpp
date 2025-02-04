@@ -20,7 +20,6 @@
 #include <algorithm>
 #include <boost/asio.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/thread.hpp>
 #include <cassert>
 #include <cmath>
 #include <experimental/random>
@@ -56,7 +55,7 @@ boost::asio::io_context io;
 // Periodically performs scheduling using timer_callback().
 boost::asio::deadline_timer timer(io);
 // Manages the io_context.
-boost::thread scheduler_thread;
+std::thread scheduler_thread;
 // Protects writes and reads to active_fds_queue, paused_fds_queue, and
 // fd_to_flow.
 std::mutex lock_scheduler;
@@ -522,7 +521,7 @@ bool setup() {
   sigaction(SIGINT, &action, &oldact);
 
   // Launch the scheduler thread.
-  scheduler_thread = boost::thread(thread_func);
+  scheduler_thread = std::thread(thread_func);
 
   RM_PRINTF("INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
             "idle_timeout_ns=%lu, monitor_port_start=%u, monitor_port_end=%u\n",
@@ -608,6 +607,7 @@ void initial_scheduling(int fd) {
   }
 }
 
+// Verify that an addr is IPv4.
 int check_family(const struct sockaddr *addr) {
   if (addr != NULL && addr->sa_family != AF_INET) {
     RM_PRINTF("WARNING: got non-AF_INET sa_family=%u\n", addr->sa_family);
@@ -655,8 +655,11 @@ void register_fd_for_monitoring(int fd) {
   lock_scheduler.unlock();
 }
 
+// accept() and connect() are the two entrance points for libratemon_interp. accept() handles the responder side and connect() handles the initiator side.
+//
 // For some reason, C++ function name mangling does not prevent us from
-// overriding accept(), so we do not need 'extern "C"'.
+// overriding accept() and connect(), so we do not need 'extern "C"'.
+
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   static int (*real_accept)(int, struct sockaddr *, socklen_t *) =
       (int (*)(int, struct sockaddr *, socklen_t *))dlsym(RTLD_NEXT, "accept");
@@ -681,10 +684,6 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   return fd;
 }
 
-// TODO: With iperf, the receiver (where we want to run this) is the listener
-// and calls accept(). In ibg, the receiver is the initiator and calls
-// connect(). Therefore, we need to support monitoring a flow from both accept()
-// and connect().
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   static int (*real_connect)(int, const struct sockaddr *, socklen_t) =
       (int (*)(int, const struct sockaddr *, socklen_t))dlsym(RTLD_NEXT, "connect");
@@ -705,7 +704,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     return fd;
 
   register_fd_for_monitoring(fd);
-  RM_PRINTF("INFO: successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);  
+  RM_PRINTF("INFO: successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
 
