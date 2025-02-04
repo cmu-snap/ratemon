@@ -22,14 +22,16 @@ VMLINUX := $(OUTPUT)/vmlinux.h
 # outdated
 INCLUDES := -I$(OUTPUT) -I../../../libbpf/include/uapi -I$(dir $(VMLINUX))
 CC := clang
-CFLAGS := -g -std=c17 -Wall -Wextra
+# DEBUG: add -g
+CFLAGS := -std=c17 -Wall -Wextra -O3
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 # If this is not set with an environment variable, then hardcode it.
 RM_IFACE ?= eno4
 RM_CGROUP ?= /test_cg
 
 CXX := clang++
-CXXFLAGS := -g -stdlib=libstdc++ -std=c++23 -Wall -Wextra
+# DEBUG: add -g
+CXXFLAGS := -stdlib=libstdc++ -std=c++23 -Wall -Wextra -O3
 SRC_DIR := $(abspath ../../../../)
 BOOST_INCLUDE := $(SRC_DIR)/boost_1_87_0/
 BOOST_LIB := $(SRC_DIR)/boost_1_87_0/stage/lib
@@ -113,7 +115,7 @@ $(VMLINUX):	$(BPFTOOL)
 # Build BPF code
 $(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
-	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH)                \
+	$(CLANG) -g -O3 -target bpf -D__TARGET_ARCH_$(ARCH)                \
 		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)                     \
 		     -c $(filter %.c,$^) -o $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
 	$(BPFTOOL) gen object $@ $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
