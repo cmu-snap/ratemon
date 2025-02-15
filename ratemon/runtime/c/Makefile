@@ -32,9 +32,6 @@ RM_CGROUP ?= /test_cg
 CXX := clang++
 # DEBUG: add -g
 CXXFLAGS := -stdlib=libstdc++ -std=c++23 -Wall -Wextra -O3
-SRC_DIR := $(abspath ../../../../)
-BOOST_INCLUDE := $(SRC_DIR)/boost_1_87_0/
-BOOST_LIB := $(SRC_DIR)/boost_1_87_0/stage/lib
 
 APPS := ratemon_main
 INTERPS := libratemon_interp
@@ -138,14 +135,14 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
 $(OUTPUT)/libratemon_interp.so: libratemon_interp.cpp ratemon.h | $(OUTPUT)
-	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) -I$(BOOST_INCLUDE) $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf -o $@
+	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) $< -ldl -lbpf -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;
 
 # Get the LD environment variables that will force an application binary to
 # use libratemon_interp.
 get_ld_vars:
-	$(Q) echo "LD_LIBRARY_PATH=$(BOOST_LIB):${LD_LIBRARY_PATH} LD_PRELOAD=$(OUTPUT)/libratemon_interp.so"
+	$(Q) echo "LD_PRELOAD=$(OUTPUT)/libratemon_interp.so"
 
 # Run ratemon_main and associated setup/teardown.
 # Remove existing struct_ops programs, manually attach RWND tc/egress program,
