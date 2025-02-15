@@ -560,7 +560,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
 // Set the CCA for this socket and make sure it was set correctly.
 bool set_cca(int fd, const char *cca) {
   if (setsockopt(fd, SOL_TCP, TCP_CONGESTION, cca, strlen(cca)) == -1) {
-    RM_PRINTF("ERROR: failed to 'setsockopt' TCP_CONGESTION\n");
+    RM_PRINTF("ERROR: failed to 'setsockopt' TCP_CONGESTION --- is CCA '%s' loaded?\n", cca);
     return false;
   }
   char retrieved_cca[32];
