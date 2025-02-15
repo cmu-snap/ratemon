@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 #define _GNU_SOURCE
 
-#include <argp.h>
-#include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <errno.h>
 #include <fcntl.h>
-#include <linux/limits.h>
-#include <linux/types.h>
-#include <net/if.h>
+#include <limits.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -56,7 +55,8 @@ void sigint_handler(int signum) {
 static int join_cgroup(const char *cgroup_path) {
   char cgroup_procs_path[PATH_MAX + 1];
   pid_t pid = getpid();
-  int fd, rc = 0;
+  int fd = 0;
+  int rc = 0;
 
   snprintf(cgroup_procs_path, sizeof(cgroup_procs_path), "%s/cgroup.procs",
            cgroup_path);
@@ -184,8 +184,9 @@ int main(int argc, char **argv) {
          "Ctrl-C to end.\n");
 
   // Wait for Ctrl-C.
-  while (run)
+  while (run) {
     sleep(1);
+  }
 
 cleanup:
   printf("Destroying BPF programs\n");
