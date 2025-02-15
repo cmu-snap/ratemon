@@ -1,7 +1,12 @@
 [
   {
     "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
-    "command": "/usr/bin/g++ -g -std=c++20 -Wall -Wextra -shared -fPIC  $< -ldl -L${BOOST_LIB} -lboost_thread -lbpf",
-    "file": "libratemon_interp.cpp.cpp"
+    "command": "/usr/bin/clang++ --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 -g -stdlib=libstdc++ -std=c++23 -Wall -Wextra -O3 -shared -fPIC -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output libratemon_interp.cpp -ldl -lbpf -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/libratemon_interp.so",
+    "file": "libratemon_interp.cpp"
+  },
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang -std=c17 -Wall -Wextra -O3 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -c ratemon_main.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_main.o",
+    "file": "ratemon_main.c"
   }
 ]
