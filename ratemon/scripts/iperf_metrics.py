@@ -26,23 +26,33 @@ def parse_args():
 
 
 def main(args):
-    with open(args.in_file, "r", encoding="utf-8") as fil:
-        res = json.load(fil)
+    try:
+        with open(args.in_file, "r", encoding="utf-8") as fil:
+            res = json.load(fil)
 
-    if "end" not in res:
-        print(f"Error: 'end' key not found in JSON file: {args.in_file}")
-        return 1
+        if "end" not in res:
+            print(f"Error: 'end' key not found in JSON file: {args.in_file}")
+            return 1
 
-    bps = res["end"]["sum_received"]["bits_per_second"]
-    rxmits_per_sec = res["end"]["sum_sent"]["retransmits"] / (
-        res["end"]["sum_sent"]["end"] - res["end"]["sum_sent"]["start"]
-    )
-    sender_cpu_total = res["end"]["cpu_utilization_percent"]["host_total"]
-    sender_cpu_user = res["end"]["cpu_utilization_percent"]["host_user"]
-    sender_cpu_system = res["end"]["cpu_utilization_percent"]["host_system"]
-    receiver_cpu_total = res["end"]["cpu_utilization_percent"]["remote_total"]
-    receiver_cpu_user = res["end"]["cpu_utilization_percent"]["remote_user"]
-    receiver_cpu_system = res["end"]["cpu_utilization_percent"]["remote_system"]
+        bps = res["end"]["sum_received"]["bits_per_second"]
+        rxmits_per_sec = res["end"]["sum_sent"]["retransmits"] / (
+            res["end"]["sum_sent"]["end"] - res["end"]["sum_sent"]["start"]
+        )
+        sender_cpu_total = res["end"]["cpu_utilization_percent"]["host_total"]
+        sender_cpu_user = res["end"]["cpu_utilization_percent"]["host_user"]
+        sender_cpu_system = res["end"]["cpu_utilization_percent"]["host_system"]
+        receiver_cpu_total = res["end"]["cpu_utilization_percent"]["remote_total"]
+        receiver_cpu_user = res["end"]["cpu_utilization_percent"]["remote_user"]
+        receiver_cpu_system = res["end"]["cpu_utilization_percent"]["remote_system"]
+    except FileNotFoundError:
+        bps = 0
+        rxmits_per_sec = 0
+        sender_cpu_total = 0
+        sender_cpu_user = 0
+        sender_cpu_system = 0
+        receiver_cpu_total = 0
+        receiver_cpu_user = 0
+        receiver_cpu_system = 0
 
     msg = (
         f"throughput (Gbps):{bps / 1e9:.2f}\n"
