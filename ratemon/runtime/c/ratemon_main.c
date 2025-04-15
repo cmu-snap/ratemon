@@ -138,14 +138,14 @@ int prepare_kprobe() {
   return 0;
 }
 
-bool read_env_str(const char *key, char *dest) {
+bool read_env_charstar(const char *key, char *dest) {
   // Read an environment variable a char *.
   char *val_str = getenv(key);
   if (val_str == NULL) {
     printf("ERROR: failed to query environment variable '%s'\n", key);
     return false;
   }
-  strcpy(dest, val_str);
+  strlcpy(dest, val_str, strlen(dest));
   return true;
 }
 
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
   libbpf_set_print(libbpf_print_fn);
 
   char cg_path[1024];
-  if (!read_env_str(RM_CGROUP_KEY, cg_path)) {
+  if (!read_env_charstar(RM_CGROUP_KEY, cg_path)) {
     printf("ERROR: failed to read cgroup path\n");
     goto cleanup;
   }

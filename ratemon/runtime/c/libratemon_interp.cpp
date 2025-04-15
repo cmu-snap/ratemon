@@ -86,12 +86,12 @@ std::queue<int> paused_fds_queue;
 std::unordered_map<int, struct rm_flow> fd_to_flow;
 // The next four are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
-uint32_t max_active_flows = 5;
+int max_active_flows = 5;
 std::string scheduling_mode = "time";
-uint32_t epoch_us = 10000;
-uint32_t epoch_bytes = 65536;
-int64_t idle_timeout_us = 0;
-uint64_t idle_timeout_ns = 0;
+int epoch_us = 10000;
+int epoch_bytes = 65536;
+int idle_timeout_us = 0;
+int64_t idle_timeout_ns = 0;
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
 
@@ -108,7 +108,8 @@ socklen_t placeholder_cc_info_length =
 inline void trigger_ack(int fd) {
   // Do not store the output to check for errors since there is nothing we can
   // do.
-  getsockopt(fd, SOL_TCP, TCP_CC_INFO, (void *)&placeholder_cc_info,
+  getsockopt(fd, SOL_TCP, TCP_CC_INFO,
+             static_cast<void *>(&placeholder_cc_info),
              &placeholder_cc_info_length);
 }
 
@@ -194,16 +195,16 @@ void timer_callback(const boost::system::error_code &error) {
   // Temporary variable for storing the front of paused_fds_queue.
   int p = 0;
   // Size of active_fds_queue.
-  uint64_t s = 0;
+  int s = 0;
   // Vector of active flows that we plan to pause.
   std::vector<int> to_pause;
   // Current kernel time (since boot).
   struct timespec ts {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  uint64_t const ktime_now_ns = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+  int64_t const ktime_now_ns = ts.tv_sec * 1000000000 + ts.tv_nsec;
   // For measuring idle time.
-  uint64_t last_data_time_ns = 0;
-  uint64_t idle_ns = 0;
+  int64_t last_data_time_ns = 0;
+  int64_t idle_ns = 0;
   // Current time (absolute).
   boost::posix_time::ptime const now =
       boost::posix_time::microsec_clock::local_time();
@@ -218,8 +219,8 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 1) Perform a status check on all active flows. It is alright to iterate
   // through all of active_fds_queue.
-  s = active_fds_queue.size();
-  for (uint64_t i = 0; i < s; ++i) {
+  s = static_cast<int>(active_fds_queue.size());
+  for (int i = 0; i < s; ++i) {
     a = active_fds_queue.front();
     active_fds_queue.pop();
     // 1.1) If this flow has been closed, remove it.
@@ -240,12 +241,12 @@ void timer_callback(const boost::system::error_code &error) {
             // the current time above?
             RM_PRINTF(
                 "WARNING: FD=%d last data time (%lu ns) is more recent that "
-                "current time (%lu ns) by %lu ns\n",
+                "current time (%ld ns) by %ld ns\n",
                 a.first, last_data_time_ns, ktime_now_ns,
                 last_data_time_ns - ktime_now_ns);
           } else {
             idle_ns = ktime_now_ns - last_data_time_ns;
-            RM_PRINTF("INFO: FD=%d now: %lu ns, last data time: %lu ns\n",
+            RM_PRINTF("INFO: FD=%d now: %ld ns, last data time: %lu ns\n",
                       a.first, ktime_now_ns, last_data_time_ns);
             RM_PRINTF(
                 "INFO: FD=%d idle has been idle for %lu ns. timeout is %lu "
@@ -292,13 +293,14 @@ void timer_callback(const boost::system::error_code &error) {
   // full capacity. This value is the existing free capacity plus the number of
   // flows we intend to pause. The important part here is that we only look at
   // as many entries in paused_fds_queue as needed.
-  uint64_t const num_to_activate =
-      max_active_flows - active_fds_queue.size() + to_pause.size();
+  int const num_to_activate = max_active_flows -
+                              static_cast<int>(active_fds_queue.size()) +
+                              static_cast<int>(to_pause.size());
   int dummy = 0;
-  for (uint64_t i = 0; i < num_to_activate; ++i) {
+  for (int i = 0; i < num_to_activate; ++i) {
     // Loop until we find a paused flow that is valid (not closed).
-    uint64_t const num_paused = paused_fds_queue.size();
-    for (uint64_t j = 0; j < num_paused; ++j) {
+    int const num_paused = static_cast<int>(paused_fds_queue.size());
+    for (int j = 0; j < num_paused; ++j) {
       p = paused_fds_queue.front();
       paused_fds_queue.pop();
       // If this flow has been closed, then skip it.
@@ -325,17 +327,16 @@ void timer_callback(const boost::system::error_code &error) {
   // 3) Pause flows. We need to recalculate the number of flows to pause because
   // we may not have been able to activate as many flows as planned. Recall that
   // it is alright to iterate through all of active_fds_queue.
-  uint64_t const num_to_pause = static_cast<uint64_t>(
-      std::max(0L, static_cast<int64_t>(active_fds_queue.size()) -
-                       static_cast<int64_t>(max_active_flows)));
+  int const num_to_pause =
+      std::max(0, static_cast<int>(active_fds_queue.size()) - max_active_flows);
 #ifdef RM_VERBOSE
-  assert(num_to_pause <= to_pause.size());
+  assert(num_to_pause <= static_cast<int>(to_pause.size()));
 #endif
   // For each flow that we are supposed to pause, advance through
   // active_fds_queue until we find it.
-  s = active_fds_queue.size();
-  uint64_t j = 0;
-  for (uint64_t i = 0; i < num_to_pause; ++i) {
+  s = static_cast<int>(active_fds_queue.size());
+  int j = 0;
+  for (int i = 0; i < num_to_pause; ++i) {
     while (j < s) {
       a = active_fds_queue.front();
       active_fds_queue.pop();
@@ -354,7 +355,7 @@ void timer_callback(const boost::system::error_code &error) {
   // 4) Check invariants.
 #ifdef RM_VERBOSE
   // Cannot have more than the max number of active flows.
-  assert(active_fds_queue.size() <= max_active_flows);
+  assert(static_cast<int>(active_fds_queue.size()) <= max_active_flows);
   // If there are no active flows, then there should also be no paused flows.
   // No, this is not strictly true anymore. If none of the flows have pending
   // data (i.e., none are in flow_to_keepalive), then they will all be paused.
@@ -363,7 +364,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 5) Calculate when the next timer should expire.
   boost::posix_time::time_duration when;
-  int64_t const next_epoch_us =
+  auto const next_epoch_us =
       (active_fds_queue.front().second - now).total_microseconds();
   if (active_fds_queue.empty()) {
     // If there are no flows, revert to slow check mode.
@@ -455,24 +456,24 @@ void sigint_handler(int signum) {
 }
 
 // Read an environment variable as an unsigned integer.
-bool read_env_uint(const char *key, volatile uint32_t *dest,
-                   bool allow_zero = false) {
+bool read_env_int(const char *key, volatile int *dest, bool allow_zero = false,
+                  bool allow_neg = false) {
   char *val_str = getenv(key);
   if (val_str == nullptr) {
     RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
     return false;
   }
   int const val_int = atoi(val_str);
-  if (allow_zero and val_int < 0) {
-    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be > 0)\n", key, val_int);
-    return false;
-  }
-  if (!allow_zero and val_int <= 0) {
-    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be >= 0)\n", key,
+  if (!allow_zero and val_int == 0) {
+    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be != 0)\n", key,
               val_int);
     return false;
   }
-  *dest = static_cast<uint32_t>(val_int);
+  if (!allow_neg and val_int < 0) {
+    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be > 0)\n", key, val_int);
+    return false;
+  }
+  *dest = val_int;
   return true;
 }
 
@@ -498,33 +499,33 @@ bool read_env_string(const char *key, std::string &dest) {
 // flow_to_rwnd.
 bool setup() {
   // Read environment variables with parameters.
-  if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
+  if (!read_env_int(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
     return false;
   }
   if (!read_env_string(RM_SCHEDILING_MODE_KEY, scheduling_mode)) {
     return false;
   }
-  if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us)) {
+  if (!read_env_int(RM_EPOCH_US_KEY, &epoch_us)) {
     return false;
   }
-  if (!read_env_uint(RM_EPOCH_BYTES_KEY, &epoch_bytes)) {
+  if (!read_env_int(RM_EPOCH_BYTES_KEY, &epoch_bytes)) {
     return false;
   }
-  uint32_t idle_timeout_us_ = 0;
-  if (!read_env_uint(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us_,
-                     true /* allow_zero */)) {
+  if (!read_env_int(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
+                    true /* allow_zero */, false /* allow_neg */)) {
     return false;
   }
-  idle_timeout_us = static_cast<int64_t>(idle_timeout_us_);
-  idle_timeout_ns = static_cast<uint64_t>(idle_timeout_us) * 1000UL;
-  uint32_t monitor_port_start_ = 0;
-  if (!read_env_uint(RM_MONITOR_PORT_START_KEY, &monitor_port_start_) ||
+  idle_timeout_ns = static_cast<int64_t>(idle_timeout_us) * 1000;
+  // trunk-ignore(clang-tidy/misc-const-correctness)
+  int monitor_port_start_ = 0;
+  if (!read_env_int(RM_MONITOR_PORT_START_KEY, &monitor_port_start_) ||
       monitor_port_start_ >= 65536) {
     return false;
   }
   monitor_port_start = static_cast<uint16_t>(monitor_port_start_);
-  uint32_t monitor_port_end_ = 0;
-  if (!read_env_uint(RM_MONITOR_PORT_END_KEY, &monitor_port_end_) ||
+  // trunk-ignore(clang-tidy/misc-const-correctness)
+  int monitor_port_end_ = 0;
+  if (!read_env_int(RM_MONITOR_PORT_END_KEY, &monitor_port_end_) ||
       monitor_port_end_ >= 65536) {
     return false;
   }
@@ -598,6 +599,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
   struct sockaddr_in local_addr {};
   socklen_t local_addr_len = sizeof(local_addr);
   // Get the local IP and port.
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
   if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&local_addr),
                   &local_addr_len) == -1) {
     RM_PRINTF("ERROR: failed to call 'getsockname'\n");
@@ -606,6 +608,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
   struct sockaddr_in remote_addr {};
   socklen_t remote_addr_len = sizeof(remote_addr);
   // Get the peer's (i.e., the remote) IP and port.
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
   if (getpeername(fd, reinterpret_cast<struct sockaddr *>(&remote_addr),
                   &remote_addr_len) == -1) {
     RM_PRINTF("ERROR: failed to call 'getpeername'\n");
@@ -649,7 +652,7 @@ void initial_scheduling(int fd) {
   bpf_map_update_elem(flow_to_last_data_time_fd, &fd_to_flow[fd], &zero,
                       BPF_ANY);
   // Should this flow be active or paused?
-  if (active_fds_queue.size() < max_active_flows) {
+  if (static_cast<int>(active_fds_queue.size()) < max_active_flows) {
     // Less than the max number of flows are active, so make this one active.
     boost::posix_time::ptime const now =
         boost::posix_time::microsec_clock::local_time();
@@ -728,6 +731,8 @@ void register_fd_for_monitoring(int fd) {
 // overriding accept() and connect(), so we do not need 'extern "C"'.
 
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
+  // trunk-ignore(clang-tidy/google-readability-casting)
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_accept = (int (*)(int, struct sockaddr *, socklen_t *))(
       dlsym(RTLD_NEXT, "accept"));
   if (real_accept == nullptr) {
@@ -754,6 +759,8 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 }
 
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+  // trunk-ignore(clang-tidy/google-readability-casting)
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_connect = (int (*)(int, const struct sockaddr *, socklen_t))(
       dlsym(RTLD_NEXT, "connect"));
   if (real_connect == nullptr) {
@@ -782,6 +789,8 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 // Get around C++ function name mangling.
 extern "C" {
 int close(int sockfd) {
+  // trunk-ignore(clang-tidy/google-readability-casting)
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
   if (real_close == nullptr) {
     RM_PRINTF("ERROR: failed to query dlsym for 'close': %s\n", dlerror());
@@ -801,7 +810,7 @@ int close(int sockfd) {
     remove_flow_from_all_maps(&fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
-    uint64_t const d = fd_to_flow.erase(sockfd);
+    auto const d = fd_to_flow.erase(sockfd);
     RM_PRINTF("INFO: removed FD=%d (%ld elements removed)\n", sockfd, d);
   } else {
     RM_PRINTF("INFO: ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);

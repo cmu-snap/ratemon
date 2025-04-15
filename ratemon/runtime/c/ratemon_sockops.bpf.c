@@ -89,7 +89,7 @@ __always_inline int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
   }
 
   // If this is a SYN or SYNACK, then trigger the BPF_SOCK_OPS_WRITE_HDR_OPT_CB
-  // callback by reserving three bytes (the minimim) for a TCP header option.
+  // callback by reserving three bytes (the minimum) for a TCP header option.
   // These three bytes will never actually be used, but reserving space is the
   // only way for that callback to be triggered.
   if (bpf_reserve_hdr_opt(skops, 3, 0)) {
