@@ -3,6 +3,7 @@
 #endif
 
 #include <arpa/inet.h>
+#include <array>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/detail/impl/epoll_reactor.hpp>
 #include <boost/asio/detail/impl/epoll_reactor.ipp>
@@ -32,6 +33,7 @@
 #include <linux/inet_diag.h>
 #include <netinet/in.h> // structure for storing address information
 #include <netinet/tcp.h>
+#include <string>
 #include <sys/socket.h> // for socket APIs
 #include <thread>
 #include <unistd.h>
@@ -85,7 +87,9 @@ std::unordered_map<int, struct rm_flow> fd_to_flow;
 // The next four are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 uint32_t max_active_flows = 5;
+std::string scheduling_mode = "time";
 uint32_t epoch_us = 10000;
+uint32_t epoch_bytes = 65536;
 int64_t idle_timeout_us = 0;
 uint64_t idle_timeout_ns = 0;
 uint16_t monitor_port_start = 9000;
@@ -389,6 +393,21 @@ void timer_callback(const boost::system::error_code &error) {
             when.total_microseconds());
 }
 
+void remove_flow_from_all_maps(struct rm_flow const *flow) {
+  if (flow_to_rwnd_fd != 0) {
+    bpf_map_delete_elem(flow_to_rwnd_fd, flow);
+  }
+  if (flow_to_win_scale_fd != 0) {
+    bpf_map_delete_elem(flow_to_win_scale_fd, flow);
+  }
+  if (flow_to_last_data_time_fd != 0) {
+    bpf_map_delete_elem(flow_to_last_data_time_fd, flow);
+  }
+  if (flow_to_keepalive_fd != 0) {
+    bpf_map_delete_elem(flow_to_keepalive_fd, flow);
+  }
+}
+
 // This function is designed to be run in a thread. It is responsible for
 // managing the async timers that perform scheduling. The timer events are
 // executed by this thread, but they can be scheduled by other threads.
@@ -406,18 +425,7 @@ void thread_func() {
   // Delete all flows from flow_to_rwnd and flow_to_win_scale.
   lock_scheduler.lock();
   for (const auto &p : fd_to_flow) {
-    if (flow_to_rwnd_fd != 0) {
-      bpf_map_delete_elem(flow_to_rwnd_fd, &p.second);
-    }
-    if (flow_to_win_scale_fd != 0) {
-      bpf_map_delete_elem(flow_to_win_scale_fd, &p.second);
-    }
-    if (flow_to_last_data_time_fd != 0) {
-      bpf_map_delete_elem(flow_to_last_data_time_fd, &p.second);
-    }
-    if (flow_to_keepalive_fd != 0) {
-      bpf_map_delete_elem(flow_to_keepalive_fd, &p.second);
-    }
+    remove_flow_from_all_maps(&p.second);
   }
   lock_scheduler.unlock();
   RM_PRINTF("INFO: scheduler thread ended\n");
@@ -446,9 +454,9 @@ void sigint_handler(int signum) {
   raise(signum);
 }
 
+// Read an environment variable as an unsigned integer.
 bool read_env_uint(const char *key, volatile uint32_t *dest,
                    bool allow_zero = false) {
-  // Read an environment variable as an unsigned integer.
   char *val_str = getenv(key);
   if (val_str == nullptr) {
     RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
@@ -468,6 +476,23 @@ bool read_env_uint(const char *key, volatile uint32_t *dest,
   return true;
 }
 
+// Read an environment variable as a string.
+bool read_env_string(const char *key, std::string &dest) {
+  char *val_str = getenv(key);
+  if (val_str == nullptr) {
+    RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
+    return false;
+  }
+  // Check that the string is not empty.
+  if (strlen(val_str) == 0) {
+    RM_PRINTF("ERROR: invalid value for '%s'='%s' (must be non-empty)\n", key,
+              val_str);
+    return false;
+  }
+  dest = std::string(val_str);
+  return true;
+}
+
 // Perform setup (only once for all flows in this process), such as reading
 // parameters from environment variables and looking up the BPF map
 // flow_to_rwnd.
@@ -476,7 +501,13 @@ bool setup() {
   if (!read_env_uint(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
     return false;
   }
+  if (!read_env_string(RM_SCHEDILING_MODE_KEY, scheduling_mode)) {
+    return false;
+  }
   if (!read_env_uint(RM_EPOCH_US_KEY, &epoch_us)) {
+    return false;
+  }
+  if (!read_env_uint(RM_EPOCH_BYTES_KEY, &epoch_bytes)) {
     return false;
   }
   uint32_t idle_timeout_us_ = 0;
@@ -596,16 +627,16 @@ bool set_cca(int fd, const char *cca) {
               cca);
     return false;
   }
-  char retrieved_cca[32];
+  std::array<char, 32> retrieved_cca{};
   socklen_t retrieved_cca_len = sizeof(retrieved_cca);
-  if (getsockopt(fd, SOL_TCP, TCP_CONGESTION, retrieved_cca,
+  if (getsockopt(fd, SOL_TCP, TCP_CONGESTION, retrieved_cca.data(),
                  &retrieved_cca_len) == -1) {
     RM_PRINTF("ERROR: failed to 'getsockopt' TCP_CONGESTION\n");
     return false;
   }
-  if (strcmp(retrieved_cca, cca) != 0) {
+  if (strcmp(retrieved_cca.data(), cca) != 0) {
     RM_PRINTF("ERROR: failed to set CCA to %s! Actual CCA is: %s\n", cca,
-              retrieved_cca);
+              retrieved_cca.data());
     return false;
   }
   return true;
@@ -767,18 +798,7 @@ int close(int sockfd) {
   lock_scheduler.lock();
   if (fd_to_flow.contains(sockfd)) {
     // Obviously, do this before removing the FD from fd_to_flow.
-    if (flow_to_rwnd_fd != 0) {
-      bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd]);
-    }
-    if (flow_to_win_scale_fd != 0) {
-      bpf_map_delete_elem(flow_to_win_scale_fd, &fd_to_flow[sockfd]);
-    }
-    if (flow_to_last_data_time_fd != 0) {
-      bpf_map_delete_elem(flow_to_last_data_time_fd, &fd_to_flow[sockfd]);
-    }
-    if (flow_to_keepalive_fd != 0) {
-      bpf_map_delete_elem(flow_to_keepalive_fd, &fd_to_flow[sockfd]);
-    }
+    remove_flow_from_all_maps(&fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
     uint64_t const d = fd_to_flow.erase(sockfd);

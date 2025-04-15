@@ -29,8 +29,14 @@
 
 // Environment variable that specifies the max number of active flows.
 #define RM_MAX_ACTIVE_FLOWS_KEY "RM_MAX_ACTIVE_FLOWS"
-// Environment variable that specifies how often to perform flow scheduling.
+// Environment variable specifying scheduling mode, either "time" or "byte".
+#define RM_SCHEDILING_MODE_KEY "RM_SCHEDULING_MODE"
+// Environment variable for scheduling mode "time" that specifies how long
+// to allow a flow to send per epoch.
 #define RM_EPOCH_US_KEY "RM_EPOCH_US"
+// Environment variable for scheduling mode "byte" that specifies the number of
+// bytes to allow a flow to send per epoch.
+#define RM_EPOCH_BYTES_KEY "RM_EPOCH_BYTES"
 // Duration after which an idle flow will be forcibly paused. 0 disables this
 // feature.
 #define RM_IDLE_TIMEOUT_US_KEY "RM_IDLE_TIMEOUT_US"
