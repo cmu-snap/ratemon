@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <array>
 #include <boost/asio/deadline_timer.hpp>
@@ -23,30 +24,29 @@
 #include <boost/operators.hpp>
 #include <boost/system/detail/error_code.hpp>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
+#include <cassert>
+#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <dlfcn.h>
+#include <experimental/random>
 #include <linux/bpf.h>
 #include <linux/inet_diag.h>
+#include <mutex>
 #include <netinet/in.h> // structure for storing address information
 #include <netinet/tcp.h>
+#include <queue>
 #include <string>
 #include <sys/socket.h> // for socket APIs
 #include <thread>
 #include <unistd.h>
-#include <vector>
-
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <experimental/random>
-#include <mutex>
-#include <queue>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "ratemon.h"
 
@@ -69,6 +69,8 @@ int flow_to_win_scale_fd = 0;
 int flow_to_last_data_time_fd = 0;
 // FD for the BPF map "flow_to_keepali" (short for "flow_to_keepalive").
 int flow_to_keepalive_fd = 0;
+// BPF ringbuf to poll for flows that have exhausted their grant.
+struct ring_buffer *done_flows_rb;
 // Runs async timers for scheduling
 boost::asio::io_context io;
 // Periodically performs scheduling using timer_callback().
@@ -84,12 +86,16 @@ std::queue<std::pair<int, boost::posix_time::ptime>> active_fds_queue;
 std::queue<int> paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
+// Maps rm_flow struct to the number of bytes remaining in the flow's message.
+// Used to give a partial grant when the flow is about to finish.
+// std::unordered_map<struct rm_flow, int> flow_to_pending_bytes;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
 std::string scheduling_mode = "time"; // or "bytes"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
+int response_size_bytes = 0;
 int idle_timeout_us = 0;
 int64_t idle_timeout_ns = 0;
 // Ports in this range (inclusive) will be tracked for scheduling.
@@ -122,7 +128,20 @@ inline int jitter(int v) {
 }
 
 inline void activate_flow(int fd) {
-  bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
+  if (scheduling_mode == "bytes") {
+    // Grant this flow a fixed number of bytes.
+    // TODO(unknown): Need a map to track the progress of the flow so we know
+    // when to give it a partial grant at the end. Do we want to do this in
+    // userspace or BPF? The question is, how will we know when a new request is
+    // sent so that we can reset this to a full message size? Should we be
+    // intercepting outgoing requests to "learn" the message size? Might as well
+    // do that. Can do this all in userspace by interposing on send().
+    bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &epoch_bytes,
+                        BPF_ANY);
+  } else if (scheduling_mode == "time") {
+    // Remove the RWND limit of 0 that has paused the flow.
+    bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
+  }
   trigger_ack(fd);
   RM_PRINTF("INFO: activated FD=%d\n", fd);
 }
@@ -271,9 +290,9 @@ void timer_callback(const boost::system::error_code &error) {
         }
       }
     }
-    // 1.3) If the flow has been active for longer than its epoch, then plan to
-    // pause it.
-    if (now > a.second) {
+    // 1.3) If we are using time-based scheduling and the flow has been active
+    // for longer than its epoch, then plan to pause it.
+    if (scheduling_mode == "time" && now > a.second) {
       if (paused_fds_queue.empty()) {
         // If there are no paused flows, then immediately reactivate this flow.
         // Randomly jitter the epoch time by +/- 12.5%.
@@ -441,6 +460,28 @@ void thread_func() {
   }
 }
 
+int handle_event(void * /*ctx*/, void *data, size_t data_sz) {
+  if (scheduling_mode != "byte") {
+    return 0;
+  }
+  if (data_sz != sizeof(struct rm_flow)) {
+    RM_PRINTF("ERROR: invalid data size %zu, expected %zu\n", data_sz,
+              sizeof(struct rm_flow));
+    return 0;
+  }
+  const auto *flow = static_cast<const struct rm_flow *>(data);
+
+  // This flow has exhausted its grant. Remove it from the active flows. It
+  // should already be paused (in flow_to_rwnd map). By removing it from active
+  // flows, the timer callback will automatically activate a new flow when it
+  // fires next.
+  RM_PRINTF("INFO: flow %u:%u->%u:%u has exhausted its grant\n",
+            flow->remote_addr, flow->remote_port, flow->local_addr,
+            flow->local_port);
+
+  return 0;
+}
+
 // Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
@@ -509,10 +550,29 @@ bool setup() {
   if (!read_env_string(RM_SCHEDILING_MODE_KEY, scheduling_mode)) {
     return false;
   }
+  if (scheduling_mode != "time" && scheduling_mode != "byte") {
+    RM_PRINTF("ERROR: invalid value for '%s'='%s' (must be 'time' or 'byte')\n",
+              RM_SCHEDILING_MODE_KEY, scheduling_mode.c_str());
+    return false;
+  }
   if (!read_env_int(RM_EPOCH_US_KEY, &epoch_us)) {
     return false;
   }
   if (!read_env_int(RM_EPOCH_BYTES_KEY, &epoch_bytes)) {
+    return false;
+  }
+  if (epoch_bytes < 1) {
+    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be > 0)\n",
+              RM_EPOCH_BYTES_KEY, epoch_bytes);
+    return false;
+  }
+  if (!read_env_int(RM_RESPONSE_SIZE_KEY, &response_size_bytes)) {
+    return false;
+  }
+  if (response_size_bytes < 0) {
+    RM_PRINTF(
+        "ERROR: invalid value for '%s'=%d (must be > 0; set = 0 to disable)\n",
+        RM_RESPONSE_SIZE_KEY, response_size_bytes);
     return false;
   }
   if (!read_env_int(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
@@ -578,6 +638,24 @@ bool setup() {
     return false;
   }
   flow_to_keepalive_fd = err;
+
+  if (scheduling_mode == "byte") {
+    // Look up the FD for the done_flows ringbuf. We do not need the BPF
+    // skeleton for this.
+    err = bpf_obj_get(RM_DONE_FLOWS_PIN_PATH);
+    if (err == -1) {
+      RM_PRINTF("ERROR: failed to get FD for 'done_flows' from path "
+                "'%s'\n",
+                RM_DONE_FLOWS_PIN_PATH);
+      return false;
+    }
+    // Use the ringbuf fd to create a new userspace ringbuf instance.
+    done_flows_rb = ring_buffer__new(err, handle_event, nullptr, nullptr);
+    if (done_flows_rb == nullptr) {
+      RM_PRINTF("ERROR: Failed to create ring buffer\n");
+      return false;
+    }
+  }
 
   // Catch SIGINT to end the program.
   struct sigaction action {};

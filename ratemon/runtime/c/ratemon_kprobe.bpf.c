@@ -158,31 +158,34 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     }
   }
 
-  // Grant update.
+  // Grant update. Do this regardless of whether we are using scheduling mode
+  // "byte" or "time". If we are actually doing time-based scheduling, then
+  // this will have no effect.
   //
-  // Look up the flow in the flow_to_rwnd.
+  // Look up the flow in the flow_to_rwnd map.
   u32 *rwnd_ptr = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
   if (rwnd_ptr == NULL) {
     bpf_printk("ERROR: 'tcp_rcv_established' error flow is active but not in "
                "flow_to_rwnd");
     return 0;
   }
-  // Decrement the rwnd by the payload size.
+  // Decrement the rwnd by the payload size to account for grant that has been
+  // used.
   if (*rwnd_ptr >= payload_bytes) {
     *rwnd_ptr -= payload_bytes;
   } else {
     *rwnd_ptr = 0;
   }
-  // Update the flow_to_rwnd with the new value.
+  // Update flow_to_rwnd with the new value.
   if (bpf_map_update_elem(&flow_to_rwnd, &flow, rwnd_ptr, BPF_ANY)) {
     bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd");
     return 0;
   }
-  // The flow still has grant remaining.
+  // If the flow has grant remaining, then we are done.
   if (*rwnd_ptr > 0) {
     return 0;
   }
-  // The flow has exhausted its grant. Add it to the done_flows ringbuf.
+  // The flow has exhausted its grant, so add it to the done_flows ringbuf.
   if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
     bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow");
     return 0;
