@@ -8,5 +8,25 @@
     "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
     "command": "/usr/bin/clang -std=c17 -Wall -Wextra -O3 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -c ratemon_main.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_main.o",
     "file": "ratemon_main.c"
+  },
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang -g -O3 -target bpf -D__TARGET_ARCH_x86 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -idirafter /usr/lib/llvm-18/lib/clang/18/include -idirafter /usr/local/include -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include -c ratemon_kprobe.bpf.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_kprobe.tmp.bpf.o",
+    "file": "ratemon_kprobe.bpf.c"
+  },
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang -g -O3 -target bpf -D__TARGET_ARCH_x86 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -idirafter /usr/lib/llvm-18/lib/clang/18/include -idirafter /usr/local/include -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include -c ratemon_sockops.bpf.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_sockops.tmp.bpf.o",
+    "file": "ratemon_sockops.bpf.c"
+  },
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang -g -O3 -target bpf -D__TARGET_ARCH_x86 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -idirafter /usr/lib/llvm-18/lib/clang/18/include -idirafter /usr/local/include -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include -c ratemon_structops.bpf.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_structops.tmp.bpf.o",
+    "file": "ratemon_structops.bpf.c"
+  },
+  {
+    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang -g -O3 -target bpf -D__TARGET_ARCH_x86 -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output -I../../../libbpf/include/uapi -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output/ -idirafter /usr/lib/llvm-18/lib/clang/18/include -idirafter /usr/local/include -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include -c ratemon_tc.bpf.c -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/ratemon_tc.tmp.bpf.o",
+    "file": "ratemon_tc.bpf.c"
   }
 ]

@@ -14,9 +14,9 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-// TODO: Update this to also track the last sequence number for a flow. Use
-// sequence number to decrement a flow's RWND over time based on how much data
-// has been received. But do we even need this? If TCP does not withdraw
+// TODO(unknown): Update this to also track the last sequence number for a flow.
+// Use sequence number to decrement a flow's RWND over time based on how much
+// data has been received. But do we even need this? If TCP does not withdraw
 // advertised window, then it should be fine to advertise once, then advertise 0
 // immediately after and the sender will have tracked the amount of data it can
 // send. Maybe. But to be truly TCP compatible, we should gentle decrement RWND
@@ -78,7 +78,7 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // Since this is tcp_rcv_established, we know that the packet is TCP.
   // Extract the TCP header.
   // All accesses to struct members must be done through BPF_CORE_READ_INTO.
-  void *data;
+  void *data = NULL;
   BPF_CORE_READ_INTO(&data, skb, data);
   const struct tcphdr *th = (const struct tcphdr *)data;
   if (th == NULL) {
@@ -94,10 +94,10 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
 
   // Safely extract members from tcp_sock, tcphdr, and sk_buff.
   // tcp_sock:
-  u32 rcv_nxt;
+  u32 rcv_nxt = 0;
   BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
   // tcphdr
-  __be32 seq_;
+  __be32 seq_ = 0;
   BPF_CORE_READ_INTO(&seq_, th, seq);
   u32 seq = bpf_ntohl(seq_);
   u64 doff = BPF_CORE_READ_BITFIELD_PROBED(th, doff);
@@ -105,11 +105,11 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   u64 fin = BPF_CORE_READ_BITFIELD_PROBED(th, fin);
   u64 rst = BPF_CORE_READ_BITFIELD_PROBED(th, rst);
   // sk_buff:
-  u32 len;
-  __be32 skc_daddr;
-  __be32 skc_rcv_saddr;
-  __u16 skc_num;
-  __be16 skc_dport;
+  u32 len = 0;
+  __be32 skc_daddr = 0;
+  __be32 skc_rcv_saddr = 0;
+  __u16 skc_num = 0;
+  __be16 skc_dport = 0;
   BPF_CORE_READ_INTO(&len, skb, len);
   BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
   BPF_CORE_READ_INTO(&skc_rcv_saddr, sk, __sk_common.skc_rcv_saddr);

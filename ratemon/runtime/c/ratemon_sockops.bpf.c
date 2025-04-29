@@ -15,18 +15,18 @@
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 // BPF SOCK_OPS program return codes.
-#define SOCKOPS_OK 1
-#define SOCKOPS_ERR 0
+enum { SOCKOPS_OK = 1, SOCKOPS_ERR = 0 };
 
-#define AF_INET 2
+enum { AF_INET = 2 };
 
-#define EINVAL 22
+enum { EINVAL = 22 };
 
-#define TCPOPT_WINDOW 3 /* Window scaling */
+enum {
+  TCPOPT_WINDOW = 3 /* Window scaling */
+};
 
 // TCP header flags.
-#define TCPHDR_SYN 0x02
-#define TCPHDR_ACK 0x10
+enum { TCPHDR_SYN = 0x02, TCPHDR_ACK = 0x10 };
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
 struct tcp_opt {
@@ -47,7 +47,8 @@ __always_inline int set_hdr_cb_flags(struct bpf_sock_ops *skops, int flags) {
     bpf_printk(
         "ERROR: failed to set sockops flags because socket is not full socket");
     return SOCKOPS_ERR;
-  } else if (ret) {
+  }
+  if (ret) {
     bpf_printk("ERROR: failed to set specific sockops flag: %ld", ret);
     return SOCKOPS_ERR;
   }
@@ -140,7 +141,8 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
 
   // Record this window scale for use when setting the RWND in the egress path.
   // Use update() instead of insert() in case this port is being reused.
-  // TODO: Change to insert() once the flow cleanup code is implemented.
+  // TODO(unknown): Change to insert() once the flow cleanup code is
+  // implemented.
   bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
 
   // Clear the flag that enables the header option write callback.

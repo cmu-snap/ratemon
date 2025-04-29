@@ -14,9 +14,11 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define ETH_P_IP 0x0800 /* Internet Protocol packet	*/
+enum {
+  ETH_P_IP = 0x0800 /* Internet Protocol packet	*/
+};
 
-#define TC_ACT_OK 0
+enum { TC_ACT_OK = 0 };
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
@@ -35,8 +37,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // We get the packet starting with the Ethernet header and need to parse the
   // network and transport headers.
   struct ethhdr *eth = data;
-  struct iphdr *ip;
-  struct tcphdr *tcp;
+  struct iphdr *ip = NULL;
+  struct tcphdr *tcp = NULL;
 
   // Check that the Ethernet header does not extend past the end of the packet.
   if ((void *)eth + sizeof(*eth) > data_end) {
