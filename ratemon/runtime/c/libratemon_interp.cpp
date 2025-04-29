@@ -84,14 +84,15 @@ std::queue<std::pair<int, boost::posix_time::ptime>> active_fds_queue;
 std::queue<int> paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
-// The next four are scheduled RWND tuning parameters. See ratemon.h for
+// The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
-std::string scheduling_mode = "time";
+std::string scheduling_mode = "time"; // or "bytes"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
 int idle_timeout_us = 0;
 int64_t idle_timeout_ns = 0;
+// Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
 
@@ -235,37 +236,38 @@ void timer_callback(const boost::system::error_code &error) {
       if (bpf_map_lookup_elem(flow_to_last_data_time_fd, &fd_to_flow[a.first],
                               &last_data_time_ns) == 0) {
         // If last_data_time_ns is 0, then this flow has not yet been tracked.
-        if (last_data_time_ns != 0U) {
-          if (last_data_time_ns > ktime_now_ns) {
-            // This could be fine...perhaps a packet arrived since we captured
-            // the current time above?
-            RM_PRINTF(
-                "WARNING: FD=%d last data time (%lu ns) is more recent that "
-                "current time (%ld ns) by %ld ns\n",
-                a.first, last_data_time_ns, ktime_now_ns,
-                last_data_time_ns - ktime_now_ns);
-          } else {
-            idle_ns = ktime_now_ns - last_data_time_ns;
-            RM_PRINTF("INFO: FD=%d now: %ld ns, last data time: %lu ns\n",
-                      a.first, ktime_now_ns, last_data_time_ns);
-            RM_PRINTF(
-                "INFO: FD=%d idle has been idle for %lu ns. timeout is %lu "
-                "ns\n",
-                a.first, idle_ns, idle_timeout_ns);
-            // If the flow has been idle for longer than the idle timeout, then
-            // pause it. We pause the flow *before* activating a replacement
-            // flow because it is by definition not sending data, so we do not
-            // risk causing a drop in utilization by pausing it immediately.
-            if (idle_ns >= idle_timeout_ns) {
-              RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n", a.first);
-              // Remove the flow from flow_to_keepalive, signalling that it no
-              // longer has pending demand.
-              bpf_map_delete_elem(flow_to_keepalive_fd, &a.first);
-              paused_fds_queue.push(a.first);
-              pause_flow(a.first);
-              continue;
-            }
-          }
+        if (last_data_time_ns == 0U) {
+          continue;
+        }
+        if (last_data_time_ns > ktime_now_ns) {
+          // This could be fine...perhaps a packet arrived since we captured
+          // the current time above?
+          RM_PRINTF(
+              "WARNING: FD=%d last data time (%lu ns) is more recent that "
+              "current time (%ld ns) by %ld ns\n",
+              a.first, last_data_time_ns, ktime_now_ns,
+              last_data_time_ns - ktime_now_ns);
+          continue;
+        }
+
+        idle_ns = ktime_now_ns - last_data_time_ns;
+        RM_PRINTF("INFO: FD=%d now: %ld ns, last data time: %lu ns\n", a.first,
+                  ktime_now_ns, last_data_time_ns);
+        RM_PRINTF("INFO: FD=%d idle has been idle for %lu ns. timeout is %lu "
+                  "ns\n",
+                  a.first, idle_ns, idle_timeout_ns);
+        // If the flow has been idle for longer than the idle timeout, then
+        // pause it. We pause the flow *before* activating a replacement
+        // flow because it is by definition not sending data, so we do not
+        // risk causing a drop in utilization by pausing it immediately.
+        if (idle_ns >= idle_timeout_ns) {
+          RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n", a.first);
+          // Remove the flow from flow_to_keepalive, signalling that it no
+          // longer has pending demand.
+          bpf_map_delete_elem(flow_to_keepalive_fd, &a.first);
+          paused_fds_queue.push(a.first);
+          pause_flow(a.first);
+          continue;
         }
       }
     }
@@ -280,7 +282,8 @@ void timer_callback(const boost::system::error_code &error) {
             now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
         RM_PRINTF("INFO: reactivated FD=%d\n", a.first);
         continue;
-      } // Plan to pause this flow.
+      }
+      // Plan to pause this flow.
       to_pause.push_back(a.first);
     }
     // Put the flow back in the active queue. For this to occur, we know the
@@ -364,6 +367,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 5) Calculate when the next timer should expire.
   boost::posix_time::time_duration when;
+  // TODO(unknown): Potential bug if active_fds_queue is empty.
   auto const next_epoch_us =
       (active_fds_queue.front().second - now).total_microseconds();
   if (active_fds_queue.empty()) {
@@ -423,7 +427,7 @@ void thread_func() {
   // Execute the configured events, until there are no more events to execute.
   io.run();
 
-  // Delete all flows from flow_to_rwnd and flow_to_win_scale.
+  // Clean up all flows.
   lock_scheduler.lock();
   for (const auto &p : fd_to_flow) {
     remove_flow_from_all_maps(&p.second);
@@ -455,7 +459,7 @@ void sigint_handler(int signum) {
   raise(signum);
 }
 
-// Read an environment variable as an unsigned integer.
+// Read an environment variable as an integer.
 bool read_env_int(const char *key, volatile int *dest, bool allow_zero = false,
                   bool allow_neg = false) {
   char *val_str = getenv(key);

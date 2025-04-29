@@ -19,7 +19,7 @@ struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
-  __type(value, unsigned int);
+  __type(value, uint32_t);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_rwnd SEC(".maps");
 
@@ -28,7 +28,7 @@ struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
-  __type(value, unsigned char);
+  __type(value, uint32_t);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_win_scale SEC(".maps");
 
@@ -38,7 +38,7 @@ struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
-  __type(value, unsigned long);
+  __type(value, uint64_t);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_last_data_time_ns SEC(".maps");
 
@@ -51,5 +51,16 @@ struct {
   __type(value, int);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_keepalive SEC(".maps");
+
+// A ringbuffer of struct rm_flow that have finished their grant and are now
+// paused. max_entries is the total ringbuf size in bytes and must be both a
+// multiple of the page size (4096) and a power of two. A single struct rm_flow
+// is 12 bytes. The max number of entries this ringbuf will need to hold is set
+// by the RM_MAX_ACTIVE_FLOWS environment variable and will typically be ~20.
+// So 4096 bytes is plenty.
+struct {
+  __uint(type, BPF_MAP_TYPE_RINGBUF);
+  __uint(max_entries, 4096 /* bytes, one page */);
+} done_flows SEC(".maps");
 
 #endif /* __RATEMON_MAPS_H */

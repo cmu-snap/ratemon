@@ -24,6 +24,7 @@
 #define RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH                                     \
   "/sys/fs/bpf/flow_to_last_data_time_ns"
 #define RM_FLOW_TO_KEEPALIVE_PIN_PATH "/sys/fs/bpf/flow_to_keepalive"
+#define RM_DONE_FLOWS_PIN_PATH "/sys/fs/bpf/done_flows"
 // Name of struct_ops CCA that flows must use to be woken up.
 #define RM_BPF_CUBIC "bpf_cubic"
 
@@ -49,10 +50,10 @@
 
 // Key for use in flow-based maps.
 struct rm_flow {
-  unsigned int local_addr;
-  unsigned int remote_addr;
-  unsigned short local_port;
-  unsigned short remote_port;
+  uint32_t local_addr;
+  uint32_t remote_addr;
+  uint16_t local_port;
+  uint16_t remote_port;
 };
 
 #endif /* __RATEMON_H */
