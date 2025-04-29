@@ -868,6 +868,46 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   return fd;
 }
 
+ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
+  // trunk-ignore(clang-tidy/google-readability-casting)
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+  static auto real_send = (ssize_t (*)(int, const void *, size_t, int))dlsym(RTLD_NEXT, "send");
+  if (real_send == nullptr) {
+    RM_PRINTF("ERROR: failed to query dlsym for 'send': %s\n", dlerror());
+    return -1;
+  }
+  ssize_t const ret = real_send(sockfd, buf, len, flags);
+  if (ret == -1) {
+    RM_PRINTF("ERROR: real 'send' failed for FD=%d\n", sockfd);
+    return ret;
+  }
+  // If we have been signalled to quit, then do nothing more.
+  if (!run) {
+    return ret;
+  }
+
+  // Update the flow_to_keepalive map to indicate that this flow has pending data.
+  lock_scheduler.lock();
+  auto flow = fd_to_flow.find(sockfd);
+  if (flow == fd_to_flow.end()) {
+    // We are not tracking this flow, so ignore it.
+    RM_PRINTF("INFO: ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+    lock_scheduler.unlock();
+    return ret;
+  }
+
+  // Parse buf, which should contain 2 ints. The first is the response size, which is what we want.
+  if (len == 2 * sizeof(int)) {
+    int *buf_int = (int *)buf;
+    int bytes = buf_int[0];
+    int sender_wait_us = buf_int[1];
+    // flow_to_pending_bytes[*flow] = bytes;
+  }
+
+  RM_PRINTF("INFO: successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
+  return ret;
+}
+
 // Get around C++ function name mangling.
 extern "C" {
 int close(int sockfd) {
