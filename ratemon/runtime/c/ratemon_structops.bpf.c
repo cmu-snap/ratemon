@@ -31,34 +31,48 @@ extern void cubictcp_acked(struct sock *sk,
 // functions, except for 'bpf_cubic_get_into', as described below.
 
 SEC("struct_ops/bpf_cubic_init")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_init, struct sock *sk) { cubictcp_init(sk); }
 
 SEC("struct_ops/bpf_cubic_recalc_ssthresh")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 __u32 BPF_PROG(bpf_cubic_recalc_ssthresh, struct sock *sk) {
   return cubictcp_recalc_ssthresh(sk);
 }
 
 SEC("struct_ops/bpf_cubic_cong_avoid")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_cong_avoid, struct sock *sk, __u32 ack, __u32 acked) {
   cubictcp_cong_avoid(sk, ack, acked);
 }
 
 SEC("struct_ops/bpf_cubic_state")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_state, struct sock *sk, __u8 new_state) {
   cubictcp_state(sk, new_state);
 }
 
 SEC("struct_ops/bpf_cubic_undo_cwnd")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 __u32 BPF_PROG(bpf_cubic_undo_cwnd, struct sock *sk) {
   return tcp_reno_undo_cwnd(sk);
 }
 
 SEC("struct_ops/bpf_cubic_cwnd_event")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_cwnd_event, struct sock *sk, enum tcp_ca_event event) {
   cubictcp_cwnd_event(sk, event);
 }
 
 SEC("struct_ops/bpf_cubic_acked")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_acked, struct sock *sk,
               const struct ack_sample *sample) {
   cubictcp_acked(sk, sample);
@@ -68,7 +82,10 @@ void BPF_PROG(bpf_cubic_acked, struct sock *sk,
 // simply send a dupACK. This wakes up the sender by communicating an up-to-date
 // RWND.
 SEC("struct_ops/bpf_cubic_get_info")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
 void BPF_PROG(bpf_cubic_get_info, struct sock *sk, u32 ext, int *attr,
+              // trunk-ignore(clang-tidy/misc-unused-parameters)
               union tcp_cc_info *info) {
   if (sk == NULL) {
     bpf_printk("ERROR: 'bpf_cubic_get_info' sk=%u", sk);

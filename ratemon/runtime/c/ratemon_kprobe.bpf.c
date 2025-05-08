@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 
 // clang-format off
+// trunk-ignore-begin(include-what-you-use)
 // vmlinux.h needs to be first.
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -10,6 +11,7 @@
 
 #include "ratemon.h"
 #include "ratemon_maps.h"
+// trunk-ignore-end(include-what-you-use)
 // clang-format on
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
@@ -62,14 +64,15 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 // this impact depends on the number of flows, response size skew, and burst
 // duration. 3 approaches: 1) assume perfect knowledge of response sizes to set
 // grants perfectly; 2) use first responses to estimate typical response size,
-// switch from large grants to small
-//    grants ("minimally active set") as a flow approaches the estimated
-//    response size, this limits the impact of leftover grants;
-// 3) modify TCP to support retracting grants.
+// switch from large grants to small grants ("minimally active set") as a flow
+// approaches the estimated response size, this limits the impact of leftover
+// grants; 3) modify TCP to support retracting grants.
 
 // 'tcp_rcv_established' will be used to track the last time that a flow
 // received data so that we can determine when to classify a flow as idle.
 SEC("kprobe/tcp_rcv_established")
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
+// trunk-ignore(clang-tidy/misc-unused-parameters)
 int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   if (sk == NULL || skb == NULL) {
     bpf_printk("ERROR: 'tcp_rcv_established' sk=%u skb=%u", sk, skb);

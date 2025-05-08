@@ -58,7 +58,7 @@ __always_inline int set_hdr_cb_flags(struct bpf_sock_ops *skops, int flags) {
 __always_inline int enable_hdr_cbs(struct bpf_sock_ops *skops) {
   // Set the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
   // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
-  if (set_hdr_cb_flags(skops, skops->bpf_sock_ops_cb_flags |
+  if (set_hdr_cb_flags(skops, (int)skops->bpf_sock_ops_cb_flags |
                                   BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
       SOCKOPS_ERR) {
     bpf_printk("ERROR: could not enable sockops header callbacks");
@@ -70,7 +70,7 @@ __always_inline int enable_hdr_cbs(struct bpf_sock_ops *skops) {
 __always_inline int disable_hdr_cbs(struct bpf_sock_ops *skops) {
   // Clear the flag enabling the BPF_SOCK_OPS_HDR_OPT_LEN_CB and
   // BPF_SOCK_OPS_WRITE_HDR_OPT_CB callbacks.
-  if (set_hdr_cb_flags(skops, skops->bpf_sock_ops_cb_flags &
+  if (set_hdr_cb_flags(skops, (int)skops->bpf_sock_ops_cb_flags &
                                   ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
       SOCKOPS_ERR) {
     bpf_printk("ERROR: could not disable sockops header callbacks");

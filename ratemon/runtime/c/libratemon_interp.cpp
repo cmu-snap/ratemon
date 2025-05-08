@@ -46,9 +46,37 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "ratemon.h"
+
+struct rm_flow_key {
+  // trunk-ignore(clang-tidy/misc-non-private-member-variables-in-classes)
+  uint32_t local_addr;
+  // trunk-ignore(clang-tidy/misc-non-private-member-variables-in-classes)
+  uint32_t remote_addr;
+  // trunk-ignore(clang-tidy/misc-non-private-member-variables-in-classes)
+  uint16_t local_port;
+  // trunk-ignore(clang-tidy/misc-non-private-member-variables-in-classes)
+  uint16_t remote_port;
+
+  bool operator==(const rm_flow_key &other) const {
+    return local_addr == other.local_addr && remote_addr == other.remote_addr &&
+           local_port == other.local_port && remote_port == other.remote_port;
+  }
+};
+
+namespace std {
+template <> struct hash<rm_flow_key> {
+  std::size_t operator()(const rm_flow_key &key) const {
+    return (std::hash<uint32_t>()(key.local_addr) ^
+            std::hash<uint32_t>()(key.remote_addr) ^
+            std::hash<uint16_t>()(key.local_port) ^
+            std::hash<uint16_t>()(key.remote_port));
+  }
+};
+} // namespace std
 
 // Protects writes only to max_active_flows, epoch_us, idle_timeout_ns,
 // monitor_port_start, monitor_port_end, flow_to_rwnd_fd, flow_to_win_scale_fd,
@@ -86,9 +114,10 @@ std::queue<std::pair<int, boost::posix_time::ptime>> active_fds_queue;
 std::queue<int> paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
+std::unordered_map<struct rm_flow_key, int> flow_to_fd;
 // Maps rm_flow struct to the number of bytes remaining in the flow's message.
 // Used to give a partial grant when the flow is about to finish.
-// std::unordered_map<struct rm_flow, int> flow_to_pending_bytes;
+std::unordered_map<int, int> flow_to_pending_bytes;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
@@ -121,22 +150,27 @@ inline void trigger_ack(int fd) {
 }
 
 // Jitter the provided value by +/- 12.5%. Returns just the jitter.
-inline int jitter(int v) {
+inline int jitter(int val) {
   return std::experimental::randint(0,
-                                    static_cast<int>(std::roundl(v * 0.25))) -
-         static_cast<int>(std::roundl(v * 0.125));
+                                    static_cast<int>(std::roundl(val * 0.25))) -
+         static_cast<int>(std::roundl(val * 0.125));
 }
 
 inline void activate_flow(int fd) {
   if (scheduling_mode == "bytes") {
-    // Grant this flow a fixed number of bytes.
-    // TODO(unknown): Need a map to track the progress of the flow so we know
-    // when to give it a partial grant at the end. Do we want to do this in
-    // userspace or BPF? The question is, how will we know when a new request is
-    // sent so that we can reset this to a full message size? Should we be
-    // intercepting outgoing requests to "learn" the message size? Might as well
-    // do that. Can do this all in userspace by interposing on send().
-    bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &epoch_bytes,
+    // Look up the remaining data in this flow.
+    auto pending_bytes = flow_to_pending_bytes.find(fd);
+    if (pending_bytes == flow_to_pending_bytes.end()) {
+      RM_PRINTF("ERROR: Could not find pending bytes for FD=%d\n", fd);
+      return;
+    }
+    // Determine how many bytes to grant.
+    int grant_bytes = std::min(epoch_bytes, pending_bytes->second);
+    // Decrement the pending bytes by the grant size since the flow will be able
+    // to send this much data.
+    pending_bytes->second -= grant_bytes;
+    // Assign the grant.
+    bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_bytes,
                         BPF_ANY);
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
@@ -151,6 +185,69 @@ inline void pause_flow(int fd) {
   bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
   trigger_ack(fd);
   RM_PRINTF("INFO: paused flow FD=%d\n", fd);
+}
+
+void try_activate_one() {
+  // Loop until we find a paused flow that is valid (not closed).
+  int const num_paused = static_cast<int>(paused_fds_queue.size());
+  // Temporary variable for storing the front of paused_fds_queue.
+  int pause_fr = 0;
+  // Current time (absolute).
+  boost::posix_time::ptime const now =
+      boost::posix_time::microsec_clock::local_time();
+  // New epoch time.
+  boost::posix_time::ptime const now_plus_epoch =
+      now + boost::posix_time::microseconds(epoch_us);
+  int dummy = 0;
+  for (int j = 0; j < num_paused; ++j) {
+    pause_fr = paused_fds_queue.front();
+    paused_fds_queue.pop();
+    // If this flow has been closed, then skip it.
+    // trunk-ignore(clang-tidy/clang-diagnostic-error)
+    if (!fd_to_flow.contains(pause_fr)) {
+      continue;
+    }
+    // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
+    // returns negative error code when the flow is not found), then it has no
+    // pending data and should be skipped.
+    if (bpf_map_lookup_elem(flow_to_keepalive_fd, &pause_fr, &dummy) != 0) {
+      // RM_PRINTF("INFO: skipping activating FD=%d, no pending data\n", p);
+      paused_fds_queue.push(pause_fr);
+      continue;
+    }
+    // Randomly jitter the epoch time by +/- 12.5%.
+    active_fds_queue.emplace(
+        pause_fr,
+        now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
+    activate_flow(pause_fr);
+    break;
+  }
+}
+
+void try_find_and_pause(int fd) {
+  // Temporary variable for storing the front of active_fds_queue.
+  std::pair<int, boost::posix_time::ptime> active_fr;
+  int active_idx = 0;
+  while (active_idx < static_cast<int>(active_fds_queue.size())) {
+    active_fr = active_fds_queue.front();
+    active_fds_queue.pop();
+    ++active_idx;
+    if (active_fr.first == fd) {
+      // Pause this flow.
+      paused_fds_queue.push(active_fr.first);
+      pause_flow(active_fr.first);
+      break;
+    }
+    // Examine the next flow in active_fds_queue.
+    active_fds_queue.push(active_fr);
+  }
+}
+
+void try_pause_one_activate_one(int fd) {
+  // Find the flow in active_fds_queue and remove it
+  try_find_and_pause(fd);
+  // Then fine one flow in paused_fds_queue to restart.
+  try_activate_one();
 }
 
 // Call this to check if scheduling should take place, and if so, perform it. If
@@ -211,11 +308,9 @@ void timer_callback(const boost::system::error_code &error) {
             active_fds_queue.size(), paused_fds_queue.size());
 
   // Temporary variable for storing the front of active_fds_queue.
-  std::pair<int, boost::posix_time::ptime> a;
-  // Temporary variable for storing the front of paused_fds_queue.
-  int p = 0;
+  std::pair<int, boost::posix_time::ptime> active_fr;
   // Size of active_fds_queue.
-  int s = 0;
+  int active_size = 0;
   // Vector of active flows that we plan to pause.
   std::vector<int> to_pause;
   // Current kernel time (since boot).
@@ -239,12 +334,13 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 1) Perform a status check on all active flows. It is alright to iterate
   // through all of active_fds_queue.
-  s = static_cast<int>(active_fds_queue.size());
-  for (int i = 0; i < s; ++i) {
-    a = active_fds_queue.front();
+  active_size = static_cast<int>(active_fds_queue.size());
+  for (int i = 0; i < active_size; ++i) {
+    active_fr = active_fds_queue.front();
     active_fds_queue.pop();
     // 1.1) If this flow has been closed, remove it.
-    if (!fd_to_flow.contains(a.first)) {
+    // trunk-ignore(clang-tidy/clang-diagnostic-error)
+    if (!fd_to_flow.contains(active_fr.first)) {
       continue;
     }
     // 1.2) If idle timeout mode is enabled, then check if this flow is
@@ -252,7 +348,8 @@ void timer_callback(const boost::system::error_code &error) {
     // flows.
     if (idle_timeout_ns > 0 && !paused_fds_queue.empty()) {
       // Look up this flow's last active time.
-      if (bpf_map_lookup_elem(flow_to_last_data_time_fd, &fd_to_flow[a.first],
+      if (bpf_map_lookup_elem(flow_to_last_data_time_fd,
+                              &fd_to_flow[active_fr.first],
                               &last_data_time_ns) == 0) {
         // If last_data_time_ns is 0, then this flow has not yet been tracked.
         if (last_data_time_ns == 0U) {
@@ -264,51 +361,52 @@ void timer_callback(const boost::system::error_code &error) {
           RM_PRINTF(
               "WARNING: FD=%d last data time (%lu ns) is more recent that "
               "current time (%ld ns) by %ld ns\n",
-              a.first, last_data_time_ns, ktime_now_ns,
+              active_fr.first, last_data_time_ns, ktime_now_ns,
               last_data_time_ns - ktime_now_ns);
           continue;
         }
 
         idle_ns = ktime_now_ns - last_data_time_ns;
-        RM_PRINTF("INFO: FD=%d now: %ld ns, last data time: %lu ns\n", a.first,
-                  ktime_now_ns, last_data_time_ns);
+        RM_PRINTF("INFO: FD=%d now: %ld ns, last data time: %lu ns\n",
+                  active_fr.first, ktime_now_ns, last_data_time_ns);
         RM_PRINTF("INFO: FD=%d idle has been idle for %lu ns. timeout is %lu "
                   "ns\n",
-                  a.first, idle_ns, idle_timeout_ns);
+                  active_fr.first, idle_ns, idle_timeout_ns);
         // If the flow has been idle for longer than the idle timeout, then
         // pause it. We pause the flow *before* activating a replacement
         // flow because it is by definition not sending data, so we do not
         // risk causing a drop in utilization by pausing it immediately.
         if (idle_ns >= idle_timeout_ns) {
-          RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n", a.first);
+          RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n",
+                    active_fr.first);
           // Remove the flow from flow_to_keepalive, signalling that it no
           // longer has pending demand.
-          bpf_map_delete_elem(flow_to_keepalive_fd, &a.first);
-          paused_fds_queue.push(a.first);
-          pause_flow(a.first);
+          bpf_map_delete_elem(flow_to_keepalive_fd, &active_fr.first);
+          paused_fds_queue.push(active_fr.first);
+          pause_flow(active_fr.first);
           continue;
         }
       }
     }
     // 1.3) If we are using time-based scheduling and the flow has been active
     // for longer than its epoch, then plan to pause it.
-    if (scheduling_mode == "time" && now > a.second) {
+    if (scheduling_mode == "time" && now > active_fr.second) {
       if (paused_fds_queue.empty()) {
         // If there are no paused flows, then immediately reactivate this flow.
         // Randomly jitter the epoch time by +/- 12.5%.
         active_fds_queue.emplace(
-            a.first,
+            active_fr.first,
             now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
-        RM_PRINTF("INFO: reactivated FD=%d\n", a.first);
+        RM_PRINTF("INFO: reactivated FD=%d\n", active_fr.first);
         continue;
       }
       // Plan to pause this flow.
-      to_pause.push_back(a.first);
+      to_pause.push_back(active_fr.first);
     }
     // Put the flow back in the active queue. For this to occur, we know the
     // flow is not idle, and it is either not yet at its epoch time or it has
     // passed its epoch time and it will be extracted and paused later.
-    active_fds_queue.push(a);
+    active_fds_queue.push(active_fr);
   }
 
   // 2) Activate flows. Now we can calculate how many flows to activate to reach
@@ -318,32 +416,8 @@ void timer_callback(const boost::system::error_code &error) {
   int const num_to_activate = max_active_flows -
                               static_cast<int>(active_fds_queue.size()) +
                               static_cast<int>(to_pause.size());
-  int dummy = 0;
   for (int i = 0; i < num_to_activate; ++i) {
-    // Loop until we find a paused flow that is valid (not closed).
-    int const num_paused = static_cast<int>(paused_fds_queue.size());
-    for (int j = 0; j < num_paused; ++j) {
-      p = paused_fds_queue.front();
-      paused_fds_queue.pop();
-      // If this flow has been closed, then skip it.
-      if (!fd_to_flow.contains(p)) {
-        continue;
-      }
-      // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
-      // returns negative error code when the flow is not found), then it has no
-      // pending data and should be skipped.
-      if (bpf_map_lookup_elem(flow_to_keepalive_fd, &p, &dummy) != 0) {
-        // RM_PRINTF("INFO: skipping activating FD=%d, no pending data\n", p);
-        paused_fds_queue.push(p);
-        continue;
-      }
-      // Randomly jitter the epoch time by +/- 12.5%.
-      active_fds_queue.emplace(
-          p,
-          now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
-      activate_flow(p);
-      break;
-    }
+    try_activate_one();
   }
 
   // 3) Pause flows. We need to recalculate the number of flows to pause because
@@ -356,22 +430,9 @@ void timer_callback(const boost::system::error_code &error) {
 #endif
   // For each flow that we are supposed to pause, advance through
   // active_fds_queue until we find it.
-  s = static_cast<int>(active_fds_queue.size());
-  int j = 0;
+  active_size = static_cast<int>(active_fds_queue.size());
   for (int i = 0; i < num_to_pause; ++i) {
-    while (j < s) {
-      a = active_fds_queue.front();
-      active_fds_queue.pop();
-      ++j;
-      if (a.first == to_pause[i]) {
-        // Pause this flow.
-        paused_fds_queue.push(a.first);
-        pause_flow(a.first);
-        break;
-      }
-      // Examine the next flow in active_fds_queue.
-      active_fds_queue.push(a);
-    }
+    try_find_and_pause(to_pause[i]);
   }
 
   // 4) Check invariants.
@@ -448,8 +509,8 @@ void thread_func() {
 
   // Clean up all flows.
   lock_scheduler.lock();
-  for (const auto &p : fd_to_flow) {
-    remove_flow_from_all_maps(&p.second);
+  for (const auto &pair : fd_to_flow) {
+    remove_flow_from_all_maps(&pair.second);
   }
   lock_scheduler.unlock();
   RM_PRINTF("INFO: scheduler thread ended\n");
@@ -460,7 +521,7 @@ void thread_func() {
   }
 }
 
-int handle_event(void * /*ctx*/, void *data, size_t data_sz) {
+int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   if (scheduling_mode != "byte") {
     return 0;
   }
@@ -478,6 +539,18 @@ int handle_event(void * /*ctx*/, void *data, size_t data_sz) {
   RM_PRINTF("INFO: flow %u:%u->%u:%u has exhausted its grant\n",
             flow->remote_addr, flow->remote_port, flow->local_addr,
             flow->local_port);
+
+  // Activate a new flow.
+  rm_flow_key const key = {flow->local_addr, flow->remote_addr,
+                           flow->local_port, flow->remote_port};
+  auto fd = flow_to_fd.find(key);
+  if (fd == flow_to_fd.end()) {
+    RM_PRINTF("ERROR: could not find FD for flow %u:%u->%u:%u\n",
+              flow->remote_addr, flow->remote_port, flow->local_addr,
+              flow->local_port);
+    return 0;
+  }
+  try_pause_one_activate_one(fd->second);
 
   return 0;
 }
@@ -650,7 +723,7 @@ bool setup() {
       return false;
     }
     // Use the ringbuf fd to create a new userspace ringbuf instance.
-    done_flows_rb = ring_buffer__new(err, handle_event, nullptr, nullptr);
+    done_flows_rb = ring_buffer__new(err, handle_grant_done, nullptr, nullptr);
     if (done_flows_rb == nullptr) {
       RM_PRINTF("ERROR: Failed to create ring buffer\n");
       return false;
@@ -796,6 +869,9 @@ void register_fd_for_monitoring(int fd) {
     return;
   }
   fd_to_flow[fd] = flow;
+  rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
+                           flow.remote_port};
+  flow_to_fd[key] = fd;
   // Change the CCA to BPF_CUBIC.
   if (!set_cca(fd, RM_BPF_CUBIC)) {
     return;
@@ -869,9 +945,10 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
-  // trunk-ignore(clang-tidy/google-readability-casting)
-  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
-  static auto real_send = (ssize_t (*)(int, const void *, size_t, int))dlsym(RTLD_NEXT, "send");
+  static auto real_send = (
+      // trunk-ignore(clang-tidy/google-readability-casting)
+      // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+      (ssize_t(*)(int, const void *, size_t, int))dlsym(RTLD_NEXT, "send"));
   if (real_send == nullptr) {
     RM_PRINTF("ERROR: failed to query dlsym for 'send': %s\n", dlerror());
     return -1;
@@ -886,7 +963,8 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     return ret;
   }
 
-  // Update the flow_to_keepalive map to indicate that this flow has pending data.
+  // Update the flow_to_keepalive map to indicate that this flow has pending
+  // data.
   lock_scheduler.lock();
   auto flow = fd_to_flow.find(sockfd);
   if (flow == fd_to_flow.end()) {
@@ -896,12 +974,16 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     return ret;
   }
 
-  // Parse buf, which should contain 2 ints. The first is the response size, which is what we want.
+  // Parse buf, which should contain 2 ints. The first is the response size,
+  // which is what we want.
   if (len == 2 * sizeof(int)) {
+    // trunk-ignore(clang-tidy/google-readability-casting)
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
     int *buf_int = (int *)buf;
-    int bytes = buf_int[0];
-    int sender_wait_us = buf_int[1];
-    // flow_to_pending_bytes[*flow] = bytes;
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    int const bytes = buf_int[0];
+    // int sender_wait_us = buf_int[1];
+    flow_to_pending_bytes[sockfd] = bytes;
   }
 
   RM_PRINTF("INFO: successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
@@ -911,7 +993,6 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 // Get around C++ function name mangling.
 extern "C" {
 int close(int sockfd) {
-  // trunk-ignore(clang-tidy/google-readability-casting)
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
   if (real_close == nullptr) {
@@ -927,13 +1008,21 @@ int close(int sockfd) {
 
   // Remove this FD from all data structures.
   lock_scheduler.lock();
+  // trunk-ignore(clang-tidy/clang-diagnostic-error)
   if (fd_to_flow.contains(sockfd)) {
     // Obviously, do this before removing the FD from fd_to_flow.
     remove_flow_from_all_maps(&fd_to_flow[sockfd]);
     // Removing the FD from fd_to_flow triggers it to be (eventually) removed
     // from scheduling.
-    auto const d = fd_to_flow.erase(sockfd);
-    RM_PRINTF("INFO: removed FD=%d (%ld elements removed)\n", sockfd, d);
+    rm_flow const flow = fd_to_flow[sockfd];
+    rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
+                             flow.remote_port};
+    auto removed = fd_to_flow.erase(sockfd);
+    RM_PRINTF("INFO: removed FD=%d from fd_to_flow (%ld elements removed)\n",
+              sockfd, removed);
+    removed = flow_to_fd.erase(key);
+    RM_PRINTF("INFO: removed FD=%d from flow_to_fd (%ld elements removed)\n",
+              sockfd, removed);
   } else {
     RM_PRINTF("INFO: ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }

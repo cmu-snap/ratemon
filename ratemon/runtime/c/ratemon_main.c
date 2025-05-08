@@ -28,6 +28,9 @@ struct ratemon_kprobe_bpf *kprobe_skel;
 // Existing signal handler for SIGINT.
 struct sigaction oldact;
 
+// This function is called by libbpf to print debug messages.
+// trunk-ignore(clang-tidy/clang-diagnostic-unused-parameter)
+// trunk-ignore(clang-tidy/misc-unused-parameters)
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
                            va_list args) {
   return vfprintf(stdout, format, args);
@@ -58,6 +61,7 @@ static int join_cgroup(const char *cgroup_path) {
   int fd = 0;
   int rc = 0;
 
+  // trunk-ignore(clang-tidy/clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
   snprintf(cgroup_procs_path, sizeof(cgroup_procs_path), "%s/cgroup.procs",
            cgroup_path);
 
@@ -149,6 +153,8 @@ bool read_env_charstar(const char *key, char *dest) {
   return true;
 }
 
+// trunk-ignore(clang-tidy/clang-diagnostic-unused-parameter)
+// trunk-ignore(clang-tidy/misc-unused-parameters)
 int main(int argc, char **argv) {
   // Catch SIGINT to end the program.
   struct sigaction action;

@@ -32,7 +32,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
+  // trunk-ignore(clang-tidy/performance-no-int-to-ptr)
   void *data = (void *)(long)skb->data;
+  // trunk-ignore(clang-tidy/performance-no-int-to-ptr)
   void *data_end = (void *)(long)skb->data_end;
   // We get the packet starting with the Ethernet header and need to parse the
   // network and transport headers.
