@@ -27,6 +27,10 @@ CheckOptions:
     value: 100
   - key: readability-function-cognitive-complexity.IgnoreMacros
     value: true
+  - key: readability-identifier-length.MinimumVariableNameLength
+    value: 2
+  - key: readability-identifier-length.MinimumParameterNameLength
+    value: 2
   # Set naming conventions for your style below (there are dozens of naming settings possible):
   # See https://clang.llvm.org/extra/clang-tidy/checks/readability/identifier-naming.html
   # - key: readability-identifier-naming.ClassCase
