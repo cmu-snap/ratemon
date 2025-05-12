@@ -177,14 +177,14 @@ inline void activate_flow(int fd) {
     bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
   }
   trigger_ack(fd);
-  RM_PRINTF("INFO: activated FD=%d\n", fd);
+  RM_PRINTF("INFO: Activated FD=%d\n", fd);
 }
 
 inline void pause_flow(int fd) {
   // Pausing a flow means retting its RWND to 0 B.
   bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
   trigger_ack(fd);
-  RM_PRINTF("INFO: paused flow FD=%d\n", fd);
+  RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
 }
 
 void try_activate_one() {
@@ -211,7 +211,7 @@ void try_activate_one() {
     // returns negative error code when the flow is not found), then it has no
     // pending data and should be skipped.
     if (bpf_map_lookup_elem(flow_to_keepalive_fd, &pause_fr, &dummy) != 0) {
-      // RM_PRINTF("INFO: skipping activating FD=%d, no pending data\n", p);
+      // RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", p);
       paused_fds_queue.push(pause_fr);
       continue;
     }
@@ -260,7 +260,7 @@ void try_pause_one_activate_one(int fd) {
 // expire. So this function must always set a new timer event, unless it is
 // called because the timer was cancelled or the program is supposed to end.
 void timer_callback(const boost::system::error_code &error) {
-  RM_PRINTF("INFO: in timer_callback\n");
+  RM_PRINTF("INFO: In timer_callback\n");
 
   // 0. Perform validity checks.
   // If an error (such as a cancellation) triggered this callback, then abort
@@ -272,15 +272,15 @@ void timer_callback(const boost::system::error_code &error) {
   // If the program has been signalled to stop, then exit. Do not set another
   // timer.
   if (!run) {
-    RM_PRINTF("INFO: program signalled to exit\n");
+    RM_PRINTF("INFO: Program signalled to exit\n");
     return;
   }
   // If setup has not been performed yet, then we cannot perform scheduling.
   // Otherwise, revert to slow check mode.
   if (!setup_done) {
-    RM_PRINTF("INFO: not set up\n");
+    RM_PRINTF("INFO: Not set up\n");
     if (timer.expires_from_now(one_sec) != 0U) {
-      RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
+      RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
     }
     timer.async_wait(&timer_callback);
     return;
@@ -296,7 +296,7 @@ void timer_callback(const boost::system::error_code &error) {
         max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_last_data_time_fd,
         flow_to_keepalive_fd);
     if (timer.expires_from_now(one_sec) != 0U) {
-      RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
+      RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
     }
     timer.async_wait(&timer_callback);
     return;
@@ -304,7 +304,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   // It is now safe to perform scheduling.
   lock_scheduler.lock();
-  RM_PRINTF("INFO: performing scheduling. active=%lu, paused=%lu\n",
+  RM_PRINTF("INFO: Performing scheduling. active=%lu, paused=%lu\n",
             active_fds_queue.size(), paused_fds_queue.size());
 
   // Temporary variable for storing the front of active_fds_queue.
@@ -397,7 +397,7 @@ void timer_callback(const boost::system::error_code &error) {
         active_fds_queue.emplace(
             active_fr.first,
             now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
-        RM_PRINTF("INFO: reactivated FD=%d\n", active_fr.first);
+        RM_PRINTF("INFO: Reactivated FD=%d\n", active_fr.first);
         continue;
       }
       // Plan to pause this flow.
@@ -452,29 +452,29 @@ void timer_callback(const boost::system::error_code &error) {
       (active_fds_queue.front().second - now).total_microseconds();
   if (active_fds_queue.empty()) {
     // If there are no flows, revert to slow check mode.
-    RM_PRINTF("INFO: no flows remaining, reverting to slow check mode\n");
+    RM_PRINTF("INFO: No flows remaining, reverting to slow check mode\n");
     when = one_sec;
   } else if (idle_timeout_ns == 0U) {
     // If we are not using idle timeout mode...
-    RM_PRINTF("INFO: no idle timeout, scheduling timer for next epoch end\n");
+    RM_PRINTF("INFO: No idle timeout, scheduling timer for next epoch end\n");
     when = boost::posix_time::microsec(next_epoch_us);
   } else if (idle_timeout_us < next_epoch_us) {
     // If we are using idle timeout mode...
-    RM_PRINTF("INFO: scheduling timer for next idle timeout\n");
+    RM_PRINTF("INFO: Scheduling timer for next idle timeout\n");
     when = boost::posix_time::microsec(idle_timeout_us);
   } else {
-    RM_PRINTF("INFO: scheduling timer for next epoch end, sooner than idle "
+    RM_PRINTF("INFO: Scheduling timer for next epoch end, sooner than idle "
               "timeout\n");
     when = boost::posix_time::microsec(next_epoch_us);
   }
 
   // 6) Start the next timer.
   if (timer.expires_from_now(when) != 0U) {
-    RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
+    RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
   }
   timer.async_wait(&timer_callback);
   lock_scheduler.unlock();
-  RM_PRINTF("INFO: sleeping until next event in %ld us\n",
+  RM_PRINTF("INFO: Sleeping until next event in %ld us\n",
             when.total_microseconds());
 }
 
@@ -497,13 +497,13 @@ void remove_flow_from_all_maps(struct rm_flow const *flow) {
 // managing the async timers that perform scheduling. The timer events are
 // executed by this thread, but they can be scheduled by other threads.
 void thread_func() {
-  RM_PRINTF("INFO: scheduler thread started\n");
+  RM_PRINTF("INFO: Scheduler thread started\n");
   if (timer.expires_from_now(one_sec) != 0U) {
-    RM_PRINTF("ERROR: timer unexpectedly cancelled\n");
+    RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
   }
 
   timer.async_wait(&timer_callback);
-  RM_PRINTF("INFO: scheduler thread initial sleep\n");
+  RM_PRINTF("INFO: Scheduler thread initial sleep\n");
   // Execute the configured events, until there are no more events to execute.
   io.run();
 
@@ -513,10 +513,10 @@ void thread_func() {
     remove_flow_from_all_maps(&pair.second);
   }
   lock_scheduler.unlock();
-  RM_PRINTF("INFO: scheduler thread ended\n");
+  RM_PRINTF("INFO: Scheduler thread ended\n");
 
   if (run) {
-    RM_PRINTF("ERROR: scheduled thread ended before program was signalled to "
+    RM_PRINTF("ERROR: Scheduled thread ended before program was signalled to "
               "stop\n");
   }
 }
@@ -526,7 +526,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     return 0;
   }
   if (data_sz != sizeof(struct rm_flow)) {
-    RM_PRINTF("ERROR: invalid data size %zu, expected %zu\n", data_sz,
+    RM_PRINTF("ERROR: Invalid data size %zu, expected %zu\n", data_sz,
               sizeof(struct rm_flow));
     return 0;
   }
@@ -536,7 +536,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // should already be paused (in flow_to_rwnd map). By removing it from active
   // flows, the timer callback will automatically activate a new flow when it
   // fires next.
-  RM_PRINTF("INFO: flow %u:%u->%u:%u has exhausted its grant\n",
+  RM_PRINTF("INFO: Flow %u:%u->%u:%u has exhausted its grant\n",
             flow->remote_addr, flow->remote_port, flow->local_addr,
             flow->local_port);
 
@@ -545,7 +545,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
                            flow->local_port, flow->remote_port};
   auto fd = flow_to_fd.find(key);
   if (fd == flow_to_fd.end()) {
-    RM_PRINTF("ERROR: could not find FD for flow %u:%u->%u:%u\n",
+    RM_PRINTF("ERROR: Could not find FD for flow %u:%u->%u:%u\n",
               flow->remote_addr, flow->remote_port, flow->local_addr,
               flow->local_port);
     return 0;
@@ -559,17 +559,17 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
 void sigint_handler(int signum) {
   switch (signum) {
   case SIGINT:
-    RM_PRINTF("INFO: caught SIGINT\n");
+    RM_PRINTF("INFO: Caught SIGINT\n");
     run = false;
     scheduler_thread.join();
-    RM_PRINTF("INFO: resetting old SIGINT handler\n");
+    RM_PRINTF("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, nullptr);
     break;
   default:
-    RM_PRINTF("ERROR: caught signal %d\n", signum);
+    RM_PRINTF("ERROR: Caught signal %d\n", signum);
     break;
   }
-  RM_PRINTF("INFO: re-raising signal %d\n", signum);
+  RM_PRINTF("INFO: Re-raising signal %d\n", signum);
   raise(signum);
 }
 
@@ -578,17 +578,17 @@ bool read_env_int(const char *key, volatile int *dest, bool allow_zero = false,
                   bool allow_neg = false) {
   char *val_str = getenv(key);
   if (val_str == nullptr) {
-    RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
+    RM_PRINTF("ERROR: Failed to query environment variable '%s'\n", key);
     return false;
   }
   int const val_int = atoi(val_str);
   if (!allow_zero and val_int == 0) {
-    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be != 0)\n", key,
+    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be != 0)\n", key,
               val_int);
     return false;
   }
   if (!allow_neg and val_int < 0) {
-    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be > 0)\n", key, val_int);
+    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be > 0)\n", key, val_int);
     return false;
   }
   *dest = val_int;
@@ -599,12 +599,12 @@ bool read_env_int(const char *key, volatile int *dest, bool allow_zero = false,
 bool read_env_string(const char *key, std::string &dest) {
   char *val_str = getenv(key);
   if (val_str == nullptr) {
-    RM_PRINTF("ERROR: failed to query environment variable '%s'\n", key);
+    RM_PRINTF("ERROR: Failed to query environment variable '%s'\n", key);
     return false;
   }
   // Check that the string is not empty.
   if (strlen(val_str) == 0) {
-    RM_PRINTF("ERROR: invalid value for '%s'='%s' (must be non-empty)\n", key,
+    RM_PRINTF("ERROR: Invalid value for '%s'='%s' (must be non-empty)\n", key,
               val_str);
     return false;
   }
@@ -624,7 +624,7 @@ bool setup() {
     return false;
   }
   if (scheduling_mode != "time" && scheduling_mode != "byte") {
-    RM_PRINTF("ERROR: invalid value for '%s'='%s' (must be 'time' or 'byte')\n",
+    RM_PRINTF("ERROR: Invalid value for '%s'='%s' (must be 'time' or 'byte')\n",
               RM_SCHEDILING_MODE_KEY, scheduling_mode.c_str());
     return false;
   }
@@ -635,7 +635,7 @@ bool setup() {
     return false;
   }
   if (epoch_bytes < 1) {
-    RM_PRINTF("ERROR: invalid value for '%s'=%d (must be > 0)\n",
+    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be > 0)\n",
               RM_EPOCH_BYTES_KEY, epoch_bytes);
     return false;
   }
@@ -644,7 +644,7 @@ bool setup() {
   }
   if (response_size_bytes < 0) {
     RM_PRINTF(
-        "ERROR: invalid value for '%s'=%d (must be > 0; set = 0 to disable)\n",
+        "ERROR: Invalid value for '%s'=%d (must be > 0; set = 0 to disable)\n",
         RM_RESPONSE_SIZE_KEY, response_size_bytes);
     return false;
   }
@@ -672,7 +672,7 @@ bool setup() {
   // for this.
   int err = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
   if (err == -1) {
-    RM_PRINTF("ERROR: failed to get FD for 'flow_to_rwnd' from path '%s'\n",
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_rwnd' from path '%s'\n",
               RM_FLOW_TO_RWND_PIN_PATH);
     return false;
   }
@@ -683,7 +683,7 @@ bool setup() {
   err = bpf_obj_get(RM_FLOW_TO_WIN_SCALE_PIN_PATH);
   if (err == -1) {
     RM_PRINTF(
-        "ERROR: failed to get FD for 'flow_to_win_scale' from path '%s'\n",
+        "ERROR: Failed to get FD for 'flow_to_win_scale' from path '%s'\n",
         RM_FLOW_TO_WIN_SCALE_PIN_PATH);
     return false;
   }
@@ -694,7 +694,7 @@ bool setup() {
   err = bpf_obj_get(RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH);
   if (err == -1) {
     RM_PRINTF(
-        "ERROR: failed to get FD for 'flow_to_last_data_time_ns' from path "
+        "ERROR: Failed to get FD for 'flow_to_last_data_time_ns' from path "
         "'%s'\n",
         RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH);
     return false;
@@ -705,7 +705,7 @@ bool setup() {
   // BPF skeleton for this.
   err = bpf_obj_get(RM_FLOW_TO_KEEPALIVE_PIN_PATH);
   if (err == -1) {
-    RM_PRINTF("ERROR: failed to get FD for 'flow_to_keepalive' from path "
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_keepalive' from path "
               "'%s'\n",
               RM_FLOW_TO_KEEPALIVE_PIN_PATH);
     return false;
@@ -717,7 +717,7 @@ bool setup() {
     // skeleton for this.
     err = bpf_obj_get(RM_DONE_FLOWS_PIN_PATH);
     if (err == -1) {
-      RM_PRINTF("ERROR: failed to get FD for 'done_flows' from path "
+      RM_PRINTF("ERROR: Failed to get FD for 'done_flows' from path "
                 "'%s'\n",
                 RM_DONE_FLOWS_PIN_PATH);
       return false;
@@ -740,7 +740,7 @@ bool setup() {
   // Launch the scheduler thread.
   scheduler_thread = std::thread(thread_func);
 
-  RM_PRINTF("INFO: setup complete! max_active_flows=%u, epoch_us=%u, "
+  RM_PRINTF("INFO: Setup complete! max_active_flows=%u, epoch_us=%u, "
             "idle_timeout_ns=%lu, monitor_port_start=%u, monitor_port_end=%u\n",
             max_active_flows, epoch_us, idle_timeout_ns, monitor_port_start,
             monitor_port_end);
@@ -757,7 +757,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
   if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&local_addr),
                   &local_addr_len) == -1) {
-    RM_PRINTF("ERROR: failed to call 'getsockname'\n");
+    RM_PRINTF("ERROR: Failed to call 'getsockname'\n");
     return false;
   }
   struct sockaddr_in remote_addr {};
@@ -766,7 +766,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
   if (getpeername(fd, reinterpret_cast<struct sockaddr *>(&remote_addr),
                   &remote_addr_len) == -1) {
-    RM_PRINTF("ERROR: failed to call 'getpeername'\n");
+    RM_PRINTF("ERROR: Failed to call 'getpeername'\n");
     return false;
   }
   // Fill in the four-tuple.
@@ -780,7 +780,7 @@ bool get_flow(int fd, struct rm_flow *flow) {
 // Set the CCA for this socket and make sure it was set correctly.
 bool set_cca(int fd, const char *cca) {
   if (setsockopt(fd, SOL_TCP, TCP_CONGESTION, cca, strlen(cca)) == -1) {
-    RM_PRINTF("ERROR: failed to 'setsockopt' TCP_CONGESTION --- is CCA '%s' "
+    RM_PRINTF("ERROR: Failed to 'setsockopt' TCP_CONGESTION --- is CCA '%s' "
               "loaded?\n",
               cca);
     return false;
@@ -789,11 +789,11 @@ bool set_cca(int fd, const char *cca) {
   socklen_t retrieved_cca_len = sizeof(retrieved_cca);
   if (getsockopt(fd, SOL_TCP, TCP_CONGESTION, retrieved_cca.data(),
                  &retrieved_cca_len) == -1) {
-    RM_PRINTF("ERROR: failed to 'getsockopt' TCP_CONGESTION\n");
+    RM_PRINTF("ERROR: Failed to 'getsockopt' TCP_CONGESTION\n");
     return false;
   }
   if (strcmp(retrieved_cca.data(), cca) != 0) {
-    RM_PRINTF("ERROR: failed to set CCA to %s! Actual CCA is: %s\n", cca,
+    RM_PRINTF("ERROR: Failed to set CCA to %s! Actual CCA is: %s\n", cca,
               retrieved_cca.data());
     return false;
   }
@@ -814,13 +814,13 @@ void initial_scheduling(int fd) {
     active_fds_queue.emplace(
         fd, now + boost::posix_time::microseconds(epoch_us) +
                 boost::posix_time::microseconds(jitter(epoch_us)));
-    RM_PRINTF("INFO: allowing new flow FD=%d\n", fd);
+    RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
     if (active_fds_queue.size() == 1) {
       if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
-        RM_PRINTF("ERROR: should have cancelled 1 timer\n");
+        RM_PRINTF("ERROR: Should have cancelled 1 timer\n");
       }
       timer.async_wait(&timer_callback);
-      RM_PRINTF("INFO: first scheduling event\n");
+      RM_PRINTF("INFO: First scheduling event\n");
     }
   } else {
     // The max number of flows are active already, so pause this one.
@@ -832,7 +832,7 @@ void initial_scheduling(int fd) {
 // Verify that an addr is IPv4.
 int check_family(const struct sockaddr *addr) {
   if (addr != nullptr && addr->sa_family != AF_INET) {
-    RM_PRINTF("WARNING: got non-AF_INET sa_family=%u\n", addr->sa_family);
+    RM_PRINTF("WARNING: Got non-AF_INET sa_family=%u\n", addr->sa_family);
     if (addr->sa_family == AF_INET6) {
       RM_PRINTF("WARNING: (continued) got AF_INET6\n");
     }
@@ -857,13 +857,13 @@ void register_fd_for_monitoring(int fd) {
   if (!get_flow(fd, &flow)) {
     return;
   }
-  RM_PRINTF("flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
+  RM_PRINTF("INFO: Found flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
             flow.local_addr, flow.local_port);
   // Ignore flows that are not in the monitor port range.
   if (flow.remote_port < monitor_port_start ||
       flow.remote_port > monitor_port_end) {
     RM_PRINTF(
-        "INFO: ignoring flow on remote port %u, not in monitor port range: "
+        "INFO: Ignoring flow on remote port %u, not in monitor port range: "
         "[%u, %u]\n",
         flow.remote_port, monitor_port_start, monitor_port_end);
     return;
@@ -894,12 +894,12 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   static auto real_accept = (int (*)(int, struct sockaddr *, socklen_t *))(
       dlsym(RTLD_NEXT, "accept"));
   if (real_accept == nullptr) {
-    RM_PRINTF("ERROR: failed to query dlsym for 'accept': %s\n", dlerror());
+    RM_PRINTF("ERROR: Failed to query dlsym for 'accept': %s\n", dlerror());
     return -1;
   }
   int const fd = real_accept(sockfd, addr, addrlen);
   if (fd == -1) {
-    RM_PRINTF("ERROR: real 'accept' failed\n");
+    RM_PRINTF("ERROR: Real 'accept' failed\n");
     return fd;
   }
   if (check_family(addr) != 0) {
@@ -912,7 +912,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   }
 
   register_fd_for_monitoring(fd);
-  RM_PRINTF("INFO: successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
+  RM_PRINTF("INFO: Successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
 
@@ -922,12 +922,12 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   static auto real_connect = (int (*)(int, const struct sockaddr *, socklen_t))(
       dlsym(RTLD_NEXT, "connect"));
   if (real_connect == nullptr) {
-    RM_PRINTF("ERROR: failed to query dlsym for 'connect': %s\n", dlerror());
+    RM_PRINTF("ERROR: Failed to query dlsym for 'connect': %s\n", dlerror());
     return -1;
   }
   int const fd = real_connect(sockfd, addr, addrlen);
   if (fd == -1) {
-    RM_PRINTF("ERROR: real 'connect' failed\n");
+    RM_PRINTF("ERROR: Real 'connect' failed\n");
     return fd;
   }
   if (check_family(addr) != 0) {
@@ -940,7 +940,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   }
 
   register_fd_for_monitoring(fd);
-  RM_PRINTF("INFO: successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);
+  RM_PRINTF("INFO: Successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
 
@@ -950,12 +950,12 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
       // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
       (ssize_t(*)(int, const void *, size_t, int))dlsym(RTLD_NEXT, "send"));
   if (real_send == nullptr) {
-    RM_PRINTF("ERROR: failed to query dlsym for 'send': %s\n", dlerror());
+    RM_PRINTF("ERROR: Failed to query dlsym for 'send': %s\n", dlerror());
     return -1;
   }
   ssize_t const ret = real_send(sockfd, buf, len, flags);
   if (ret == -1) {
-    RM_PRINTF("ERROR: real 'send' failed for FD=%d\n", sockfd);
+    RM_PRINTF("ERROR: Real 'send' failed for FD=%d\n", sockfd);
     return ret;
   }
   // If we have been signalled to quit, then do nothing more.
@@ -969,7 +969,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   auto flow = fd_to_flow.find(sockfd);
   if (flow == fd_to_flow.end()) {
     // We are not tracking this flow, so ignore it.
-    RM_PRINTF("INFO: ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+    RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
     lock_scheduler.unlock();
     return ret;
   }
@@ -986,7 +986,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     flow_to_pending_bytes[sockfd] = bytes;
   }
 
-  RM_PRINTF("INFO: successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
+  RM_PRINTF("INFO: Successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
   return ret;
 }
 
@@ -996,14 +996,14 @@ int close(int sockfd) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
   if (real_close == nullptr) {
-    RM_PRINTF("ERROR: failed to query dlsym for 'close': %s\n", dlerror());
+    RM_PRINTF("ERROR: Failed to query dlsym for 'close': %s\n", dlerror());
     return -1;
   }
   int const ret = real_close(sockfd);
   if (ret == -1) {
-    RM_PRINTF("ERROR: real 'close' failed\n");
+    RM_PRINTF("ERROR: Real 'close' failed\n");
   } else {
-    RM_PRINTF("INFO: successful 'close' for FD=%d\n", sockfd);
+    RM_PRINTF("INFO: Successful 'close' for FD=%d\n", sockfd);
   }
 
   // Remove this FD from all data structures.
@@ -1018,13 +1018,13 @@ int close(int sockfd) {
     rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
                              flow.remote_port};
     auto removed = fd_to_flow.erase(sockfd);
-    RM_PRINTF("INFO: removed FD=%d from fd_to_flow (%ld elements removed)\n",
+    RM_PRINTF("INFO: Removed FD=%d from fd_to_flow (%ld elements removed)\n",
               sockfd, removed);
     removed = flow_to_fd.erase(key);
-    RM_PRINTF("INFO: removed FD=%d from flow_to_fd (%ld elements removed)\n",
+    RM_PRINTF("INFO: Removed FD=%d from flow_to_fd (%ld elements removed)\n",
               sockfd, removed);
   } else {
-    RM_PRINTF("INFO: ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
+    RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }
   lock_scheduler.unlock();
   return ret;

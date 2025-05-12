@@ -40,16 +40,16 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format,
 void sigint_handler(int signum) {
   switch (signum) {
   case SIGINT:
-    printf("INFO: caught SIGINT\n");
+    printf("INFO: Caught SIGINT\n");
     run = false;
-    printf("Resetting old SIGINT handler\n");
+    printf("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, NULL);
     break;
   default:
-    printf("ERROR: caught signal %d\n", signum);
+    printf("ERROR: Caught signal %d\n", signum);
     break;
   }
-  printf("INFO: re-raising signal %d\n", signum);
+  printf("INFO: Re-raising signal %d\n", signum);
   raise(signum);
 }
 
@@ -67,12 +67,12 @@ static int join_cgroup(const char *cgroup_path) {
 
   fd = open(cgroup_procs_path, O_WRONLY);
   if (fd < 0) {
-    printf("ERROR in opening cgroup procs file: %s\n", cgroup_procs_path);
+    printf("ERROR: Unable to open cgroup procs file: %s\n", cgroup_procs_path);
     return 1;
   }
 
   if (dprintf(fd, "%d\n", pid) < 0) {
-    printf("ERROR in adding PID %d to cgroup: %s\n", pid, cgroup_path);
+    printf("ERROR: Unable to add PID %d to cgroup: %s\n", pid, cgroup_path);
     rc = 1;
   }
 
@@ -84,27 +84,27 @@ int prepare_sockops(char *cg_path) {
   // Open skeleton and load programs and maps.
   sockops_skel = ratemon_sockops_bpf__open_and_load();
   if (!sockops_skel) {
-    printf("ERROR: failed to open/load 'ratemon_sockops' BPF skeleton\n");
+    printf("ERROR: Failed to open/load 'ratemon_sockops' BPF skeleton\n");
     return 1;
   }
   // Join cgroup for sock_ops.
   if (join_cgroup(cg_path) < 0) {
-    printf("ERROR: failed to join cgroup: %s\n", cg_path);
+    printf("ERROR: Failed to join cgroup: %s\n", cg_path);
     return 1;
   }
   int cg_fd = open(cg_path, O_RDONLY);
   if (cg_fd <= 0) {
-    printf("ERROR: failed to open cgroup: %s cg_fd: %d errno: %d\n", cg_path,
+    printf("ERROR: Failed to open cgroup: %s cg_fd: %d errno: %d\n", cg_path,
            cg_fd, errno);
     return 1;
   }
-  printf("INFO: opened cgroup: %s, cg_fd: %d, pid: %d\n", cg_path, cg_fd,
+  printf("INFO: Opened cgroup: %s, cg_fd: %d, pid: %d\n", cg_path, cg_fd,
          getpid());
   // Attach sock_ops.
   struct bpf_link *skops_link_win_scale =
       bpf_program__attach_cgroup(sockops_skel->progs.read_win_scale, cg_fd);
   if (skops_link_win_scale == NULL) {
-    printf("ERROR: failed to attach 'read_win_scale'\n");
+    printf("ERROR: Failed to attach 'read_win_scale'\n");
     return 1;
   }
   sockops_skel->links.read_win_scale = skops_link_win_scale;
@@ -115,13 +115,13 @@ int prepare_structops() {
   // Open skeleton and load programs and maps.
   structops_skel = ratemon_structops_bpf__open_and_load();
   if (!structops_skel) {
-    printf("ERROR: failed to open/load 'ratemon_structops' BPF skeleton\n");
+    printf("ERROR: Failed to open/load 'ratemon_structops' BPF skeleton\n");
     return 1;
   }
   // Attach struct_ops.
   structops_link = bpf_map__attach_struct_ops(structops_skel->maps.bpf_cubic);
   if (structops_link == NULL) {
-    printf("ERROR: failed to attach 'bpf_cubic'\n");
+    printf("ERROR: Failed to attach 'bpf_cubic'\n");
     return 1;
   }
   return 0;
@@ -131,25 +131,25 @@ int prepare_kprobe() {
   // Open skeleton and load programs and maps.
   kprobe_skel = ratemon_kprobe_bpf__open_and_load();
   if (!kprobe_skel) {
-    printf("ERROR: failed to open/load 'ratemon_kprobe' BPF skeleton\n");
+    printf("ERROR: Failed to open/load 'ratemon_kprobe' BPF skeleton\n");
     return 1;
   }
   // Attach kprobe.
   if (ratemon_kprobe_bpf__attach(kprobe_skel)) {
-    printf("ERROR: failed to attach 'ratemon_kprobe'\n");
+    printf("ERROR: Failed to attach 'ratemon_kprobe'\n");
     return 1;
   }
   return 0;
 }
 
-bool read_env_charstar(const char *key, char *dest) {
+bool read_env_charstar(const char *key, char *dest, size_t dest_len) {
   // Read an environment variable a char *.
   char *val_str = getenv(key);
   if (val_str == NULL) {
-    printf("ERROR: failed to query environment variable '%s'\n", key);
+    printf("ERROR: Failed to query environment variable '%s'\n", key);
     return false;
   }
-  strlcpy(dest, val_str, strlen(dest));
+  strlcpy(dest, val_str, dest_len);
   return true;
 }
 
@@ -167,21 +167,23 @@ int main(int argc, char **argv) {
   libbpf_set_print(libbpf_print_fn);
 
   char cg_path[1024];
-  if (!read_env_charstar(RM_CGROUP_KEY, cg_path)) {
-    printf("ERROR: failed to read cgroup path\n");
+  memset(cg_path, 0, sizeof(cg_path));
+  if (!read_env_charstar(RM_CGROUP_KEY, cg_path, sizeof(cg_path))) {
+    printf("ERROR: Failed to read cgroup path\n");
     goto cleanup;
   }
+  printf("INFO: cgroup path: %s\n", cg_path);
 
   if (prepare_sockops(cg_path)) {
-    printf("ERROR: failed to set up sockops\n");
+    printf("ERROR: Failed to set up sockops\n");
     goto cleanup;
   }
   if (prepare_structops()) {
-    printf("ERROR: failed to set up structops\n");
+    printf("ERROR: Failed to set up structops\n");
     goto cleanup;
   }
   if (prepare_kprobe()) {
-    printf("ERROR: failed to set up kprobe\n");
+    printf("ERROR: Failed to set up kprobe\n");
     goto cleanup;
   }
 

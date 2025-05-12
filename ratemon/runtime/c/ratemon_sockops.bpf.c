@@ -143,7 +143,7 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   // Use update() instead of insert() in case this port is being reused.
   // TODO(unknown): Change to insert() once the flow cleanup code is
   // implemented.
-  bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
+  // bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale_opt.data, BPF_ANY);
 
   // Clear the flag that enables the header option write callback.
   disable_hdr_cbs(skops);
