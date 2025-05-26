@@ -8,7 +8,7 @@ if [[ $# -ne 1 ]] && [[ $# -ne 2 ]]; then
 	exit 255
 fi
 main_dir="$1"
-version="5.15.156"
+version="6.9.12"
 if [[ -n $2 ]]; then
 	version="$2"
 fi
@@ -29,11 +29,11 @@ DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install
 
 # Download Linux 5.15.156 and apply get_info() patch. Do not build it yet.
 pushd "${main_dir}"
-wget "https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-${version}.tar.gz"
+wget "https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-${version}.tar.gz"
 tar xf "linux-${version}.tar.gz"
 rm -f "linux-${version}.tar.gz"
 pushd "linux-${version}"
-git apply "${main_dir}/ratemon/linux/get_info.patch"
+git apply "${main_dir}/ratemon/linux/get_info_${version}.patch"
 cp -fv "/boot/config-$(uname -r)" .config
 scripts/config --disable SYSTEM_TRUSTED_KEYS
 scripts/config --disable SYSTEM_REVOCATION_KEYS
