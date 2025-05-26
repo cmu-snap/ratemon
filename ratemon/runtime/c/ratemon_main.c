@@ -167,6 +167,7 @@ int main(int argc, char **argv) {
   libbpf_set_print(libbpf_print_fn);
 
   char cg_path[1024];
+  // trunk-ignore(clang-tidy/clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
   memset(cg_path, 0, sizeof(cg_path));
   if (!read_env_charstar(RM_CGROUP_KEY, cg_path, sizeof(cg_path))) {
     printf("ERROR: Failed to read cgroup path\n");

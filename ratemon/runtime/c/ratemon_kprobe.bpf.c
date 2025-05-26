@@ -16,58 +16,6 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-// TODO(unknown): Update this to also track the last sequence number for a flow.
-// Use sequence number to decrement a flow's RWND over time based on how much
-// data has been received. But do we even need this? If TCP does not withdraw
-// advertised window, then it should be fine to advertise once, then advertise 0
-// immediately after and the sender will have tracked the amount of data it can
-// send. Maybe. But to be truly TCP compatible, we should gentle decrement RWND
-// as data arrives. However, we do still need to know when it is safe to give an
-// allocation to a new flow. So we need to track when a flow that was just
-// granted to has sent its entire grant. So we do need to track the last
-// sequence number for a flow. How will this work. We track last seq here. Need
-// to know the seq that we started the grant with as well. Then in interop we
-// periodically check our stored last seq to see if we've gone far enough? No, I
-// think a better way is to track the remaining grant. Whenever data comes in,
-// we decrement the remaining grant by that amount. Perhaps can track this in
-// the RWND map. Is this too much work to do per-packet? No, because this is
-// per-skb which will be a large chunk of data (64KB) if we're doing a good job.
-// Probably best.
-// Then this kprobe can handle the grant decrement without involving interop.
-// Interop just needs to know when to give a grant to a different flow.
-// Could create a map that is like "recently_done_with_grant" and kprobe can put
-// a flow in that when it has fulfilled its grant. Of course there will be some
-// inaccuracy because it will take a while for an ACK to go out with RWND=0 and
-// get to the sender, so more data will be in flight. But actually no, RWND is a
-// window, so the sender won't ever transmit more than we grant.
-// So then the design of interop is to just wait for the done queue to be
-// nonempty, update its internal data structures, select a new flow to activate,
-// and set its RWND. I think the only thing that needs to change in interop is
-// the selection of when a flow is done. Instead of time-based, if a flow shows
-// up in the done queue, then it is done. We can keep the existing logic for
-// idle timeout to remove a flow earlier. Do we even need a new map for this?
-// Interop knows the flows that it has granted to. In the rwnd map, they are
-// only not done with their grants if the rwnd limit is greater than 0. So
-// instead of a done map, interop could just check each of the active flows in
-// the rwnd map to see if they are down to 0. The con of this is that it
-// requires checking all active flows in the rwnd map, whereas a done queue can
-// be checked only once for every flow that finishes. Lets start with the design
-// that reuses the rwnd map. Use a BPF ringbuf:
-// https://docs.ebpf.io/linux/map-type/BPF_MAP_TYPE_RINGBUF/ Then interop can
-// epoll to wait for flows to finish. This will save CPU and complexity of
-// repeatedly waking up to check. This may also remove the need for interop's
-// timer-based design, since epoll will handle the wait. What about the leftover
-// grants at the end of a burst? If the response size is not a perfect multiple
-// of the grant size, then there will be leftover grants. So we may still need a
-// way to retract a grant. Basically, all flows will end up with a little bit of
-// grant left, so at the next burst they will all send at once. The scale of
-// this impact depends on the number of flows, response size skew, and burst
-// duration. 3 approaches: 1) assume perfect knowledge of response sizes to set
-// grants perfectly; 2) use first responses to estimate typical response size,
-// switch from large grants to small grants ("minimally active set") as a flow
-// approaches the estimated response size, this limits the impact of leftover
-// grants; 3) modify TCP to support retracting grants.
-
 // 'tcp_rcv_established' will be used to track the last time that a flow
 // received data so that we can determine when to classify a flow as idle.
 SEC("kprobe/tcp_rcv_established")

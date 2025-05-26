@@ -156,7 +156,7 @@ inline int jitter(int val) {
          static_cast<int>(std::roundl(val * 0.125));
 }
 
-inline void activate_flow(int fd) {
+inline void activate_flow(int fd, bool trigger_ack_on_activate = true) {
   if (scheduling_mode == "bytes") {
     // Look up the remaining data in this flow.
     auto pending_bytes = flow_to_pending_bytes.find(fd);
@@ -167,7 +167,8 @@ inline void activate_flow(int fd) {
     // Determine how many bytes to grant.
     int grant_bytes = std::min(epoch_bytes, pending_bytes->second);
     // Decrement the pending bytes by the grant size since the flow will be able
-    // to send this much data.
+    // to send this much data. We can be confident that that we will not call
+    // activate_flow() again until the flow has sent this much data.
     pending_bytes->second -= grant_bytes;
     // Assign the grant.
     bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_bytes,
@@ -176,7 +177,10 @@ inline void activate_flow(int fd) {
     // Remove the RWND limit of 0 that has paused the flow.
     bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
   }
-  trigger_ack(fd);
+
+  if (trigger_ack_on_activate) {
+    trigger_ack(fd);
+  }
   RM_PRINTF("INFO: Activated FD=%d\n", fd);
 }
 
@@ -202,7 +206,7 @@ void try_activate_one() {
   for (int j = 0; j < num_paused; ++j) {
     pause_fr = paused_fds_queue.front();
     paused_fds_queue.pop();
-    // If this flow has been closed, then skip it.
+    // If we do not know about this flow (e.g., been closed), then skip it.
     // trunk-ignore(clang-tidy/clang-diagnostic-error)
     if (!fd_to_flow.contains(pause_fr)) {
       continue;
@@ -238,8 +242,9 @@ void try_find_and_pause(int fd) {
       pause_flow(active_fr.first);
       break;
     }
-    // Examine the next flow in active_fds_queue.
+    // Add this flow back to active_fds_queue.
     active_fds_queue.push(active_fr);
+    // Examine the next flow in active_fds_queue.
   }
 }
 
@@ -447,25 +452,26 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 5) Calculate when the next timer should expire.
   boost::posix_time::time_duration when;
-  // TODO(unknown): Potential bug if active_fds_queue is empty.
-  auto const next_epoch_us =
-      (active_fds_queue.front().second - now).total_microseconds();
   if (active_fds_queue.empty()) {
     // If there are no flows, revert to slow check mode.
     RM_PRINTF("INFO: No flows remaining, reverting to slow check mode\n");
     when = one_sec;
-  } else if (idle_timeout_ns == 0U) {
-    // If we are not using idle timeout mode...
-    RM_PRINTF("INFO: No idle timeout, scheduling timer for next epoch end\n");
-    when = boost::posix_time::microsec(next_epoch_us);
-  } else if (idle_timeout_us < next_epoch_us) {
-    // If we are using idle timeout mode...
-    RM_PRINTF("INFO: Scheduling timer for next idle timeout\n");
-    when = boost::posix_time::microsec(idle_timeout_us);
   } else {
-    RM_PRINTF("INFO: Scheduling timer for next epoch end, sooner than idle "
-              "timeout\n");
-    when = boost::posix_time::microsec(next_epoch_us);
+    auto const next_epoch_us =
+        (active_fds_queue.front().second - now).total_microseconds();
+    if (idle_timeout_ns == 0U) {
+      // If we are not using idle timeout mode...
+      RM_PRINTF("INFO: No idle timeout, scheduling timer for next epoch end\n");
+      when = boost::posix_time::microsec(next_epoch_us);
+    } else if (idle_timeout_us < next_epoch_us) {
+      // If we are using idle timeout mode...
+      RM_PRINTF("INFO: Scheduling timer for next idle timeout\n");
+      when = boost::posix_time::microsec(idle_timeout_us);
+    } else {
+      RM_PRINTF("INFO: Scheduling timer for next epoch end, sooner than idle "
+                "timeout\n");
+      when = boost::posix_time::microsec(next_epoch_us);
+    }
   }
 
   // 6) Start the next timer.
@@ -533,9 +539,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   const auto *flow = static_cast<const struct rm_flow *>(data);
 
   // This flow has exhausted its grant. Remove it from the active flows. It
-  // should already be paused (in flow_to_rwnd map). By removing it from active
-  // flows, the timer callback will automatically activate a new flow when it
-  // fires next.
+  // should already be paused (in flow_to_rwnd map with value of 0) because its
+  // grant will have been decremented as data arrived.
   RM_PRINTF("INFO: Flow %u:%u->%u:%u has exhausted its grant\n",
             flow->remote_addr, flow->remote_port, flow->local_addr,
             flow->local_port);
@@ -800,7 +805,8 @@ bool set_cca(int fd, const char *cca) {
   return true;
 }
 
-// Perform initial scheduling for this flow.
+// Perform initial scheduling for this flow. This should happen during the
+// handshake, in either accept() or connect().
 void initial_scheduling(int fd) {
   // Create an entry in flow_to_last_data_time_ns for this flow so that the
   // kprobe program knows to start tracking this flow.
@@ -822,6 +828,21 @@ void initial_scheduling(int fd) {
       timer.async_wait(&timer_callback);
       RM_PRINTF("INFO: First scheduling event\n");
     }
+
+    // If we are using time-based scheduling, then we can immediately set the
+    // correct RWND for the flow. We cannot do this for byte-based scheduling
+    // because we do not yet have an entry for the flow in pending_bytes. This
+    // is because initial_scheduling() is called during the handshake, whereas
+    // pending_bytes is initially populated during the burst request, which
+    // happens after the handshake.
+    if (scheduling_mode == "time") {
+      // Activate the flow, but do not trigger an ACK because this is the
+      // initial scheduling, which takes place during the handshake. In
+      // practice, this call does nothing for time-based scheduling, but it is
+      // included for completeness and to get a log indicating the flow was
+      // activated.
+      activate_flow(fd, false /* trigger_ack_on_activate */);
+    }
   } else {
     // The max number of flows are active already, so pause this one.
     paused_fds_queue.push(fd);
@@ -841,6 +862,7 @@ int check_family(const struct sockaddr *addr) {
   return 0;
 }
 
+// This should happen during the handshake, in either accept() or connect().
 void register_fd_for_monitoring(int fd) {
   // One-time setup.
   lock_setup.lock();
