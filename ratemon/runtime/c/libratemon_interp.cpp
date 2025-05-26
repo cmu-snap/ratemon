@@ -857,8 +857,8 @@ void register_fd_for_monitoring(int fd) {
   if (!get_flow(fd, &flow)) {
     return;
   }
-  RM_PRINTF("INFO: Found flow: %u:%u->%u:%u\n", flow.remote_addr, flow.remote_port,
-            flow.local_addr, flow.local_port);
+  RM_PRINTF("INFO: Found flow: %u:%u->%u:%u\n", flow.remote_addr,
+            flow.remote_port, flow.local_addr, flow.local_port);
   // Ignore flows that are not in the monitor port range.
   if (flow.remote_port < monitor_port_start ||
       flow.remote_port > monitor_port_end) {
