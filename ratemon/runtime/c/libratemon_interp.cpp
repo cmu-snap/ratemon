@@ -78,13 +78,6 @@ template <> struct hash<rm_flow_key> {
 };
 } // namespace std
 
-// Protects writes only to max_active_flows, epoch_us, idle_timeout_ns,
-// monitor_port_start, monitor_port_end, flow_to_rwnd_fd, flow_to_win_scale_fd,
-// flow_to_last_data_time_fd, flow_to_keepalive_fd, oldact, and setup. Reads are
-// unprotected.
-std::mutex lock_setup;
-// Whether setup has been performed.
-bool setup_done = false;
 // Used to signal the scheduler thread to end.
 bool run = true;
 // Existing signal handler for SIGINT.
@@ -124,12 +117,17 @@ int max_active_flows = 5;
 std::string scheduling_mode = "time"; // or "bytes"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
-int response_size_bytes = 0;
+// int response_size_bytes = 0;
 int idle_timeout_us = 0;
 int64_t idle_timeout_ns = 0;
 // Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
+
+// Forward declaration so that setup() resolves. Defined for real below.
+bool setup();
+// Whether setup has been performed.
+bool setup_done = setup();
 
 // Used to set entries in flow_to_rwnd.
 int zero = 0;
@@ -283,9 +281,9 @@ void timer_callback(const boost::system::error_code &error) {
   // If setup has not been performed yet, then we cannot perform scheduling.
   // Otherwise, revert to slow check mode.
   if (!setup_done) {
-    RM_PRINTF("INFO: Not set up\n");
+    RM_PRINTF("ERROR: Cannot execute timer callback, setup not done\n");
     if (timer.expires_from_now(one_sec) != 0U) {
-      RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
+      RM_PRINTF("ERROR: Timer unexpectedly cancelled (1)\n");
     }
     timer.async_wait(&timer_callback);
     return;
@@ -301,7 +299,7 @@ void timer_callback(const boost::system::error_code &error) {
         max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_last_data_time_fd,
         flow_to_keepalive_fd);
     if (timer.expires_from_now(one_sec) != 0U) {
-      RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
+      RM_PRINTF("ERROR: Timer unexpectedly cancelled (2)\n");
     }
     timer.async_wait(&timer_callback);
     return;
@@ -476,7 +474,7 @@ void timer_callback(const boost::system::error_code &error) {
 
   // 6) Start the next timer.
   if (timer.expires_from_now(when) != 0U) {
-    RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
+    RM_PRINTF("ERROR: Timer unexpectedly cancelled (3)\n");
   }
   timer.async_wait(&timer_callback);
   lock_scheduler.unlock();
@@ -505,7 +503,7 @@ void remove_flow_from_all_maps(struct rm_flow const *flow) {
 void thread_func() {
   RM_PRINTF("INFO: Scheduler thread started\n");
   if (timer.expires_from_now(one_sec) != 0U) {
-    RM_PRINTF("ERROR: Timer unexpectedly cancelled\n");
+    RM_PRINTF("ERROR: Timer unexpectedly cancelled (4)\n");
   }
 
   timer.async_wait(&timer_callback);
@@ -528,6 +526,11 @@ void thread_func() {
 }
 
 int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle grant done, setup not done\n");
+    return 0;
+  }
+
   if (scheduling_mode != "byte") {
     return 0;
   }
@@ -546,6 +549,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
             flow->local_port);
 
   // Activate a new flow.
+  lock_scheduler.lock();
   rm_flow_key const key = {flow->local_addr, flow->remote_addr,
                            flow->local_port, flow->remote_port};
   auto fd = flow_to_fd.find(key);
@@ -553,10 +557,11 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     RM_PRINTF("ERROR: Could not find FD for flow %u:%u->%u:%u\n",
               flow->remote_addr, flow->remote_port, flow->local_addr,
               flow->local_port);
+    lock_scheduler.unlock();
     return 0;
   }
   try_pause_one_activate_one(fd->second);
-
+  lock_scheduler.unlock();
   return 0;
 }
 
@@ -644,15 +649,15 @@ bool setup() {
               RM_EPOCH_BYTES_KEY, epoch_bytes);
     return false;
   }
-  if (!read_env_int(RM_RESPONSE_SIZE_KEY, &response_size_bytes)) {
-    return false;
-  }
-  if (response_size_bytes < 0) {
-    RM_PRINTF(
-        "ERROR: Invalid value for '%s'=%d (must be > 0; set = 0 to disable)\n",
-        RM_RESPONSE_SIZE_KEY, response_size_bytes);
-    return false;
-  }
+  // if (!read_env_int(RM_RESPONSE_SIZE_KEY, &response_size_bytes)) {
+  //   return false;
+  // }
+  // if (response_size_bytes < 0) {
+  //   RM_PRINTF(
+  //       "ERROR: Invalid value for '%s'=%d (must be > 0; set = 0 to
+  //       disable)\n", RM_RESPONSE_SIZE_KEY, response_size_bytes);
+  //   return false;
+  // }
   if (!read_env_int(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
                     true /* allow_zero */, false /* allow_neg */)) {
     return false;
@@ -823,7 +828,17 @@ void initial_scheduling(int fd) {
     RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
     if (active_fds_queue.size() == 1) {
       if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
-        RM_PRINTF("ERROR: Should have cancelled 1 timer\n");
+        // Timers usually expire naturally, so there is never a timer to cancel.
+        // This is a special case where we have a new flow and therefore need to
+        // cancel the existing timer and reset it with a new duration. We only
+        // do this if there is a single active flow, which we just put in
+        // active_fds_queue. If there are multiple active flows, then the timer
+        // was already correctly tracking the existing head of the queue.
+        // Basically, this cancels slow-check mode and starts epoch-based
+        // checks.
+        RM_PRINTF("ERROR: Should have cancelled 1 timer. If you are seeing "
+                  "this, it is possible that the first flow to be tracked was "
+                  "started before the scheduler thread could launch.\n");
       }
       timer.async_wait(&timer_callback);
       RM_PRINTF("INFO: First scheduling event\n");
@@ -864,16 +879,6 @@ int check_family(const struct sockaddr *addr) {
 
 // This should happen during the handshake, in either accept() or connect().
 void register_fd_for_monitoring(int fd) {
-  // One-time setup.
-  lock_setup.lock();
-  if (!setup_done) {
-    if (!setup()) {
-      lock_setup.unlock();
-      return;
-    }
-    setup_done = true;
-  }
-  lock_setup.unlock();
   // Look up the four-tuple.
   struct rm_flow flow {};
   if (!get_flow(fd, &flow)) {
@@ -930,6 +935,9 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
   // If we have been signalled to quit, then do nothing more.
   if (!run) {
+    RM_PRINTF(
+        "INFO: libratemon_interp not running, returning FD=%d from 'accept'\n",
+        fd);
     return fd;
   }
 
@@ -958,11 +966,14 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 
   // If we have been signalled to quit, then do nothing more.
   if (!run) {
+    RM_PRINTF(
+        "INFO: libratemon_interp not running, returning FD=%d from 'connect'\n",
+        fd);
     return fd;
   }
 
   register_fd_for_monitoring(fd);
-  RM_PRINTF("INFO: Successful 'close' for FD=%d, got FD=%d\n", sockfd, fd);
+  RM_PRINTF("INFO: Successful 'connect' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
 
@@ -980,8 +991,12 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     RM_PRINTF("ERROR: Real 'send' failed for FD=%d\n", sockfd);
     return ret;
   }
+
   // If we have been signalled to quit, then do nothing more.
   if (!run) {
+    RM_PRINTF("INFO: libratemon_interp not running, returning from 'send' for "
+              "FD=%d\n",
+              sockfd);
     return ret;
   }
 
@@ -1006,9 +1021,11 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     int const bytes = buf_int[0];
     // int sender_wait_us = buf_int[1];
     flow_to_pending_bytes[sockfd] = bytes;
+    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
   }
 
   RM_PRINTF("INFO: Successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
+  lock_scheduler.unlock();
   return ret;
 }
 
@@ -1028,6 +1045,14 @@ int close(int sockfd) {
     RM_PRINTF("INFO: Successful 'close' for FD=%d\n", sockfd);
   }
 
+  // If we have been signalled to quit, then do nothing more.
+  if (!run) {
+    RM_PRINTF("INFO: libratemon_interp not running, returning from 'close' for "
+              "FD=%d\n",
+              sockfd);
+    return ret;
+  }
+
   // Remove this FD from all data structures.
   lock_scheduler.lock();
   // trunk-ignore(clang-tidy/clang-diagnostic-error)
@@ -1045,6 +1070,17 @@ int close(int sockfd) {
     removed = flow_to_fd.erase(key);
     RM_PRINTF("INFO: Removed FD=%d from flow_to_fd (%ld elements removed)\n",
               sockfd, removed);
+
+    // If this is the last flow that we know about and we close it, then assume
+    // that we are no longer needed and kill the scheduler thread.
+    if (fd_to_flow.empty()) {
+      RM_PRINTF("INFO: No more flows remaining, stopping libratemon_interp and "
+                "its scheduler thread.\n");
+      run = false;
+      lock_scheduler.unlock();
+      scheduler_thread.join();
+      return ret;
+    }
   } else {
     RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }
