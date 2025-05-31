@@ -227,11 +227,14 @@ void try_activate_one() {
 }
 
 void try_find_and_pause(int fd) {
+  RM_PRINTF("INFO: Trying to pause flow FD=%d\n", fd);
   // Temporary variable for storing the front of active_fds_queue.
   std::pair<int, boost::posix_time::ptime> active_fr;
   int active_idx = 0;
+  // Check all entries in active_fds_queue once, until we find the one we are looking for.
   while (active_idx < static_cast<int>(active_fds_queue.size())) {
     active_fr = active_fds_queue.front();
+    RM_PRINTF("INFO: Checking active flow %d at index %d\n", active_fr.first, active_idx);
     active_fds_queue.pop();
     ++active_idx;
     if (active_fr.first == fd) {
@@ -412,6 +415,11 @@ void timer_callback(const boost::system::error_code &error) {
     active_fds_queue.push(active_fr);
   }
 
+  RM_PRINTF("flows to pause:\n");
+  for (const auto &fd : to_pause) {
+    RM_PRINTF("  %d\n", fd);
+  }
+
   // 2) Activate flows. Now we can calculate how many flows to activate to reach
   // full capacity. This value is the existing free capacity plus the number of
   // flows we intend to pause. The important part here is that we only look at
@@ -426,6 +434,8 @@ void timer_callback(const boost::system::error_code &error) {
   // 3) Pause flows. We need to recalculate the number of flows to pause because
   // we may not have been able to activate as many flows as planned. Recall that
   // it is alright to iterate through all of active_fds_queue.
+  RM_PRINTF("active_fds_queue.size()=%zu, paused_fds_queue.size()=%zu, max_active_flows=%d\n",
+            active_fds_queue.size(), paused_fds_queue.size(), max_active_flows);
   int const num_to_pause =
       std::max(0, static_cast<int>(active_fds_queue.size()) - max_active_flows);
 #ifdef RM_VERBOSE
@@ -433,6 +443,7 @@ void timer_callback(const boost::system::error_code &error) {
 #endif
   // For each flow that we are supposed to pause, advance through
   // active_fds_queue until we find it.
+  RM_PRINTF("INFO: Pausing %d flows, to_pause contains: %zu\n", num_to_pause, to_pause.size());
   active_size = static_cast<int>(active_fds_queue.size());
   for (int i = 0; i < num_to_pause; ++i) {
     try_find_and_pause(to_pause[i]);
@@ -457,15 +468,20 @@ void timer_callback(const boost::system::error_code &error) {
   } else {
     auto const next_epoch_us =
         (active_fds_queue.front().second - now).total_microseconds();
-    if (idle_timeout_ns == 0U) {
+    if (scheduling_mode == "byte") {
+      RM_PRINTF("INFO: In byte-based scheduling mode, using slow check mode\n");
+      when = one_sec;
+    } else if (idle_timeout_ns == 0U) {
       // If we are not using idle timeout mode...
       RM_PRINTF("INFO: No idle timeout, scheduling timer for next epoch end\n");
       when = boost::posix_time::microsec(next_epoch_us);
     } else if (idle_timeout_us < next_epoch_us) {
       // If we are using idle timeout mode...
-      RM_PRINTF("INFO: Scheduling timer for next idle timeout\n");
+      RM_PRINTF("INFO: Scheduling timer for next idle timeout, sooner than next epoch end\n");
       when = boost::posix_time::microsec(idle_timeout_us);
     } else {
+      RM_PRINTF("epoch_us=%d, idle_timeout_us=%d, next_epoch_us=%ld\n",
+                epoch_us, idle_timeout_us, next_epoch_us);
       RM_PRINTF("INFO: Scheduling timer for next epoch end, sooner than idle "
                 "timeout\n");
       when = boost::posix_time::microsec(next_epoch_us);
@@ -811,57 +827,60 @@ bool set_cca(int fd, const char *cca) {
 }
 
 // Perform initial scheduling for this flow. This should happen during the
-// handshake, in either accept() or connect().
+// handshake, in either accept() or connect(). The caller must hold lock_scheduler.
 void initial_scheduling(int fd) {
   // Create an entry in flow_to_last_data_time_ns for this flow so that the
   // kprobe program knows to start tracking this flow.
   bpf_map_update_elem(flow_to_last_data_time_fd, &fd_to_flow[fd], &zero,
                       BPF_ANY);
   // Should this flow be active or paused?
-  if (static_cast<int>(active_fds_queue.size()) < max_active_flows) {
-    // Less than the max number of flows are active, so make this one active.
-    boost::posix_time::ptime const now =
-        boost::posix_time::microsec_clock::local_time();
-    active_fds_queue.emplace(
-        fd, now + boost::posix_time::microseconds(epoch_us) +
-                boost::posix_time::microseconds(jitter(epoch_us)));
-    RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
-    if (active_fds_queue.size() == 1) {
-      if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
-        // Timers usually expire naturally, so there is never a timer to cancel.
-        // This is a special case where we have a new flow and therefore need to
-        // cancel the existing timer and reset it with a new duration. We only
-        // do this if there is a single active flow, which we just put in
-        // active_fds_queue. If there are multiple active flows, then the timer
-        // was already correctly tracking the existing head of the queue.
-        // Basically, this cancels slow-check mode and starts epoch-based
-        // checks.
-        RM_PRINTF("ERROR: Should have cancelled 1 timer. If you are seeing "
-                  "this, it is possible that the first flow to be tracked was "
-                  "started before the scheduler thread could launch.\n");
-      }
-      timer.async_wait(&timer_callback);
-      RM_PRINTF("INFO: First scheduling event\n");
-    }
-
-    // If we are using time-based scheduling, then we can immediately set the
-    // correct RWND for the flow. We cannot do this for byte-based scheduling
-    // because we do not yet have an entry for the flow in pending_bytes. This
-    // is because initial_scheduling() is called during the handshake, whereas
-    // pending_bytes is initially populated during the burst request, which
-    // happens after the handshake.
-    if (scheduling_mode == "time") {
-      // Activate the flow, but do not trigger an ACK because this is the
-      // initial scheduling, which takes place during the handshake. In
-      // practice, this call does nothing for time-based scheduling, but it is
-      // included for completeness and to get a log indicating the flow was
-      // activated.
-      activate_flow(fd, false /* trigger_ack_on_activate */);
-    }
-  } else {
+  if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
     // The max number of flows are active already, so pause this one.
     paused_fds_queue.push(fd);
     pause_flow(fd);
+    return;
+  }
+
+  // Less than the max number of flows are active, so make this one active.
+  boost::posix_time::ptime const now =
+      boost::posix_time::microsec_clock::local_time();
+  auto awaken = now + boost::posix_time::microseconds(epoch_us) +
+          boost::posix_time::microseconds(jitter(epoch_us));
+  active_fds_queue.emplace(fd, awaken);
+  RM_PRINTF("Initial scheduling for flow FD=%d, awaken in the future by %ld us\n", fd,
+    (active_fds_queue.front().second - now).total_microseconds());
+  RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
+  if (active_fds_queue.size() == 1) {
+    if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
+      // Timers usually expire naturally, so there is never a timer to cancel.
+      // This is a special case where we have a new flow and therefore need to
+      // cancel the existing timer and reset it with a new duration. We only
+      // do this if there is a single active flow, which we just put in
+      // active_fds_queue. If there are multiple active flows, then the timer
+      // was already correctly tracking the existing head of the queue.
+      // Basically, this cancels slow-check mode and starts epoch-based
+      // checks.
+      RM_PRINTF("ERROR: Should have cancelled 1 timer. If you are seeing "
+                "this, it is possible that the first flow to be tracked was "
+                "started before the scheduler thread could launch.\n");
+    }
+    timer.async_wait(&timer_callback);
+    RM_PRINTF("INFO: First scheduling event\n");
+  }
+
+  // If we are using time-based scheduling, then we can immediately set the
+  // correct RWND for the flow. We cannot do this for byte-based scheduling
+  // because we do not yet have an entry for the flow in pending_bytes. This
+  // is because initial_scheduling() is called during the handshake, whereas
+  // pending_bytes is initially populated during the burst request, which
+  // happens after the handshake.
+  if (scheduling_mode == "time") {
+    // Activate the flow, but do not trigger an ACK because this is the
+    // initial scheduling, which takes place during the handshake. In
+    // practice, this call does nothing for time-based scheduling, but it is
+    // included for completeness and to get a log indicating the flow was
+    // activated.
+    activate_flow(fd, false /* trigger_ack_on_activate */);
   }
 }
 
