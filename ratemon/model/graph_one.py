@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" Graph all of the features from a single experiment. """
+"""Graph all of the features from a single experiment."""
 
 import argparse
 import multiprocessing

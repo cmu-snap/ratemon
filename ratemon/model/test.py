@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" Evalaute the model on experiments. """
+"""Evalaute the model on experiments."""
 
 import argparse
 import json

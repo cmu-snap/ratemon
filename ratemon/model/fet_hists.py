@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" Plot histograms of the training features. """
+"""Plot histograms of the training features."""
 
 import argparse
 from os import path

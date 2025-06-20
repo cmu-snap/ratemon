@@ -37,11 +37,11 @@
 #include <linux/bpf.h>
 #include <linux/inet_diag.h>
 #include <mutex>
-#include <netinet/in.h> // structure for storing address information
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <queue>
 #include <string>
-#include <sys/socket.h> // for socket APIs
+#include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -154,13 +154,49 @@ inline int jitter(int val) {
          static_cast<int>(std::roundl(val * 0.125));
 }
 
-inline void activate_flow(int fd, bool trigger_ack_on_activate = true) {
+// Pause this flow. Return the number of flows that were paused.
+inline int pause_flow(int fd) {
+  // Pausing a flow means setting its RWND to 0 B.
+  bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
+  trigger_ack(fd);
+  RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
+  return 1;
+}
+
+// Find and pause the flow. Return the number of flows that were paused.
+int try_find_and_pause(int fd) {
+  RM_PRINTF("INFO: Trying to pause flow FD=%d\n", fd);
+  // Temporary variable for storing the front of active_fds_queue.
+  std::pair<int, boost::posix_time::ptime> active_fr;
+  int active_idx = 0;
+  // Check all entries in active_fds_queue once, until we find the one we are
+  // looking for.
+  while (active_idx < static_cast<int>(active_fds_queue.size())) {
+    active_fr = active_fds_queue.front();
+    RM_PRINTF("INFO: Checking active flow %d at index %d\n", active_fr.first,
+              active_idx);
+    active_fds_queue.pop();
+    ++active_idx;
+    if (active_fr.first == fd) {
+      // Pause this flow.
+      paused_fds_queue.push(active_fr.first);
+      return pause_flow(active_fr.first);
+    }
+    // Add this flow back to active_fds_queue.
+    active_fds_queue.push(active_fr);
+    // Examine the next flow in active_fds_queue.
+  }
+  return 0;
+}
+
+// Attempt to activate this flow. Return the number of activated flows.
+inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
   if (scheduling_mode == "bytes") {
     // Look up the remaining data in this flow.
     auto pending_bytes = flow_to_pending_bytes.find(fd);
     if (pending_bytes == flow_to_pending_bytes.end()) {
       RM_PRINTF("ERROR: Could not find pending bytes for FD=%d\n", fd);
-      return;
+      return 0;
     }
     // Determine how many bytes to grant.
     int grant_bytes = std::min(epoch_bytes, pending_bytes->second);
@@ -180,16 +216,12 @@ inline void activate_flow(int fd, bool trigger_ack_on_activate = true) {
     trigger_ack(fd);
   }
   RM_PRINTF("INFO: Activated FD=%d\n", fd);
+  return 1;
 }
 
-inline void pause_flow(int fd) {
-  // Pausing a flow means retting its RWND to 0 B.
-  bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
-  trigger_ack(fd);
-  RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
-}
-
-void try_activate_one() {
+// Try to find and activate one flow. Returns the number of flows that were
+// activated.
+int try_activate_one() {
   // Loop until we find a paused flow that is valid (not closed).
   int const num_paused = static_cast<int>(paused_fds_queue.size());
   // Temporary variable for storing the front of paused_fds_queue.
@@ -207,53 +239,42 @@ void try_activate_one() {
     // If we do not know about this flow (e.g., been closed), then skip it.
     // trunk-ignore(clang-tidy/clang-diagnostic-error)
     if (!fd_to_flow.contains(pause_fr)) {
+      RM_PRINTF("INFO: Skipping activating FD=%d, flow closed\n", pause_fr);
       continue;
     }
     // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
     // returns negative error code when the flow is not found), then it has no
     // pending data and should be skipped.
     if (bpf_map_lookup_elem(flow_to_keepalive_fd, &pause_fr, &dummy) != 0) {
-      // RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", p);
+      RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", pause_fr);
       paused_fds_queue.push(pause_fr);
       continue;
     }
+    RM_PRINTF("INFO: Decided to activating flow FD=%d\n", pause_fr);
     // Randomly jitter the epoch time by +/- 12.5%.
     active_fds_queue.emplace(
         pause_fr,
         now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
-    activate_flow(pause_fr);
-    break;
+    return activate_flow(pause_fr);
   }
+  return 0;
 }
 
-void try_find_and_pause(int fd) {
-  RM_PRINTF("INFO: Trying to pause flow FD=%d\n", fd);
-  // Temporary variable for storing the front of active_fds_queue.
-  std::pair<int, boost::posix_time::ptime> active_fr;
-  int active_idx = 0;
-  // Check all entries in active_fds_queue once, until we find the one we are looking for.
-  while (active_idx < static_cast<int>(active_fds_queue.size())) {
-    active_fr = active_fds_queue.front();
-    RM_PRINTF("INFO: Checking active flow %d at index %d\n", active_fr.first, active_idx);
-    active_fds_queue.pop();
-    ++active_idx;
-    if (active_fr.first == fd) {
-      // Pause this flow.
-      paused_fds_queue.push(active_fr.first);
-      pause_flow(active_fr.first);
-      break;
-    }
-    // Add this flow back to active_fds_queue.
-    active_fds_queue.push(active_fr);
-    // Examine the next flow in active_fds_queue.
-  }
-}
-
-void try_pause_one_activate_one(int fd) {
+// Try to pause this flow and activate one other flow. Returns the number of
+// flows that were activated.
+int try_pause_one_activate_one(int fd) {
   // Find the flow in active_fds_queue and remove it
-  try_find_and_pause(fd);
-  // Then fine one flow in paused_fds_queue to restart.
-  try_activate_one();
+  if (try_find_and_pause(fd) == 0) {
+    RM_PRINTF("ERROR: Could not find and/or pause flow FD=%d\n", fd);
+    return 0;
+  }
+  // Then find one flow in paused_fds_queue to restart.
+  int const num_activated = try_activate_one();
+  if (try_activate_one() == 0) {
+    RM_PRINTF("ERROR: Could not activate a flow after pausing FD=%d\n", fd);
+    return 0;
+  }
+  return num_activated;
 }
 
 // Call this to check if scheduling should take place, and if so, perform it. If
@@ -415,9 +436,9 @@ void timer_callback(const boost::system::error_code &error) {
     active_fds_queue.push(active_fr);
   }
 
-  RM_PRINTF("flows to pause:\n");
+  RM_PRINTF("INFO: Flows in to_pause:\n");
   for (const auto &fd : to_pause) {
-    RM_PRINTF("  %d\n", fd);
+    RM_PRINTF("INFO:     %d\n", fd);
   }
 
   // 2) Activate flows. Now we can calculate how many flows to activate to reach
@@ -427,6 +448,7 @@ void timer_callback(const boost::system::error_code &error) {
   int const num_to_activate = max_active_flows -
                               static_cast<int>(active_fds_queue.size()) +
                               static_cast<int>(to_pause.size());
+  RM_PRINTF("INFO: Activating %d flows\n", num_to_activate);
   for (int i = 0; i < num_to_activate; ++i) {
     try_activate_one();
   }
@@ -434,7 +456,8 @@ void timer_callback(const boost::system::error_code &error) {
   // 3) Pause flows. We need to recalculate the number of flows to pause because
   // we may not have been able to activate as many flows as planned. Recall that
   // it is alright to iterate through all of active_fds_queue.
-  RM_PRINTF("active_fds_queue.size()=%zu, paused_fds_queue.size()=%zu, max_active_flows=%d\n",
+  RM_PRINTF("INFO: active_fds_queue.size()=%zu, paused_fds_queue.size()=%zu, "
+            "max_active_flows=%d\n",
             active_fds_queue.size(), paused_fds_queue.size(), max_active_flows);
   int const num_to_pause =
       std::max(0, static_cast<int>(active_fds_queue.size()) - max_active_flows);
@@ -443,7 +466,8 @@ void timer_callback(const boost::system::error_code &error) {
 #endif
   // For each flow that we are supposed to pause, advance through
   // active_fds_queue until we find it.
-  RM_PRINTF("INFO: Pausing %d flows, to_pause contains: %zu\n", num_to_pause, to_pause.size());
+  RM_PRINTF("INFO: Pausing %d flows, to_pause contains: %zu\n", num_to_pause,
+            to_pause.size());
   active_size = static_cast<int>(active_fds_queue.size());
   for (int i = 0; i < num_to_pause; ++i) {
     try_find_and_pause(to_pause[i]);
@@ -477,10 +501,11 @@ void timer_callback(const boost::system::error_code &error) {
       when = boost::posix_time::microsec(next_epoch_us);
     } else if (idle_timeout_us < next_epoch_us) {
       // If we are using idle timeout mode...
-      RM_PRINTF("INFO: Scheduling timer for next idle timeout, sooner than next epoch end\n");
+      RM_PRINTF("INFO: Scheduling timer for next idle timeout, sooner than "
+                "next epoch end\n");
       when = boost::posix_time::microsec(idle_timeout_us);
     } else {
-      RM_PRINTF("epoch_us=%d, idle_timeout_us=%d, next_epoch_us=%ld\n",
+      RM_PRINTF("INFO: epoch_us=%d, idle_timeout_us=%d, next_epoch_us=%ld\n",
                 epoch_us, idle_timeout_us, next_epoch_us);
       RM_PRINTF("INFO: Scheduling timer for next epoch end, sooner than idle "
                 "timeout\n");
@@ -576,7 +601,10 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     lock_scheduler.unlock();
     return 0;
   }
-  try_pause_one_activate_one(fd->second);
+  if (try_pause_one_activate_one(fd->second) == 0) {
+    RM_PRINTF("ERROR: Could not pause flow FD=%d and activate another flow\n",
+              fd->second);
+  }
   lock_scheduler.unlock();
   return 0;
 }
@@ -827,7 +855,8 @@ bool set_cca(int fd, const char *cca) {
 }
 
 // Perform initial scheduling for this flow. This should happen during the
-// handshake, in either accept() or connect(). The caller must hold lock_scheduler.
+// handshake, in either accept() or connect(). The caller must hold
+// lock_scheduler.
 void initial_scheduling(int fd) {
   // Create an entry in flow_to_last_data_time_ns for this flow so that the
   // kprobe program knows to start tracking this flow.
@@ -845,10 +874,11 @@ void initial_scheduling(int fd) {
   boost::posix_time::ptime const now =
       boost::posix_time::microsec_clock::local_time();
   auto awaken = now + boost::posix_time::microseconds(epoch_us) +
-          boost::posix_time::microseconds(jitter(epoch_us));
+                boost::posix_time::microseconds(jitter(epoch_us));
   active_fds_queue.emplace(fd, awaken);
-  RM_PRINTF("Initial scheduling for flow FD=%d, awaken in the future by %ld us\n", fd,
-    (active_fds_queue.front().second - now).total_microseconds());
+  RM_PRINTF(
+      "Initial scheduling for flow FD=%d, awaken in the future by %ld us\n", fd,
+      (active_fds_queue.front().second - now).total_microseconds());
   RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
   if (active_fds_queue.size() == 1) {
     if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
@@ -880,7 +910,9 @@ void initial_scheduling(int fd) {
     // practice, this call does nothing for time-based scheduling, but it is
     // included for completeness and to get a log indicating the flow was
     // activated.
-    activate_flow(fd, false /* trigger_ack_on_activate */);
+    if (activate_flow(fd, false /* trigger_ack_on_activate */) == 0) {
+      RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
+    }
   }
 }
 
@@ -1026,6 +1058,12 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   if (flow == fd_to_flow.end()) {
     // We are not tracking this flow, so ignore it.
     RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+    lock_scheduler.unlock();
+    return ret;
+  }
+  int one = 1;
+  if (bpf_map_update_elem(flow_to_keepalive_fd, &sockfd, &one, BPF_ANY) != 0) {
+    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d\n", sockfd);
     lock_scheduler.unlock();
     return ret;
   }

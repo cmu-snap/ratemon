@@ -7,7 +7,9 @@ from ratemon.model import features
 
 
 class LossTracker:
-    def __init__(self, flow, window_sizes=[8]):
+    def __init__(self, flow, window_sizes=None):
+        if window_sizes is None:
+            window_sizes = [8]
         assert window_sizes, "Must specify window_sizes."
         self.flow = flow
         self.window_sizes = window_sizes

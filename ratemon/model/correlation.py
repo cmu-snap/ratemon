@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" Evaluates feature correlation. """
+"""Evaluates feature correlation."""
 
 import argparse
 import multiprocessing

@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-""" General unit tests. """
+"""General unit tests."""
 
 import os
 import shlex

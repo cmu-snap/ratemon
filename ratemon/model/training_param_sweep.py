@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" Visualizes sklearn training parameters. """
+"""Visualizes sklearn training parameters."""
 
 import argparse
 import itertools

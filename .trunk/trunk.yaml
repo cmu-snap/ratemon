@@ -2,30 +2,30 @@
 # To learn more about the format of this file, see https://docs.trunk.io/reference/trunk-yaml
 version: 0.1
 cli:
-  version: 1.22.15
+  version: 1.24.0
 # Trunk provides extensibility via plugins. (https://docs.trunk.io/plugins)
 plugins:
   sources:
     - id: trunk
-      ref: v1.6.8
+      ref: v1.7.0
       uri: https://github.com/trunk-io/plugins
 # Many linters and tools depend on runtimes - configure them here. (https://docs.trunk.io/runtimes)
 runtimes:
   enabled:
     - go@1.21.0
-    - node@18.20.5
+    - node@22.16.0
     - python@3.10.8
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
   ignore:
-      - linters: [ALL]
-        paths:
-          # BPF playground.
-          - ratemon/runtime/c/experimental/**
-      - linters: [include-what-you-use]
-        paths:
-          # BPF includes are weird.
-          - ratemon/runtime/c/*.bpf.c
+    - linters: [ALL]
+      paths:
+        # BPF playground.
+        - ratemon/runtime/c/experimental/**
+    - linters: [include-what-you-use]
+      paths:
+        # BPF includes are weird.
+        - ratemon/runtime/c/*.bpf.c
   disabled:
     - markdown-table-prettify
     - remark-lint
@@ -45,34 +45,34 @@ lint:
     - clang-tidy@16.0.3
     - codespell@2.4.1
     - dustilock@1.2.0
-    - gitleaks@8.25.1
+    - gitleaks@8.27.2
     - include-what-you-use@0.20
     - kube-linter@0.7.2
     - markdown-link-check@3.13.7
     - pragma-once
     - pre-commit-hooks@5.0.0
-    - ruff@0.11.8
-    - semgrep@1.116.0
+    - ruff@0.12.0
+    - semgrep@1.126.0
     - taplo@0.9.3
     - terrascan@1.19.1
-    - trivy@0.62.1
-    - trufflehog-git@3.88.28
+    - trivy@0.63.0
+    - trufflehog-git@3.89.2
     - trunk-toolbox@0.5.4
-    - vale@3.11.2
+    - vale@3.12.0
     - actionlint@1.7.7
-    - bandit@1.8.3
+    - bandit@1.8.5
     - black@25.1.0
-    - checkov@3.2.416
+    - checkov@3.2.443
     - git-diff-check
     - hadolint@2.12.1-beta
     - isort@6.0.1
-    - markdownlint@0.44.0
-    - osv-scanner@2.0.2
+    - markdownlint@0.45.0
+    - osv-scanner@2.0.3
     - prettier@3.5.3
-    - ruff@0.11.8
+    - ruff@0.12.0
     - shellcheck@0.10.0
     - shfmt@3.6.0
-    - trufflehog@3.88.28
+    - trufflehog@3.89.2
     - yamllint@1.37.1
 actions:
   disabled:

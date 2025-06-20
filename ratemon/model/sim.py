@@ -1,4 +1,4 @@
-"""Runs simulations. """
+"""Runs simulations."""
 
 import json
 import logging

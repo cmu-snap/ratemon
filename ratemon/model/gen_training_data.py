@@ -1,5 +1,5 @@
 #! /usr/bin/env python3
-"""Runs experiments to generate training data. """
+"""Runs experiments to generate training data."""
 
 import argparse
 import itertools
