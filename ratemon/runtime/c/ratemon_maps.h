@@ -28,7 +28,7 @@ struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, RM_MAX_FLOWS);
   __type(key, struct rm_flow);
-  __type(value, uint32_t);
+  __type(value, uint8_t);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } flow_to_win_scale SEC(".maps");
 

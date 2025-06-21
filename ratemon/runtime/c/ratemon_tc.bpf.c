@@ -91,9 +91,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // If the configured RWND value is 0 B, then we can take a shortcut and not
     // bother looking up the window scale.
     tcp->window = 0;
-    // bpf_printk(
-    //     "INFO: set RWND for flow with local port %u and remote port %u to 0
-    //     B", flow.local_port, flow.remote_port);
+    bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with local port %u "
+               "and remote port %u to 0B",
+               flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
 
@@ -101,7 +101,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
-    bpf_printk("ERROR: flow with local port %u, remote port %u, no win scale",
+    bpf_printk("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
+               "port %u, no win scale",
                flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
@@ -112,8 +113,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
   tcp->window = min(tcp->window, rwnd_with_win_scale);
-  // bpf_printk(
-  //     "INFO: set RWND for flow with remote port %u to %u (win scale: %u)",
-  //     flow.remote_port, rwnd_with_win_scale, *win_scale);
+  bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
+             "to %u (win scale: %u)",
+             flow.remote_port, rwnd_with_win_scale, *win_scale);
   return TC_ACT_OK;
 }

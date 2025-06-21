@@ -141,6 +141,7 @@ socklen_t placeholder_cc_info_length =
 // Trigger a pure ACK packet to be send on this FD by calling getsockopt() with
 // TCP_CC_INFO. This only works if the flow is using the CCA BPF_CUBIC.
 inline void trigger_ack(int fd) {
+  RM_PRINTF("INFO: Triggering ACK for flow FD=%d\n", fd);
   // Do not store the output to check for errors since there is nothing we can
   // do.
   getsockopt(fd, SOL_TCP, TCP_CC_INFO,
@@ -1179,9 +1180,10 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   }
   RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
 
+  // If we are doing byte-based scheduling, then track the size of this request.
   // Parse buf, which should contain 2 ints. The first is the response size,
   // which is what we want.
-  if (len == 2 * sizeof(int)) {
+  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
     // trunk-ignore(clang-tidy/google-readability-casting)
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
     int *buf_int = (int *)buf;

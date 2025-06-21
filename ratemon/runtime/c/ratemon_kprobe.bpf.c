@@ -81,19 +81,22 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   u32 payload_bytes = len - (doff * 4);
   if ((payload_bytes <= 1) && (seq == rcv_nxt - 1) && !syn && !fin && !rst) {
     // This is a keepalive packet.
-    bpf_printk("INFO: 'tcp_rcv_established' found keepalive");
+    bpf_printk("INFO: 'tcp_rcv_established' found keepalive for flow %u<->%u",
+               flow.local_port, flow.remote_port);
     int one = 1;
     if (bpf_map_update_elem(&flow_to_keepalive, &flow, &one, BPF_ANY)) {
-      bpf_printk(
-          "ERROR: 'tcp_rcv_established' error updating flow_to_keepalive");
+      bpf_printk("ERROR: 'tcp_rcv_established' error updating "
+                 "flow_to_keepalive for flow %u<->%u",
+                 flow.local_port, flow.remote_port);
     }
   }
 
   // If this packet does not contain new data (e.g., it is a pure ACK or a
   // retransmission), then we are not interested in it.
   if (seq < rcv_nxt) {
-    bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data",
-               tp);
+    bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data "
+               "for flow %u<->%u",
+               flow.local_port, flow.remote_port);
     return 0;
   }
 
@@ -105,7 +108,8 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
                             BPF_ANY)) {
       bpf_printk("ERROR: 'tcp_rcv_established' error updating "
-                 "flow_to_last_data_time_ns");
+                 "flow_to_last_data_time_ns for flow %u<->%u",
+                 flow.local_port, flow.remote_port);
     }
   }
 
@@ -116,10 +120,11 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // Look up the flow in the flow_to_rwnd map.
   u32 *rwnd_ptr = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
   if (rwnd_ptr == NULL) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error flow is active but not in "
-               "flow_to_rwnd");
     return 0;
   }
+  bpf_printk(
+      "INFO: 'tcp_rcv_established' flow %u<->%u is active and in flow_to_rwnd",
+      flow.local_port, flow.remote_port);
   // Decrement the rwnd by the payload size to account for grant that has been
   // used.
   if (*rwnd_ptr >= payload_bytes) {
@@ -128,8 +133,13 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     *rwnd_ptr = 0;
   }
   // Update flow_to_rwnd with the new value.
+  bpf_printk("INFO: 'tcp_rcv_established' updating flow_to_rwnd for flow "
+             "%u<->%u to %u",
+             flow.local_port, flow.remote_port, *rwnd_ptr);
   if (bpf_map_update_elem(&flow_to_rwnd, &flow, rwnd_ptr, BPF_ANY)) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd");
+    bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd for "
+               "flow %u<->%u to %u",
+               flow.local_port, flow.remote_port, *rwnd_ptr);
     return 0;
   }
   // If the flow has grant remaining, then we are done.
@@ -138,7 +148,9 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   }
   // The flow has exhausted its grant, so add it to the done_flows ringbuf.
   if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow");
+    bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
+               "%u<->%u to ringbuf",
+               flow.local_port, flow.remote_port);
     return 0;
   }
 
