@@ -158,7 +158,7 @@ attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 	sudo bpftool map pin name flow_to_win_sca /sys/fs/bpf/flow_to_win_scale
 	sudo bpftool map pin name flow_to_last_da /sys/fs/bpf/flow_to_last_data_time_ns
 	sudo bpftool map pin name flow_to_keepali /sys/fs/bpf/flow_to_keepalive
-	sudo bpftool map pin name flow_to_keepali /sys/fs/bpf/done_flows
+	sudo bpftool map pin name done_flows /sys/fs/bpf/done_flows
 	sudo RM_CGROUP=$(RM_CGROUP) ./ratemon_main || true
 	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress

@@ -26,6 +26,7 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <cassert>
+#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -325,13 +326,15 @@ void timer_callback(const boost::system::error_code &error) {
   // Check that relevant parameters have been set. Otherwise, revert to slow
   // check mode.
   if ((max_active_flows == 0U) || (epoch_us == 0U) || (flow_to_rwnd_fd == 0) ||
-      (flow_to_last_data_time_fd == 0) || (flow_to_keepalive_fd == 0)) {
+      (flow_to_win_scale_fd == 0) || (flow_to_last_data_time_fd == 0) ||
+      (flow_to_keepalive_fd == 0)) {
     RM_PRINTF(
         "ERROR: cannot continue, invalid max_active_flows=%u, epoch_us=%u, "
-        "flow_to_rwnd_fd=%d, flow_to_last_data_time_fd=%d, or "
+        "flow_to_rwnd_fd=%d, flow_to_win_scale_fd=%d, "
+        "flow_to_last_data_time_fd=%d, or "
         "flow_to_keepalive_fd=%d\n",
-        max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_last_data_time_fd,
-        flow_to_keepalive_fd);
+        max_active_flows, epoch_us, flow_to_rwnd_fd, flow_to_win_scale_fd,
+        flow_to_last_data_time_fd, flow_to_keepalive_fd);
     if (timer.expires_from_now(one_sec) != 0U) {
       RM_PRINTF("ERROR: Timer unexpectedly cancelled (2)\n");
     }
@@ -458,9 +461,20 @@ void timer_callback(const boost::system::error_code &error) {
   int const num_to_activate = max_active_flows -
                               static_cast<int>(active_fds_queue.size()) +
                               static_cast<int>(to_pause.size());
-  RM_PRINTF("INFO: Activating %d flows\n", num_to_activate);
+  RM_PRINTF("INFO: Attempting to activate %d flows\n", num_to_activate);
+  int num_activated = 0;
   for (int i = 0; i < num_to_activate; ++i) {
-    try_activate_one();
+    num_activated += try_activate_one();
+  }
+  if (num_activated != num_to_activate) {
+    RM_PRINTF(
+        "ERROR: Could not activate as many flows as requested, activated=%d, "
+        "requested=%d\n",
+        num_activated, num_to_activate);
+    // If we could not activate all requested flows, then we will have to pause
+    // some of the active flows.
+  } else {
+    RM_PRINTF("INFO: Activated %d flows\n", num_activated);
   }
 
   // 3) Pause flows. We need to recalculate the number of flows to pause because
@@ -680,6 +694,7 @@ bool read_env_string(const char *key, std::string &dest) {
 // parameters from environment variables and looking up the BPF map
 // flow_to_rwnd.
 bool setup() {
+  RM_PRINTF("INFO: Performing setup\n");
   // Read environment variables with parameters.
   if (!read_env_int(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
     return false;
@@ -735,9 +750,10 @@ bool setup() {
   // Look up the FD for the flow_to_rwnd map. We do not need the BPF skeleton
   // for this.
   int err = bpf_obj_get(RM_FLOW_TO_RWND_PIN_PATH);
-  if (err == -1) {
-    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_rwnd' from path '%s'\n",
-              RM_FLOW_TO_RWND_PIN_PATH);
+  if (err < 0) {
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_rwnd' from path: '%s', "
+              "err=%d : %s\n",
+              RM_FLOW_TO_RWND_PIN_PATH, -err, strerror(-err));
     return false;
   }
   flow_to_rwnd_fd = err;
@@ -745,10 +761,10 @@ bool setup() {
   // Look up the FD for the flow_to_win_scale map. We do not need the BPF
   // skeleton for this.
   err = bpf_obj_get(RM_FLOW_TO_WIN_SCALE_PIN_PATH);
-  if (err == -1) {
-    RM_PRINTF(
-        "ERROR: Failed to get FD for 'flow_to_win_scale' from path '%s'\n",
-        RM_FLOW_TO_WIN_SCALE_PIN_PATH);
+  if (err < 0) {
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_win_scale' from path: "
+              "'%s', err=%d : %s\n",
+              RM_FLOW_TO_WIN_SCALE_PIN_PATH, -err, strerror(-err));
     return false;
   }
   flow_to_win_scale_fd = err;
@@ -756,11 +772,10 @@ bool setup() {
   // Look up the FD for the flow_to_last_data_time_ns map. We do not need the
   // BPF skeleton for this.
   err = bpf_obj_get(RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH);
-  if (err == -1) {
-    RM_PRINTF(
-        "ERROR: Failed to get FD for 'flow_to_last_data_time_ns' from path "
-        "'%s'\n",
-        RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH);
+  if (err < 0) {
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_last_data_time_ns' from "
+              "path: '%s', err=%d : %s\n",
+              RM_FLOW_TO_LAST_DATA_TIME_PIN_PATH, -err, strerror(-err));
     return false;
   }
   flow_to_last_data_time_fd = err;
@@ -768,10 +783,10 @@ bool setup() {
   // Look up the FD for the flow_to_keepalive map. We do not need the
   // BPF skeleton for this.
   err = bpf_obj_get(RM_FLOW_TO_KEEPALIVE_PIN_PATH);
-  if (err == -1) {
-    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_keepalive' from path "
-              "'%s'\n",
-              RM_FLOW_TO_KEEPALIVE_PIN_PATH);
+  if (err < 0) {
+    RM_PRINTF("ERROR: Failed to get FD for 'flow_to_keepalive' from path: "
+              "'%s', err=%d : %s\n",
+              RM_FLOW_TO_KEEPALIVE_PIN_PATH, -err, strerror(-err));
     return false;
   }
   flow_to_keepalive_fd = err;
@@ -780,10 +795,10 @@ bool setup() {
     // Look up the FD for the done_flows ringbuf. We do not need the BPF
     // skeleton for this.
     err = bpf_obj_get(RM_DONE_FLOWS_PIN_PATH);
-    if (err == -1) {
-      RM_PRINTF("ERROR: Failed to get FD for 'done_flows' from path "
-                "'%s'\n",
-                RM_DONE_FLOWS_PIN_PATH);
+    if (err < 0) {
+      RM_PRINTF("ERROR: Failed to get FD for 'done_flows' from path: '%s', "
+                "err=%d : %s\n",
+                RM_DONE_FLOWS_PIN_PATH, -err, strerror(-err));
       return false;
     }
     // Use the ringbuf fd to create a new userspace ringbuf instance.
@@ -1003,6 +1018,11 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     return fd;
   }
 
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'accept', setup not done\n");
+    return fd;
+  }
+
   register_fd_for_monitoring(fd);
   RM_PRINTF("INFO: Successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
@@ -1034,6 +1054,11 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     return fd;
   }
 
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'connect', setup not done\n");
+    return fd;
+  }
+
   register_fd_for_monitoring(fd);
   RM_PRINTF("INFO: Successful 'connect' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
@@ -1062,6 +1087,11 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     return ret;
   }
 
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'send', setup not done\n");
+    return ret;
+  }
+
   // Update the flow_to_keepalive map to indicate that this flow has pending
   // data.
   lock_scheduler.lock();
@@ -1073,11 +1103,17 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     return ret;
   }
   int one = 1;
-  if (bpf_map_update_elem(flow_to_keepalive_fd, &sockfd, &one, BPF_ANY) != 0) {
+  int const err =
+      bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: bpf_map_update_elem returned %d (errno=%d: %s) for "
+              "FD=%d, flow_to_keepalive_fd=%d\n",
+              err, errno, strerror(errno), sockfd, flow_to_keepalive_fd);
     RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d\n", sockfd);
     lock_scheduler.unlock();
     return ret;
   }
+  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
 
   // Parse buf, which should contain 2 ints. The first is the response size,
   // which is what we want.
@@ -1118,6 +1154,11 @@ int close(int sockfd) {
     RM_PRINTF("INFO: libratemon_interp not running, returning from 'close' for "
               "FD=%d\n",
               sockfd);
+    return ret;
+  }
+
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'close', setup not done\n");
     return ret;
   }
 

@@ -61,6 +61,7 @@ struct {
 struct {
   __uint(type, BPF_MAP_TYPE_RINGBUF);
   __uint(max_entries, 4096 /* bytes, one page */);
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
 } done_flows SEC(".maps");
 
 #endif /* __RATEMON_MAPS_H */
