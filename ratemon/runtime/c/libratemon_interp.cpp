@@ -427,10 +427,12 @@ void timer_callback(const boost::system::error_code &error) {
         if (last_data_time_ns > ktime_now_ns) {
           // This could be fine...perhaps a packet arrived since we captured
           // the current time above?
-          RM_PRINTF(
-              "WARNING: FD=%d last data time (%lu ns) is in the future compared to our current time (%ld ns) by %ld ns. This is probably due to a super recent sneaky packet arrival since we recorded the current time.\n",
-              active_fr.first, last_data_time_ns, ktime_now_ns,
-              last_data_time_ns - ktime_now_ns);
+          RM_PRINTF("WARNING: FD=%d last data time (%lu ns) is in the future "
+                    "compared to our current time (%ld ns) by %ld ns. This is "
+                    "probably due to a super recent sneaky packet arrival "
+                    "since we recorded the current time.\n",
+                    active_fr.first, last_data_time_ns, ktime_now_ns,
+                    last_data_time_ns - ktime_now_ns);
         }
 
         idle_ns = ktime_now_ns - last_data_time_ns;
