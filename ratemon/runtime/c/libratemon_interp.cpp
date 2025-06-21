@@ -26,7 +26,6 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <cassert>
-#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -40,6 +39,7 @@
 #include <mutex>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <optional>
 #include <queue>
 #include <string>
 #include <sys/socket.h>
@@ -98,7 +98,7 @@ boost::asio::io_context io;
 // Periodically performs scheduling using timer_callback().
 boost::asio::deadline_timer timer(io);
 // Manages the io_context.
-std::thread scheduler_thread;
+std::optional<std::thread> scheduler_thread;
 // Protects writes and reads to active_fds_queue, paused_fds_queue, and
 // fd_to_flow.
 std::mutex lock_scheduler;
@@ -168,7 +168,13 @@ std::string ipv4_to_string(uint32_t addr) {
 // Pause this flow. Return the number of flows that were paused.
 inline int pause_flow(int fd) {
   // Pausing a flow means setting its RWND to 0 B.
-  bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
+  int const err =
+      bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Could not pause flow FD=%d, err=%d (%s)\n", fd, err,
+              strerror(-err));
+    return 0;
+  }
   trigger_ack(fd);
   RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
   return 1;
@@ -202,7 +208,7 @@ int try_find_and_pause(int fd) {
 
 // Attempt to activate this flow. Return the number of activated flows.
 inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
-  if (scheduling_mode == "bytes") {
+  if (scheduling_mode == "byte") {
     // Look up the remaining data in this flow.
     auto pending_bytes = flow_to_pending_bytes.find(fd);
     if (pending_bytes == flow_to_pending_bytes.end()) {
@@ -216,11 +222,21 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // activate_flow() again until the flow has sent this much data.
     pending_bytes->second -= grant_bytes;
     // Assign the grant.
-    bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_bytes,
-                        BPF_ANY);
+    int const err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd],
+                                        &grant_bytes, BPF_ANY);
+    if (err != 0) {
+      RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n", fd,
+                err, strerror(-err));
+      return 0;
+    }
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
-    bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
+    int const err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
+    if (err != 0) {
+      RM_PRINTF("WARNING: Could not delete RWND clamp for flow FD=%d, "
+                "err=%d (%s). The flow might not have been clamped.\n",
+                fd, err, strerror(-err));
+    }
   }
 
   if (trigger_ack_on_activate) {
@@ -256,7 +272,12 @@ int try_activate_one() {
     // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
     // returns negative error code when the flow is not found), then it has no
     // pending data and should be skipped.
-    if (bpf_map_lookup_elem(flow_to_keepalive_fd, &pause_fr, &dummy) != 0) {
+    int const err = bpf_map_lookup_elem(flow_to_keepalive_fd,
+                                        &fd_to_flow[pause_fr], &dummy);
+    RM_PRINTF("INFO: Checking flow FD=%d, dummy=%d, err=%d\n", pause_fr, dummy,
+              err);
+    if (bpf_map_lookup_elem(flow_to_keepalive_fd, &fd_to_flow[pause_fr],
+                            &dummy) != 0) {
       RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", pause_fr);
       paused_fds_queue.push(pause_fr);
       continue;
@@ -281,7 +302,7 @@ int try_pause_one_activate_one(int fd) {
   }
   // Then find one flow in paused_fds_queue to restart.
   int const num_activated = try_activate_one();
-  if (try_activate_one() == 0) {
+  if (num_activated == 0) {
     RM_PRINTF("ERROR: Could not activate a flow after pausing FD=%d\n", fd);
     return 0;
   }
@@ -367,6 +388,14 @@ void timer_callback(const boost::system::error_code &error) {
   boost::posix_time::ptime const now_plus_epoch =
       now + boost::posix_time::microseconds(epoch_us);
 
+  if (static_cast<int>(active_fds_queue.size()) > max_active_flows) {
+    RM_PRINTF("FATAL ERROR: active_fds_queue.size()=%zu is larger than "
+              "max_active_flows=%d\n",
+              active_fds_queue.size(), max_active_flows);
+    // This should never happen.
+    return;
+  }
+
   // Typically, active_fds_queue will be small and paused_fds_queue will be
   // large. Therefore, it is alright for us to iterate through the entire
   // active_fds_queue (multiple times), but we must iterate through as few
@@ -399,11 +428,9 @@ void timer_callback(const boost::system::error_code &error) {
           // This could be fine...perhaps a packet arrived since we captured
           // the current time above?
           RM_PRINTF(
-              "WARNING: FD=%d last data time (%lu ns) is more recent that "
-              "current time (%ld ns) by %ld ns\n",
+              "WARNING: FD=%d last data time (%lu ns) is in the future compared to our current time (%ld ns) by %ld ns. This is probably due to a super recent sneaky packet arrival since we recorded the current time.\n",
               active_fr.first, last_data_time_ns, ktime_now_ns,
               last_data_time_ns - ktime_now_ns);
-          continue;
         }
 
         idle_ns = ktime_now_ns - last_data_time_ns;
@@ -421,7 +448,13 @@ void timer_callback(const boost::system::error_code &error) {
                     active_fr.first);
           // Remove the flow from flow_to_keepalive, signalling that it no
           // longer has pending demand.
-          bpf_map_delete_elem(flow_to_keepalive_fd, &active_fr.first);
+          int const err = bpf_map_delete_elem(flow_to_keepalive_fd,
+                                              &fd_to_flow[active_fr.first]);
+          if (err != 0) {
+            RM_PRINTF("ERROR: Could not delete flow FD=%d from keepalive map, "
+                      "err=%d (%s)\n",
+                      active_fr.first, err, strerror(-err));
+          }
           paused_fds_queue.push(active_fr.first);
           pause_flow(active_fr.first);
           continue;
@@ -584,6 +617,11 @@ void thread_func() {
   lock_scheduler.unlock();
   RM_PRINTF("INFO: Scheduler thread ended\n");
 
+  // Need to manually free the ring buffer.
+  if (done_flows_rb != nullptr) {
+    ring_buffer__free(done_flows_rb);
+  }
+
   if (run) {
     RM_PRINTF("ERROR: Scheduled thread ended before program was signalled to "
               "stop\n");
@@ -639,7 +677,15 @@ void sigint_handler(int signum) {
   case SIGINT:
     RM_PRINTF("INFO: Caught SIGINT\n");
     run = false;
-    scheduler_thread.join();
+    // If this is not the scheduler thread, then join the scheduler thread.
+    if (scheduler_thread &&
+        std::this_thread::get_id() == scheduler_thread->get_id()) {
+      RM_PRINTF("WARNING: Caught SIGINT in the scheduler thread. Should this "
+                "have happened?\n");
+    } else if (scheduler_thread && scheduler_thread->joinable()) {
+      scheduler_thread->join();
+      scheduler_thread.reset();
+    }
     RM_PRINTF("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, nullptr);
     break;
@@ -801,7 +847,10 @@ bool setup() {
                 RM_DONE_FLOWS_PIN_PATH, -err, strerror(-err));
       return false;
     }
-    // Use the ringbuf fd to create a new userspace ringbuf instance.
+    // Use the ringbuf fd to create a new userspace ringbuf instance. Note that
+    // this must be freed with ring_buffer__free(). It also must be freed on
+    // setup() failure, but we create the ringbuffer last so this is not an
+    // issue.
     done_flows_rb = ring_buffer__new(err, handle_grant_done, nullptr, nullptr);
     if (done_flows_rb == nullptr) {
       RM_PRINTF("ERROR: Failed to create ring buffer\n");
@@ -817,7 +866,7 @@ bool setup() {
   sigaction(SIGINT, &action, &oldact);
 
   // Launch the scheduler thread.
-  scheduler_thread = std::thread(thread_func);
+  scheduler_thread.emplace(thread_func);
 
   RM_PRINTF("INFO: Setup complete! max_active_flows=%u, epoch_us=%u, "
             "idle_timeout_ns=%lu, monitor_port_start=%u, monitor_port_end=%u\n",
@@ -828,6 +877,15 @@ bool setup() {
 
 // Fill in the four-tuple for this socket.
 bool get_flow(int fd, struct rm_flow *flow) {
+  if (flow == nullptr) {
+    RM_PRINTF("ERROR: Flow pointer is null\n");
+    return false;
+  }
+  // Initialize flow in case we return early.
+  flow->local_addr = 0;
+  flow->remote_addr = 0;
+  flow->local_port = 0;
+  flow->remote_port = 0;
   // Determine the four-tuple, which we need to track because RWND tuning is
   // applied based on four-tuple.
   struct sockaddr_in local_addr {};
@@ -885,8 +943,14 @@ bool set_cca(int fd, const char *cca) {
 void initial_scheduling(int fd) {
   // Create an entry in flow_to_last_data_time_ns for this flow so that the
   // kprobe program knows to start tracking this flow.
-  bpf_map_update_elem(flow_to_last_data_time_fd, &fd_to_flow[fd], &zero,
-                      BPF_ANY);
+  int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
+                                      &fd_to_flow[fd], &zero, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
+              "FD=%d, err=%d (%s)\n",
+              fd, err, strerror(-err));
+    return;
+  }
   // Should this flow be active or paused?
   if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
     // The max number of flows are active already, so pause this one.
@@ -919,6 +983,8 @@ void initial_scheduling(int fd) {
                 "this, it is possible that the first flow to be tracked was "
                 "started before the scheduler thread could launch.\n");
     }
+    // The above call to timer.expires_from_now() will have cancelled any other
+    // pending async_wait(), so we are safe to call async_wait() again.
     timer.async_wait(&timer_callback);
     RM_PRINTF("INFO: First scheduling event\n");
   }
@@ -972,16 +1038,17 @@ void register_fd_for_monitoring(int fd) {
         flow.remote_port, monitor_port_start, monitor_port_end);
     return;
   }
+  lock_scheduler.lock();
   fd_to_flow[fd] = flow;
   rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
                            flow.remote_port};
   flow_to_fd[key] = fd;
   // Change the CCA to BPF_CUBIC.
   if (!set_cca(fd, RM_BPF_CUBIC)) {
+    lock_scheduler.unlock();
     return;
   }
   // Initial scheduling for this flow.
-  lock_scheduler.lock();
   initial_scheduling(fd);
   lock_scheduler.unlock();
 }
@@ -1009,17 +1076,15 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   if (check_family(addr) != 0) {
     return fd;
   }
-
-  // If we have been signalled to quit, then do nothing more.
-  if (!run) {
+  if (!setup_done) {
     RM_PRINTF(
-        "INFO: libratemon_interp not running, returning FD=%d from 'accept'\n",
-        fd);
+        "ERROR: Cannot handle 'accept', setup not done, returning FD=%d\n", fd);
     return fd;
   }
-
-  if (!setup_done) {
-    RM_PRINTF("ERROR: Cannot handle 'accept', setup not done\n");
+  // If we have been signalled to quit, then do nothing more.
+  if (!run) {
+    RM_PRINTF("INFO: libratemon_interp not running, 'accept' returning FD=%d\n",
+              fd);
     return fd;
   }
 
@@ -1045,17 +1110,16 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   if (check_family(addr) != 0) {
     return fd;
   }
-
-  // If we have been signalled to quit, then do nothing more.
-  if (!run) {
+  if (!setup_done) {
     RM_PRINTF(
-        "INFO: libratemon_interp not running, returning FD=%d from 'connect'\n",
+        "ERROR: Cannot handle 'connect', setup not done, returning FD=%d\n",
         fd);
     return fd;
   }
-
-  if (!setup_done) {
-    RM_PRINTF("ERROR: Cannot handle 'connect', setup not done\n");
+  // If we have been signalled to quit, then do nothing more.
+  if (!run) {
+    RM_PRINTF(
+        "INFO: libratemon_interp not running, 'connect' returning FD=%d\n", fd);
     return fd;
   }
 
@@ -1078,17 +1142,16 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     RM_PRINTF("ERROR: Real 'send' failed for FD=%d\n", sockfd);
     return ret;
   }
-
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'send', setup not done, returning FD=%d\n",
+              sockfd);
+    return ret;
+  }
   // If we have been signalled to quit, then do nothing more.
   if (!run) {
     RM_PRINTF("INFO: libratemon_interp not running, returning from 'send' for "
               "FD=%d\n",
               sockfd);
-    return ret;
-  }
-
-  if (!setup_done) {
-    RM_PRINTF("ERROR: Cannot handle 'send', setup not done\n");
     return ret;
   }
 
@@ -1106,10 +1169,9 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   int const err =
       bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
   if (err != 0) {
-    RM_PRINTF("ERROR: bpf_map_update_elem returned %d (errno=%d: %s) for "
-              "FD=%d, flow_to_keepalive_fd=%d\n",
-              err, errno, strerror(errno), sockfd, flow_to_keepalive_fd);
-    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d\n", sockfd);
+    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d, "
+              "flow_to_keepalive_fd=%d, err=%d (%s)\n",
+              sockfd, flow_to_keepalive_fd, err, strerror(-err));
     lock_scheduler.unlock();
     return ret;
   }
@@ -1148,17 +1210,16 @@ int close(int sockfd) {
   } else {
     RM_PRINTF("INFO: Successful 'close' for FD=%d\n", sockfd);
   }
-
+  if (!setup_done) {
+    RM_PRINTF("ERROR: Cannot handle 'close', setup not done, returning FD=%d\n",
+              sockfd);
+    return ret;
+  }
   // If we have been signalled to quit, then do nothing more.
   if (!run) {
     RM_PRINTF("INFO: libratemon_interp not running, returning from 'close' for "
               "FD=%d\n",
               sockfd);
-    return ret;
-  }
-
-  if (!setup_done) {
-    RM_PRINTF("ERROR: Cannot handle 'close', setup not done\n");
     return ret;
   }
 
@@ -1187,9 +1248,15 @@ int close(int sockfd) {
                 "its scheduler thread.\n");
       run = false;
       lock_scheduler.unlock();
-      scheduler_thread.join();
+      if (scheduler_thread && scheduler_thread->joinable()) {
+        scheduler_thread->join();
+        scheduler_thread.reset();
+      }
       return ret;
     }
+
+    // The flow will be removed from the active_fds_queue and paused_fds_queue
+    // when the scheduler thread wakes up and processes the next event.
   } else {
     RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }
