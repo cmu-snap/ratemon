@@ -154,6 +154,16 @@ inline int jitter(int val) {
          static_cast<int>(std::roundl(val * 0.125));
 }
 
+std::string ipv4_to_string(uint32_t addr) {
+  struct in_addr inaddr {};
+  inaddr.s_addr = htonl(addr);
+  std::array<char, INET_ADDRSTRLEN> buf{};
+  if (inet_ntop(AF_INET, &inaddr, buf.data(), INET_ADDRSTRLEN) != nullptr) {
+    return std::string(buf.data());
+  }
+  return std::string("INVALID_IP");
+}
+
 // Pause this flow. Return the number of flows that were paused.
 inline int pause_flow(int fd) {
   // Pausing a flow means setting its RWND to 0 B.
@@ -585,9 +595,9 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // This flow has exhausted its grant. Remove it from the active flows. It
   // should already be paused (in flow_to_rwnd map with value of 0) because its
   // grant will have been decremented as data arrived.
-  RM_PRINTF("INFO: Flow %u:%u->%u:%u has exhausted its grant\n",
-            flow->remote_addr, flow->remote_port, flow->local_addr,
-            flow->local_port);
+  RM_PRINTF("INFO: Flow %s:%u->%s:%u has exhausted its grant\n",
+            ipv4_to_string(flow->remote_addr).c_str(), flow->remote_port,
+            ipv4_to_string(flow->local_addr).c_str(), flow->local_port);
 
   // Activate a new flow.
   lock_scheduler.lock();
@@ -595,9 +605,9 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
                            flow->local_port, flow->remote_port};
   auto fd = flow_to_fd.find(key);
   if (fd == flow_to_fd.end()) {
-    RM_PRINTF("ERROR: Could not find FD for flow %u:%u->%u:%u\n",
-              flow->remote_addr, flow->remote_port, flow->local_addr,
-              flow->local_port);
+    RM_PRINTF("ERROR: Could not find FD for flow %s:%u->%s:%u\n",
+              ipv4_to_string(flow->remote_addr).c_str(), flow->remote_port,
+              ipv4_to_string(flow->local_addr).c_str(), flow->local_port);
     lock_scheduler.unlock();
     return 0;
   }
@@ -935,8 +945,9 @@ void register_fd_for_monitoring(int fd) {
   if (!get_flow(fd, &flow)) {
     return;
   }
-  RM_PRINTF("INFO: Found flow: %u:%u->%u:%u\n", flow.remote_addr,
-            flow.remote_port, flow.local_addr, flow.local_port);
+  RM_PRINTF("INFO: Found flow: %s:%u->%s:%u\n",
+            ipv4_to_string(flow.remote_addr).c_str(), flow.remote_port,
+            ipv4_to_string(flow.local_addr).c_str(), flow.local_port);
   // Ignore flows that are not in the monitor port range.
   if (flow.remote_port < monitor_port_start ||
       flow.remote_port > monitor_port_end) {
