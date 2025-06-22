@@ -50,6 +50,7 @@
 #include <variant>
 #include <vector>
 
+#include "constant_time_int_queue.h"
 #include "ratemon.h"
 
 struct rm_flow_key {
@@ -105,7 +106,7 @@ std::mutex lock_scheduler;
 // FDs for flows that are are currently active.
 std::queue<std::pair<int, boost::posix_time::ptime>> active_fds_queue;
 // FDs for flows that are currently paused (RWND = 0 B);
-std::queue<int> paused_fds_queue;
+ConstantTimeIntQueue paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
 std::unordered_map<struct rm_flow_key, int> flow_to_fd;
@@ -197,7 +198,7 @@ int try_find_and_pause(int fd) {
     ++active_idx;
     if (active_fr.first == fd) {
       // Pause this flow.
-      paused_fds_queue.push(active_fr.first);
+      paused_fds_queue.enqueue(active_fr.first);
       return pause_flow(active_fr.first);
     }
     // Add this flow back to active_fds_queue.
@@ -262,8 +263,7 @@ int try_activate_one() {
       now + boost::posix_time::microseconds(epoch_us);
   int dummy = 0;
   for (int j = 0; j < num_paused; ++j) {
-    pause_fr = paused_fds_queue.front();
-    paused_fds_queue.pop();
+    pause_fr = paused_fds_queue.dequeue();
     // If we do not know about this flow (e.g., been closed), then skip it.
     // trunk-ignore(clang-tidy/clang-diagnostic-error)
     if (!fd_to_flow.contains(pause_fr)) {
@@ -280,7 +280,7 @@ int try_activate_one() {
     if (bpf_map_lookup_elem(flow_to_keepalive_fd, &fd_to_flow[pause_fr],
                             &dummy) != 0) {
       RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", pause_fr);
-      paused_fds_queue.push(pause_fr);
+      paused_fds_queue.enqueue(pause_fr);
       continue;
     }
     RM_PRINTF("INFO: Decided to activating flow FD=%d\n", pause_fr);
@@ -415,7 +415,7 @@ void timer_callback(const boost::system::error_code &error) {
     }
     // 1.2) If idle timeout mode is enabled, then check if this flow is
     // past its idle timeout. Skip this check if there are no paused
-    // flows.
+    // flows (i.e., no flows seeking activation).
     if (idle_timeout_ns > 0 && !paused_fds_queue.empty()) {
       // Look up this flow's last active time.
       if (bpf_map_lookup_elem(flow_to_last_data_time_fd,
@@ -458,7 +458,7 @@ void timer_callback(const boost::system::error_code &error) {
                       "err=%d (%s)\n",
                       active_fr.first, err, strerror(-err));
           }
-          paused_fds_queue.push(active_fr.first);
+          paused_fds_queue.enqueue(active_fr.first);
           pause_flow(active_fr.first);
           continue;
         }
@@ -940,6 +940,90 @@ bool set_cca(int fd, const char *cca) {
   return true;
 }
 
+// A new request is being sent on this connection. Perform scheduling for flow
+// to determine whether the outgoing request will carry an RWND that initially
+// activates or pauses the flow. This happens on a new request to send(), NOT in
+// the handshake (accept() or connect()). The caller must hold lock_scheduler.
+void schedule_for_new_request(int fd) {
+  // This can happen between calls to the scheduling timer. Race conditions are
+  // avoided by the caller holding lock_scheduler. This must leave all global
+  // state in a safe state.
+
+  // Create an entry in flow_to_last_data_time_ns for this flow so that the
+  // kprobe program knows to start tracking this flow.
+  int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
+                                      &fd_to_flow[fd], &zero, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
+              "FD=%d, err=%d (%s)\n",
+              fd, err, strerror(-err));
+    return;
+  }
+
+  // Need to determine whether the flow is already active or paused.
+  // If it is active, then do nothing. For fairness, do not refresh its timer/grant.
+  // If there is space to activate it and it is paused, then do so.
+  // If there is no space to activate it and it is paused, then do nothing.
+
+  if (true /* flow in active */) {
+    return;
+  }
+
+  if (static_cast<int>(active_fds_queue.size()) < max_active_flows) {
+    if (paused_fds_queue.contains(fd)) {
+      paused_fds_queue.find_and_delete(fd);
+    }
+
+    RM_PRINTF("INFO: Flow FD=%d is not active, but there is space to activate "
+              "it, so activating it now\n",
+              fd);
+    // Activate the flow, but do not trigger an ACK because this is the
+    // initial scheduling, which takes place during the handshake. In practice,
+    // this call does nothing for time-based scheduling, but it is included for
+    // completeness and to get a log indicating the flow was activated.
+    active_fds_queue.emplace(
+        fd, boost::posix_time::microsec_clock::local_time() +
+                boost::posix_time::microseconds(epoch_us) +
+                boost::posix_time::microseconds(jitter(epoch_us)));
+    if (activate_flow(fd, false /* trigger_ack_on_activate */) == 0) {
+      RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
+    } else {
+      RM_PRINTF("INFO: Activated flow FD=%d\n", fd);
+    }
+  } else {
+    if (paused_fds_queue.contains(fd)) {
+      return;
+    }
+    RM_PRINTF("INFO: Flow FD=%d is not active, but there is no space to "
+              "activate it, so pausing it now\n",
+              fd);
+    // Pause the flow.
+    paused_fds_queue.enqueue(fd);
+    pause_flow(fd);
+    RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
+  }
+
+
+  if (paused_fds_queue.contains(fd)) {
+      if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
+          // The flow is paused, but we cannot activate it because the max number of
+          // flows are already active. Do nothing.
+          RM_PRINTF("INFO: Cannot activate FD=%d, max_active_flows reached\n", fd);
+          return;
+      }
+
+      active_fds_queue.emplace(
+          fd, boost::posix_time::microsec_clock::local_time() +
+                  boost::posix_time::microseconds(epoch_us) +
+                  boost::posix_time::microseconds(jitter(epoch_us)));
+      RM_PRINTF("INFO: Activated FD=%d, awaken in the future by %ld us\n", fd,
+                (active_fds_queue.back().second -
+                 boost::posix_time::microsec_clock::local_time())
+                    .total_microseconds());
+      paused_fds_queue.find_and_delete(fd);
+  }
+}
+
 // Perform initial scheduling for this flow. This should happen during the
 // handshake, in either accept() or connect(). The caller must hold
 // lock_scheduler.
@@ -957,7 +1041,7 @@ void initial_scheduling(int fd) {
   // Should this flow be active or paused?
   if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
     // The max number of flows are active already, so pause this one.
-    paused_fds_queue.push(fd);
+    paused_fds_queue.enqueue(fd);
     pause_flow(fd);
     return;
   }

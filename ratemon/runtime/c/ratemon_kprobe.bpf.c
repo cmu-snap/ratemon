@@ -80,7 +80,8 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // number, and none of SYN, FIN, or RST are set".
   u32 payload_bytes = len - (doff * 4);
   if ((payload_bytes <= 1) && (seq == rcv_nxt - 1) && !syn && !fin && !rst) {
-    // This is a keepalive packet.
+    // This is a keepalive packet. Set a 1 to indicate that this flow received a
+    // keepalive. This 1 will be removed when the flow goes idle.
     bpf_printk("INFO: 'tcp_rcv_established' found keepalive for flow %u<->%u",
                flow.local_port, flow.remote_port);
     int one = 1;

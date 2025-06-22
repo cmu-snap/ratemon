@@ -43,7 +43,8 @@ struct {
 } flow_to_last_data_time_ns SEC(".maps");
 
 // Flows in this map have received a recent keepalive and have not gone idle
-// since, so they are considered to be active.
+// since, so they are considered to be active. A flow's entry is set to 1 on the
+// receipt of a keepalive packet and deleted when that flow goes idle.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, RM_MAX_FLOWS);
