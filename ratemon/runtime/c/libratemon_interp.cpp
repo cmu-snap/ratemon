@@ -168,7 +168,7 @@ std::string ipv4_to_string(uint32_t addr) {
 }
 
 // Pause this flow. Return the number of flows that were paused.
-inline int pause_flow(int fd) {
+inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   // Pausing a flow means setting its RWND to 0 B.
   int const err =
       bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
@@ -177,7 +177,11 @@ inline int pause_flow(int fd) {
               strerror(-err));
     return 0;
   }
-  trigger_ack(fd);
+  if (trigger_ack_on_pause) {
+    // Trigger an ACK to be sent on this flow.
+    RM_PRINTF("INFO: Triggering ACK for paused flow FD=%d\n", fd);
+    trigger_ack(fd);
+  }
   RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
   return 1;
 }
@@ -1070,7 +1074,7 @@ bool schedule_on_new_request(int fd) {
   active_fds_queue.emplace(
       fd, now + boost::posix_time::microseconds(epoch_us) +
               boost::posix_time::microseconds(jitter(epoch_us)));
-  if (activate_flow(fd, true /* trigger_ack_on_activate */) == 0) {
+  if (activate_flow(fd, false /* trigger_ack_on_activate */) == 0) {
     RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
     return false;
   }
@@ -1097,6 +1101,40 @@ bool schedule_on_new_request(int fd) {
     timer.async_wait(&timer_callback);
     RM_PRINTF("INFO: Exiting idle check mode.\n");
   }
+  return true;
+}
+
+// This should be called before the real send() to ensure that the correct RWND
+// is encoded in the outgoing burst request.
+bool handle_send(int sockfd, const void *buf, size_t len) {
+  lock_scheduler.lock();
+  // Update the flow_to_keepalive map to indicate that this flow has pending
+  // data.
+  if (!set_keepalive(sockfd)) {
+    RM_PRINTF("ERROR: Failed to update keepalive for FD=%d\n", sockfd);
+    lock_scheduler.unlock();
+    return false;
+  }
+  // If we are doing byte-based scheduling, then track the size of this request.
+  // Parse buf, which should contain 2 ints. The first is the response size,
+  // which is what we want.
+  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
+    // trunk-ignore(clang-tidy/google-readability-casting)
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+    int *buf_int = (int *)buf;
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    int const bytes = buf_int[0];
+    // int sender_wait_us = buf_int[1];
+    flow_to_pending_bytes[sockfd] = bytes;
+    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+  }
+  // This is the key part. Determine whether this flow will be active or paused.
+  if (!schedule_on_new_request(sockfd)) {
+    RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
+    lock_scheduler.unlock();
+    return false;
+  }
+  lock_scheduler.unlock();
   return true;
 }
 
@@ -1187,56 +1225,21 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     RM_PRINTF("ERROR: Failed to query dlsym for 'send': %s\n", dlerror());
     return -1;
   }
+  // Do any ratemon-specific handling before calling the real send().
+  if (setup_done && run) {
+    if (!handle_send(sockfd, buf, len)) {
+      RM_PRINTF("ERROR: Failed to handle 'send' for FD=%d\n", sockfd);
+    }
+  } else {
+    RM_PRINTF("ERROR: Cannot handle 'send' for FD=%d. setup_done=%d, run=%d\n",
+              sockfd, setup_done, run);
+  }
   ssize_t const ret = real_send(sockfd, buf, len, flags);
   if (ret == -1) {
     RM_PRINTF("ERROR: Real 'send' failed for FD=%d\n", sockfd);
     return ret;
   }
-  if (!setup_done) {
-    RM_PRINTF("ERROR: Cannot handle 'send', setup not done, returning FD=%d\n",
-              sockfd);
-    return ret;
-  }
-  // If we have been signalled to quit, then do nothing more.
-  if (!run) {
-    RM_PRINTF("INFO: libratemon_interp not running, returning from 'send' for "
-              "FD=%d\n",
-              sockfd);
-    return ret;
-  }
-
-  lock_scheduler.lock();
-  // Update the flow_to_keepalive map to indicate that this flow has pending
-  // data.
-  if (!set_keepalive(sockfd)) {
-    RM_PRINTF("ERROR: Failed to update keepalive for FD=%d\n", sockfd);
-    lock_scheduler.unlock();
-    return ret;
-  }
-
-  // If we are doing byte-based scheduling, then track the size of this request.
-  // Parse buf, which should contain 2 ints. The first is the response size,
-  // which is what we want.
-  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
-    // trunk-ignore(clang-tidy/google-readability-casting)
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
-    int *buf_int = (int *)buf;
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int const bytes = buf_int[0];
-    // int sender_wait_us = buf_int[1];
-    flow_to_pending_bytes[sockfd] = bytes;
-    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
-  }
-
-  // This is the key part. Determine whether this flow will be active or paused.
-  if (!schedule_on_new_request(sockfd)) {
-    RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
-    lock_scheduler.unlock();
-    return ret;
-  }
-
   RM_PRINTF("INFO: Successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
-  lock_scheduler.unlock();
   return ret;
 }
 
