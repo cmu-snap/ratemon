@@ -940,158 +940,26 @@ bool set_cca(int fd, const char *cca) {
   return true;
 }
 
-// A new request is being sent on this connection. Perform scheduling for flow
-// to determine whether the outgoing request will carry an RWND that initially
-// activates or pauses the flow. This happens on a new request to send(), NOT in
-// the handshake (accept() or connect()). The caller must hold lock_scheduler.
-void schedule_for_new_request(int fd) {
-  // This can happen between calls to the scheduling timer. Race conditions are
-  // avoided by the caller holding lock_scheduler. This must leave all global
-  // state in a safe state.
-
-  // Create an entry in flow_to_last_data_time_ns for this flow so that the
-  // kprobe program knows to start tracking this flow.
-  int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
-                                      &fd_to_flow[fd], &zero, BPF_ANY);
+// Add a flow to the flow_to_keepalive map. Must hold lock_scheduler before
+// calling this function.
+bool set_keepalive(int sockfd) {
+  auto flow = fd_to_flow.find(sockfd);
+  if (flow == fd_to_flow.end()) {
+    // We are not tracking this flow, so ignore it.
+    RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+    return false;
+  }
+  int one = 1;
+  int const err =
+      bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
   if (err != 0) {
-    RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
-              "FD=%d, err=%d (%s)\n",
-              fd, err, strerror(-err));
-    return;
+    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d, "
+              "flow_to_keepalive_fd=%d, err=%d (%s)\n",
+              sockfd, flow_to_keepalive_fd, err, strerror(-err));
+    return false;
   }
-
-  // Need to determine whether the flow is already active or paused.
-  // If it is active, then do nothing. For fairness, do not refresh its timer/grant.
-  // If there is space to activate it and it is paused, then do so.
-  // If there is no space to activate it and it is paused, then do nothing.
-
-  if (true /* flow in active */) {
-    return;
-  }
-
-  if (static_cast<int>(active_fds_queue.size()) < max_active_flows) {
-    if (paused_fds_queue.contains(fd)) {
-      paused_fds_queue.find_and_delete(fd);
-    }
-
-    RM_PRINTF("INFO: Flow FD=%d is not active, but there is space to activate "
-              "it, so activating it now\n",
-              fd);
-    // Activate the flow, but do not trigger an ACK because this is the
-    // initial scheduling, which takes place during the handshake. In practice,
-    // this call does nothing for time-based scheduling, but it is included for
-    // completeness and to get a log indicating the flow was activated.
-    active_fds_queue.emplace(
-        fd, boost::posix_time::microsec_clock::local_time() +
-                boost::posix_time::microseconds(epoch_us) +
-                boost::posix_time::microseconds(jitter(epoch_us)));
-    if (activate_flow(fd, false /* trigger_ack_on_activate */) == 0) {
-      RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
-    } else {
-      RM_PRINTF("INFO: Activated flow FD=%d\n", fd);
-    }
-  } else {
-    if (paused_fds_queue.contains(fd)) {
-      return;
-    }
-    RM_PRINTF("INFO: Flow FD=%d is not active, but there is no space to "
-              "activate it, so pausing it now\n",
-              fd);
-    // Pause the flow.
-    paused_fds_queue.enqueue(fd);
-    pause_flow(fd);
-    RM_PRINTF("INFO: Paused flow FD=%d\n", fd);
-  }
-
-
-  if (paused_fds_queue.contains(fd)) {
-      if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
-          // The flow is paused, but we cannot activate it because the max number of
-          // flows are already active. Do nothing.
-          RM_PRINTF("INFO: Cannot activate FD=%d, max_active_flows reached\n", fd);
-          return;
-      }
-
-      active_fds_queue.emplace(
-          fd, boost::posix_time::microsec_clock::local_time() +
-                  boost::posix_time::microseconds(epoch_us) +
-                  boost::posix_time::microseconds(jitter(epoch_us)));
-      RM_PRINTF("INFO: Activated FD=%d, awaken in the future by %ld us\n", fd,
-                (active_fds_queue.back().second -
-                 boost::posix_time::microsec_clock::local_time())
-                    .total_microseconds());
-      paused_fds_queue.find_and_delete(fd);
-  }
-}
-
-// Perform initial scheduling for this flow. This should happen during the
-// handshake, in either accept() or connect(). The caller must hold
-// lock_scheduler.
-void initial_scheduling(int fd) {
-  // Create an entry in flow_to_last_data_time_ns for this flow so that the
-  // kprobe program knows to start tracking this flow.
-  int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
-                                      &fd_to_flow[fd], &zero, BPF_ANY);
-  if (err != 0) {
-    RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
-              "FD=%d, err=%d (%s)\n",
-              fd, err, strerror(-err));
-    return;
-  }
-  // Should this flow be active or paused?
-  if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
-    // The max number of flows are active already, so pause this one.
-    paused_fds_queue.enqueue(fd);
-    pause_flow(fd);
-    return;
-  }
-
-  // Less than the max number of flows are active, so make this one active.
-  boost::posix_time::ptime const now =
-      boost::posix_time::microsec_clock::local_time();
-  auto awaken = now + boost::posix_time::microseconds(epoch_us) +
-                boost::posix_time::microseconds(jitter(epoch_us));
-  active_fds_queue.emplace(fd, awaken);
-  RM_PRINTF(
-      "Initial scheduling for flow FD=%d, awaken in the future by %ld us\n", fd,
-      (active_fds_queue.front().second - now).total_microseconds());
-  RM_PRINTF("INFO: Allowing new flow FD=%d\n", fd);
-  if (active_fds_queue.size() == 1) {
-    if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
-      // Timers usually expire naturally, so there is never a timer to cancel.
-      // This is a special case where we have a new flow and therefore need to
-      // cancel the existing timer and reset it with a new duration. We only
-      // do this if there is a single active flow, which we just put in
-      // active_fds_queue. If there are multiple active flows, then the timer
-      // was already correctly tracking the existing head of the queue.
-      // Basically, this cancels slow-check mode and starts epoch-based
-      // checks.
-      RM_PRINTF("ERROR: Should have cancelled 1 timer. If you are seeing "
-                "this, it is possible that the first flow to be tracked was "
-                "started before the scheduler thread could launch.\n");
-    }
-    // The above call to timer.expires_from_now() will have cancelled any other
-    // pending async_wait(), so we are safe to call async_wait() again.
-    timer.async_wait(&timer_callback);
-    RM_PRINTF("INFO: First scheduling event\n");
-  }
-
-  // If we are using time-based scheduling, then we can immediately set the
-  // correct RWND for the flow. We cannot do this for byte-based scheduling
-  // because we do not yet have an entry for the flow in pending_bytes. This
-  // is because initial_scheduling() is called during the handshake, whereas
-  // pending_bytes is initially populated during the burst request, which
-  // happens after the handshake.
-  if (scheduling_mode == "time") {
-    // Activate the flow, but do not trigger an ACK because this is the
-    // initial scheduling, which takes place during the handshake. In
-    // practice, this call does nothing for time-based scheduling, but it is
-    // included for completeness and to get a log indicating the flow was
-    // activated.
-    if (activate_flow(fd, false /* trigger_ack_on_activate */) == 0) {
-      RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
-    }
-  }
+  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
+  return true;
 }
 
 // Verify that an addr is IPv4.
@@ -1135,13 +1003,108 @@ void register_fd_for_monitoring(int fd) {
     lock_scheduler.unlock();
     return;
   }
-  // Initial scheduling for this flow.
-  initial_scheduling(fd);
+
+  // Create an entry in flow_to_last_data_time_ns for this flow so that the
+  // kprobe program knows to start tracking this flow.
+  int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
+                                      &fd_to_flow[fd], &zero, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
+              "FD=%d, err=%d (%s)\n",
+              fd, err, strerror(-err));
+    return;
+  }
+
+  // A new flow is automatically paused.
+  paused_fds_queue.enqueue(fd);
+  pause_flow(fd);
   lock_scheduler.unlock();
+}
+
+// A new request is being sent on this connection. Perform scheduling for the
+// flow to determine whether the outgoing request will carry an RWND that
+// initially activates or pauses the flow. This happens on a new request to
+// send(), NOT in the handshake (accept() or connect()). The caller must hold
+// lock_scheduler.
+//
+// This function can be called between calls to the scheduling timer. Race
+// conditions are avoided by the caller holding lock_scheduler. This must leave
+// all global state in a safe state.
+//
+// We need to determine whether the flow is already active or paused. If it is
+// active, then do nothing. For fairness, do not refresh its timer/grant. If
+// there is space to activate it and it is paused, then do so. If there is no
+// space to activate it and it is paused, then do nothing.
+bool schedule_on_new_request(int fd) {
+  if (!paused_fds_queue.contains(fd)) {
+    // The flow is not paused, so it must be active already. Do nothing.
+    RM_PRINTF("INFO: Flow FD=%d is already active, doing nothing\n", fd);
+    return true;
+  }
+
+  if (static_cast<int>(active_fds_queue.size()) >= max_active_flows) {
+    RM_PRINTF("INFO: Flow FD=%d is paused and there is no space to "
+              "activate it, so doing nothing.\n",
+              fd);
+    return true;
+  }
+
+  // The flow is paused but we can activate it.
+  RM_PRINTF("INFO: Flow FD=%d is not active, but there is space to activate "
+            "it, so activating it now\n",
+            fd);
+  if (!paused_fds_queue.find_and_delete(fd)) {
+    RM_PRINTF("ERROR: Could not find and delete flow FD=%d from paused "
+              "queue, this is a bug!\n",
+              fd);
+    return false;
+  }
+
+  // Activate the flow, but do not trigger an ACK because this scheduling was
+  // triggered by an outgoing burst request, and the grant will be carried in
+  // the burst request itself. In practice, this call does nothing for
+  // time-based scheduling, but it is included for completeness and to get a log
+  // indicating the flow was activated.
+  boost::posix_time::ptime const now =
+      boost::posix_time::microsec_clock::local_time();
+  active_fds_queue.emplace(
+      fd, now + boost::posix_time::microseconds(epoch_us) +
+              boost::posix_time::microseconds(jitter(epoch_us)));
+  if (activate_flow(fd, true /* trigger_ack_on_activate */) == 0) {
+    RM_PRINTF("ERROR: Failed to activate flow FD=%d\n", fd);
+    return false;
+  }
+  RM_PRINTF("INFO: Activated flow FD=%d\n", fd);
+
+  if (active_fds_queue.size() == 1) {
+    // There were no flows active, so we need to exit slow check mode.
+    if (timer.expires_from_now(active_fds_queue.front().second - now) != 1) {
+      // Timers usually expire naturally, so there is never a timer to cancel.
+      // This is a special case where we have a new flow and therefore need to
+      // cancel the existing timer and reset it with a new duration. We only
+      // do this if there is a single active flow, which we just put in
+      // active_fds_queue. If there are multiple active flows, then the timer
+      // was already correctly tracking the existing head of the queue.
+      // Basically, this cancels slow-check mode and starts epoch-based
+      // checks.
+      RM_PRINTF("ERROR: Should have cancelled 1 timer. If you are seeing "
+                "this, it is possible that the first flow to be tracked was "
+                "started before the scheduler thread could launch.\n");
+      return false;
+    }
+    // The above call to timer.expires_from_now() will have cancelled any
+    // other pending async_wait(), so we are safe to call async_wait() again.
+    timer.async_wait(&timer_callback);
+    RM_PRINTF("INFO: Exiting idle check mode.\n");
+  }
+  return true;
 }
 
 // accept() and connect() are the two entrance points for libratemon_interp.
 // accept() handles the responder side and connect() handles the initiator side.
+// On these calls, we register the socket for monitoring and set the CCA to
+// BPF_CUBIC. All flows are initially paused. Scheduling takes place when the
+// applications transmits a burst request via send().
 //
 // For some reason, C++ function name mangling does not prevent us from
 // overriding accept() and connect(), so we do not need 'extern "C"'.
@@ -1242,27 +1205,14 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     return ret;
   }
 
+  lock_scheduler.lock();
   // Update the flow_to_keepalive map to indicate that this flow has pending
   // data.
-  lock_scheduler.lock();
-  auto flow = fd_to_flow.find(sockfd);
-  if (flow == fd_to_flow.end()) {
-    // We are not tracking this flow, so ignore it.
-    RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+  if (!set_keepalive(sockfd)) {
+    RM_PRINTF("ERROR: Failed to update keepalive for FD=%d\n", sockfd);
     lock_scheduler.unlock();
     return ret;
   }
-  int one = 1;
-  int const err =
-      bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
-  if (err != 0) {
-    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d, "
-              "flow_to_keepalive_fd=%d, err=%d (%s)\n",
-              sockfd, flow_to_keepalive_fd, err, strerror(-err));
-    lock_scheduler.unlock();
-    return ret;
-  }
-  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
 
   // If we are doing byte-based scheduling, then track the size of this request.
   // Parse buf, which should contain 2 ints. The first is the response size,
@@ -1276,6 +1226,13 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
     // int sender_wait_us = buf_int[1];
     flow_to_pending_bytes[sockfd] = bytes;
     RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+  }
+
+  // This is the key part. Determine whether this flow will be active or paused.
+  if (!schedule_on_new_request(sockfd)) {
+    RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
+    lock_scheduler.unlock();
+    return ret;
   }
 
   RM_PRINTF("INFO: Successful 'send' for FD=%d, sent %zd bytes\n", sockfd, ret);
