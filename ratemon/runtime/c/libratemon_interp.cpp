@@ -559,10 +559,12 @@ void timer_callback(const boost::system::error_code &error) {
     if (scheduling_mode == "byte") {
       if (idle_timeout_ns == 0U) {
         // If we are not using idle timeout mode...
-        RM_PRINTF("INFO: In byte-based scheduling mode but no idle timeout, falling back to slow check mode\n");
+        RM_PRINTF("INFO: In byte-based scheduling mode but no idle timeout, "
+                  "falling back to slow check mode\n");
         when = one_sec;
       } else {
-        RM_PRINTF("INFO: In byte-based scheduling mode, scheduling timer for next idle timeout\n");
+        RM_PRINTF("INFO: In byte-based scheduling mode, scheduling timer for "
+                  "next idle timeout\n");
         when = boost::posix_time::microsec(idle_timeout_us);
       }
     } else if (idle_timeout_ns == 0U) {
