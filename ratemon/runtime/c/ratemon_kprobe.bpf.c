@@ -16,6 +16,8 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+#define max(x, y) ((x) > (y) ? (x) : (y))
+
 // 'tcp_rcv_established' will be used to track the last time that a flow
 // received data so that we can determine when to classify a flow as idle.
 SEC("kprobe/tcp_rcv_established")
@@ -92,14 +94,16 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
     }
   }
 
-  // If this packet does not contain new data (e.g., it is a pure ACK or a
-  // retransmission), then we are not interested in it.
-  if (seq < rcv_nxt) {
-    bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data "
-               "for flow %u<->%u",
-               flow.local_port, flow.remote_port);
-    return 0;
-  }
+  // // If this packet does not contain new data (e.g., it is a pure ACK or a
+  // // retransmission), then we are not interested in it.
+  // if (seq < rcv_nxt) {
+  //   bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data "
+  //              "for flow %u<->%u",
+  //              flow.local_port, flow.remote_port);
+  //   return 0;
+  // }
+
+  u32 grant_used = max(0, (seq + payload_bytes) - rcv_nxt);
 
   // Check if we should record the last data time for this flow.
   if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) != NULL) {
@@ -123,13 +127,25 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   if (rwnd_ptr == NULL) {
     return 0;
   }
+  // Wait until here to print this log to we only log flows we care about.
+  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u received %u bytes",
+             flow.local_port, flow.remote_port, payload_bytes);
+  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u used %u bytes of grant",
+             flow.local_port, flow.remote_port, grant_used);
   bpf_printk(
       "INFO: 'tcp_rcv_established' flow %u<->%u is active and in flow_to_rwnd",
       flow.local_port, flow.remote_port);
+  if (*rwnd_ptr == 0) {
+    bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has already exhausted "
+               "its grant, so we do nothing",
+               flow.local_port, flow.remote_port);
+    return 0;
+  }
+
   // Decrement the rwnd by the payload size to account for grant that has been
   // used.
-  if (*rwnd_ptr >= payload_bytes) {
-    *rwnd_ptr -= payload_bytes;
+  if (*rwnd_ptr >= grant_used) {
+    *rwnd_ptr -= grant_used;
   } else {
     *rwnd_ptr = 0;
   }
@@ -145,9 +161,17 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   }
   // If the flow has grant remaining, then we are done.
   if (*rwnd_ptr > 0) {
+    bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has remaining grant "
+               "%u, so it is not done",
+               flow.local_port, flow.remote_port, *rwnd_ptr);
     return 0;
   }
-  // The flow has exhausted its grant, so add it to the done_flows ringbuf.
+
+  // The flow has exhausted its grant with this segment, so add it to the
+  // done_flows ringbuf.
+  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has exhausted its "
+             "grant, adding to done_flows",
+             flow.local_port, flow.remote_port);
   if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
     bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
                "%u<->%u to ringbuf",

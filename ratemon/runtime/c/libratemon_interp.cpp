@@ -100,6 +100,8 @@ boost::asio::io_context io;
 boost::asio::deadline_timer timer(io);
 // Manages the io_context.
 std::optional<std::thread> scheduler_thread;
+// Thread to poll the done_flows ringbuffer for byte-based scheduling.
+std::optional<std::thread> ringbuf_poll_thread;
 // Protects writes and reads to active_fds_queue, paused_fds_queue, and
 // fd_to_flow.
 std::mutex lock_scheduler;
@@ -235,6 +237,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
                 err, strerror(-err));
       return 0;
     }
+    RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
+              grant_bytes);
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
     int const err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
@@ -287,7 +291,7 @@ int try_activate_one() {
       paused_fds_queue.enqueue(pause_fr);
       continue;
     }
-    RM_PRINTF("INFO: Decided to activating flow FD=%d\n", pause_fr);
+    RM_PRINTF("INFO: Decided to activate flow FD=%d\n", pause_fr);
     // Randomly jitter the epoch time by +/- 12.5%.
     active_fds_queue.emplace(
         pause_fr,
@@ -641,9 +645,11 @@ void thread_func() {
     RM_PRINTF("ERROR: Scheduled thread ended before program was signalled to "
               "stop\n");
   }
+  RM_PRINTF("INFO: Scheduler thread ended\n");
 }
 
 int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
+  RM_PRINTF("INFO: In handle_grant_done, data_sz=%zu\n", data_sz);
   if (!setup_done) {
     RM_PRINTF("ERROR: Cannot handle grant done, setup not done\n");
     return 0;
@@ -686,6 +692,19 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   return 0;
 }
 
+// Function to poll the done_flows ringbuffer. Only used in byte-based scheduling mode.
+void ringbuf_poll_func() {
+  RM_PRINTF("INFO: Ringbuf poll thread started\n");
+  while (run && done_flows_rb != nullptr) {
+    int const ret = ring_buffer__poll(done_flows_rb, 100 /* timeout ms */);
+    if (ret < 0) {
+      RM_PRINTF("ERROR: ring_buffer__poll returned %d\n", ret);
+      break;
+    }
+  }
+  RM_PRINTF("INFO: Ringbuf poll thread ended\n");
+}
+
 // Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
@@ -700,6 +719,14 @@ void sigint_handler(int signum) {
     } else if (scheduler_thread && scheduler_thread->joinable()) {
       scheduler_thread->join();
       scheduler_thread.reset();
+    }
+    if (ringbuf_poll_thread &&
+        std::this_thread::get_id() == ringbuf_poll_thread->get_id()) {
+      RM_PRINTF("WARNING: Caught SIGINT in the ringbuf poll thread. Should "
+                "this have happened?\n");
+    } else if (ringbuf_poll_thread && ringbuf_poll_thread->joinable()) {
+      ringbuf_poll_thread->join();
+      ringbuf_poll_thread.reset();
     }
     RM_PRINTF("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, nullptr);
@@ -871,6 +898,9 @@ bool setup() {
       RM_PRINTF("ERROR: Failed to create ring buffer\n");
       return false;
     }
+    ringbuf_poll_thread.emplace(ringbuf_poll_func);
+    RM_PRINTF(
+        "INFO: Successfully created ring buffer for byte-based scheduling\n");
   }
 
   // Catch SIGINT to end the program.
@@ -1307,6 +1337,10 @@ int close(int sockfd) {
       if (scheduler_thread && scheduler_thread->joinable()) {
         scheduler_thread->join();
         scheduler_thread.reset();
+      }
+      if (ringbuf_poll_thread && ringbuf_poll_thread->joinable()) {
+        ringbuf_poll_thread->join();
+        ringbuf_poll_thread.reset();
       }
       return ret;
     }

@@ -109,12 +109,18 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
   // Apply the window scale to the configured RWND value.
   u16 rwnd_with_win_scale = (u16)(*rwnd >> *win_scale);
+  // The smallest RWND we can set with accuracy is 1 << win scale. If applying
+  // the win scale make the RWND 0 when it was not 0 before, then set it to 1 so
+  // we do not accidentally pause the flow. We know the RWND is not supposed to
+  // be 0 at this point in the code because there is a check for that case
+  // above.
+  u16 rwnd_to_set = rwnd_with_win_scale == 0 ? 1 : rwnd_with_win_scale;
   // Set the RWND value in the TCP header. If the existing advertised window
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
-  tcp->window = min(tcp->window, rwnd_with_win_scale);
+  tcp->window = min(tcp->window, rwnd_to_set);
   bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
              "to %u (win scale: %u)",
-             flow.remote_port, rwnd_with_win_scale, *win_scale);
+             flow.remote_port, rwnd_to_set, *win_scale);
   return TC_ACT_OK;
 }
