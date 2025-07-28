@@ -231,29 +231,33 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // Determine how many bytes to grant.
     int const grant_bytes = std::min(epoch_bytes, pending_bytes->second);
     // Decrement the pending bytes by the grant size since the flow will be able
-    // to send this much data. We can be confident that that we will not call
+    // to send this much data. We can be confident that we will not call
     // activate_flow() again until the flow has sent this much data.
+    // Note: We need to update pending_bytes here and not as data is received to
+    // avoid race conditions.
     pending_bytes->second -= grant_bytes;
 
-    // Check we already have a rm_grant_info for this flow, and if so update it
-    // directly.
+    // Check if we already have a rm_grant_info for this flow, and if so update
+    // it.
     struct rm_grant_info *existing_grant = nullptr;
     int err =
         bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &existing_grant);
-    if (err == 0 || existing_grant == nullptr) {
+    if (err == 0 && existing_grant != nullptr) {
+      existing_grant->override_rwnd_bytes =
+          0xFFFFFFFF; // Will be ignored in favor of the following grant info.
       existing_grant->new_grant_bytes = static_cast<uint32_t>(grant_bytes);
     } else {
       // No existing rm_grant_info, so create one.
       RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
                 "new grant\n",
                 fd);
-      struct rm_grant_info grant = {
-          .override_rwnd_bytes =
-              0xFFFFFFFF, // Ignored. Use the following grant info.
+      struct rm_grant_info new_grant = {
+          .override_rwnd_bytes = 0xFFFFFFFF, // Will be ignored in favor of the
+                                             // following grant info.
           .new_grant_bytes = static_cast<uint32_t>(grant_bytes),
           .grant_seq_num_end_bytes = 0,
       };
-      err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant,
+      err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &new_grant,
                                 BPF_ANY);
       if (err != 0) {
         RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n",

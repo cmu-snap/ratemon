@@ -14,13 +14,14 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+#define min(x, y) ((x) < (y) ? (x) : (y))
+#define max(x, y) ((x) > (y) ? (x) : (y))
+
 enum {
   ETH_P_IP = 0x0800 /* Internet Protocol packet	*/
 };
 
 enum { TC_ACT_OK = 0 };
-
-#define min(x, y) ((x) < (y) ? (x) : (y))
 
 // Perform RWND tuning at TC egress. If a flow has an entry in flow_to_rwnd,
 // then install that value in the advertised window field. Inspired by:
@@ -81,9 +82,37 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   if (grant->override_rwnd_bytes == 0xFFFFFFFF) {
     // Override is 2^32-1, so use grant info.
     // TODO(unknown): Handle sequence number wraparound.
-    if (tcp->ack_seq > grant->grant_seq_num_end_bytes) {
+    if (grant->new_grant_bytes > 0) {
+      // This flow received a new grant. Update the grant end seq num and clear
+      // the new grant field. Support stacking grants by basing the new end seq
+      // num off of the old end seq num if the former is already ahead of the
+      // ACK seq num, e.g., if there is currently a grant active.
+      grant->grant_seq_num_end_bytes =
+          max(tcp->ack_seq, grant->grant_seq_num_end_bytes) +
+          grant->new_grant_bytes;
+      rwnd = grant->new_grant_bytes;
+      grant->new_grant_bytes = 0;
+    } else if (tcp->ack_seq > grant->grant_seq_num_end_bytes) {
+      // The flow has no grant and should be paused.
+
+      // TODO(unknown): Potential problem here if we do not accurately track
+      // granted bytes. Need to make sure we do not grant past the end of the
+      // request size otherwise we'll never get to this done condition.
+
       rwnd = 0;
+      // The flow has exhausted its grant with this segment, so add it to the
+      // done_flows ringbuf.
+      bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has no grant, "
+                 "adding to done_flows",
+                 flow.local_port, flow.remote_port);
+      if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
+        bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
+                   "%u<->%u to ringbuf",
+                   flow.local_port, flow.remote_port);
+        return 0;
+      }
     } else {
+      // The flow is on an existing grant.
       rwnd = grant->grant_seq_num_end_bytes - tcp->ack_seq;
     }
   } else {

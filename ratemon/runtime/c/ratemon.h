@@ -70,7 +70,9 @@ struct rm_grant_info {
   // If set, then look up the ACK seq, use this to set the
   // grant_seq_num_end_bytes, and then reset this to 0.
   uint32_t new_grant_bytes;
-  // The sequence number that the grant ends at, used to calculate the RWND.
+  // The sequence number that the grant ends at, used to calculate the RWND. We
+  // always track grants in relation to sequence numbers, since grants are
+  // windows.
   uint32_t grant_seq_num_end_bytes;
 };
 
