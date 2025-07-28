@@ -62,4 +62,15 @@ struct rm_flow {
   uint16_t remote_port;
 };
 
+// Contains grant / RWND information for a flow.
+struct rm_grant_info {
+  // If set, then ignore the other fields and use this value as the RWND.
+  uint32_t override_rwnd_bytes;
+  // If set, then look up the ACK seq, use this to set the
+  // grant_seq_num_end_bytes, and then reset this to 0.
+  uint32_t new_grant_bytes;
+  // The sequence number that the grant ends at, used to calculate the RWND.
+  uint32_t grant_seq_num_end_bytes;
+};
+
 #endif /* __RATEMON_H */

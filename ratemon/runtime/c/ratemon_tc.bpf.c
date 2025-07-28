@@ -71,8 +71,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                          .remote_addr = bpf_ntohl(ip->daddr),
                          .local_port = bpf_ntohs(tcp->source),
                          .remote_port = bpf_ntohs(tcp->dest)};
-  u32 *rwnd = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
-  if (rwnd == NULL) {
+  struct rm_grant_info *grant = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
+
+  if (grant == NULL) {
     // This flow does not have a custom RWND value.
     // bpf_printk(
     //     "WARNING: flow with local port %u and remote port %u has no RWND
@@ -87,7 +88,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   //   return TC_ACT_OK;
   // }
 
-  if (*rwnd == 0) {
+  if (grant->override_rwnd_bytes == 0) {
     // If the configured RWND value is 0 B, then we can take a shortcut and not
     // bother looking up the window scale.
     tcp->window = 0;
@@ -108,7 +109,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   // Apply the window scale to the configured RWND value.
-  u16 rwnd_with_win_scale = (u16)(*rwnd >> *win_scale);
+  u16 rwnd_with_win_scale = (u16)(grant->override_rwnd_bytes >> *win_scale);
   // The smallest RWND we can set with accuracy is 1 << win scale. If applying
   // the win scale make the RWND 0 when it was not 0 before, then set it to 1 so
   // we do not accidentally pause the flow. We know the RWND is not supposed to

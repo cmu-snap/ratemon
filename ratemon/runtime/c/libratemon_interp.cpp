@@ -172,8 +172,13 @@ std::string ipv4_to_string(uint32_t addr) {
 // Pause this flow. Return the number of flows that were paused.
 inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   // Pausing a flow means setting its RWND to 0 B.
-  int const err =
-      bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &zero, BPF_ANY);
+  struct rm_grant_info zero_grant = {
+      .override_rwnd_bytes = 0,
+      .new_grant_bytes = 0,
+      .grant_seq_num_end_bytes = 0,
+  };
+  int const err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd],
+                                      &zero_grant, BPF_ANY);
   if (err != 0) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d, err=%d (%s)\n", fd, err,
               strerror(-err));
@@ -224,14 +229,19 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
       return 0;
     }
     // Determine how many bytes to grant.
-    int grant_bytes = std::min(epoch_bytes, pending_bytes->second);
+    int const grant_bytes = std::min(epoch_bytes, pending_bytes->second);
     // Decrement the pending bytes by the grant size since the flow will be able
     // to send this much data. We can be confident that that we will not call
     // activate_flow() again until the flow has sent this much data.
     pending_bytes->second -= grant_bytes;
+    struct rm_grant_info grant = {
+        .override_rwnd_bytes = static_cast<uint32_t>(grant_bytes),
+        .new_grant_bytes = 0,
+        .grant_seq_num_end_bytes = 0,
+    };
     // Assign the grant.
-    int const err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd],
-                                        &grant_bytes, BPF_ANY);
+    int const err =
+        bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant, BPF_ANY);
     if (err != 0) {
       RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n", fd,
                 err, strerror(-err));
@@ -692,7 +702,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   return 0;
 }
 
-// Function to poll the done_flows ringbuffer. Only used in byte-based scheduling mode.
+// Function to poll the done_flows ringbuffer. Only used in byte-based
+// scheduling mode.
 void ringbuf_poll_func() {
   RM_PRINTF("INFO: Ringbuf poll thread started\n");
   while (run && done_flows_rb != nullptr) {
