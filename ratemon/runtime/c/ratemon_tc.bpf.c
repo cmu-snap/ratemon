@@ -72,23 +72,28 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                          .local_port = bpf_ntohs(tcp->source),
                          .remote_port = bpf_ntohs(tcp->dest)};
   struct rm_grant_info *grant = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
-
   if (grant == NULL) {
-    // This flow does not have a custom RWND value.
-    // bpf_printk(
-    //     "WARNING: flow with local port %u and remote port %u has no RWND
-    //     value", flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
-  // For scheduled RWND tuning, it is fine for the RWND to be 0.
-  // if (*rwnd == 0) {
-  //   // The RWND is configured to be 0. That does not make sense.
-  //   bpf_printk("ERROR: Flow with local port %u, remote port %u, RWND=0B",
-  //              flow.local_port, flow.remote_port);
-  //   return TC_ACT_OK;
-  // }
 
-  if (grant->override_rwnd_bytes == 0) {
+  // Determine new RWND value, either based on the override or the grant info.
+  u32 rwnd = 0;
+  if (grant->override_rwnd_bytes == 0xFFFFFFFF) {
+    // Override is 2^32-1, so use grant info.
+    // TODO(unknown): Handle sequence number wraparound.
+    if (tcp->ack_seq > grant->grant_seq_num_end_bytes) {
+      rwnd = 0;
+    } else {
+      rwnd = grant->grant_seq_num_end_bytes - tcp->ack_seq;
+    }
+  } else {
+    // Override is not 2^32-1, so ignore grant info and use the override value.
+    rwnd = grant->override_rwnd_bytes;
+  }
+
+  // Apply the new RWND value.
+
+  if (rwnd == 0) {
     // If the configured RWND value is 0 B, then we can take a shortcut and not
     // bother looking up the window scale.
     tcp->window = 0;
@@ -109,7 +114,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   // Apply the window scale to the configured RWND value.
-  u16 rwnd_with_win_scale = (u16)(grant->override_rwnd_bytes >> *win_scale);
+  u16 rwnd_with_win_scale = (u16)(rwnd >> *win_scale);
   // The smallest RWND we can set with accuracy is 1 << win scale. If applying
   // the win scale make the RWND 0 when it was not 0 before, then set it to 1 so
   // we do not accidentally pause the flow. We know the RWND is not supposed to

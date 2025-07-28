@@ -64,7 +64,8 @@ struct rm_flow {
 
 // Contains grant / RWND information for a flow.
 struct rm_grant_info {
-  // If set, then ignore the other fields and use this value as the RWND.
+  // If not equal to 2^32-1, then use this value as the RWND and ignore the
+  // following grant info.
   uint32_t override_rwnd_bytes;
   // If set, then look up the ACK seq, use this to set the
   // grant_seq_num_end_bytes, and then reset this to 0.

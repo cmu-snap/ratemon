@@ -133,7 +133,7 @@ bool setup();
 // Whether setup has been performed.
 bool setup_done = setup();
 
-// Used to set entries in flow_to_rwnd.
+// Used to set entries in BPF maps.
 int zero = 0;
 boost::posix_time::seconds one_sec = boost::posix_time::seconds(1);
 // As an optimization, reuse the same tcp_cc_info struct and size.
@@ -234,18 +234,32 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // to send this much data. We can be confident that that we will not call
     // activate_flow() again until the flow has sent this much data.
     pending_bytes->second -= grant_bytes;
-    struct rm_grant_info grant = {
-        .override_rwnd_bytes = static_cast<uint32_t>(grant_bytes),
-        .new_grant_bytes = 0,
-        .grant_seq_num_end_bytes = 0,
-    };
-    // Assign the grant.
-    int const err =
-        bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant, BPF_ANY);
-    if (err != 0) {
-      RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n", fd,
-                err, strerror(-err));
-      return 0;
+
+    // Check we already have a rm_grant_info for this flow, and if so update it
+    // directly.
+    struct rm_grant_info *existing_grant = nullptr;
+    int err =
+        bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &existing_grant);
+    if (err == 0 || existing_grant == nullptr) {
+      existing_grant->new_grant_bytes = static_cast<uint32_t>(grant_bytes);
+    } else {
+      // No existing rm_grant_info, so create one.
+      RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
+                "new grant\n",
+                fd);
+      struct rm_grant_info grant = {
+          .override_rwnd_bytes =
+              0xFFFFFFFF, // Ignored. Use the following grant info.
+          .new_grant_bytes = static_cast<uint32_t>(grant_bytes),
+          .grant_seq_num_end_bytes = 0,
+      };
+      err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant,
+                                BPF_ANY);
+      if (err != 0) {
+        RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n",
+                  fd, err, strerror(-err));
+        return 0;
+      }
     }
     RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
               grant_bytes);
