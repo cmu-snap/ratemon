@@ -85,7 +85,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     if (grant->new_grant_bytes > 0) {
       // This flow received a new grant. Update the grant end seq num and clear
       // the new grant field. Support stacking grants by basing the new end seq
-      // num off of the old end seq num if the former is already ahead of the
+      // num off of the old end seq num if the latter is already ahead of the
       // ACK seq num, e.g., if there is currently a grant active.
       grant->grant_seq_num_end_bytes =
           max(tcp->ack_seq, grant->grant_seq_num_end_bytes) +

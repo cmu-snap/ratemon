@@ -96,94 +96,99 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
 
   return 0;
 
+  // clang-format off
+  // Disable clang-format so that it does not wreck commented-out code.
+
   // The rest is disabled because because grant checks will now happen based on
   // ACK seq in tc egress.
 
-  // // If this packet does not contain new data (e.g., it is a pure ACK or a
-  // // retransmission), then we are not interested in it.
-  // if (seq < rcv_nxt) {
-  //   bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data
-  //   "
-  //              "for flow %u<->%u",
+  // // // If this packet does not contain new data (e.g., it is a pure ACK or a
+  // // // retransmission), then we are not interested in it.
+  // // if (seq < rcv_nxt) {
+  // //   bpf_printk("INFO: 'tcp_rcv_established' packet does not contain new data
+  // //   "
+  // //              "for flow %u<->%u",
+  // //              flow.local_port, flow.remote_port);
+  // //   return 0;
+  // // }
+
+  // u32 grant_used = max(0, (seq + payload_bytes) - rcv_nxt);
+
+  // // Check if we should record the last data time for this flow.
+  // if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) != NULL) {
+  //   // This flow is in the map, so we are supposed to track its last data time.
+  //   // Get the current time and store it for this flow.
+  //   u64 now_ns = bpf_ktime_get_ns();
+  //   if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
+  //                           BPF_ANY)) {
+  //     bpf_printk("ERROR: 'tcp_rcv_established' error updating "
+  //                "flow_to_last_data_time_ns for flow %u<->%u",
+  //                flow.local_port, flow.remote_port);
+  //   }
+  // }
+
+  // // Grant update. Do this regardless of whether we are using scheduling mode
+  // // "byte" or "time". If we are actually doing time-based scheduling, then
+  // // this will have no effect.
+  // //
+  // // Look up the flow in the flow_to_rwnd map.
+  // struct rm_grant_info *grant = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
+  // if (grant == NULL) {
+  //   return 0;
+  // }
+  // // Wait until here to print this log to we only log flows we care about.
+  // bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u received %u bytes",
+  //            flow.local_port, flow.remote_port, payload_bytes);
+  // bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u used %u bytes of grant",
+  //            flow.local_port, flow.remote_port, grant_used);
+  // bpf_printk(
+  //     "INFO: 'tcp_rcv_established' flow %u<->%u is active and in flow_to_rwnd",
+  //     flow.local_port, flow.remote_port);
+  // if (grant->override_rwnd_bytes == 0) {
+  //   bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has already exhausted "
+  //              "its grant, so we do nothing",
   //              flow.local_port, flow.remote_port);
   //   return 0;
   // }
 
-  u32 grant_used = max(0, (seq + payload_bytes) - rcv_nxt);
+  // // Decrement the rwnd by the payload size to account for grant that has been
+  // // used.
+  // if (grant->override_rwnd_bytes >= grant_used) {
+  //   grant->override_rwnd_bytes -= grant_used;
+  // } else {
+  //   grant->override_rwnd_bytes = 0;
+  // }
+  // // Update flow_to_rwnd with the new value.
+  // bpf_printk("INFO: 'tcp_rcv_established' updating flow_to_rwnd for flow "
+  //            "%u<->%u to %u",
+  //            flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  // if (bpf_map_update_elem(&flow_to_rwnd, &flow, grant, BPF_ANY)) {
+  //   bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd for "
+  //              "flow %u<->%u to %u",
+  //              flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  //   return 0;
+  // }
+  // // If the flow has grant remaining, then we are done.
+  // if (grant->override_rwnd_bytes > 0) {
+  //   bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has remaining grant "
+  //              "%u, so it is not done",
+  //              flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  //   return 0;
+  // }
 
-  // Check if we should record the last data time for this flow.
-  if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) != NULL) {
-    // This flow is in the map, so we are supposed to track its last data time.
-    // Get the current time and store it for this flow.
-    u64 now_ns = bpf_ktime_get_ns();
-    if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
-                            BPF_ANY)) {
-      bpf_printk("ERROR: 'tcp_rcv_established' error updating "
-                 "flow_to_last_data_time_ns for flow %u<->%u",
-                 flow.local_port, flow.remote_port);
-    }
-  }
+  // // The flow has exhausted its grant with this segment, so add it to the
+  // // done_flows ringbuf.
+  // bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has exhausted its "
+  //            "grant, adding to done_flows",
+  //            flow.local_port, flow.remote_port);
+  // if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
+  //   bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
+  //              "%u<->%u to ringbuf",
+  //              flow.local_port, flow.remote_port);
+  //   return 0;
+  // }
 
-  // Grant update. Do this regardless of whether we are using scheduling mode
-  // "byte" or "time". If we are actually doing time-based scheduling, then
-  // this will have no effect.
-  //
-  // Look up the flow in the flow_to_rwnd map.
-  struct rm_grant_info *grant = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
-  if (grant == NULL) {
-    return 0;
-  }
-  // Wait until here to print this log to we only log flows we care about.
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u received %u bytes",
-             flow.local_port, flow.remote_port, payload_bytes);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u used %u bytes of grant",
-             flow.local_port, flow.remote_port, grant_used);
-  bpf_printk(
-      "INFO: 'tcp_rcv_established' flow %u<->%u is active and in flow_to_rwnd",
-      flow.local_port, flow.remote_port);
-  if (grant->override_rwnd_bytes == 0) {
-    bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has already exhausted "
-               "its grant, so we do nothing",
-               flow.local_port, flow.remote_port);
-    return 0;
-  }
+  // return 0;
 
-  // Decrement the rwnd by the payload size to account for grant that has been
-  // used.
-  if (grant->override_rwnd_bytes >= grant_used) {
-    grant->override_rwnd_bytes -= grant_used;
-  } else {
-    grant->override_rwnd_bytes = 0;
-  }
-  // Update flow_to_rwnd with the new value.
-  bpf_printk("INFO: 'tcp_rcv_established' updating flow_to_rwnd for flow "
-             "%u<->%u to %u",
-             flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
-  if (bpf_map_update_elem(&flow_to_rwnd, &flow, grant, BPF_ANY)) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd for "
-               "flow %u<->%u to %u",
-               flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
-    return 0;
-  }
-  // If the flow has grant remaining, then we are done.
-  if (grant->override_rwnd_bytes > 0) {
-    bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has remaining grant "
-               "%u, so it is not done",
-               flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
-    return 0;
-  }
-
-  // The flow has exhausted its grant with this segment, so add it to the
-  // done_flows ringbuf.
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has exhausted its "
-             "grant, adding to done_flows",
-             flow.local_port, flow.remote_port);
-  if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-    bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
-               "%u<->%u to ringbuf",
-               flow.local_port, flow.remote_port);
-    return 0;
-  }
-
-  return 0;
+  // clang-format on
 }
