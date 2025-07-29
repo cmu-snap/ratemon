@@ -74,6 +74,10 @@ struct rm_grant_info {
   // always track grants in relation to sequence numbers, since grants are
   // windows.
   uint32_t grant_seq_num_end_bytes;
+  // Indicates if the flow has recently completed a grant and should not be
+  // re-added to the done_flows map. Used to make sure that a flow is added to
+  // the done_flows map at most once per grant.
+  bool grant_done;
 };
 
 #endif /* __RATEMON_H */

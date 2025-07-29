@@ -94,22 +94,27 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       grant->new_grant_bytes = 0;
     } else if (tcp->ack_seq > grant->grant_seq_num_end_bytes) {
       // The flow has no grant and should be paused.
+      rwnd = 0;
 
       // TODO(unknown): Potential problem here if we do not accurately track
       // granted bytes. Need to make sure we do not grant past the end of the
       // request size otherwise we'll never get to this done condition.
 
-      rwnd = 0;
-      // The flow has exhausted its grant with this segment, so add it to the
-      // done_flows ringbuf.
-      bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has no grant, "
-                 "adding to done_flows",
-                 flow.local_port, flow.remote_port);
-      if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-        bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
-                   "%u<->%u to ringbuf",
-                   flow.local_port, flow.remote_port);
-        return 0;
+      // Check grant_done so that we only submit this flow to done_flows once.
+      if (!grant->grant_done) {
+        grant->grant_done = true;
+        // The flow has exhausted its grant with this segment, so add it to the
+        // done_flows ringbuf.
+        bpf_printk(
+            "INFO: 'tcp_rcv_established' flow %u<->%u has spent its grant, "
+            "adding to done_flows",
+            flow.local_port, flow.remote_port);
+        if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
+          bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
+                     "%u<->%u to ringbuf",
+                     flow.local_port, flow.remote_port);
+          return 0;
+        }
       }
     } else {
       // The flow is on an existing grant.

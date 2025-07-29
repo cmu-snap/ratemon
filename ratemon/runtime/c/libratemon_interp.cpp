@@ -176,6 +176,7 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
       .override_rwnd_bytes = 0,
       .new_grant_bytes = 0,
       .grant_seq_num_end_bytes = 0,
+      .grant_done = false,
   };
   int const err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd],
                                       &zero_grant, BPF_ANY);
@@ -254,6 +255,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // Will be ignored in favor of the following grant info.
     grant.override_rwnd_bytes = 0xFFFFFFFF;
     grant.new_grant_bytes = static_cast<uint32_t>(grant_bytes);
+    grant.grant_done = false;
     // Write the new grant info into the map.
     err =
         bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant, BPF_ANY);
@@ -693,9 +695,6 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // This flow has exhausted its grant. Remove it from the active flows. It
   // should already be paused (in flow_to_rwnd map with value of 0) because its
   // grant will have been decremented as data arrived.
-  RM_PRINTF("INFO: Flow %s:%u->%s:%u has exhausted its grant\n",
-            ipv4_to_string(flow->remote_addr).c_str(), flow->remote_port,
-            ipv4_to_string(flow->local_addr).c_str(), flow->local_port);
 
   // Activate a new flow.
   lock_scheduler.lock();
@@ -709,6 +708,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     lock_scheduler.unlock();
     return 0;
   }
+  RM_PRINTF("INFO: Flow FD=%d has exhausted its grant\n", fd->second);
   if (try_pause_one_activate_one(fd->second) == 0) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d and activate another flow\n",
               fd->second);
@@ -1049,7 +1049,7 @@ void register_fd_for_monitoring(int fd) {
   if (!get_flow(fd, &flow)) {
     return;
   }
-  RM_PRINTF("INFO: Found flow: %s:%u->%s:%u\n",
+  RM_PRINTF("INFO: Found flow FD=%d: %s:%u->%s:%u\n", fd,
             ipv4_to_string(flow.remote_addr).c_str(), flow.remote_port,
             ipv4_to_string(flow.local_addr).c_str(), flow.local_port);
   // Ignore flows that are not in the monitor port range.
@@ -1163,7 +1163,7 @@ bool schedule_on_new_request(int fd) {
     // The above call to timer.expires_from_now() will have cancelled any
     // other pending async_wait(), so we are safe to call async_wait() again.
     timer.async_wait(&timer_callback);
-    RM_PRINTF("INFO: Exiting idle check mode.\n");
+    RM_PRINTF("INFO: Exiting slow check mode.\n");
   }
   return true;
 }
