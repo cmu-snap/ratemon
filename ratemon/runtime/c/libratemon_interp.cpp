@@ -221,6 +221,7 @@ int try_find_and_pause(int fd) {
 
 // Attempt to activate this flow. Return the number of activated flows.
 inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
+  int err = 0;
   if (scheduling_mode == "byte") {
     // Look up the remaining data in this flow.
     auto pending_bytes = flow_to_pending_bytes.find(fd);
@@ -237,39 +238,35 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // avoid race conditions.
     pending_bytes->second -= grant_bytes;
 
+    struct rm_grant_info grant {};
     // Check if we already have a rm_grant_info for this flow, and if so update
-    // it.
-    struct rm_grant_info *existing_grant = nullptr;
-    int err =
-        bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &existing_grant);
-    if (err == 0 && existing_grant != nullptr) {
-      existing_grant->override_rwnd_bytes =
-          0xFFFFFFFF; // Will be ignored in favor of the following grant info.
-      existing_grant->new_grant_bytes = static_cast<uint32_t>(grant_bytes);
-    } else {
-      // No existing rm_grant_info, so create one.
+    // it. Note that bpf_map_lookup_elem() copies the element from the map as
+    // opposed to giving us a pointer to it, so we need to write back any
+    // updates.
+    err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant);
+    if (err != 0) {
+      // No existing rm_grant_info, so fill in new info.
       RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
                 "new grant\n",
                 fd);
-      struct rm_grant_info new_grant = {
-          .override_rwnd_bytes = 0xFFFFFFFF, // Will be ignored in favor of the
-                                             // following grant info.
-          .new_grant_bytes = static_cast<uint32_t>(grant_bytes),
-          .grant_seq_num_end_bytes = 0,
-      };
-      err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &new_grant,
-                                BPF_ANY);
-      if (err != 0) {
-        RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n",
-                  fd, err, strerror(-err));
-        return 0;
-      }
+      grant.grant_seq_num_end_bytes = 0;
+    }
+    // Will be ignored in favor of the following grant info.
+    grant.override_rwnd_bytes = 0xFFFFFFFF;
+    grant.new_grant_bytes = static_cast<uint32_t>(grant_bytes);
+    // Write the new grant info into the map.
+    err =
+        bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant, BPF_ANY);
+    if (err != 0) {
+      RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n", fd,
+                err, strerror(-err));
+      return 0;
     }
     RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
               grant_bytes);
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
-    int const err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
+    err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
     if (err != 0) {
       RM_PRINTF("WARNING: Could not delete RWND clamp for flow FD=%d, "
                 "err=%d (%s). The flow might not have been clamped.\n",
