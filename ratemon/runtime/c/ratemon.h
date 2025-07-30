@@ -82,6 +82,10 @@ struct rm_grant_info {
   // re-added to the done_flows map. Used to make sure that a flow is added to
   // the done_flows map at most once per grant.
   bool grant_done;
+  // Count of bytes that were granted in excess of new_grant_bytes due to
+  // bumping RWND from 0 to 1 when 0 < RWND < win_scale. This quantity will be
+  // carried forward and subtracted from the next grant.
+  uint32_t excessive_grant_bytes;
 };
 
 #endif /* __RATEMON_H */

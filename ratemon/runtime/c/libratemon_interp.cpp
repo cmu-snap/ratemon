@@ -184,6 +184,7 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   grant_info.new_grant_bytes = 0;
   grant_info.grant_seq_num_end_bytes = 0;
   grant_info.grant_done = false;
+  grant_info.excessive_grant_bytes = 0;
   err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
                             BPF_ANY);
   if (err != 0) {
@@ -243,6 +244,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
                 fd);
       grant_info.grant_seq_num_end_bytes = 0;
       grant_info.ungranted_bytes = 0;
+      grant_info.excessive_grant_bytes = 0;
     }
     // Will be ignored in favor of the following grant info.
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
@@ -1200,6 +1202,7 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.new_grant_bytes = 0;
       grant_info.grant_seq_num_end_bytes = 0;
       grant_info.grant_done = false;
+      grant_info.excessive_grant_bytes = 0;
     }
     grant_info.ungranted_bytes = bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,

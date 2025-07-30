@@ -78,24 +78,28 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   u32 ack_seq = bpf_ntohl(tcp->ack_seq);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u: ack_seq: %u",
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
              flow.local_port, flow.remote_port, ack_seq);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u: ungranted_bytes: %u",
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %u",
              flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u: "
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
              "grant_info->override_rwnd_bytes: %u",
              flow.local_port, flow.remote_port,
              grant_info->override_rwnd_bytes);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u: "
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
              "grant_info->new_grant_bytes: %u",
              flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
-  bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u: "
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
              "grant_info->grant_seq_num_end_bytes: %u",
              flow.local_port, flow.remote_port,
              grant_info->grant_seq_num_end_bytes);
   bpf_printk(
-      "INFO: 'tcp_rcv_established' flow %u<->%u: grant_info->grant_done: %u",
+      "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
       flow.local_port, flow.remote_port, grant_info->grant_done);
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+             "grant_info->excessive_grant_bytes: %u",
+             flow.local_port, flow.remote_port,
+             grant_info->excessive_grant_bytes);
 
   // Determine new RWND value, either based on the override or the grant info.
   u32 rwnd = 0;
@@ -105,56 +109,57 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     if (grant_info->new_grant_bytes > 0) {
       u32 grant_to_use =
           min(grant_info->ungranted_bytes, grant_info->new_grant_bytes);
+      grant_info->ungranted_bytes -= grant_to_use;
       // This flow received a new grant. Update the grant end seq num and clear
       // the new grant field. Support stacking grants by basing the new end seq
       // num off of the old end seq num if the latter is already ahead of the
-      // ACK seq num, e.g., if there is currently a grant active.
+      // ACK seq num, e.g., if there is currently a grant active. Take into
+      // account pre-granted bytes.
       grant_info->grant_seq_num_end_bytes =
-          max(ack_seq, grant_info->grant_seq_num_end_bytes) + grant_to_use;
+          max(ack_seq, grant_info->grant_seq_num_end_bytes) + grant_to_use +
+          grant_info->excessive_grant_bytes;
       rwnd = grant_to_use;
       grant_info->new_grant_bytes = 0;
-      bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u received new grant "
+      // We have applied the pre-granted bytes to the grant end seq num, so
+      // reset this.
+      grant_info->excessive_grant_bytes = 0;
+      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant "
                  "of %u bytes",
                  flow.local_port, flow.remote_port, rwnd);
-    } else if (ack_seq > grant_info->grant_seq_num_end_bytes) {
+    } else if (ack_seq >= grant_info->grant_seq_num_end_bytes) {
       // The flow has no grant and should be paused.
       rwnd = 0;
-
-      // TODO(unknown): Potential problem here if we do not accurately track
-      // granted bytes. Need to make sure we do not grant past the end of the
-      // request size otherwise we'll never get to this done condition.
-
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;
         // The flow has exhausted its grant with this segment, so add it to the
         // done_flows ringbuf.
         bpf_printk(
-            "INFO: 'tcp_rcv_established' flow %u<->%u has spent its grant, "
+            "INFO: 'do_rwnd_at_egress' flow %u<->%u has spent its grant, "
             "adding to done_flows",
             flow.local_port, flow.remote_port);
         if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-          bpf_printk("ERROR: 'tcp_rcv_established' error submitting done flow "
+          bpf_printk("ERROR: 'do_rwnd_at_egress' error submitting done flow "
                      "%u<->%u to ringbuf",
                      flow.local_port, flow.remote_port);
           return 0;
         }
       }
       bpf_printk(
-          "INFO: 'tcp_rcv_established' flow %u<->%u has exhausted its grant, "
+          "INFO: 'do_rwnd_at_egress' flow %u<->%u has exhausted its grant, "
           "pausing with RWND 0 bytes",
           flow.local_port, flow.remote_port);
     } else {
       // The flow is on an existing grant.
       rwnd = grant_info->grant_seq_num_end_bytes - ack_seq;
-      bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has active grant "
+      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has active grant "
                  "with %u bytes remaining",
                  flow.local_port, flow.remote_port, rwnd);
     }
   } else {
     // Override is not 2^32-1, so ignore grant info and use the override value.
     rwnd = grant_info->override_rwnd_bytes;
-    bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has override RWND %u",
+    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has override RWND %u",
                flow.local_port, flow.remote_port, rwnd);
   }
 
@@ -189,18 +194,19 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // above. Even though we are technically granting more than we should, the
   // official grant end seq num is still precise, so we can still correctly
   // determine when a flow is done.
-  u16 rwnd_to_set;
+  u16 rwnd_to_set = 0;
   if (rwnd_with_win_scale == 0) {
-    // TODO: Need special handling here for the case where the extra grant is greater than ungranted bytes. Otherwise will still lose track.
-    // Solution: Need special handling for the last grant in a burst. Set the RWND to 1 and grant the excessive bytes, but set the grant end seq to be the actual message size.
-    // Problem still: sender will remember the grant and start the next burst with the remainder.
-    // I don't think there is a way to grant with finer fidelity than win scale. Need a way to make the bookkeeping work while still granting 1.
-    // Need a way to carry over a grant to the next burst.
-    // Add a field "excessive grant" and subtrack that from the next grant.
     rwnd_to_set = 1;
-    int extra_grant = rwnd - (((u32)rwnd_with_win_scale) << *win_scale);
-    grant_info->grant_seq_num_end_bytes += extra_grant;
-    grant_info->ungranted_bytes -= extra_grant;
+    int extra_grant = (((u32)rwnd_to_set) << *win_scale) - rwnd;
+    // Since we are pre-granting this amount, subtract it from the ungranted
+    // bytes. But do not change the grant end seq num, since that will mess up
+    // our grant end detection.
+    grant_info->ungranted_bytes -=
+        min(grant_info->ungranted_bytes, extra_grant);
+    grant_info->excessive_grant_bytes += extra_grant;
+    bpf_printk("INFO: 'do_rwnd_at_egress' flow with local port %u, remote port "
+               "%u carrying forward excessive grant of %d bytes",
+               flow.local_port, flow.remote_port, extra_grant);
   } else {
     rwnd_to_set = rwnd_with_win_scale;
   }
