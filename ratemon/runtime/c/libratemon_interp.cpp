@@ -112,9 +112,6 @@ ConstantTimeIntQueue paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
 std::unordered_map<struct rm_flow_key, int> flow_to_fd;
-// Maps rm_flow struct to the number of bytes remaining in the flow's message.
-// Used to give a partial grant when the flow is about to finish.
-std::unordered_map<int, int> flow_to_pending_bytes;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
@@ -172,14 +169,23 @@ std::string ipv4_to_string(uint32_t addr) {
 // Pause this flow. Return the number of flows that were paused.
 inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   // Pausing a flow means setting its RWND to 0 B.
-  struct rm_grant_info zero_grant = {
-      .override_rwnd_bytes = 0,
-      .new_grant_bytes = 0,
-      .grant_seq_num_end_bytes = 0,
-      .grant_done = false,
-  };
-  int const err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd],
-                                      &zero_grant, BPF_ANY);
+  struct rm_grant_info grant_info {};
+  // Need to look up instead of simply overwriting because unacked_bytes must be
+  // preserved.
+  int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
+  if (err != 0) {
+    // No existing rm_grant_info, so fill in new info.
+    RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
+              "new grant\n",
+              fd);
+    grant_info.ungranted_bytes = 0;
+  }
+  grant_info.override_rwnd_bytes = 0;
+  grant_info.new_grant_bytes = 0;
+  grant_info.grant_seq_num_end_bytes = 0;
+  grant_info.grant_done = false;
+  err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
+                            BPF_ANY);
   if (err != 0) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d, err=%d (%s)\n", fd, err,
               strerror(-err));
@@ -224,48 +230,34 @@ int try_find_and_pause(int fd) {
 inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
   int err = 0;
   if (scheduling_mode == "byte") {
-    // Look up the remaining data in this flow.
-    auto pending_bytes = flow_to_pending_bytes.find(fd);
-    if (pending_bytes == flow_to_pending_bytes.end()) {
-      RM_PRINTF("ERROR: Could not find pending bytes for FD=%d\n", fd);
-      return 0;
-    }
-    // Determine how many bytes to grant.
-    int const grant_bytes = std::min(epoch_bytes, pending_bytes->second);
-    // Decrement the pending bytes by the grant size since the flow will be able
-    // to send this much data. We can be confident that we will not call
-    // activate_flow() again until the flow has sent this much data.
-    // Note: We need to update pending_bytes here and not as data is received to
-    // avoid race conditions.
-    pending_bytes->second -= grant_bytes;
-
-    struct rm_grant_info grant {};
+    struct rm_grant_info grant_info {};
     // Check if we already have a rm_grant_info for this flow, and if so update
     // it. Note that bpf_map_lookup_elem() copies the element from the map as
     // opposed to giving us a pointer to it, so we need to write back any
     // updates.
-    err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant);
+    err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
     if (err != 0) {
       // No existing rm_grant_info, so fill in new info.
       RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
                 "new grant\n",
                 fd);
-      grant.grant_seq_num_end_bytes = 0;
+      grant_info.grant_seq_num_end_bytes = 0;
+      grant_info.ungranted_bytes = 0;
     }
     // Will be ignored in favor of the following grant info.
-    grant.override_rwnd_bytes = 0xFFFFFFFF;
-    grant.new_grant_bytes = static_cast<uint32_t>(grant_bytes);
-    grant.grant_done = false;
+    grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+    grant_info.new_grant_bytes = static_cast<uint32_t>(epoch_bytes);
+    grant_info.grant_done = false;
     // Write the new grant info into the map.
-    err =
-        bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant, BPF_ANY);
+    err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
+                              BPF_ANY);
     if (err != 0) {
       RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n", fd,
                 err, strerror(-err));
       return 0;
     }
     RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
-              grant_bytes);
+              epoch_bytes);
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
     err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
@@ -1189,8 +1181,35 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
     int const bytes = buf_int[0];
     // int sender_wait_us = buf_int[1];
-    flow_to_pending_bytes[sockfd] = bytes;
     RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+
+    struct rm_grant_info grant_info {};
+    // Check if we already have a rm_grant_info for this flow, and if so update
+    // it. Note that bpf_map_lookup_elem() copies the element from the map as
+    // opposed to giving us a pointer to it, so we need to write back any
+    // updates.
+    int err =
+        bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info);
+    if (err != 0) {
+      // No existing rm_grant_info, so fill in new info.
+      RM_PRINTF(
+          "INFO: Could not find existing grant info for flow FD=%d, creating "
+          "new grant info\n",
+          sockfd);
+      grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+      grant_info.new_grant_bytes = 0;
+      grant_info.grant_seq_num_end_bytes = 0;
+      grant_info.grant_done = false;
+    }
+    grant_info.ungranted_bytes = bytes;
+    err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,
+                              BPF_ANY);
+    if (err != 0) {
+      RM_PRINTF("ERROR: Could not update ungranted bytes for flow FD=%d, "
+                "err=%d (%s)\n",
+                sockfd, err, strerror(-err));
+      return false;
+    }
   }
   // This is the key part. Determine whether this flow will be active or paused.
   if (!schedule_on_new_request(sockfd)) {

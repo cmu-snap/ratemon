@@ -64,6 +64,10 @@ struct rm_flow {
 
 // Contains grant / RWND information for a flow.
 struct rm_grant_info {
+  // Data pending / yet to be ACKed for the current burst request. Set by
+  // libratemon_interp, used at tc egress to fine-tune the last grant, to
+  // prevent over-granting at the end of a burst.
+  uint32_t ungranted_bytes;
   // If not equal to 2^32-1, then use this value as the RWND and ignore the
   // following grant info.
   uint32_t override_rwnd_bytes;

@@ -132,8 +132,8 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // // this will have no effect.
   // //
   // // Look up the flow in the flow_to_rwnd map.
-  // struct rm_grant_info *grant = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
-  // if (grant == NULL) {
+  // struct rm_grant_info *grant_info = bpf_map_lookup_elem(&flow_to_rwnd, &flow);
+  // if (grant_info == NULL) {
   //   return 0;
   // }
   // // Wait until here to print this log to we only log flows we care about.
@@ -144,7 +144,7 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // bpf_printk(
   //     "INFO: 'tcp_rcv_established' flow %u<->%u is active and in flow_to_rwnd",
   //     flow.local_port, flow.remote_port);
-  // if (grant->override_rwnd_bytes == 0) {
+  // if (grant_info->override_rwnd_bytes == 0) {
   //   bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has already exhausted "
   //              "its grant, so we do nothing",
   //              flow.local_port, flow.remote_port);
@@ -153,26 +153,26 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
 
   // // Decrement the rwnd by the payload size to account for grant that has been
   // // used.
-  // if (grant->override_rwnd_bytes >= grant_used) {
-  //   grant->override_rwnd_bytes -= grant_used;
+  // if (grant_info->override_rwnd_bytes >= grant_used) {
+  //   grant_info->override_rwnd_bytes -= grant_used;
   // } else {
-  //   grant->override_rwnd_bytes = 0;
+  //   grant_info->override_rwnd_bytes = 0;
   // }
   // // Update flow_to_rwnd with the new value.
   // bpf_printk("INFO: 'tcp_rcv_established' updating flow_to_rwnd for flow "
   //            "%u<->%u to %u",
-  //            flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  //            flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
   // if (bpf_map_update_elem(&flow_to_rwnd, &flow, grant, BPF_ANY)) {
   //   bpf_printk("ERROR: 'tcp_rcv_established' error updating flow_to_rwnd for "
   //              "flow %u<->%u to %u",
-  //              flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  //              flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
   //   return 0;
   // }
   // // If the flow has grant remaining, then we are done.
-  // if (grant->override_rwnd_bytes > 0) {
+  // if (grant_info->override_rwnd_bytes > 0) {
   //   bpf_printk("INFO: 'tcp_rcv_established' flow %u<->%u has remaining grant "
   //              "%u, so it is not done",
-  //              flow.local_port, flow.remote_port, grant->override_rwnd_bytes);
+  //              flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
   //   return 0;
   // }
 
