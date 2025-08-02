@@ -197,7 +197,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u16 rwnd_to_set = 0;
   if (rwnd_with_win_scale == 0) {
     rwnd_to_set = 1;
-    int extra_grant = (((u32)rwnd_to_set) << *win_scale) - rwnd;
+    u32 extra_grant = (((u32)rwnd_to_set) << *win_scale) - rwnd;
     // Since we are pre-granting this amount, subtract it from the ungranted
     // bytes. But do not change the grant end seq num, since that will mess up
     // our grant end detection.

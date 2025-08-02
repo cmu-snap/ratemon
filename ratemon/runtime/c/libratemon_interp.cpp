@@ -175,10 +175,8 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
   if (err != 0) {
     // No existing rm_grant_info, so fill in new info.
-    RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
-              "new grant\n",
-              fd);
-    grant_info.ungranted_bytes = 0;
+    RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
+    return 0;
   }
   grant_info.override_rwnd_bytes = 0;
   grant_info.new_grant_bytes = 0;
@@ -239,16 +237,18 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
     if (err != 0) {
       // No existing rm_grant_info, so fill in new info.
-      RM_PRINTF("INFO: Could not find existing grant for flow FD=%d, creating "
-                "new grant\n",
-                fd);
-      grant_info.grant_seq_num_end_bytes = 0;
-      grant_info.ungranted_bytes = 0;
-      grant_info.excessive_grant_bytes = 0;
+      RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
+      return 0;
     }
-    // Will be ignored in favor of the following grant info.
+    if (grant_info.ungranted_bytes == 0) {
+      RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
+                "bytes\n",
+                fd);
+      return 0;
+    }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes = static_cast<uint32_t>(epoch_bytes);
+    grant_info.new_grant_bytes = std::min(grant_info.ungranted_bytes,
+                                          static_cast<uint32_t>(epoch_bytes));
     grant_info.grant_done = false;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
@@ -269,7 +269,6 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
                 fd, err, strerror(-err));
     }
   }
-
   if (trigger_ack_on_activate) {
     trigger_ack(fd);
   }
@@ -312,12 +311,18 @@ int try_activate_one() {
       paused_fds_queue.enqueue(pause_fr);
       continue;
     }
-    RM_PRINTF("INFO: Decided to activate flow FD=%d\n", pause_fr);
+    RM_PRINTF("INFO: Trying to activate flow FD=%d\n", pause_fr);
+    if (activate_flow(pause_fr) == 0) {
+      // Tried but failed to activate this flow, so put it back in the queue.
+      paused_fds_queue.enqueue(pause_fr);
+      continue;
+    }
+    // Successful activation, so put it in the active_fds_queue.
     // Randomly jitter the epoch time by +/- 12.5%.
     active_fds_queue.emplace(
         pause_fr,
         now_plus_epoch + boost::posix_time::microseconds(jitter(epoch_us)));
-    return activate_flow(pause_fr);
+    return 1;
   }
   return 0;
 }
