@@ -155,6 +155,28 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has active grant "
                  "with %u bytes remaining",
                  flow.local_port, flow.remote_port, rwnd);
+
+      // if (/*rwnd < 1448*/false) {
+      //   // The grant is for less than one segment. The sender will stall for
+      //   // 200ms, so we need to retract this grant.
+      //   rwnd = 0;
+      //   grant_info->grant_seq_num_end_bytes -= rwnd;
+      //   grant_info->ungranted_bytes += rwnd;
+      //   grant_info->grant_done = true;
+      //   // The flow has exhausted its grant with this segment, so add it to
+      //   the
+      //   // done_flows ringbuf.
+      //   bpf_printk(
+      //       "INFO: 'do_rwnd_at_egress' flow %u<->%u has spent its grant, "
+      //       "adding to done_flows",
+      //       flow.local_port, flow.remote_port);
+      //   if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
+      //     bpf_printk("ERROR: 'do_rwnd_at_egress' error submitting done flow "
+      //                "%u<->%u to ringbuf",
+      //                flow.local_port, flow.remote_port);
+      //     return 0;
+      //   }
+      // }
     }
   } else {
     // Override is not 2^32-1, so ignore grant info and use the override value.
