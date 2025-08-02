@@ -51,8 +51,8 @@ lint:
     - markdown-link-check@3.13.7
     - pragma-once
     - pre-commit-hooks@5.0.0
-    - ruff@0.12.5
-    - semgrep@1.130.0
+    - ruff@0.12.7
+    - semgrep@1.131.0
     - taplo@0.9.3
     - terrascan@1.19.1
     - trivy@0.64.1
@@ -69,7 +69,7 @@ lint:
     - markdownlint@0.45.0
     - osv-scanner@2.0.3
     - prettier@3.6.2
-    - ruff@0.12.5
+    - ruff@0.12.7
     - shellcheck@0.10.0
     - shfmt@3.6.0
     - trufflehog@3.90.2
