@@ -207,19 +207,14 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
-  // Apply the window scale to the configured RWND value.
-  u16 rwnd_with_win_scale = (u16)(rwnd >> *win_scale);
-  // The smallest RWND we can set with accuracy is 1 << win scale. If applying
-  // the win scale makes the RWND 0 when it was not 0 before, then set it to 1
-  // so we do not accidentally pause the flow. We know the RWND is not supposed
-  // to be 0 at this point in the code because there is a check for that case
-  // above. Even though we are technically granting more than we should, the
-  // official grant end seq num is still precise, so we can still correctly
-  // determine when a flow is done.
-  u16 rwnd_to_set = 0;
-  if (rwnd_with_win_scale == 0) {
-    rwnd_to_set = 1;
-    u32 extra_grant = (((u32)rwnd_to_set) << *win_scale) - rwnd;
+  // The smallest RWND we can set with accuracy is 1 << win scale. We should not
+  // grant less than one segment (1448B) because otherwise the sender will stall
+  // for 200ms. If either of these is the case, then round up and account for
+  // the excessive grant bytes.
+  u32 min_grant = max(1U << *win_scale, 1448U);
+  u32 rwnd_safe = rwnd;
+  if (min_grant > rwnd_safe) {
+    u32 extra_grant = min_grant - rwnd_safe;
     // Since we are pre-granting this amount, subtract it from the ungranted
     // bytes. But do not change the grant end seq num, since that will mess up
     // our grant end detection.
@@ -229,15 +224,26 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     bpf_printk("INFO: 'do_rwnd_at_egress' flow with local port %u, remote port "
                "%u carrying forward excessive grant of %d bytes",
                flow.local_port, flow.remote_port, extra_grant);
-  } else {
-    rwnd_to_set = rwnd_with_win_scale;
+    rwnd_safe = min_grant;
   }
+
+  // Apply the window scale to the configured RWND value.
+  u16 rwnd_with_win_scale = (u16)(rwnd_safe >> *win_scale);
   // Set the RWND value in the TCP header. If the existing advertised window
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
-  tcp->window = bpf_htons(min(bpf_ntohs(tcp->window), rwnd_to_set));
+  u16 existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
+  if (existing_rwnd_with_win_scale < rwnd_with_win_scale) {
+    bpf_printk("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
+               "advertised window %u smaller than grant %u (values printed do "
+               "not include win scale)",
+               flow.remote_port, existing_rwnd_with_win_scale,
+               rwnd_with_win_scale);
+    rwnd_with_win_scale = existing_rwnd_with_win_scale;
+  }
+  tcp->window = bpf_htons(rwnd_with_win_scale);
   bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
              "to %u (win scale: %u)",
-             flow.remote_port, rwnd_to_set, *win_scale);
+             flow.remote_port, rwnd_with_win_scale, *win_scale);
   return TC_ACT_OK;
 }
