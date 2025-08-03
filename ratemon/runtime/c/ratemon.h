@@ -64,28 +64,29 @@ struct rm_flow {
 
 // Contains grant / RWND information for a flow.
 struct rm_grant_info {
-  // Data pending / yet to be ACKed for the current burst request. Set by
-  // libratemon_interp, used at tc egress to fine-tune the last grant, to
-  // prevent over-granting at the end of a burst. This is an int because it can go negative if we over-grant due to win scaling.
+  // Data pending / yet to be granted. Incremented by libratemon_interp on a new
+  // burst request, used at tc egress to fine-tune the last grant, to prevent
+  // over-granting at the end of a burst. This is allowed to be negative due to
+  // extra grants.
   int ungranted_bytes;
   // If not equal to 2^32-1, then use this value as the RWND and ignore the
-  // following grant info.
+  // following grant info. This is unsigned because it is tied to the TCP
+  // advertised window, which is an unsigned sequence number.
   uint32_t override_rwnd_bytes;
-  // If set, then look up the ACK seq, use this to set the
-  // grant_seq_num_end_bytes, and then reset this to 0.
-  uint32_t new_grant_bytes;
-  // The sequence number that the grant ends at, used to calculate the RWND. We
-  // always track grants in relation to sequence numbers, since grants are
-  // windows.
-  uint32_t grant_seq_num_end_bytes;
+  // The scheduler has assigned a new grant of this amount.
+  int new_grant_bytes;
+  // The last sequence number in the granted window, regardless of how much
+  // pending data the sender has. Used to set the TCP advertised window. This is
+  // unsigned because sequence numbers are unsigned.
+  uint32_t rwnd_end_seq;
+  // The last sequence number in the granted window, reduced if the sender has
+  // less data to send than the grant. This is unsigned because sequence numbers
+  // are unsigned.
+  uint32_t grant_end_seq;
   // Indicates if the flow has recently completed a grant and should not be
   // re-added to the done_flows map. Used to make sure that a flow is added to
   // the done_flows map at most once per grant.
   bool grant_done;
-  // Count of bytes that were granted in excess of new_grant_bytes due to
-  // bumping RWND from 0 to 1 when 0 < RWND < win_scale. This quantity will be
-  // carried forward and added from the next grant when calculating the end seq num.
-  uint32_t excessive_grant_bytes;
 };
 
 #endif /* __RATEMON_H */

@@ -179,10 +179,6 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
     return 0;
   }
   grant_info.override_rwnd_bytes = 0;
-  grant_info.new_grant_bytes = 0;
-  grant_info.grant_seq_num_end_bytes = 0;
-  grant_info.grant_done = false;
-  grant_info.excessive_grant_bytes = 0;
   err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
                             BPF_ANY);
   if (err != 0) {
@@ -247,7 +243,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
       return 0;
     }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes = static_cast<uint32_t>(epoch_bytes);
+    grant_info.new_grant_bytes = epoch_bytes;
     grant_info.grant_done = false;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
@@ -1204,11 +1200,12 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
           sockfd);
       grant_info.override_rwnd_bytes = 0xFFFFFFFF;
       grant_info.new_grant_bytes = 0;
-      grant_info.grant_seq_num_end_bytes = 0;
+      grant_info.rwnd_end_seq = 0;
+      grant_info.grant_end_seq = 0;
       grant_info.grant_done = false;
-      grant_info.excessive_grant_bytes = 0;
     }
-    // This is an increment because the ungranted bytes may be negative due to excessive grants due to win scaling.
+    // This is an increment because the ungranted bytes may be negative due to
+    // extra grants.
     grant_info.ungranted_bytes += bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,
                               BPF_ANY);

@@ -77,6 +77,15 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
+  u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
+  if (win_scale == NULL) {
+    // We do not know the window scale to use for this flow.
+    bpf_printk("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
+               "port %u, no win scale",
+               flow.local_port, flow.remote_port);
+    return TC_ACT_OK;
+  }
+
   u32 ack_seq = bpf_ntohl(tcp->ack_seq);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
              flow.local_port, flow.remote_port, ack_seq);
@@ -90,66 +99,84 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
              "grant_info->new_grant_bytes: %u",
              flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->grant_seq_num_end_bytes: %u",
-             flow.local_port, flow.remote_port,
-             grant_info->grant_seq_num_end_bytes);
+             "grant_info->rwnd_end_seq: %u",
+             flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+             "grant_info->grant_end_seq: %u",
+             flow.local_port, flow.remote_port, grant_info->grant_end_seq);
   bpf_printk(
       "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
       flow.local_port, flow.remote_port, grant_info->grant_done);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->excessive_grant_bytes: %u",
-             flow.local_port, flow.remote_port,
-             grant_info->excessive_grant_bytes);
 
-  // Determine new RWND value, either based on the override or the grant info.
   u32 rwnd = 0;
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
     // Override is 2^32-1, so use grant info.
     // TODO(unknown): Handle sequence number wraparound.
+
+    // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
-      u32 grant_to_use =
-          min(grant_info->ungranted_bytes, grant_info->new_grant_bytes);
-      grant_info->ungranted_bytes -= grant_to_use;
-      grant_info->grant_seq_num_end_bytes =
-          max(ack_seq, grant_info->grant_seq_num_end_bytes) + grant_to_use
-           + grant_info->excessive_grant_bytes;
-      rwnd = grant_to_use;
-      grant_info->new_grant_bytes = 0;
-      // We have applied the pre-granted bytes to the grant end seq num, so
-      // reset this.
-      grant_info->excessive_grant_bytes = 0;
+      // Reduce the new grant amount based on pending data.
+      int grant_to_use =
+          min(grant_info->new_grant_bytes, max(grant_info->ungranted_bytes, 0));
       bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant "
                  "of %u bytes",
-                 flow.local_port, flow.remote_port, rwnd);
-    } else if (ack_seq >= grant_info->grant_seq_num_end_bytes) {
-      // The flow has no grant and should be paused.
-      rwnd = 0;
+                 flow.local_port, flow.remote_port, grant_to_use);
+      grant_info->new_grant_bytes = 0;
+      grant_info->ungranted_bytes -= grant_to_use;
+      grant_info->grant_end_seq += grant_to_use;
+      grant_info->rwnd_end_seq =
+          max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
+    }
+    rwnd = grant_info->rwnd_end_seq - ack_seq;
+
+    // The smallest RWND we can set with accuracy is 1 << win scale. Also, we
+    // should not grant less than one segment (1448B) because otherwise the
+    // sender will stall for 200ms. If either of these is the case, then grant a
+    // little bit extra.
+    u32 min_grant = min(1U << *win_scale, 1448U);
+    if (rwnd < min_grant) {
+      u32 extra_grant = min_grant - rwnd;
+      bpf_printk(
+          "INFO: 'do_rwnd_at_egress' flow with remote port "
+          "%u granted an extra %d bytes on top of desired grant of %d bytes",
+          flow.remote_port, extra_grant, rwnd);
+      // This may go negative (if the extra grant is more than the remaining
+      // data). If it does, then this grant will actually pre-grant for the
+      // sender's next data, which we cannot escape.
+      grant_info->ungranted_bytes -= (int)extra_grant;
+      // ALWAYS update rwnd_end_seq when granting so that we NEVER retract a
+      // grant.
+      grant_info->rwnd_end_seq += extra_grant;
+      // If the sender has more pending data, then we can expect the sender to
+      // meet (some of) this extra grant immediately, so update
+      // grant_end_seq by the amount of expected data. If the sender has
+      // no more data, then do not update grant_end_seq.
+      grant_info->grant_end_seq +=
+          min(extra_grant, max(grant_info->ungranted_bytes, 0));
+      rwnd = min_grant;
+    }
+    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
+               "in grant",
+               flow.local_port, flow.remote_port, rwnd);
+
+    // Check if the grant is over. This check must be grant_end_seq, not
+    // rwnd_end_seq.
+    if (ack_seq >= grant_info->grant_end_seq) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;
-        // The flow has exhausted its grant with this segment, so add it to the
-        // done_flows ringbuf.
-        bpf_printk(
-            "INFO: 'do_rwnd_at_egress' flow %u<->%u has spent its grant, "
-            "adding to done_flows",
-            flow.local_port, flow.remote_port);
+        // The flow has exhausted its grant, so add it to the done_flows
+        // ringbuf.
+        bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u exhausted its "
+                   "grant, adding to done_flows",
+                   flow.local_port, flow.remote_port);
         if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-          bpf_printk("ERROR: 'do_rwnd_at_egress' error submitting done flow "
-                     "%u<->%u to ringbuf",
+          bpf_printk("ERROR: 'do_rwnd_at_egress' error adding flow %u<->%u to "
+                     "done_flows",
                      flow.local_port, flow.remote_port);
           return 0;
         }
       }
-      bpf_printk(
-          "INFO: 'do_rwnd_at_egress' flow %u<->%u has exhausted its grant, "
-          "pausing with RWND 0 bytes",
-          flow.local_port, flow.remote_port);
-    } else {
-      // The flow is on an existing grant.
-      rwnd = grant_info->grant_seq_num_end_bytes - ack_seq;
-      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has active grant "
-                 "with %u bytes remaining",
-                 flow.local_port, flow.remote_port, rwnd);
     }
   } else {
     // Override is not 2^32-1, so ignore grant info and use the override value.
@@ -160,49 +187,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
   // Apply the new RWND value.
 
-  if (rwnd == 0) {
-    // If the configured RWND value is 0 B, then we can take a shortcut and not
-    // bother looking up the window scale.
-    tcp->window = 0;
-    bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with local port %u "
-               "and remote port %u to 0B",
-               flow.local_port, flow.remote_port);
-    return TC_ACT_OK;
-  }
-
-  // Only need to look up the window scale value if the RWND is not 0.
-  u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
-  if (win_scale == NULL) {
-    // We do not know the window scale to use for this flow.
-    bpf_printk("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
-               "port %u, no win scale",
-               flow.local_port, flow.remote_port);
-    return TC_ACT_OK;
-  }
-
-  // The smallest RWND we can set with accuracy is 1 << win scale. We should not
-  // grant less than one segment (1448B) because otherwise the sender will stall
-  // for 200ms. If either of these is the case, then round up and account for
-  // the excessive grant bytes.
-  u32 min_grant = max(1U << *win_scale, 1448U);
-  u32 rwnd_safe = 0;
-  if (min_grant > rwnd) {
-    u32 extra_grant = min_grant - rwnd;
-    // Since we are pre-granting this amount, subtract it from the ungranted
-    // bytes. But do not change the grant end seq num, since that will mess up
-    // our grant end detection.
-    grant_info->ungranted_bytes -= extra_grant;
-    grant_info->excessive_grant_bytes += extra_grant;
-    bpf_printk("INFO: 'do_rwnd_at_egress' flow with remote port "
-      "%u carrying forward excessive grant of %d bytes on top of desired grant of %d bytes",
-      flow.remote_port, extra_grant, rwnd);
-    rwnd_safe = min_grant;
-  } else {
-    rwnd_safe = rwnd;
-  }
-
   // Apply the window scale to the configured RWND value.
-  u16 rwnd_with_win_scale = (u16)(rwnd_safe >> *win_scale);
+  u16 rwnd_with_win_scale = (u16)(rwnd >> *win_scale);
   // Set the RWND value in the TCP header. If the existing advertised window
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
