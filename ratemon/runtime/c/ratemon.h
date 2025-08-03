@@ -66,8 +66,8 @@ struct rm_flow {
 struct rm_grant_info {
   // Data pending / yet to be ACKed for the current burst request. Set by
   // libratemon_interp, used at tc egress to fine-tune the last grant, to
-  // prevent over-granting at the end of a burst.
-  uint32_t ungranted_bytes;
+  // prevent over-granting at the end of a burst. This is an int because it can go negative if we over-grant due to win scaling.
+  int ungranted_bytes;
   // If not equal to 2^32-1, then use this value as the RWND and ignore the
   // following grant info.
   uint32_t override_rwnd_bytes;
@@ -84,7 +84,7 @@ struct rm_grant_info {
   bool grant_done;
   // Count of bytes that were granted in excess of new_grant_bytes due to
   // bumping RWND from 0 to 1 when 0 < RWND < win_scale. This quantity will be
-  // carried forward and subtracted from the next grant.
+  // carried forward and added from the next grant when calculating the end seq num.
   uint32_t excessive_grant_bytes;
 };
 

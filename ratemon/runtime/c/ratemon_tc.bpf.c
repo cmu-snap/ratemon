@@ -115,9 +115,58 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // num off of the old end seq num if the latter is already ahead of the
       // ACK seq num, e.g., if there is currently a grant active. Take into
       // account pre-granted bytes.
+      // u32 excessive_bytes_used = min(grant_info->excessive_grant_bytes, grant_to_use);
+      // Latest: The purpose of excessive_grant_bytes exactly and only to delay when the extra grant applied earlier is applied to the end seq num. This is a dirty hack so that the check for the end of a grant works out.
+
+      // The end seq is literally just our own bookkkeeping of when to count a grant as done.
+      // What really matters for not granting too much is the ungranted bytes field.
+      // When we assign a grant, we just need to set the end seq to match when we decide the grant should end and a flow should be eligible for receiving a new grant.
+      // All we need to do is make sure that the end seq is not beyond what we have granted.
+      // The tough part is that the end seq is also what we use to decide what rwnd to set.
+      // THAT'S THE REAL ISSUE: we're using the end seq for two things that are at odds.
+      // We need to set the rwnd based on what we have actually granted. Highly accurately.
+      // But the end seq, that is really our own decision and has fewer restrictions.
+      // I think we need to track these separately.
+      // One value rwnd_end_seq and another grant_end_seq.
+      // rwnd_end_seq is updated whenever we grant more bytes. This must be tracked accurately.
+      // grant_end_seq is set to the amount of data we know the sender has. This also needs to be tracked accurately, but it is not the same as rwnd_end_seq (it might be sooner).
+      // Then, when we make an excessive/extra grant, we can update the rwnd_end_seq without changing the grant_end_seq.
+      // No, this is not quite right. There are two modes. When we extend a grant and we know the sender has more to send, then we update both rwnd_end_seq and grant_end_seq. If the flow does not have more data (last grant in a burst), then only update the rwnd_end.
+      // But what happens at the start of the next burst? We update the grant_end_seq because the flow now has data to send and a grant with which to send it, but the rwnd_end_seq is updated less because some of the grant has already been granted.
+      // So in that case we first update the grant_end_seq, and then set the rwnd_end_seq to equal it.
+      // Another way to think about it is that the grant_end_seq is what we want to happen. The rwnd_end_seq is what we
+      // need to do to make it happen.
+      // No need for excessive_bytes field.
+
+      /* New logic:
+
+      if ack_seq >= grant_end_seq:
+        // Grant done.
+        rwnd = 0
+        // submit flow to done_flows.
+      else:
+        // On either an existing grant or a new grant.
+        if new grant:
+          grant = min(grant, ungranted_bytes)
+          ungranted_bytes -= grant
+          grant_end_seq += grant
+          rwnd_end_seq = max(rwnd_end_seq, grant_end_seq)
+        rwnd = rwnd_end_seq - ack_seq
+
+        // Fix rwnd
+        min_grant = min(1 << win_scale, 1448)
+        if rwnd < min_grant:
+          extra_grant = min_grant - rwnd
+          rwnd_end_seq += extra_grant
+          // grant_end_seq stays the same.
+          rwnd = min_grant
+      */
+
+
+
       grant_info->grant_seq_num_end_bytes =
-          max(ack_seq, grant_info->grant_seq_num_end_bytes) + grant_to_use +
-          grant_info->excessive_grant_bytes;
+          max(ack_seq, grant_info->grant_seq_num_end_bytes) + grant_to_use
+           + grant_info->excessive_grant_bytes;
       rwnd = grant_to_use;
       grant_info->new_grant_bytes = 0;
       // We have applied the pre-granted bytes to the grant end seq num, so
@@ -212,19 +261,20 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // for 200ms. If either of these is the case, then round up and account for
   // the excessive grant bytes.
   u32 min_grant = max(1U << *win_scale, 1448U);
-  u32 rwnd_safe = rwnd;
-  if (min_grant > rwnd_safe) {
-    u32 extra_grant = min_grant - rwnd_safe;
+  u32 rwnd_safe = 0;
+  if (min_grant > rwnd) {
+    u32 extra_grant = min_grant - rwnd;
     // Since we are pre-granting this amount, subtract it from the ungranted
     // bytes. But do not change the grant end seq num, since that will mess up
     // our grant end detection.
-    grant_info->ungranted_bytes -=
-        min(grant_info->ungranted_bytes, extra_grant);
+    grant_info->ungranted_bytes -= extra_grant;
     grant_info->excessive_grant_bytes += extra_grant;
-    bpf_printk("INFO: 'do_rwnd_at_egress' flow with local port %u, remote port "
-               "%u carrying forward excessive grant of %d bytes",
-               flow.local_port, flow.remote_port, extra_grant);
+    bpf_printk("INFO: 'do_rwnd_at_egress' flow with remote port "
+      "%u carrying forward excessive grant of %d bytes on top of desired grant of %d bytes",
+      flow.remote_port, extra_grant, rwnd);
     rwnd_safe = min_grant;
+  } else {
+    rwnd_safe = rwnd;
   }
 
   // Apply the window scale to the configured RWND value.

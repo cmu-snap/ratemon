@@ -240,15 +240,14 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
       RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
       return 0;
     }
-    if (grant_info.ungranted_bytes == 0) {
+    if (grant_info.ungranted_bytes <= 0) {
       RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
                 "bytes\n",
                 fd);
       return 0;
     }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes = std::min(grant_info.ungranted_bytes,
-                                          static_cast<uint32_t>(epoch_bytes));
+    grant_info.new_grant_bytes = static_cast<uint32_t>(epoch_bytes);
     grant_info.grant_done = false;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
@@ -1209,7 +1208,8 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.grant_done = false;
       grant_info.excessive_grant_bytes = 0;
     }
-    grant_info.ungranted_bytes = bytes;
+    // This is an increment because the ungranted bytes may be negative due to excessive grants due to win scaling.
+    grant_info.ungranted_bytes += bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,
                               BPF_ANY);
     if (err != 0) {
