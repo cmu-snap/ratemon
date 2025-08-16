@@ -23,6 +23,28 @@ enum {
 
 enum { TC_ACT_OK = 0 };
 
+inline void handle_extra_grant(struct rm_flow *flow,
+                               struct rm_grant_info *grant_info,
+                               u32 extra_grant, u32 *rwnd) {
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow with remote port "
+             "%u granted an extra %d bytes on top of desired grant of %d bytes",
+             flow->remote_port, extra_grant, *rwnd);
+  // This may go negative (if the extra grant is more than the remaining
+  // data). If it does, then this grant will actually pre-grant for the
+  // sender's next data, which we cannot escape.
+  grant_info->ungranted_bytes -= (int)extra_grant;
+  // ALWAYS update rwnd_end_seq when granting so that we NEVER retract a
+  // grant.
+  grant_info->rwnd_end_seq += extra_grant;
+  // If the sender has more pending data, then we can expect the sender to
+  // meet (some of) this extra grant immediately, so update
+  // grant_end_seq by the amount of expected data. If the sender has
+  // no more data, then do not update grant_end_seq.
+  grant_info->grant_end_seq +=
+      min(extra_grant, max(grant_info->ungranted_bytes, 0));
+  *rwnd += extra_grant;
+}
+
 // Perform RWND tuning at TC egress. If a flow has an entry in flow_to_rwnd,
 // then install that value in the advertised window field. Inspired by:
 // https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
@@ -129,32 +151,24 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     }
     rwnd = grant_info->rwnd_end_seq - ack_seq;
 
-    // The smallest RWND we can set with accuracy is 1 << win scale. Also, we
-    // should not grant less than one segment (1448B) because otherwise the
-    // sender will stall for 200ms. If either of these is the case, then grant a
+    // We should not grant less than one segment (1448B) because otherwise the
+    // sender will stall for 200ms. If we are about to do that then grant a
     // little bit extra.
-    u32 min_grant = min(1U << *win_scale, 1448U);
+    u32 min_grant = 1448U;
     if (rwnd < min_grant) {
-      u32 extra_grant = min_grant - rwnd;
-      bpf_printk(
-          "INFO: 'do_rwnd_at_egress' flow with remote port "
-          "%u granted an extra %d bytes on top of desired grant of %d bytes",
-          flow.remote_port, extra_grant, rwnd);
-      // This may go negative (if the extra grant is more than the remaining
-      // data). If it does, then this grant will actually pre-grant for the
-      // sender's next data, which we cannot escape.
-      grant_info->ungranted_bytes -= (int)extra_grant;
-      // ALWAYS update rwnd_end_seq when granting so that we NEVER retract a
-      // grant.
-      grant_info->rwnd_end_seq += extra_grant;
-      // If the sender has more pending data, then we can expect the sender to
-      // meet (some of) this extra grant immediately, so update
-      // grant_end_seq by the amount of expected data. If the sender has
-      // no more data, then do not update grant_end_seq.
-      grant_info->grant_end_seq +=
-          min(extra_grant, max(grant_info->ungranted_bytes, 0));
-      rwnd = min_grant;
+      handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
     }
+
+    // We lose all precision less then 1 << win_scale. If rwnd has any bits set
+    // in the last win_scale bits, then grant extra to round up the next bit so
+    // that the last win_scale bits are all 0. This also addresses the situation
+    // where the rwnd is less than 1 << win_scale.
+    u32 win_scale_mask = (1U << *win_scale) - 1;
+    u32 tail = rwnd & win_scale_mask;
+    if (tail) {
+      handle_extra_grant(&flow, grant_info, (win_scale_mask + 1) - tail, &rwnd);
+    }
+
     bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
                "in grant",
                flow.local_port, flow.remote_port, rwnd);
