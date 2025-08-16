@@ -145,6 +145,10 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                  flow.local_port, flow.remote_port, grant_to_use);
       grant_info->new_grant_bytes = 0;
       grant_info->ungranted_bytes -= grant_to_use;
+      if (grant_info->grant_end_seq == 0) {
+        // This is the first grant we've ever seen for this flow.
+        grant_info->grant_end_seq = ack_seq;
+      }
       grant_info->grant_end_seq += grant_to_use;
       grant_info->rwnd_end_seq =
           max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
