@@ -1202,7 +1202,7 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.new_grant_bytes = 0;
       grant_info.rwnd_end_seq = 0;
       grant_info.grant_end_seq = 0;
-      grant_info.grant_done = false;
+      grant_info.grant_done = true;
     }
     // This is an increment because the ungranted bytes may be negative due to
     // extra grants.

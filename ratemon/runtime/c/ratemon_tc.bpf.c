@@ -27,7 +27,7 @@ inline void handle_extra_grant(struct rm_flow *flow,
                                struct rm_grant_info *grant_info,
                                u32 extra_grant, u32 *rwnd) {
   bpf_printk("INFO: 'do_rwnd_at_egress' flow with remote port "
-             "%u granted an extra %d bytes on top of desired grant of %d bytes",
+             "%u granted an extra %u bytes on top of desired grant of %u bytes",
              flow->remote_port, extra_grant, *rwnd);
   // This may go negative (if the extra grant is more than the remaining
   // data). If it does, then this grant will actually pre-grant for the
@@ -111,14 +111,14 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u32 ack_seq = bpf_ntohl(tcp->ack_seq);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
              flow.local_port, flow.remote_port, ack_seq);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %u",
+  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
              flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
              "grant_info->override_rwnd_bytes: %u",
              flow.local_port, flow.remote_port,
              grant_info->override_rwnd_bytes);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->new_grant_bytes: %u",
+             "grant_info->new_grant_bytes: %d",
              flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
   bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
              "grant_info->rwnd_end_seq: %u",
@@ -135,31 +135,41 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // Override is 2^32-1, so use grant info.
     // TODO(unknown): Handle sequence number wraparound.
 
+    if (grant_info->grant_end_seq == 0) {
+      // This is the first time we've seen this flow.
+      grant_info->grant_end_seq = ack_seq;
+    }
+    if (grant_info->rwnd_end_seq == 0) {
+      // This is the first time we've seen this flow.
+      grant_info->rwnd_end_seq = ack_seq;
+    }
+
     // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
       // Reduce the new grant amount based on pending data.
       int grant_to_use =
           min(grant_info->new_grant_bytes, max(grant_info->ungranted_bytes, 0));
       bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant "
-                 "of %u bytes",
+                 "of %d bytes",
                  flow.local_port, flow.remote_port, grant_to_use);
       grant_info->new_grant_bytes = 0;
       grant_info->ungranted_bytes -= grant_to_use;
-      if (grant_info->grant_end_seq == 0) {
-        // This is the first grant we've ever seen for this flow.
-        grant_info->grant_end_seq = ack_seq;
-      }
+
       grant_info->grant_end_seq += grant_to_use;
       grant_info->rwnd_end_seq =
           max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
     }
     rwnd = grant_info->rwnd_end_seq - ack_seq;
 
-    // We should not grant less than one segment (1448B) because otherwise the
+    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has base grant "
+               "remaining of %u bytes",
+               flow.local_port, flow.remote_port, rwnd);
+
+    // If we are supposed to send a nonzero grant, then we should not grant less than one segment (1448B) because otherwise the
     // sender will stall for 200ms. If we are about to do that then grant a
     // little bit extra.
     u32 min_grant = 1448U;
-    if (rwnd < min_grant) {
+    if (rwnd > 0 && rwnd < min_grant) {
       handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
     }
 
