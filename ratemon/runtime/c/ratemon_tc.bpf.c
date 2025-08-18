@@ -155,9 +155,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       grant_info->new_grant_bytes = 0;
       grant_info->ungranted_bytes -= grant_to_use;
 
-      grant_info->grant_end_seq += grant_to_use;
-      grant_info->rwnd_end_seq =
-          max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
+      grant_info->rwnd_end_seq += grant_to_use;
+      grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+          // max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
     }
     rwnd = grant_info->rwnd_end_seq - ack_seq;
 
