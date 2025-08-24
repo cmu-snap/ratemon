@@ -157,7 +157,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
       grant_info->rwnd_end_seq += grant_to_use;
       grant_info->grant_end_seq = grant_info->rwnd_end_seq;
-          // max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
+      // max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
     }
     rwnd = grant_info->rwnd_end_seq - ack_seq;
 
@@ -165,9 +165,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                "remaining of %u bytes",
                flow.local_port, flow.remote_port, rwnd);
 
-    // If we are supposed to send a nonzero grant, then we should not grant less than one segment (1448B) because otherwise the
-    // sender will stall for 200ms. If we are about to do that then grant a
-    // little bit extra.
+    // If we are supposed to send a nonzero grant, then we should not grant less
+    // than one segment (1448B) because otherwise the sender will stall for
+    // 200ms. If we are about to do that then grant a little bit extra.
     u32 min_grant = 1448U;
     if (rwnd > 0 && rwnd < min_grant) {
       handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
