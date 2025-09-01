@@ -16,7 +16,7 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define max(x, y) ((x) > (y) ? (x) : (y))
+inline int max(int val1, int val2) { return val1 > val2 ? val1 : val2; }
 
 // 'tcp_rcv_established' will be used to track the last time that a flow
 // received data so that we can determine when to classify a flow as idle.
