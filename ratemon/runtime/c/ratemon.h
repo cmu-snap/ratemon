@@ -54,6 +54,10 @@
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
 
+#ifndef UINT32_MAX
+#define UINT32_MAX 4294967295U
+#endif
+
 // Key for use in flow-based maps.
 struct rm_flow {
   uint32_t local_addr;
@@ -77,11 +81,12 @@ struct rm_grant_info {
   int new_grant_bytes;
   // The last sequence number in the granted window, regardless of how much
   // pending data the sender has. Used to set the TCP advertised window. This is
-  // unsigned because sequence numbers are unsigned.
+  // unsigned because sequence numbers are unsigned. Take care regarding
+  // sequence number wrapping.
   uint32_t rwnd_end_seq;
   // The last sequence number in the granted window, reduced if the sender has
   // less data to send than the grant. This is unsigned because sequence numbers
-  // are unsigned.
+  // are unsigned. Take care regarding sequence number wrapping.
   uint32_t grant_end_seq;
   // Indicates if the flow has recently completed a grant and should not be
   // re-added to the done_flows map. Used to make sure that a flow is added to

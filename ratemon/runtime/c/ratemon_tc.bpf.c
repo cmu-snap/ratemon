@@ -14,8 +14,17 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define min(x, y) ((x) < (y) ? (x) : (y))
-#define max(x, y) ((x) > (y) ? (x) : (y))
+inline int min(int val1, int val2) { return val1 < val2 ? val1 : val2; }
+
+inline int max(int val1, int val2) { return val1 > val2 ? val1 : val2; }
+
+// Comparators to handle sequence number wrapping for 32-bit sequence numbers.
+// The key is to remember that arithmetic on int32_t is module 2^31.
+inline bool before(uint32_t seq1, uint32_t seq2) {
+  return (int32_t)(seq1 - seq2) < 0;
+}
+
+inline bool after(uint32_t seq2, uint32_t seq1) { return before(seq1, seq2); }
 
 enum {
   ETH_P_IP = 0x0800 /* Internet Protocol packet	*/
@@ -41,7 +50,7 @@ inline void handle_extra_grant(struct rm_flow *flow,
   // grant_end_seq by the amount of expected data. If the sender has
   // no more data, then do not update grant_end_seq.
   grant_info->grant_end_seq +=
-      min(extra_grant, max(grant_info->ungranted_bytes, 0));
+      min((int)extra_grant, max(grant_info->ungranted_bytes, 0));
   *rwnd += extra_grant;
 }
 
@@ -149,17 +158,22 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // Reduce the new grant amount based on pending data.
       int grant_to_use =
           min(grant_info->new_grant_bytes, max(grant_info->ungranted_bytes, 0));
-      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant "
-                 "of %d bytes",
+      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
+                 "%d bytes",
                  flow.local_port, flow.remote_port, grant_to_use);
       grant_info->new_grant_bytes = 0;
       grant_info->ungranted_bytes -= grant_to_use;
-
+      // Sequence number increment wraps naturally for uint32_t, but comparisons
+      // must use before/after macros.
       grant_info->rwnd_end_seq += grant_to_use;
       grant_info->grant_end_seq = grant_info->rwnd_end_seq;
-      // max(grant_info->rwnd_end_seq, grant_info->grant_end_seq);
     }
-    rwnd = grant_info->rwnd_end_seq - ack_seq;
+    // Calculate window size using sequence number wrapping.
+    if (after(grant_info->rwnd_end_seq, ack_seq)) {
+      rwnd = grant_info->rwnd_end_seq - ack_seq;
+    } else {
+      rwnd = (uint32_t)(grant_info->rwnd_end_seq + (UINT32_MAX - ack_seq) + 1);
+    }
 
     bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has base grant "
                "remaining of %u bytes",
@@ -189,7 +203,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Check if the grant is over. This check must be grant_end_seq, not
     // rwnd_end_seq.
-    if (ack_seq >= grant_info->grant_end_seq) {
+    if (ack_seq == grant_info->grant_end_seq ||
+        after(ack_seq, grant_info->grant_end_seq)) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;
