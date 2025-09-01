@@ -9,6 +9,7 @@
 #include <bpf/bpf_endian.h>
 
 #include "ratemon.h"
+#include "ratemon.bpf.h"
 #include "ratemon_maps.h"
 // clang-format on
 
@@ -35,9 +36,9 @@ enum { TC_ACT_OK = 0 };
 inline void handle_extra_grant(struct rm_flow *flow,
                                struct rm_grant_info *grant_info,
                                u32 extra_grant, u32 *rwnd) {
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow with remote port "
-             "%u granted an extra %u bytes on top of desired grant of %u bytes",
-             flow->remote_port, extra_grant, *rwnd);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow with remote port "
+            "%u granted an extra %u bytes on top of desired grant of %u bytes",
+            flow->remote_port, extra_grant, *rwnd);
   // This may go negative (if the extra grant is more than the remaining
   // data). If it does, then this grant will actually pre-grant for the
   // sender's next data, which we cannot escape.
@@ -59,7 +60,7 @@ inline void handle_extra_grant(struct rm_flow *flow,
 // https://stackoverflow.com/questions/65762365/ebpf-printing-udp-payload-and-source-ip-as-hex
 SEC("tc/egress")
 int do_rwnd_at_egress(struct __sk_buff *skb) {
-  // bpf_printk("INFO: do_rwnd_at_egress");
+  // RM_PRINTK("INFO: do_rwnd_at_egress");
   if (skb == NULL) {
     return TC_ACT_OK;
   }
@@ -111,31 +112,30 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
-    bpf_printk("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
-               "port %u, no win scale",
-               flow.local_port, flow.remote_port);
+    RM_PRINTK("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
+              "port %u, no win scale",
+              flow.local_port, flow.remote_port);
     return TC_ACT_OK;
   }
 
   u32 ack_seq = bpf_ntohl(tcp->ack_seq);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
-             flow.local_port, flow.remote_port, ack_seq);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
-             flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->override_rwnd_bytes: %u",
-             flow.local_port, flow.remote_port,
-             grant_info->override_rwnd_bytes);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->new_grant_bytes: %d",
-             flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->rwnd_end_seq: %u",
-             flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
-  bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-             "grant_info->grant_end_seq: %u",
-             flow.local_port, flow.remote_port, grant_info->grant_end_seq);
-  bpf_printk(
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
+            flow.local_port, flow.remote_port, ack_seq);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
+            flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+            "grant_info->override_rwnd_bytes: %u",
+            flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+            "grant_info->new_grant_bytes: %d",
+            flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+            "grant_info->rwnd_end_seq: %u",
+            flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+            "grant_info->grant_end_seq: %u",
+            flow.local_port, flow.remote_port, grant_info->grant_end_seq);
+  RM_PRINTK(
       "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
       flow.local_port, flow.remote_port, grant_info->grant_done);
 
@@ -158,9 +158,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // Reduce the new grant amount based on pending data.
       int grant_to_use =
           min(grant_info->new_grant_bytes, max(grant_info->ungranted_bytes, 0));
-      bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
-                 "%d bytes",
-                 flow.local_port, flow.remote_port, grant_to_use);
+      RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
+                "%d bytes",
+                flow.local_port, flow.remote_port, grant_to_use);
       grant_info->new_grant_bytes = 0;
       grant_info->ungranted_bytes -= grant_to_use;
       // Sequence number increment wraps naturally for uint32_t, but comparisons
@@ -175,9 +175,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       rwnd = (uint32_t)(grant_info->rwnd_end_seq + (UINT32_MAX - ack_seq) + 1);
     }
 
-    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has base grant "
-               "remaining of %u bytes",
-               flow.local_port, flow.remote_port, rwnd);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u has base grant "
+              "remaining of %u bytes",
+              flow.local_port, flow.remote_port, rwnd);
 
     // If we are supposed to send a nonzero grant, then we should not grant less
     // than one segment (1448B) because otherwise the sender will stall for
@@ -197,9 +197,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       handle_extra_grant(&flow, grant_info, (win_scale_mask + 1) - tail, &rwnd);
     }
 
-    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
-               "in grant",
-               flow.local_port, flow.remote_port, rwnd);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
+              "in grant",
+              flow.local_port, flow.remote_port, rwnd);
 
     // Check if the grant is over. This check must be grant_end_seq, not
     // rwnd_end_seq.
@@ -210,13 +210,13 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         grant_info->grant_done = true;
         // The flow has exhausted its grant, so add it to the done_flows
         // ringbuf.
-        bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u exhausted its "
-                   "grant, adding to done_flows",
-                   flow.local_port, flow.remote_port);
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u exhausted its "
+                  "grant, adding to done_flows",
+                  flow.local_port, flow.remote_port);
         if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
-          bpf_printk("ERROR: 'do_rwnd_at_egress' error adding flow %u<->%u to "
-                     "done_flows",
-                     flow.local_port, flow.remote_port);
+          RM_PRINTK("ERROR: 'do_rwnd_at_egress' error adding flow %u<->%u to "
+                    "done_flows",
+                    flow.local_port, flow.remote_port);
           return 0;
         }
       }
@@ -224,8 +224,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   } else {
     // Override is not 2^32-1, so ignore grant info and use the override value.
     rwnd = grant_info->override_rwnd_bytes;
-    bpf_printk("INFO: 'do_rwnd_at_egress' flow %u<->%u has override RWND %u",
-               flow.local_port, flow.remote_port, rwnd);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u has override RWND %u",
+              flow.local_port, flow.remote_port, rwnd);
   }
 
   // Apply the new RWND value.
@@ -237,16 +237,16 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // preserve flow control.
   u16 existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
   if (existing_rwnd_with_win_scale < rwnd_with_win_scale) {
-    bpf_printk("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
-               "advertised window %u smaller than grant %u (values printed do "
-               "not include win scale)",
-               flow.remote_port, existing_rwnd_with_win_scale,
-               rwnd_with_win_scale);
+    RM_PRINTK("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
+              "advertised window %u smaller than grant %u (values printed do "
+              "not include win scale)",
+              flow.remote_port, existing_rwnd_with_win_scale,
+              rwnd_with_win_scale);
     rwnd_with_win_scale = existing_rwnd_with_win_scale;
   }
   tcp->window = bpf_htons(rwnd_with_win_scale);
-  bpf_printk("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
-             "to %u (win scale: %u)",
-             flow.remote_port, rwnd_with_win_scale, *win_scale);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
+            "to %u (win scale: %u)",
+            flow.remote_port, rwnd_with_win_scale, *win_scale);
   return TC_ACT_OK;
 }

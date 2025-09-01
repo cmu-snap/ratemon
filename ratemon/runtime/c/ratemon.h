@@ -9,11 +9,9 @@
 
 #ifdef RM_VERBOSE
 #define RM_PRINTF(...) printf(__VA_ARGS__)
-// #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
 #define NDEBUG // Disable assert() calls.
 #define RM_PRINTF(...)
-// #define RM_PRINTK(...)
 #endif
 
 // Max number of flows that BPF can track.

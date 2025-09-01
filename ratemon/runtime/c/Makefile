@@ -112,7 +112,7 @@ $(VMLINUX):	$(BPFTOOL)
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $@
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h ratemon.bpf.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
 	$(CLANG) -g -O3 -target bpf -D__TARGET_ARCH_$(ARCH)                \
 		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)                     \

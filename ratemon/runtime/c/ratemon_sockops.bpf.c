@@ -9,6 +9,7 @@
 #include <bpf/bpf_endian.h>
 
 #include "ratemon.h"
+#include "ratemon.bpf.h"
 #include "ratemon_maps.h"
 // clang-format on
 
@@ -44,13 +45,12 @@ __always_inline int set_hdr_cb_flags(struct bpf_sock_ops *skops, int flags) {
     // This is not a fullsock.
     // Note: bpf_sk_fullsock() is not available in sockops, so if this is not a
     // fullsock there is nothing we can do.
-    bpf_printk("ERROR: 'sockops' failed to set sockops flags because socket is "
-               "not full socket");
+    RM_PRINTK("ERROR: 'sockops' failed to set sockops flags because socket is "
+              "not full socket");
     return SOCKOPS_ERR;
   }
   if (ret) {
-    bpf_printk("ERROR: 'sockops' failed to set specific sockops flag: %ld",
-               ret);
+    RM_PRINTK("ERROR: 'sockops' failed to set specific sockops flag: %ld", ret);
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
@@ -62,7 +62,7 @@ __always_inline int enable_hdr_cbs(struct bpf_sock_ops *skops) {
   if (set_hdr_cb_flags(skops, (int)skops->bpf_sock_ops_cb_flags |
                                   BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
       SOCKOPS_ERR) {
-    bpf_printk("ERROR: 'sockops' could not enable sockops header callbacks");
+    RM_PRINTK("ERROR: 'sockops' could not enable sockops header callbacks");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
@@ -74,7 +74,7 @@ __always_inline int disable_hdr_cbs(struct bpf_sock_ops *skops) {
   if (set_hdr_cb_flags(skops, (int)skops->bpf_sock_ops_cb_flags &
                                   ~BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG) ==
       SOCKOPS_ERR) {
-    bpf_printk("ERROR: 'sockops' could not disable sockops header callbacks");
+    RM_PRINTK("ERROR: 'sockops' could not disable sockops header callbacks");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
@@ -95,7 +95,7 @@ __always_inline int handle_hdr_opt_len(struct bpf_sock_ops *skops) {
   // These three bytes will never actually be used, but reserving space is the
   // only way for that callback to be triggered.
   if (bpf_reserve_hdr_opt(skops, 3, 0)) {
-    bpf_printk("ERROR: 'sockops' failed to reserve space for a header option");
+    RM_PRINTK("ERROR: 'sockops' failed to reserve space for a header option");
     return SOCKOPS_ERR;
   }
   return SOCKOPS_OK;
@@ -115,7 +115,7 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   struct tcp_opt win_scale_opt = {.kind = TCPOPT_WINDOW, .len = 0, .data = 0};
   if (bpf_load_hdr_opt(skops, &win_scale_opt, sizeof(win_scale_opt), 0) != 3 ||
       win_scale_opt.len != 3 || win_scale_opt.kind != TCPOPT_WINDOW) {
-    bpf_printk("ERROR: 'sockops' failed to retrieve window scale option");
+    RM_PRINTK("ERROR: 'sockops' failed to retrieve window scale option");
     return SOCKOPS_ERR;
   }
 
@@ -123,9 +123,9 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
     // This is not an IPv4 packet. We only support IPv4 packets because the
     // struct we use as a map key stores IP addresses as 32 bits. This is purely
     // an implementation detail.
-    bpf_printk("WARNING: 'sockops' not using IPv4 for flow on local port %u: "
-               "family=%u",
-               skops->local_port, skops->family);
+    RM_PRINTK("WARNING: 'sockops' not using IPv4 for flow on local port %u: "
+              "family=%u",
+              skops->local_port, skops->family);
     disable_hdr_cbs(skops);
     return SOCKOPS_OK;
   }
@@ -136,10 +136,10 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
                          // Use bpf_ntohl instead of bpf_ntohs because the port
                          // is actually stored as a u32.
                          .remote_port = (u16)bpf_ntohl(skops->remote_port)};
-  bpf_printk("INFO: 'sockops' TCP window scale for flow with remote port %u "
-             "and local port %u "
-             "is %u",
-             flow.remote_port, flow.local_port, win_scale_opt.data);
+  RM_PRINTK("INFO: 'sockops' TCP window scale for flow with remote port %u "
+            "and local port %u "
+            "is %u",
+            flow.remote_port, flow.local_port, win_scale_opt.data);
 
   // Record this window scale for use when setting the RWND in the egress path.
   // Use update() instead of insert() in case this port is being reused.
@@ -147,7 +147,7 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
   // implemented.
   uint8_t win_scale = win_scale_opt.data;
   if (bpf_map_update_elem(&flow_to_win_scale, &flow, &win_scale, BPF_ANY)) {
-    bpf_printk("ERROR: 'sockops' failed to update flow_to_win_scale map");
+    RM_PRINTK("ERROR: 'sockops' failed to update flow_to_win_scale map");
     return SOCKOPS_ERR;
   }
 
