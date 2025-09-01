@@ -143,7 +143,7 @@ $(INTERPS): %: $(OUTPUT)/%.so ;
 
 # Get the LD environment variables that will force an application binary to
 # use libratemon_interp.
-get_ld_vars:
+get_ld_var:
 	$(Q) echo "LD_PRELOAD=$(OUTPUT)/libratemon_interp.so"
 
 # Run ratemon_main and associated setup/teardown.
