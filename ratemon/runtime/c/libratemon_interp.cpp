@@ -171,7 +171,7 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   if (scheduling_mode == "byte") {
     RM_PRINTF("INFO: Cannot pause flow FD=%d in byte-based scheduling mode\n",
               fd);
-    return 0;
+    return 1;
   }
   // Pausing a flow means setting its RWND to 0 B.
   struct rm_grant_info grant_info {};
