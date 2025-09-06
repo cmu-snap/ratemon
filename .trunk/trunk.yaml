@@ -51,12 +51,12 @@ lint:
     - markdown-link-check@3.13.7
     - pragma-once
     - pre-commit-hooks@5.0.0
-    - ruff@0.12.11
-    - semgrep@1.134.0
+    - ruff@0.12.12
+    - semgrep@1.135.0
     - taplo@0.10.0
     - terrascan@1.19.1
     - trivy@0.66.0
-    - trufflehog-git@3.90.5
+    - trufflehog-git@3.90.6
     - trunk-toolbox@0.5.4
     - vale@3.12.0
     - actionlint@1.7.7
@@ -69,10 +69,10 @@ lint:
     - markdownlint@0.45.0
     - osv-scanner@2.2.2
     - prettier@3.6.2
-    - ruff@0.12.11
+    - ruff@0.12.12
     - shellcheck@0.11.0
     - shfmt@3.6.0
-    - trufflehog@3.90.5
+    - trufflehog@3.90.6
     - yamllint@1.37.1
 actions:
   disabled:
