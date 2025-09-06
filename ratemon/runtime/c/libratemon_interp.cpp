@@ -118,12 +118,14 @@ int max_active_flows = 5;
 std::string scheduling_mode = "time"; // or "bytes"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
-// int response_size_bytes = 0;
 int idle_timeout_us = 0;
 int64_t idle_timeout_ns = 0;
 // Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
+// Grant end percent for early grant completion. See struct rm_grant_info for
+// more details.
+int grant_done_percent = 100;
 
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
@@ -237,7 +239,6 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     // updates.
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
     if (err != 0) {
-      // No existing rm_grant_info, so fill in new info.
       RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
       return 0;
     }
@@ -804,9 +805,10 @@ bool read_env_string(const char *key, std::string &dest) {
 }
 
 // Perform setup (only once for all flows in this process), such as reading
-// parameters from environment variables and looking up the BPF map
-// flow_to_rwnd.
+// parameters from environment variables and setting up BPF maps.
 bool setup() {
+  // Parameter setup.
+
   RM_PRINTF("INFO: Performing setup\n");
   // Read environment variables with parameters.
   if (!read_env_int(RM_MAX_ACTIVE_FLOWS_KEY, &max_active_flows)) {
@@ -831,15 +833,6 @@ bool setup() {
               RM_EPOCH_BYTES_KEY, epoch_bytes);
     return false;
   }
-  // if (!read_env_int(RM_RESPONSE_SIZE_KEY, &response_size_bytes)) {
-  //   return false;
-  // }
-  // if (response_size_bytes < 0) {
-  //   RM_PRINTF(
-  //       "ERROR: Invalid value for '%s'=%d (must be > 0; set = 0 to
-  //       disable)\n", RM_RESPONSE_SIZE_KEY, response_size_bytes);
-  //   return false;
-  // }
   if (!read_env_int(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
                     true /* allow_zero */, false /* allow_neg */)) {
     return false;
@@ -859,6 +852,16 @@ bool setup() {
     return false;
   }
   monitor_port_end = static_cast<uint16_t>(monitor_port_end_);
+  if (!read_env_int(RM_GRANT_DONE_PERCENT_KEY, &grant_done_percent)) {
+    return false;
+  }
+  if (grant_done_percent < 0 || grant_done_percent > 100) {
+    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be in [0-100])\n",
+              RM_GRANT_DONE_PERCENT_KEY, grant_done_percent);
+    return false;
+  }
+
+  // BPF setup.
 
   // Look up the FD for the flow_to_rwnd map. We do not need the BPF skeleton
   // for this.
@@ -1208,6 +1211,7 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.rwnd_end_seq = 0;
       grant_info.grant_end_seq = 0;
       grant_info.grant_done = true;
+      grant_info.grant_done_percent = grant_done_percent;
     }
     // This is an increment because the ungranted bytes may be negative due to
     // extra grants.

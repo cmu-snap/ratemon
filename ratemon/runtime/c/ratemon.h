@@ -51,6 +51,9 @@
 #define RM_MONITOR_PORT_END_KEY "RM_MONITOR_PORT_END"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
+// Environment variable that specifies the grant end percent for early grant
+// completion. See struct rm_grant_info for more details.
+#define RM_GRANT_DONE_PERCENT_KEY "RM_GRANT_DONE_PERCENT"
 
 #ifndef UINT32_MAX
 #define UINT32_MAX 4294967295U
@@ -90,6 +93,13 @@ struct rm_grant_info {
   // re-added to the done_flows map. Used to make sure that a flow is added to
   // the done_flows map at most once per grant.
   bool grant_done;
+  // When processing a new grant, consider the grant to be done when this
+  // percent of the bytes have been ACKed. Must be in the range [0-100]. If this
+  // is equal to 100 (i.e., a grant is never done early), then precisely track
+  // all extra grant bytes as counting towards the grant end. If this is less
+  // than 100, then extra grants will not extend grant_end_seq, so the actual
+  // grant done percent will be less than what is configured here.
+  int grant_done_percent;
 };
 
 #endif /* __RATEMON_H */
