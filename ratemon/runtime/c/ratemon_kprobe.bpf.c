@@ -48,21 +48,21 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
 
   // Safely extract members from tcp_sock, tcphdr, and sk_buff.
   // tcp_sock:
-  u32 rcv_nxt = 0;
+  uint32_t rcv_nxt = 0;
   BPF_CORE_READ_INTO(&rcv_nxt, tp, rcv_nxt);
   // tcphdr
   __be32 seq_ = 0;
   BPF_CORE_READ_INTO(&seq_, th, seq);
-  u32 seq = bpf_ntohl(seq_);
-  u64 doff = BPF_CORE_READ_BITFIELD_PROBED(th, doff);
-  u64 syn = BPF_CORE_READ_BITFIELD_PROBED(th, syn);
-  u64 fin = BPF_CORE_READ_BITFIELD_PROBED(th, fin);
-  u64 rst = BPF_CORE_READ_BITFIELD_PROBED(th, rst);
+  uint32_t seq = bpf_ntohl(seq_);
+  uint64_t doff = BPF_CORE_READ_BITFIELD_PROBED(th, doff);
+  uint64_t syn = BPF_CORE_READ_BITFIELD_PROBED(th, syn);
+  uint64_t fin = BPF_CORE_READ_BITFIELD_PROBED(th, fin);
+  uint64_t rst = BPF_CORE_READ_BITFIELD_PROBED(th, rst);
   // sk_buff:
-  u32 len = 0;
+  uint32_t len = 0;
   __be32 skc_daddr = 0;
   __be32 skc_rcv_saddr = 0;
-  __u16 skc_num = 0;
+  uint16_t skc_num = 0;
   __be16 skc_dport = 0;
   BPF_CORE_READ_INTO(&len, skb, len);
   BPF_CORE_READ_INTO(&skc_daddr, sk, __sk_common.skc_daddr);
@@ -81,7 +81,7 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // A packet is a keepalive "...when the segment size is zero or one, the
   // current sequence number is one byte less than the next expected sequence
   // number, and none of SYN, FIN, or RST are set".
-  u32 payload_bytes = len - (doff * 4);
+  uint32_t payload_bytes = len - (doff * 4);
   if ((payload_bytes <= 1) && (seq == rcv_nxt - 1) && !syn && !fin && !rst) {
     // This is a keepalive packet. Set a 1 to indicate that this flow received a
     // keepalive. This 1 will be removed when the flow goes idle.
@@ -113,13 +113,13 @@ int BPF_KPROBE(tcp_rcv_established, struct sock *sk, struct sk_buff *skb) {
   // //   return 0;
   // // }
 
-  // u32 grant_used = max(0, (seq + payload_bytes) - rcv_nxt);
+  // uint32_t grant_used = max(0, (seq + payload_bytes) - rcv_nxt);
 
   // // Check if we should record the last data time for this flow.
   // if (bpf_map_lookup_elem(&flow_to_last_data_time_ns, &flow) != NULL) {
   //   // This flow is in the map, so we are supposed to track its last data time.
   //   // Get the current time and store it for this flow.
-  //   u64 now_ns = bpf_ktime_get_ns();
+  //   uint64_t now_ns = bpf_ktime_get_ns();
   //   if (bpf_map_update_elem(&flow_to_last_data_time_ns, &flow, &now_ns,
   //                           BPF_ANY)) {
   //     RM_PRINTK("ERROR: 'tcp_rcv_established' error updating "

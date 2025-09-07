@@ -35,7 +35,7 @@ enum { TC_ACT_OK = 0 };
 
 inline void handle_extra_grant(struct rm_flow *flow,
                                struct rm_grant_info *grant_info,
-                               u32 extra_grant, u32 *rwnd) {
+                               uint32_t extra_grant, uint32_t *rwnd) {
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow with remote port "
             "%u granted an extra %u bytes on top of desired grant of %u bytes",
             flow->remote_port, extra_grant, *rwnd);
@@ -109,7 +109,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
-  u8 *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
+  uint8_t *win_scale = bpf_map_lookup_elem(&flow_to_win_scale, &flow);
   if (win_scale == NULL) {
     // We do not know the window scale to use for this flow.
     RM_PRINTK("ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
@@ -118,7 +118,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
-  u32 ack_seq = bpf_ntohl(tcp->ack_seq);
+  uint32_t ack_seq = bpf_ntohl(tcp->ack_seq);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
             flow.local_port, flow.remote_port, ack_seq);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
@@ -143,7 +143,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
             flow.local_port, flow.remote_port,
             grant_info->grant_end_buffer_bytes);
 
-  u32 rwnd = 0;
+  uint32_t rwnd = 0;
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
     // Override is 2^32-1, so use grant info.
 
@@ -185,7 +185,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // If we are supposed to send a nonzero grant, then we should not grant less
     // than one segment (1448B) because otherwise the sender will stall for
     // 200ms. If we are about to do that then grant a little bit extra.
-    u32 min_grant = 1448U;
+    uint32_t min_grant = 1448U;
     if (rwnd > 0 && rwnd < min_grant) {
       handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
     }
@@ -194,8 +194,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // in the last win_scale bits, then grant extra to round up the next bit so
     // that the last win_scale bits are all 0. This also addresses the situation
     // where the rwnd is less than 1 << win_scale.
-    u32 win_scale_mask = (1U << *win_scale) - 1;
-    u32 tail = rwnd & win_scale_mask;
+    uint32_t win_scale_mask = (1U << *win_scale) - 1;
+    uint32_t tail = rwnd & win_scale_mask;
     if (tail) {
       handle_extra_grant(&flow, grant_info, (win_scale_mask + 1) - tail, &rwnd);
     }
@@ -236,11 +236,11 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   // Apply the new RWND value.
 
   // Apply the window scale to the configured RWND value.
-  u16 rwnd_with_win_scale = (u16)(rwnd >> *win_scale);
+  uint16_t rwnd_with_win_scale = (uint16_t)(rwnd >> *win_scale);
   // Set the RWND value in the TCP header. If the existing advertised window
   // set by flow control is smaller, then use that instead so that we
   // preserve flow control.
-  u16 existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
+  uint16_t existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
   if (existing_rwnd_with_win_scale < rwnd_with_win_scale) {
     RM_PRINTK("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
               "advertised window %u smaller than grant %u (values printed do "

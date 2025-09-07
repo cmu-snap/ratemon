@@ -31,9 +31,9 @@ enum { TCPHDR_SYN = 0x02, TCPHDR_ACK = 0x10 };
 #define TCPHDR_SYNACK (TCPHDR_SYN | TCPHDR_ACK)
 
 struct tcp_opt {
-  __u8 kind;
-  __u8 len;
-  __u8 data;
+  uint8_t kind;
+  uint8_t len;
+  uint8_t data;
 } __attribute__((packed));
 
 // The next several functions are helpers for the sockops program that records
@@ -132,10 +132,11 @@ __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops) {
 
   struct rm_flow flow = {.local_addr = bpf_ntohl(skops->local_ip4),
                          .remote_addr = bpf_ntohl(skops->remote_ip4),
-                         .local_port = (u16)skops->local_port,
+                         .local_port = (uint16_t)skops->local_port,
                          // Use bpf_ntohl instead of bpf_ntohs because the port
-                         // is actually stored as a u32.
-                         .remote_port = (u16)bpf_ntohl(skops->remote_port)};
+                         // is actually stored as a uint32_t.
+                         .remote_port =
+                             (uint16_t)bpf_ntohl(skops->remote_port)};
   RM_PRINTK("INFO: 'sockops' TCP window scale for flow with remote port %u "
             "and local port %u "
             "is %u",
