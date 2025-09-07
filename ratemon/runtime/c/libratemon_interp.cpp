@@ -125,7 +125,7 @@ uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
 // Consider a grant done when the ACKed sequence number is within this many
 // bytes of the end of the grant.
-int grant_end_buffer_bytes = 32768;
+int grant_end_buffer_bytes = 0;
 
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
