@@ -182,27 +182,29 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               "remaining of %u bytes",
               flow.local_port, flow.remote_port, rwnd);
 
-    // If we are supposed to send a nonzero grant, then we should not grant less
-    // than one segment (1448B) because otherwise the sender will stall for
-    // 200ms. If we are about to do that then grant a little bit extra.
-    uint32_t min_grant = 1448U;
-    if (rwnd > 0 && rwnd < min_grant) {
-      handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
-    }
+    if (false) {
+      // If we are supposed to send a nonzero grant, then we should not grant less
+      // than one segment (1448B) because otherwise the sender will stall for
+      // 200ms. If we are about to do that then grant a little bit extra.
+      uint32_t min_grant = 1448U;
+      if (rwnd > 0 && rwnd < min_grant) {
+        handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
+      }
 
-    // We lose all precision less then 1 << win_scale. If rwnd has any bits set
-    // in the last win_scale bits, then grant extra to round up the next bit so
-    // that the last win_scale bits are all 0. This also addresses the situation
-    // where the rwnd is less than 1 << win_scale.
-    uint32_t win_scale_mask = (1U << *win_scale) - 1;
-    uint32_t tail = rwnd & win_scale_mask;
-    if (tail) {
-      handle_extra_grant(&flow, grant_info, (win_scale_mask + 1) - tail, &rwnd);
-    }
+      // We lose all precision less then 1 << win_scale. If rwnd has any bits set
+      // in the last win_scale bits, then grant extra to round up the next bit so
+      // that the last win_scale bits are all 0. This also addresses the situation
+      // where the rwnd is less than 1 << win_scale.
+      uint32_t win_scale_mask = (1U << *win_scale) - 1;
+      uint32_t tail = rwnd & win_scale_mask;
+      if (tail) {
+        handle_extra_grant(&flow, grant_info, (win_scale_mask + 1) - tail, &rwnd);
+      }
 
-    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
-              "in grant",
-              flow.local_port, flow.remote_port, rwnd);
+      RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u has %u bytes remaining "
+                "in grant",
+                flow.local_port, flow.remote_port, rwnd);
+    }
 
     // Check if the grant is over. This check must be grant_end_seq, not
     // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes.
