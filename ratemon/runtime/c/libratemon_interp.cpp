@@ -852,12 +852,8 @@ bool setup() {
     return false;
   }
   monitor_port_end = static_cast<uint16_t>(monitor_port_end_);
-  if (!read_env_int(RM_GRANT_END_BUFFER_BYTES_KEY, &grant_end_buffer_bytes)) {
-    return false;
-  }
-  if (grant_end_buffer_bytes < 0) {
-    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be >= 0)\n",
-              RM_GRANT_END_BUFFER_BYTES_KEY, grant_end_buffer_bytes);
+  if (!read_env_int(RM_GRANT_END_BUFFER_BYTES_KEY, &grant_end_buffer_bytes,
+                    true /* allow_zero */, false /* allow_neg */)) {
     return false;
   }
 
