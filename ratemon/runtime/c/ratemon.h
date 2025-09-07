@@ -54,6 +54,9 @@
 // Environment variable that specifies the grant end percent for early grant
 // completion. See struct rm_grant_info for more details.
 #define RM_GRANT_DONE_PERCENT_KEY "RM_GRANT_DONE_PERCENT"
+// Environment variable that specifies how early to consider a grant done (in
+// bytes). See struct rm_grant_info for more details.
+#define RM_GRANT_END_BUFFER_BYTES_KEY "RM_GRANT_END_BUFFER_BYTES"
 
 #ifndef UINT32_MAX
 #define UINT32_MAX 4294967295U
@@ -100,6 +103,9 @@ struct rm_grant_info {
   // than 100, then extra grants will not extend grant_end_seq, so the actual
   // grant done percent will be less than what is configured here.
   int grant_done_percent;
+  // Consider a grant done when the ACKed sequence number is within this many
+  // bytes of grant_end_seq. Only used if grant_done_percent == 100.
+  int grant_end_buffer_bytes;
 };
 
 #endif /* __RATEMON_H */

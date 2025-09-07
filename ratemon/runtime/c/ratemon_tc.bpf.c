@@ -218,9 +218,14 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               flow.local_port, flow.remote_port, rwnd);
 
     // Check if the grant is over. This check must be grant_end_seq, not
-    // rwnd_end_seq.
-    if (ack_seq == grant_info->grant_end_seq ||
-        after(ack_seq, grant_info->grant_end_seq)) {
+    // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes (only
+    // supported if grant_done_percent is 100).
+    uint32_t actual_grant_end_seq =
+        grant_info->grant_end_seq - (grant_info->grant_done_percent == 100
+                                         ? grant_info->grant_end_buffer_bytes
+                                         : 0);
+    if (ack_seq == actual_grant_end_seq ||
+        after(ack_seq, actual_grant_end_seq)) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;

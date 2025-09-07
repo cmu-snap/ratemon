@@ -115,7 +115,7 @@ std::unordered_map<struct rm_flow_key, int> flow_to_fd;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
-std::string scheduling_mode = "time"; // or "bytes"
+std::string scheduling_mode = "byte"; // or "time"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
 int idle_timeout_us = 0;
@@ -126,6 +126,9 @@ uint16_t monitor_port_end = 9999;
 // Grant end percent for early grant completion. See struct rm_grant_info for
 // more details.
 int grant_done_percent = 100;
+// Consider a grant done when the ACKed sequence number is within this many
+// bytes of the end of the grant. Only used if grant_done_percent == 100.
+int grant_end_buffer_bytes = 32768;
 
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
@@ -860,6 +863,14 @@ bool setup() {
               RM_GRANT_DONE_PERCENT_KEY, grant_done_percent);
     return false;
   }
+  if (!read_env_int(RM_GRANT_END_BUFFER_BYTES_KEY, &grant_end_buffer_bytes)) {
+    return false;
+  }
+  if (grant_end_buffer_bytes < 0) {
+    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be >= 0)\n",
+              RM_GRANT_END_BUFFER_BYTES_KEY, grant_end_buffer_bytes);
+    return false;
+  }
 
   // BPF setup.
 
@@ -1212,6 +1223,7 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.grant_end_seq = 0;
       grant_info.grant_done = true;
       grant_info.grant_done_percent = grant_done_percent;
+      grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
     }
     // This is an increment because the ungranted bytes may be negative due to
     // extra grants.
