@@ -33,8 +33,9 @@ enum {
 
 enum { TC_ACT_OK = 0 };
 
-inline void handle_extra_grant(struct rm_flow *flow, struct rm_grant_info *grant_info,
-                        u32 extra_grant, u32 *rwnd) {
+inline void handle_extra_grant(struct rm_flow *flow,
+                               struct rm_grant_info *grant_info,
+                               u32 extra_grant, u32 *rwnd) {
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow with remote port "
             "%u granted an extra %u bytes on top of desired grant of %u bytes",
             flow->remote_port, extra_grant, *rwnd);
