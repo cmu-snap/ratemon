@@ -207,7 +207,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // Check if the grant is over. This check must be grant_end_seq, not
     // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes.
     uint32_t actual_grant_end_seq =
-        grant_info->grant_end_seq - grant_info->grant_end_buffer_bytes;
+        grant_info->grant_end_seq -
+        (uint32_t)grant_info->grant_end_buffer_bytes;
     if (ack_seq == actual_grant_end_seq ||
         after(ack_seq, actual_grant_end_seq)) {
       // Check grant_done so that we only submit this flow to done_flows once.
