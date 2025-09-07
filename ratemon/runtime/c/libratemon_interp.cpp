@@ -123,11 +123,8 @@ int64_t idle_timeout_ns = 0;
 // Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
-// Grant end percent for early grant completion. See struct rm_grant_info for
-// more details.
-int grant_done_percent = 100;
 // Consider a grant done when the ACKed sequence number is within this many
-// bytes of the end of the grant. Only used if grant_done_percent == 100.
+// bytes of the end of the grant.
 int grant_end_buffer_bytes = 32768;
 
 // Forward declaration so that setup() resolves. Defined for real below.
@@ -855,14 +852,6 @@ bool setup() {
     return false;
   }
   monitor_port_end = static_cast<uint16_t>(monitor_port_end_);
-  if (!read_env_int(RM_GRANT_DONE_PERCENT_KEY, &grant_done_percent)) {
-    return false;
-  }
-  if (grant_done_percent < 0 || grant_done_percent > 100) {
-    RM_PRINTF("ERROR: Invalid value for '%s'=%d (must be in [0-100])\n",
-              RM_GRANT_DONE_PERCENT_KEY, grant_done_percent);
-    return false;
-  }
   if (!read_env_int(RM_GRANT_END_BUFFER_BYTES_KEY, &grant_end_buffer_bytes)) {
     return false;
   }
@@ -1222,7 +1211,6 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.rwnd_end_seq = 0;
       grant_info.grant_end_seq = 0;
       grant_info.grant_done = true;
-      grant_info.grant_done_percent = grant_done_percent;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
     }
     // This is an increment because the ungranted bytes may be negative due to

@@ -45,16 +45,12 @@ void handle_extra_grant(struct rm_flow *flow, struct rm_grant_info *grant_info,
   // ALWAYS update rwnd_end_seq when granting so that we NEVER retract a
   // grant.
   grant_info->rwnd_end_seq += extra_grant;
-  if (grant_info->grant_done_percent == 100) {
-    // If the sender has more pending data, then we can expect the sender to
-    // meet (some of) this extra grant immediately, so update
-    // grant_end_seq by the amount of expected data. If the sender has
-    // no more data, then do not update grant_end_seq. We only perform this
-    // update if we are tracking the grant_end_seq precisely (i.e.,
-    // grant_done_percent is 100).
-    grant_info->grant_end_seq +=
-        min((int)extra_grant, max(grant_info->ungranted_bytes, 0));
-  }
+  // If the sender has more pending data, then we can expect the sender to
+  // meet (some of) this extra grant immediately, so update
+  // grant_end_seq by the amount of expected data. If the sender has
+  // no more data, then do not update grant_end_seq.
+  grant_info->grant_end_seq +=
+      min((int)extra_grant, max(grant_info->ungranted_bytes, 0));
   *rwnd += extra_grant;
 }
 
@@ -142,8 +138,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
       flow.local_port, flow.remote_port, grant_info->grant_done);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->grant_done_percent: %d",
-            flow.local_port, flow.remote_port, grant_info->grant_done_percent);
+            "grant_info->grant_end_buffer_bytes: %d",
+            flow.local_port, flow.remote_port,
+            grant_info->grant_end_buffer_bytes);
 
   u32 rwnd = 0;
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
@@ -172,17 +169,6 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // must use before/after macros.
       grant_info->rwnd_end_seq += grant_to_use;
       grant_info->grant_end_seq = grant_info->rwnd_end_seq;
-
-      // grant_done_percent is checked to be in the range [0, 100] by
-      // libratemon_interp.cpp, so we do not need to check that here.
-      if (grant_info->grant_done_percent != 100) {
-        // Now roll back the grant_end_seq to consider a flow to be done with
-        // its grant early to avoid straggler packets at the end of a grant. The
-        // division needs to be 100U (unsigned) because BPF does not support
-        // signed division.
-        grant_info->grant_end_seq -=
-            (grant_to_use * (100 - grant_info->grant_done_percent)) / 100U;
-      }
     }
     // Calculate window size using sequence number wrapping.
     if (after(grant_info->rwnd_end_seq, ack_seq)) {
@@ -218,12 +204,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               flow.local_port, flow.remote_port, rwnd);
 
     // Check if the grant is over. This check must be grant_end_seq, not
-    // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes (only
-    // supported if grant_done_percent is 100).
+    // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes..
     uint32_t actual_grant_end_seq =
-        grant_info->grant_end_seq - (grant_info->grant_done_percent == 100
-                                         ? grant_info->grant_end_buffer_bytes
-                                         : 0);
+        grant_info->grant_end_seq - grant_info->grant_end_buffer_bytes;
     if (ack_seq == actual_grant_end_seq ||
         after(ack_seq, actual_grant_end_seq)) {
       // Check grant_done so that we only submit this flow to done_flows once.
