@@ -33,7 +33,7 @@ enum {
 
 enum { TC_ACT_OK = 0 };
 
-void handle_extra_grant(struct rm_flow *flow, struct rm_grant_info *grant_info,
+inline void handle_extra_grant(struct rm_flow *flow, struct rm_grant_info *grant_info,
                         u32 extra_grant, u32 *rwnd) {
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow with remote port "
             "%u granted an extra %u bytes on top of desired grant of %u bytes",
@@ -204,7 +204,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               flow.local_port, flow.remote_port, rwnd);
 
     // Check if the grant is over. This check must be grant_end_seq, not
-    // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes..
+    // rwnd_end_seq. Adjust the end seq by grant_end_buffer_bytes.
     uint32_t actual_grant_end_seq =
         grant_info->grant_end_seq - grant_info->grant_end_buffer_bytes;
     if (ack_seq == actual_grant_end_seq ||
