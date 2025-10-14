@@ -73,21 +73,43 @@ index 7e4f16a7d..4b82465ca 100644
  		.procname	= "tcp_keepalive_time",
  		.data		= &init_net.ipv4.sysctl_tcp_keepalive_time,
 diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index c765d4798..b7d212c17 100644
+index c765d4798..599afef88 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -224,6 +224,11 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
- 	const unsigned int lss = icsk->icsk_ack.last_seg_size;
- 	unsigned int len;
+@@ -215,6 +215,17 @@ static __cold void tcp_gro_dev_warn(const struct sock *sk, const struct sk_buff
+ 	rcu_read_unlock();
+ }
  
-+	int mss_estimate = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_mss_estimate);
-+	icsk->icsk_ack.last_seg_size = len;
-+	icsk->icsk_ack.rcv_mss = len;
-+	return;
++/* If configured, cap the MSS estimate (rcv_mss) to a sysctl value. */
++static void maybe_cap_tcp_mss_estimate(struct sock *sk)
++{
++	struct inet_connection_sock *icsk = inet_csk(sk);
++	int mss_estimate_conf = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_mss_estimate);
++	if (mss_estimate_conf > 0) {
++		icsk->icsk_ack.rcv_mss = min_t(
++			unsigned int, icsk->icsk_ack.rcv_mss, mss_estimate_conf);
++	}
++}
 +
- 	icsk->icsk_ack.last_seg_size = 0;
+ /* Adapt the MSS value used to make delayed ack decision to the
+  * real world.
+  */
+@@ -282,6 +293,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+ 			icsk->icsk_ack.last_seg_size = len;
+ 			if (len == lss) {
+ 				icsk->icsk_ack.rcv_mss = len;
++				maybe_cap_tcp_mss_estimate(sk);
+ 				return;
+ 			}
+ 		}
+@@ -289,6 +301,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+ 			icsk->icsk_ack.pending |= ICSK_ACK_PUSHED2;
+ 		icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
+ 	}
++	maybe_cap_tcp_mss_estimate(sk);
+ }
  
- 	/* skb->len may jitter because of SACKs, even if peer
+ static void tcp_incr_quickack(struct sock *sk, unsigned int max_quickacks)
 diff --git a/net/ipv4/tcp_ipv4.c b/net/ipv4/tcp_ipv4.c
 index 92511b7fd..1ff33e414 100644
 --- a/net/ipv4/tcp_ipv4.c
