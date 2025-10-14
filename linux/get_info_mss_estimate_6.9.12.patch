@@ -22,6 +22,69 @@ index 2bcf30381..e53afe634 100644
  #define TCP_KEEPALIVE_TIME	(120*60*HZ)	/* two hours */
  #define TCP_KEEPALIVE_PROBES	9		/* Max of 9 keepalive probes	*/
  #define TCP_KEEPALIVE_INTVL	(75*HZ)
+diff --git a/include/trace/events/tcp.h b/include/trace/events/tcp.h
+index 699dafd20..09143358d 100644
+--- a/include/trace/events/tcp.h
++++ b/include/trace/events/tcp.h
+@@ -427,6 +427,58 @@ TRACE_EVENT(tcp_cong_state_set,
+ 		  __entry->cong_state)
+ );
+ 
++TRACE_EVENT(tcp_mss_estimate_capped,
++
++	TP_PROTO(struct sock *sk, unsigned int orig_mss, unsigned int capped_mss, unsigned int cap_value),
++
++	TP_ARGS(sk, orig_mss, capped_mss, cap_value),
++
++	TP_STRUCT__entry(
++		__field(const void *, skaddr)
++		__field(__u16, sport)
++		__field(__u16, dport)
++		__field(__u16, family)
++		__array(__u8, saddr, 4)
++		__array(__u8, daddr, 4)
++		__array(__u8, saddr_v6, 16)
++		__array(__u8, daddr_v6, 16)
++		__field(__u32, orig_mss)
++		__field(__u32, capped_mss)
++		__field(__u32, cap_value)
++	),
++
++	TP_fast_assign(
++		struct inet_sock *inet = inet_sk(sk);
++		__be32 *p32;
++
++		__entry->skaddr = sk;
++		__entry->sport = ntohs(inet->inet_sport);
++		__entry->dport = ntohs(inet->inet_dport);
++		__entry->family = sk->sk_family;
++
++		p32 = (__be32 *) __entry->saddr;
++		*p32 = inet->inet_saddr;
++
++		p32 = (__be32 *) __entry->daddr;
++		*p32 = inet->inet_daddr;
++
++		TP_STORE_ADDRS(__entry, inet->inet_saddr, inet->inet_daddr,
++			      sk->sk_v6_rcv_saddr, sk->sk_v6_daddr);
++
++		__entry->orig_mss = orig_mss;
++		__entry->capped_mss = capped_mss;
++		__entry->cap_value = cap_value;
++	),
++
++	TP_printk("skaddr=%p family=%s sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c orig_mss=%u capped_mss=%u cap_value=%u",
++		  __entry->skaddr,
++		  show_family_name(__entry->family),
++		  __entry->sport, __entry->dport,
++		  __entry->saddr, __entry->daddr,
++		  __entry->saddr_v6, __entry->daddr_v6,
++		  __entry->orig_mss, __entry->capped_mss, __entry->cap_value)
++);
++
+ #endif /* _TRACE_TCP_H */
+ 
+ /* This part must be outside protection */
 diff --git a/net/ipv4/bpf_tcp_ca.c b/net/ipv4/bpf_tcp_ca.c
 index 7f518ea5f..edccafb1a 100644
 --- a/net/ipv4/bpf_tcp_ca.c
@@ -73,10 +136,10 @@ index 7e4f16a7d..4b82465ca 100644
  		.procname	= "tcp_keepalive_time",
  		.data		= &init_net.ipv4.sysctl_tcp_keepalive_time,
 diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index c765d4798..599afef88 100644
+index c765d4798..dfb593771 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -215,6 +215,17 @@ static __cold void tcp_gro_dev_warn(const struct sock *sk, const struct sk_buff
+@@ -215,6 +215,24 @@ static __cold void tcp_gro_dev_warn(const struct sock *sk, const struct sk_buff
  	rcu_read_unlock();
  }
  
@@ -86,15 +149,22 @@ index c765d4798..599afef88 100644
 +	struct inet_connection_sock *icsk = inet_csk(sk);
 +	int mss_estimate_conf = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_mss_estimate);
 +	if (mss_estimate_conf > 0) {
++		unsigned int orig_rcv_mss = icsk->icsk_ack.rcv_mss;
 +		icsk->icsk_ack.rcv_mss = min_t(
 +			unsigned int, icsk->icsk_ack.rcv_mss, mss_estimate_conf);
++
++		/* Trace when the cap is actually applied */
++		if (orig_rcv_mss != icsk->icsk_ack.rcv_mss) {
++			trace_tcp_mss_estimate_capped(sk, orig_rcv_mss, icsk->icsk_ack.rcv_mss,
++					      mss_estimate_conf);
++		}
 +	}
 +}
 +
  /* Adapt the MSS value used to make delayed ack decision to the
   * real world.
   */
-@@ -282,6 +293,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+@@ -282,6 +300,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
  			icsk->icsk_ack.last_seg_size = len;
  			if (len == lss) {
  				icsk->icsk_ack.rcv_mss = len;
@@ -102,7 +172,7 @@ index c765d4798..599afef88 100644
  				return;
  			}
  		}
-@@ -289,6 +301,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+@@ -289,6 +308,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
  			icsk->icsk_ack.pending |= ICSK_ACK_PUSHED2;
  		icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
  	}
