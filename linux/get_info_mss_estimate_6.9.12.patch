@@ -1,3 +1,9 @@
+commit 399dacadc7027ee26b71ec072a54a3e61746709a
+Author: Christopher Canel <c.canel@icloud.com>
+Date:   Tue Oct 14 00:14:59 2025 -0700
+
+    Enable get_info; cap TCP MSS estimate
+
 diff --git a/include/net/netns/ipv4.h b/include/net/netns/ipv4.h
 index c356c458b..425c9b36f 100644
 --- a/include/net/netns/ipv4.h
@@ -11,14 +17,14 @@ index c356c458b..425c9b36f 100644
  	int sysctl_tcp_keepalive_intvl;
  	u8 sysctl_tcp_keepalive_probes;
 diff --git a/include/net/tcp.h b/include/net/tcp.h
-index 2bcf30381..e53afe634 100644
+index 2bcf30381..b0996ddb7 100644
 --- a/include/net/tcp.h
 +++ b/include/net/tcp.h
 @@ -158,6 +158,7 @@ static_assert((1 << ATO_BITS) > TCP_DELACK_MAX);
  #define TCP_RESOURCE_PROBE_INTERVAL ((unsigned)(HZ/2U)) /* Maximal interval between probes
  					                 * for local resources.
  					                 */
-+#define TCP_MSS_ESTIMATE	3000		/* bytes */
++#define TCP_MSS_ESTIMATE	65536		/* bytes */
  #define TCP_KEEPALIVE_TIME	(120*60*HZ)	/* two hours */
  #define TCP_KEEPALIVE_PROBES	9		/* Max of 9 keepalive probes	*/
  #define TCP_KEEPALIVE_INTVL	(75*HZ)
