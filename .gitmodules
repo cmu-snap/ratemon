@@ -1,6 +1,3 @@
-[submodule "ns-3-unfair"]
-	path = ns-3-unfair
-	url = https://github.com/ccanel/ns-3-unfair.git
 [submodule "libbpf"]
 	path = libbpf
 	url = https://github.com/libbpf/libbpf.git
