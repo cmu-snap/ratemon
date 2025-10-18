@@ -1,9 +1,3 @@
-commit 399dacadc7027ee26b71ec072a54a3e61746709a
-Author: Christopher Canel <c.canel@icloud.com>
-Date:   Tue Oct 14 00:14:59 2025 -0700
-
-    Enable get_info; cap TCP MSS estimate
-
 diff --git a/include/net/netns/ipv4.h b/include/net/netns/ipv4.h
 index c356c458b..425c9b36f 100644
 --- a/include/net/netns/ipv4.h
@@ -142,10 +136,10 @@ index 7e4f16a7d..4b82465ca 100644
  		.procname	= "tcp_keepalive_time",
  		.data		= &init_net.ipv4.sysctl_tcp_keepalive_time,
 diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
-index c765d4798..dfb593771 100644
+index c765d4798..d089e08be 100644
 --- a/net/ipv4/tcp_input.c
 +++ b/net/ipv4/tcp_input.c
-@@ -215,6 +215,24 @@ static __cold void tcp_gro_dev_warn(const struct sock *sk, const struct sk_buff
+@@ -215,6 +215,21 @@ static __cold void tcp_gro_dev_warn(const struct sock *sk, const struct sk_buff
  	rcu_read_unlock();
  }
  
@@ -153,24 +147,21 @@ index c765d4798..dfb593771 100644
 +static void maybe_cap_tcp_mss_estimate(struct sock *sk)
 +{
 +	struct inet_connection_sock *icsk = inet_csk(sk);
++	u32 old_rcv_mss = icsk->icsk_ack.rcv_mss;
 +	int mss_estimate_conf = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_mss_estimate);
 +	if (mss_estimate_conf > 0) {
-+		unsigned int orig_rcv_mss = icsk->icsk_ack.rcv_mss;
 +		icsk->icsk_ack.rcv_mss = min_t(
-+			unsigned int, icsk->icsk_ack.rcv_mss, mss_estimate_conf);
-+
-+		/* Trace when the cap is actually applied */
-+		if (orig_rcv_mss != icsk->icsk_ack.rcv_mss) {
-+			trace_tcp_mss_estimate_capped(sk, orig_rcv_mss, icsk->icsk_ack.rcv_mss,
-+					      mss_estimate_conf);
-+		}
++			unsigned int, old_rcv_mss, mss_estimate_conf);
 +	}
++	/* Always trace, so we know this is working. */
++	trace_tcp_mss_estimate_capped(sk, old_rcv_mss, icsk->icsk_ack.rcv_mss,
++				  mss_estimate_conf);
 +}
 +
  /* Adapt the MSS value used to make delayed ack decision to the
   * real world.
   */
-@@ -282,6 +300,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+@@ -282,6 +297,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
  			icsk->icsk_ack.last_seg_size = len;
  			if (len == lss) {
  				icsk->icsk_ack.rcv_mss = len;
@@ -178,7 +169,7 @@ index c765d4798..dfb593771 100644
  				return;
  			}
  		}
-@@ -289,6 +308,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
+@@ -289,6 +305,7 @@ static void tcp_measure_rcv_mss(struct sock *sk, const struct sk_buff *skb)
  			icsk->icsk_ack.pending |= ICSK_ACK_PUSHED2;
  		icsk->icsk_ack.pending |= ICSK_ACK_PUSHED;
  	}
