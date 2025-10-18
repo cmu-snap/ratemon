@@ -35,7 +35,7 @@ wget "https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-${version}.tar
 tar xf "linux-${version}.tar.gz"
 rm -f "linux-${version}.tar.gz"
 pushd "linux-${version}"
-git apply "${main_dir}/ratemon/linux/get_info_${version}.patch"
+git apply "${main_dir}/ratemon/linux/get_info_mss_estimate_${version}.patch"
 uname="$(uname -r)"
 cp -fv "/boot/config-${uname}" .config
 scripts/config --disable SYSTEM_TRUSTED_KEYS
