@@ -57,6 +57,15 @@ void BPF_PROG(bpf_cubic_state, struct sock *sk, uint8_t new_state) {
   cubictcp_state(sk, new_state);
 }
 
+SEC("struct_ops/bpf_cubic_custom_cong_control")
+// trunk-ignore(clang-tidy/misc-unused-parameters)
+// trunk-ignore(clang-tidy/performance-no-int-to-ptr)
+void BPF_PROG(bpf_cubic_custom_cong_control, struct sock *sk, const struct rate_sample *rs) {
+  // Force an ACK by always marking that an ACK is pending.
+  (struct inet_connection_sock *)sk->icsk_ack.pending |= ICSK_ACK_NOW;
+  RM_PRINTK("INFO: 'bpf_cubic_custom_cong_control' requested an ACK");
+}
+
 SEC("struct_ops/bpf_cubic_undo_cwnd")
 // trunk-ignore(clang-tidy/misc-unused-parameters)
 // trunk-ignore(clang-tidy/performance-no-int-to-ptr)
@@ -121,6 +130,7 @@ struct tcp_congestion_ops bpf_cubic = {
     .ssthresh = (void *)bpf_cubic_recalc_ssthresh,
     .cong_avoid = (void *)bpf_cubic_cong_avoid,
     .set_state = (void *)bpf_cubic_state,
+    .cong_control = (void *)bpf_cubic_custom_cong_control,
     .undo_cwnd = (void *)bpf_cubic_undo_cwnd,
     .cwnd_event = (void *)bpf_cubic_cwnd_event,
     .pkts_acked = (void *)bpf_cubic_acked,
