@@ -5,7 +5,7 @@
 #define __RATEMON_H
 
 // Comment out the below line to disable verbose logging.
-#define RM_VERBOSE
+// #define RM_VERBOSE
 
 #ifdef RM_VERBOSE
 #define RM_PRINTF(...) printf(__VA_ARGS__)
