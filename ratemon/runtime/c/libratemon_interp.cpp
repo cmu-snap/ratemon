@@ -140,7 +140,7 @@ union tcp_cc_info placeholder_cc_info;
 socklen_t placeholder_cc_info_length =
     static_cast<socklen_t>(sizeof(placeholder_cc_info));
 
-// Trigger a pure ACK packet to be send on this FD by calling getsockopt() with
+// Trigger a pure ACK packet to be sent on this FD by calling getsockopt() with
 // TCP_CC_INFO. This only works if the flow is using the CCA BPF_CUBIC.
 inline void trigger_ack(int fd) {
   RM_PRINTF("INFO: Triggering ACK for flow FD=%d\n", fd);
