@@ -148,3 +148,5 @@ ratemon/runtime/c/experimental/ratemon_test
 ratemon/runtime/c/experimental/client_server/.output
 ratemon/runtime/c/experimental/client_server/client
 ratemon/runtime/c/experimental/client_server/server
+
+.DS_Store
