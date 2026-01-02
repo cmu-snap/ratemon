@@ -126,6 +126,9 @@ uint16_t monitor_port_end = 9999;
 // Consider a grant done when the ACKed sequence number is within this many
 // bytes of the end of the grant.
 int grant_end_buffer_bytes = 0;
+// If true, all overridden functions will do nothing and just call the original
+// implementations. Controlled by the RM_NOOP_MODE environment variable.
+bool noop_mode = false;
 
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
@@ -807,6 +810,15 @@ bool read_env_string(const char *key, std::string &dest) {
 // Perform setup (only once for all flows in this process), such as reading
 // parameters from environment variables and setting up BPF maps.
 bool setup() {
+  // Check if no-op mode is enabled first
+  const char *noop_env = std::getenv("RM_NOOP_MODE");
+  if (noop_env != nullptr && std::string(noop_env) == "yes") {
+    noop_mode = true;
+    RM_PRINTF("WARNING: Running in no-op mode. All functions will delegate to kernel implementations\n");
+    // In no-op mode we still do all other setup, but later we do not perform any
+    // ratemon operations.
+  }
+
   // Parameter setup.
 
   RM_PRINTF("INFO: Performing setup\n");
@@ -1254,6 +1266,9 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     RM_PRINTF("ERROR: Real 'accept' failed\n");
     return fd;
   }
+  if (noop_mode) {
+    return fd;
+  }
   if (check_family(addr) != 0) {
     return fd;
   }
@@ -1288,6 +1303,9 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     RM_PRINTF("ERROR: Real 'connect' failed\n");
     return fd;
   }
+  if (noop_mode) {
+    return fd;
+  }
   if (check_family(addr) != 0) {
     return fd;
   }
@@ -1317,6 +1335,9 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   if (real_send == nullptr) {
     RM_PRINTF("ERROR: Failed to query dlsym for 'send': %s\n", dlerror());
     return -1;
+  }
+  if (noop_mode) {
+    return real_send(sockfd, buf, len, flags);
   }
   // Do any ratemon-specific handling before calling the real send().
   if (setup_done && run) {
@@ -1350,6 +1371,9 @@ int close(int sockfd) {
     RM_PRINTF("ERROR: Real 'close' failed\n");
   } else {
     RM_PRINTF("INFO: Successful 'close' for FD=%d\n", sockfd);
+  }
+  if (noop_mode) {
+    return ret;
   }
   if (!setup_done) {
     RM_PRINTF("ERROR: Cannot handle 'close', setup not done, returning FD=%d\n",
