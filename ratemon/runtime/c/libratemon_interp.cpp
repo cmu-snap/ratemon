@@ -37,6 +37,7 @@
 #include <linux/bpf.h>
 #include <linux/inet_diag.h>
 #include <mutex>
+#include <shared_mutex>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <optional>
@@ -102,9 +103,10 @@ boost::asio::deadline_timer timer(io);
 std::optional<std::thread> scheduler_thread;
 // Thread to poll the done_flows ringbuffer for byte-based scheduling.
 std::optional<std::thread> ringbuf_poll_thread;
-// Protects writes and reads to active_fds_queue, paused_fds_queue, and
-// fd_to_flow.
-std::mutex lock_scheduler;
+// Protects writes and reads to active_fds_queue, paused_fds_queue,
+// fd_to_flow, and flow_to_fd. Use unique_lock for writes and shared_lock for
+// reads.
+std::shared_mutex lock_scheduler;
 // FDs for flows that are are currently active.
 std::queue<std::pair<int, boost::posix_time::ptime>> active_fds_queue;
 // FDs for flows that are currently paused (RWND = 0 B);
@@ -403,7 +405,7 @@ void timer_callback(const boost::system::error_code &error) {
   }
 
   // It is now safe to perform scheduling.
-  lock_scheduler.lock();
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   RM_PRINTF("INFO: Performing scheduling. active=%lu, paused=%lu\n",
             active_fds_queue.size(), paused_fds_queue.size());
 
@@ -624,7 +626,7 @@ void timer_callback(const boost::system::error_code &error) {
     RM_PRINTF("ERROR: Timer unexpectedly cancelled (3)\n");
   }
   timer.async_wait(&timer_callback);
-  lock_scheduler.unlock();
+  // lock is automatically released when it goes out of scope
   RM_PRINTF("INFO: Sleeping until next event in %ld us\n",
             when.total_microseconds());
 }
@@ -659,11 +661,12 @@ void thread_func() {
   io.run();
 
   // Clean up all flows.
-  lock_scheduler.lock();
-  for (const auto &pair : fd_to_flow) {
-    remove_flow_from_all_maps(&pair.second);
+  {
+    std::unique_lock<std::shared_mutex> lock(lock_scheduler);
+    for (const auto &pair : fd_to_flow) {
+      remove_flow_from_all_maps(&pair.second);
+    }
   }
-  lock_scheduler.unlock();
   RM_PRINTF("INFO: Scheduler thread ended\n");
 
   // Need to manually free the ring buffer.
@@ -700,7 +703,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // grant will have been decremented as data arrived.
 
   // Activate a new flow.
-  lock_scheduler.lock();
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   rm_flow_key const key = {flow->local_addr, flow->remote_addr,
                            flow->local_port, flow->remote_port};
   auto fd = flow_to_fd.find(key);
@@ -708,7 +711,6 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     RM_PRINTF("ERROR: Could not find FD for flow %s:%u->%s:%u\n",
               ipv4_to_string(flow->remote_addr).c_str(), flow->remote_port,
               ipv4_to_string(flow->local_addr).c_str(), flow->local_port);
-    lock_scheduler.unlock();
     return 0;
   }
   RM_PRINTF("INFO: Flow FD=%d has exhausted its grant\n", fd->second);
@@ -716,7 +718,6 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d and activate another flow\n",
               fd->second);
   }
-  lock_scheduler.unlock();
   return 0;
 }
 
@@ -1071,14 +1072,13 @@ void register_fd_for_monitoring(int fd) {
         flow.remote_port, monitor_port_start, monitor_port_end);
     return;
   }
-  lock_scheduler.lock();
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   fd_to_flow[fd] = flow;
   rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
                            flow.remote_port};
   flow_to_fd[key] = fd;
   // Change the CCA to BPF_CUBIC.
   if (!set_cca(fd, RM_BPF_CUBIC)) {
-    lock_scheduler.unlock();
     return;
   }
 
@@ -1096,7 +1096,7 @@ void register_fd_for_monitoring(int fd) {
   // A new flow is automatically paused.
   paused_fds_queue.enqueue(fd);
   pause_flow(fd);
-  lock_scheduler.unlock();
+  // lock is automatically released when it goes out of scope
 }
 
 // A new request is being sent on this connection. Perform scheduling for the
@@ -1181,12 +1181,11 @@ bool schedule_on_new_request(int fd) {
 // This should be called before the real send() to ensure that the correct RWND
 // is encoded in the outgoing burst request.
 bool handle_send(int sockfd, const void *buf, size_t len) {
-  lock_scheduler.lock();
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   // Update the flow_to_keepalive map to indicate that this flow has pending
   // data.
   if (!set_keepalive(sockfd)) {
     RM_PRINTF("ERROR: Failed to update keepalive for FD=%d\n", sockfd);
-    lock_scheduler.unlock();
     return false;
   }
   // If we are doing byte-based scheduling, then track the size of this request.
@@ -1236,10 +1235,9 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
   // This is the key part. Determine whether this flow will be active or paused.
   if (!schedule_on_new_request(sockfd)) {
     RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
-    lock_scheduler.unlock();
     return false;
   }
-  lock_scheduler.unlock();
+  // lock is automatically released when it goes out of scope
   return true;
 }
 
@@ -1389,7 +1387,7 @@ int close(int sockfd) {
   }
 
   // Remove this FD from all data structures.
-  lock_scheduler.lock();
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   // trunk-ignore(clang-tidy/clang-diagnostic-error)
   if (fd_to_flow.contains(sockfd)) {
     // Obviously, do this before removing the FD from fd_to_flow.
@@ -1412,7 +1410,7 @@ int close(int sockfd) {
       RM_PRINTF("INFO: No more flows remaining, stopping libratemon_interp and "
                 "its scheduler thread.\n");
       run = false;
-      lock_scheduler.unlock();
+      lock.unlock();
       if (scheduler_thread && scheduler_thread->joinable()) {
         scheduler_thread->join();
         scheduler_thread.reset();
@@ -1429,7 +1427,7 @@ int close(int sockfd) {
   } else {
     RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }
-  lock_scheduler.unlock();
+  // lock is automatically released when it goes out of scope
   return ret;
 }
 }
