@@ -49,6 +49,11 @@
 // using scheduled RWND tuning.
 #define RM_MONITOR_PORT_START_KEY "RM_MONITOR_PORT_START"
 #define RM_MONITOR_PORT_END_KEY "RM_MONITOR_PORT_END"
+// Environment variable that specifies the mode for handling new burst requests.
+// "normal": use the existing scheduling logic with queues
+// "port": activate flows with remote ports in [monitor_port_start,
+//         monitor_port_start + max_active_flows), pause others
+#define RM_NEW_BURST_MODE_KEY "RM_NEW_BURST_MODE"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
 // Environment variable that specifies how early to consider a grant done (in

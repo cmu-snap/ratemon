@@ -118,6 +118,7 @@ std::unordered_map<struct rm_flow_key, int> flow_to_fd;
 // parameter documentation.
 int max_active_flows = 5;
 std::string scheduling_mode = "byte"; // or "time"
+std::string new_burst_mode = "normal"; // or "port"
 int epoch_us = 10000;
 int epoch_bytes = 65536;
 int idle_timeout_us = 0;
@@ -835,6 +836,19 @@ bool setup() {
               RM_SCHEDILING_MODE_KEY, scheduling_mode.c_str());
     return false;
   }
+
+  if (!read_env_string(RM_NEW_BURST_MODE_KEY, new_burst_mode)) {
+    // Default to "normal" if not specified
+    new_burst_mode = "normal";
+    RM_PRINTF("INFO: RM_NEW_BURST_MODE not set, defaulting to 'normal'\n");
+  }
+  RM_PRINTF("INFO: new_burst_mode=%s\n", new_burst_mode.c_str());
+  if (new_burst_mode != "normal" && new_burst_mode != "port") {
+    RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal' or 'port'\n",
+              new_burst_mode.c_str());
+    return false;
+  }
+
   if (!read_env_int(RM_EPOCH_US_KEY, &epoch_us)) {
     return false;
   }
@@ -1093,9 +1107,13 @@ void register_fd_for_monitoring(int fd) {
     return;
   }
 
-  // A new flow is automatically paused.
+  // All flows start paused and are added to scheduler queues.
+  // In port mode, initial grants are based on port numbers (in handle_send),
+  // but flows are still tracked in queues for when normal scheduling takes over
+  // after the flash grants complete.
   paused_fds_queue.enqueue(fd);
   pause_flow(fd);
+  RM_PRINTF("INFO: Flow FD=%d registered and added to paused queue\n", fd);
   // lock is automatically released when it goes out of scope
 }
 
@@ -1178,9 +1196,9 @@ bool schedule_on_new_request(int fd) {
   return true;
 }
 
-// This should be called before the real send() to ensure that the correct RWND
-// is encoded in the outgoing burst request.
-bool handle_send(int sockfd, const void *buf, size_t len) {
+// Handle send in normal mode - uses existing queue-based scheduling logic.
+// Requires exclusive lock on scheduler state.
+static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   // Update the flow_to_keepalive map to indicate that this flow has pending
   // data.
@@ -1189,26 +1207,18 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
     return false;
   }
   // If we are doing byte-based scheduling, then track the size of this request.
-  // Parse buf, which should contain 2 ints. The first is the response size,
-  // which is what we want.
   if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
     // trunk-ignore(clang-tidy/google-readability-casting)
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
     int *buf_int = (int *)buf;
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
     int const bytes = buf_int[0];
-    // int sender_wait_us = buf_int[1];
     RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
 
     struct rm_grant_info grant_info {};
-    // Check if we already have a rm_grant_info for this flow, and if so update
-    // it. Note that bpf_map_lookup_elem() copies the element from the map as
-    // opposed to giving us a pointer to it, so we need to write back any
-    // updates.
     int err =
         bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info);
     if (err != 0) {
-      // No existing rm_grant_info, so fill in new info.
       RM_PRINTF(
           "INFO: Could not find existing grant info for flow FD=%d, creating "
           "new grant info\n",
@@ -1220,8 +1230,6 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       grant_info.grant_done = true;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
     }
-    // This is an increment because the ungranted bytes may be negative due to
-    // extra grants.
     grant_info.ungranted_bytes += bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,
                               BPF_ANY);
@@ -1232,16 +1240,154 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
       return false;
     }
   }
-  // This is the key part. Determine whether this flow will be active or paused.
+
+  // Use existing queue-based scheduling logic
   if (!schedule_on_new_request(sockfd)) {
     RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
     return false;
   }
-  // lock is automatically released when it goes out of scope
+
   return true;
 }
 
-// accept() and connect() are the two entrance points for libratemon_interp.
+// Handle send in port mode - makes decisions based on port numbers.
+// Provides initial "flash" grants, then queue-based scheduling takes over.
+// Uses shared lock for reading flow info, then unique lock for queue manipulation.
+static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
+  // First, extract needed information with a shared lock
+  uint16_t remote_port;
+  struct rm_flow flow;
+  {
+    std::shared_lock<std::shared_mutex> lock(lock_scheduler);
+
+    auto flow_it = fd_to_flow.find(sockfd);
+    if (flow_it == fd_to_flow.end()) {
+      RM_PRINTF("ERROR: Flow FD=%d not found in fd_to_flow\n", sockfd);
+      return false;
+    }
+    flow = flow_it->second;
+    remote_port = flow.remote_port;
+  }
+  // Lock released - now we can operate without blocking other threads
+
+  // Update the flow_to_keepalive map (BPF map, has its own synchronization)
+  int one = 1;
+  int err = bpf_map_update_elem(flow_to_keepalive_fd, &flow, &one, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Could not update flow_to_keepalive for FD=%d, "
+              "err=%d (%s)\n",
+              sockfd, err, strerror(-err));
+    return false;
+  }
+  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
+
+  // If we are doing byte-based scheduling, then track the size of this request.
+  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
+    // trunk-ignore(clang-tidy/google-readability-casting)
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+    int *buf_int = (int *)buf;
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    int const bytes = buf_int[0];
+    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+
+    struct rm_grant_info grant_info {};
+    err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
+    if (err != 0) {
+      RM_PRINTF(
+          "INFO: Could not find existing grant info for flow FD=%d, creating "
+          "new grant info\n",
+          sockfd);
+      grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+      grant_info.new_grant_bytes = 0;
+      grant_info.rwnd_end_seq = 0;
+      grant_info.grant_end_seq = 0;
+      grant_info.grant_done = true;
+      grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
+    }
+    grant_info.ungranted_bytes += bytes;
+    err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
+    if (err != 0) {
+      RM_PRINTF("ERROR: Could not update ungranted bytes for flow FD=%d, "
+                "err=%d (%s)\n",
+                sockfd, err, strerror(-err));
+      return false;
+    }
+  }
+
+  // Port mode: make scheduling decision based on remote port number.
+  // This provides the initial "flash" grant. After this grant completes,
+  // handle_grant_done will transition the flow to normal queue-based scheduling.
+  // NOTE: We do NOT touch queue data structures here. The queues will show all
+  // flows as paused during flash grants, which is fine - normal scheduling takes
+  // over when flash grants complete.
+  uint16_t const port_range_end = monitor_port_start + max_active_flows;
+
+  if (remote_port >= monitor_port_start && remote_port < port_range_end) {
+    // This flow gets a flash grant - set grant in BPF maps only, don't touch queues
+    RM_PRINTF("INFO: Port mode - giving flash grant to flow FD=%d with "
+              "remote_port=%u (in range [%u, %u))\n",
+              sockfd, remote_port, monitor_port_start, port_range_end);
+
+    // Set grant for byte-based scheduling or remove RWND clamp for time-based
+    if (scheduling_mode == "byte") {
+      struct rm_grant_info grant_info {};
+      err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
+      if (err != 0) {
+        RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", sockfd);
+        return false;
+      }
+      if (grant_info.ungranted_bytes <= 0) {
+        RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
+                  "bytes\n",
+                  sockfd);
+        return true;
+      }
+      grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+      grant_info.new_grant_bytes = epoch_bytes;
+      grant_info.grant_done = false;
+      err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
+      if (err != 0) {
+        RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n",
+                  sockfd, err, strerror(-err));
+        return false;
+      }
+      RM_PRINTF("INFO: Gave flash grant of %d bytes to flow FD=%d "
+                "(queues not updated)\n",
+                epoch_bytes, sockfd);
+    } else if (scheduling_mode == "time") {
+      err = bpf_map_delete_elem(flow_to_rwnd_fd, &flow);
+      if (err != 0) {
+        RM_PRINTF("WARNING: Could not delete RWND clamp for flow FD=%d, "
+                  "err=%d (%s)\n",
+                  sockfd, err, strerror(-err));
+      }
+      RM_PRINTF("INFO: Gave flash grant to flow FD=%d in time-based mode "
+                "(queues not updated)\n",
+                sockfd);
+    }
+    // Note: Don't trigger ACK since grant will be in the outgoing request
+  } else {
+    // This flow doesn't get a flash grant - stays paused in queue
+    // It will be activated by normal queue-based scheduling later
+    RM_PRINTF("INFO: Port mode - flow FD=%d with remote_port=%u "
+              "(not in range [%u, %u)) stays paused, will be activated by "
+              "normal scheduling\n",
+              sockfd, remote_port, monitor_port_start, port_range_end);
+  }
+
+  return true;
+}
+
+// This should be called before the real send() to ensure that the correct RWND
+// is encoded in the outgoing burst request.
+bool handle_send(int sockfd, const void *buf, size_t len) {
+  if (new_burst_mode == "port") {
+    return handle_send_port_mode(sockfd, buf, len);
+  } else {
+    return handle_send_normal_mode(sockfd, buf, len);
+  }
+}
+
 // accept() handles the responder side and connect() handles the initiator side.
 // On these calls, we register the socket for monitoring and set the CCA to
 // BPF_CUBIC. All flows are initially paused. Scheduling takes place when the
