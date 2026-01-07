@@ -118,11 +118,16 @@ std::unordered_map<struct rm_flow_key, int> flow_to_fd;
 // parameter documentation.
 int max_active_flows = 5;
 std::string scheduling_mode = "byte"; // or "time"
-std::string new_burst_mode = "normal"; // or "port"
+std::string new_burst_mode = "normal"; // or "port" or "single"
+std::string single_request_policy = "normal"; // or "pregrant" (only applies when new_burst_mode="single")
 int epoch_us = 10000;
 int epoch_bytes = 65536;
 int idle_timeout_us = 0;
 int64_t idle_timeout_ns = 0;
+// Burst tracking for single_request_pregrant policy
+int current_burst_number = 0;
+int burst_flows_remaining = 0;
+bool pregrant_done = false;
 // Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
@@ -682,6 +687,62 @@ void thread_func() {
   RM_PRINTF("INFO: Scheduler thread ended\n");
 }
 
+// Pre-grant for the next burst when only max_active_flows remain working on current burst.
+// This is used in single_request_pregrant policy.
+void pregrant_for_next_burst() {
+  RM_PRINTF("INFO: Pre-granting for next burst (burst %d -> %d)\n",
+            current_burst_number, current_burst_number + 1);
+
+  std::unique_lock<std::shared_mutex> const lock(lock_scheduler);
+
+  int pregranted_count = 0;
+
+  // Grant to all flows that have pending ungranted bytes
+  for (auto &entry : fd_to_flow) {
+    int const fd = entry.first;
+    struct rm_flow const &flow_iter = entry.second;
+
+    // Check if flow has ungranted bytes (indicating burst request was received)
+    struct rm_grant_info grant_info {};
+    int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
+    if (err != 0 || grant_info.ungranted_bytes <= 0) {
+      continue;  // No pending data for this flow
+    }
+
+    // Activate this flow for the next burst
+    // First check if it's already active
+    if (!paused_fds_queue.contains(fd)) {
+      RM_PRINTF("INFO: Pregrant - flow FD=%d already active, skipping\n", fd);
+      continue;
+    }
+
+    // Remove from paused queue
+    if (!paused_fds_queue.find_and_delete(fd)) {
+      RM_PRINTF("WARNING: Pregrant - could not remove FD=%d from paused queue\n", fd);
+      continue;
+    }
+
+    // Activate the flow
+    boost::posix_time::ptime const now =
+        boost::posix_time::microsec_clock::local_time();
+    active_fds_queue.emplace(
+        fd, now + boost::posix_time::microseconds(epoch_us) +
+                boost::posix_time::microseconds(jitter(epoch_us)));
+
+    // Activate without triggering ACK (grant will be used when next burst request arrives)
+    if (activate_flow(fd, false) == 0) {
+      RM_PRINTF("ERROR: Pregrant - failed to activate flow FD=%d\n", fd);
+      continue;
+    }
+
+    pregranted_count++;
+    RM_PRINTF("INFO: Pregrant - activated flow FD=%d for next burst\n", fd);
+  }
+
+  pregrant_done = true;
+  RM_PRINTF("INFO: Pre-granted %d flows for next burst\n", pregranted_count);
+}
+
 int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   RM_PRINTF("INFO: In handle_grant_done, data_sz=%zu\n", data_sz);
   if (!setup_done) {
@@ -715,6 +776,29 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     return 0;
   }
   RM_PRINTF("INFO: Flow FD=%d has exhausted its grant\n", fd->second);
+
+  // Check if this flow has completed its entire burst (ungranted_bytes <= 0)
+  // This is used for pregrant policy to track burst progress
+  if (single_request_policy == "pregrant" && new_burst_mode == "single") {
+    struct rm_grant_info grant_info {};
+    int err = bpf_map_lookup_elem(flow_to_rwnd_fd, flow, &grant_info);
+    if (err == 0 && grant_info.ungranted_bytes <= 0) {
+      // This flow completed its burst
+      burst_flows_remaining--;
+      RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
+                fd->second, burst_flows_remaining);
+
+      // Check if we should trigger pre-granting
+      if (!pregrant_done && burst_flows_remaining <= max_active_flows &&
+          burst_flows_remaining > 0) {
+        RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
+                  "triggering pre-grant\n",
+                  burst_flows_remaining, max_active_flows);
+        pregrant_for_next_burst();
+      }
+    }
+  }
+
   if (try_pause_one_activate_one(fd->second) == 0) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d and activate another flow\n",
               fd->second);
@@ -847,6 +931,19 @@ bool setup() {
       new_burst_mode != "single") {
     RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal', 'port', or 'single'\n",
               new_burst_mode.c_str());
+    return false;
+  }
+
+  // Read and validate single_request_policy
+  if (!read_env_string(RM_SINGLE_REQUEST_POLICY_KEY, single_request_policy)) {
+    // Default to "normal" if not specified
+    single_request_policy = "normal";
+    RM_PRINTF("INFO: RM_SINGLE_REQUEST_POLICY not set, defaulting to 'normal'\n");
+  }
+  RM_PRINTF("INFO: single_request_policy=%s\n", single_request_policy.c_str());
+  if (single_request_policy != "normal" && single_request_policy != "pregrant") {
+    RM_PRINTF("ERROR: Invalid single_request_policy=%s, must be 'normal' or 'pregrant'\n",
+              single_request_policy.c_str());
     return false;
   }
 
@@ -1253,9 +1350,11 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
 
 // Handle send in single mode - one send() per host represents all flows from that host.
 // This mode is for IBG's single_request feature where the receiver sends one burst
-// request to each sender host, and that single send() should update state and perform
-// scheduling for all flows from that host. Triggers ACKs for flows that are activated,
-// except for the calling flow which will carry the grant in the burst request itself.
+// request to each sender host, and that single send() should update state for all
+// flows from that host.
+// Two policies:
+// - "normal": Perform scheduling on every send() call
+// - "pregrant": Perform scheduling only on first burst; subsequent bursts use pre-grants
 static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   struct rm_flow flow {};
   if (!get_flow(sockfd, &flow)) {
@@ -1267,11 +1366,31 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   uint32_t const remote_addr = flow.remote_addr;
 
   RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
-            "updating state for all flows from this host\n",
-            sockfd, ipv4_to_string(remote_addr).c_str());
+            "burst_number=%d, policy=%s\n",
+            sockfd, ipv4_to_string(remote_addr).c_str(),
+            current_burst_number, single_request_policy.c_str());
 
   // Acquire exclusive lock to update state for all flows from this host
   std::unique_lock<std::shared_mutex> const lock(lock_scheduler);
+
+  // Initialize burst tracking on first burst
+  if (current_burst_number == 0 && burst_flows_remaining == 0) {
+    // Count total flows to initialize burst_flows_remaining
+    burst_flows_remaining = fd_to_flow.size();
+    pregrant_done = false;
+    RM_PRINTF("INFO: First burst - initialized burst_flows_remaining=%d\n",
+              burst_flows_remaining);
+  }
+
+  // Determine whether to perform scheduling
+  bool should_schedule = false;
+  if (single_request_policy == "normal") {
+    // Normal policy: always schedule
+    should_schedule = true;
+  } else if (single_request_policy == "pregrant") {
+    // Pregrant policy: only schedule on first burst
+    should_schedule = (current_burst_number == 0);
+  }
 
   // Find all flows from the same remote host and update their state
   int flows_updated = 0;
@@ -1315,21 +1434,46 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       RM_PRINTF("INFO: Single mode - flow FD=%d now has %d ungranted bytes\n",
                 fd, grant_info.ungranted_bytes);
 
-      // Call schedule_on_new_request for this flow
-      // This will activate the flow if there's capacity, otherwise leave it paused
-      if (!schedule_on_new_request(fd)) {
-        RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n", fd);
-        // Continue with other flows
-      }
+      // Perform scheduling if policy allows
+      if (should_schedule) {
+        // Call schedule_on_new_request for this flow
+        // This will activate the flow if there's capacity, otherwise leave it paused
+        if (!schedule_on_new_request(fd)) {
+          RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n", fd);
+          // Continue with other flows
+        }
 
-      // Trigger an ACK for flows that are activated, except for the calling flow
-      // (sockfd) which will carry the grant in the burst request itself
-      if (fd != sockfd) {
-        trigger_ack(fd);
+        // Trigger an ACK for flows that are activated, except for the calling flow
+        // (sockfd) which will carry the grant in the burst request itself
+        if (fd != sockfd) {
+          trigger_ack(fd);
+        } else {
+          RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
+                    "(grant will be in burst request)\n", fd);
+        }
       } else {
-        RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
-                  "(grant will be in burst request)\n", fd);
+        RM_PRINTF("INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
+                  "(will use pre-grant from previous burst)\n", fd);
       }
+    }
+  }
+
+  // Increment burst number after processing first send() of new burst
+  // (subsequent hosts' send() calls won't increment it again since we track per-burst)
+  if (flows_updated > 0) {
+    // Simple heuristic: if this is the first host sending, increment burst number
+    // In practice, all hosts send simultaneously so this works
+    static uint32_t last_burst_remote_addr = 0;
+    if (remote_addr != last_burst_remote_addr || current_burst_number == 0) {
+      if (last_burst_remote_addr != 0 && remote_addr < last_burst_remote_addr) {
+        // New burst detected (lower IP address means we've wrapped around)
+        current_burst_number++;
+        pregrant_done = false;
+        burst_flows_remaining = fd_to_flow.size();
+        RM_PRINTF("INFO: Starting burst %d, reset burst_flows_remaining=%d\n",
+                  current_burst_number, burst_flows_remaining);
+      }
+      last_burst_remote_addr = remote_addr;
     }
   }
 
