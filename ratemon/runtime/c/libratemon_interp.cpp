@@ -1325,10 +1325,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       // Trigger an ACK for flows that are activated, except for the calling flow
       // (sockfd) which will carry the grant in the burst request itself
       if (fd != sockfd) {
-        if (!trigger_ack(fd)) {
-          RM_PRINTF("WARNING: trigger_ack failed for flow FD=%d\n", fd);
-          // Continue with other flows
-        }
+        trigger_ack(fd);
       } else {
         RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
                   "(grant will be in burst request)\n", fd);
