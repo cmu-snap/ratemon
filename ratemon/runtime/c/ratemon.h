@@ -53,6 +53,10 @@
 // "normal": use the existing scheduling logic with queues
 // "port": activate flows with remote ports in [monitor_port_start,
 //         monitor_port_start + max_active_flows), pause others
+// "single": one send() per host represents all flows from that host (for IBG's
+//           single_request mode). Updates state and performs scheduling for all
+//           flows from the same remote host. Triggers ACKs for activated flows
+//           except the calling flow (which carries the grant in the burst request).
 #define RM_NEW_BURST_MODE_KEY "RM_NEW_BURST_MODE"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"

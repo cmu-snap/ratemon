@@ -843,8 +843,9 @@ bool setup() {
     RM_PRINTF("INFO: RM_NEW_BURST_MODE not set, defaulting to 'normal'\n");
   }
   RM_PRINTF("INFO: new_burst_mode=%s\n", new_burst_mode.c_str());
-  if (new_burst_mode != "normal" && new_burst_mode != "port") {
-    RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal' or 'port'\n",
+  if (new_burst_mode != "normal" && new_burst_mode != "port" &&
+      new_burst_mode != "single") {
+    RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal', 'port', or 'single'\n",
               new_burst_mode.c_str());
     return false;
   }
@@ -1250,6 +1251,102 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
   return true;
 }
 
+// Handle send in single mode - one send() per host represents all flows from that host.
+// This mode is for IBG's single_request feature where the receiver sends one burst
+// request to each sender host, and that single send() should update state and perform
+// scheduling for all flows from that host. Triggers ACKs for flows that are activated,
+// except for the calling flow which will carry the grant in the burst request itself.
+static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
+  struct rm_flow flow {};
+  if (!get_flow(sockfd, &flow)) {
+    RM_PRINTF("ERROR: Could not get flow for FD=%d\n", sockfd);
+    return false;
+  }
+
+  // Get the remote address from the calling flow
+  uint32_t const remote_addr = flow.remote_addr;
+
+  RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
+            "updating state for all flows from this host\n",
+            sockfd, ipv4_to_string(remote_addr).c_str());
+
+  // Acquire exclusive lock to update state for all flows from this host
+  std::unique_lock<std::shared_mutex> const lock(lock_scheduler);
+
+  // Find all flows from the same remote host and update their state
+  int flows_updated = 0;
+  for (auto &entry : fd_to_flow) {
+    int const fd = entry.first;
+    struct rm_flow const &flow_iter = entry.second;
+
+    // Check if this flow is from the same remote host
+    if (flow_iter.remote_addr == remote_addr) {
+      flows_updated++;
+
+      RM_PRINTF("INFO: Single mode - updating flow FD=%d (remote_port=%u) "
+                "from host %s\n",
+                fd, flow_iter.remote_port, ipv4_to_string(remote_addr).c_str());
+
+      // Set keepalive for this flow
+      if (!set_keepalive(fd)) {
+        RM_PRINTF("ERROR: Could not set keepalive for flow FD=%d\n", fd);
+        // Continue with other flows rather than failing completely
+      }
+
+      // Update ungranted bytes in BPF map
+      int err = 0;
+      struct rm_grant_info grant_info {};
+      err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
+      if (err != 0) {
+        RM_PRINTF("WARNING: Could not find grant info for flow FD=%d, "
+                  "creating new entry\n", fd);
+        grant_info = {};
+      }
+
+      // Add the burst size to ungranted bytes
+      grant_info.ungranted_bytes += static_cast<int>(len);
+      err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
+      if (err != 0) {
+        RM_PRINTF("ERROR: Could not update grant info for flow FD=%d, "
+                  "err=%d (%s)\n", fd, err, strerror(-err));
+        // Continue with other flows
+      }
+
+      RM_PRINTF("INFO: Single mode - flow FD=%d now has %d ungranted bytes\n",
+                fd, grant_info.ungranted_bytes);
+
+      // Call schedule_on_new_request for this flow
+      // This will activate the flow if there's capacity, otherwise leave it paused
+      if (!schedule_on_new_request(fd)) {
+        RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n", fd);
+        // Continue with other flows
+      }
+
+      // Trigger an ACK for flows that are activated, except for the calling flow
+      // (sockfd) which will carry the grant in the burst request itself
+      if (fd != sockfd) {
+        if (!trigger_ack(fd)) {
+          RM_PRINTF("WARNING: trigger_ack failed for flow FD=%d\n", fd);
+          // Continue with other flows
+        }
+      } else {
+        RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
+                  "(grant will be in burst request)\n", fd);
+      }
+    }
+  }
+
+  RM_PRINTF("INFO: Single mode - updated %d flows from host %s\n",
+            flows_updated, ipv4_to_string(remote_addr).c_str());
+
+  if (flows_updated == 0) {
+    RM_PRINTF("WARNING: Single mode - no flows found for host %s (only found FD=%d)\n",
+              ipv4_to_string(remote_addr).c_str(), sockfd);
+  }
+
+  return true;
+}
+
 // Handle send in port mode - makes decisions based on port numbers.
 // Provides initial "flash" grants, then queue-based scheduling takes over.
 // Uses shared lock for reading flow info, then unique lock for queue manipulation.
@@ -1383,6 +1480,8 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
 bool handle_send(int sockfd, const void *buf, size_t len) {
   if (new_burst_mode == "port") {
     return handle_send_port_mode(sockfd, buf, len);
+  } else if (new_burst_mode == "single") {
+    return handle_send_single_mode(sockfd, buf, len);
   } else {
     return handle_send_normal_mode(sockfd, buf, len);
   }
