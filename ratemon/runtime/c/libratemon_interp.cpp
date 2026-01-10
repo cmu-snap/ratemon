@@ -1365,13 +1365,19 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // Get the remote address from the calling flow
   uint32_t const remote_addr = flow.remote_addr;
 
-  RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
-            "burst_number=%d, policy=%s\n",
-            sockfd, ipv4_to_string(remote_addr).c_str(),
-            current_burst_number, single_request_policy.c_str());
+  // Parse burst_number from the burst request message
+  // Format is: [burst_number, bytes, wait_us]
+  int burst_number = -1;
+  if (len == 3 * sizeof(int)) {
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
+    const int *buf_int = reinterpret_cast<const int *>(buf);
+    burst_number = buf_int[0];
+  }
 
-  // Acquire exclusive lock to update state for all flows from this host
-  std::unique_lock<std::shared_mutex> const lock(lock_scheduler);
+  RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
+            "received_burst_number=%d, current_burst_number=%d, policy=%s\n",
+            sockfd, ipv4_to_string(remote_addr).c_str(),
+            burst_number, current_burst_number, single_request_policy.c_str());
 
   // Initialize burst tracking on first burst
   if (current_burst_number == 0 && burst_flows_remaining == 0) {
@@ -1458,22 +1464,18 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
     }
   }
 
-  // Increment burst number after processing first send() of new burst
-  // (subsequent hosts' send() calls won't increment it again since we track per-burst)
-  if (flows_updated > 0) {
-    // Simple heuristic: if this is the first host sending, increment burst number
-    // In practice, all hosts send simultaneously so this works
-    static uint32_t last_burst_remote_addr = 0;
-    if (remote_addr != last_burst_remote_addr || current_burst_number == 0) {
-      if (last_burst_remote_addr != 0 && remote_addr < last_burst_remote_addr) {
-        // New burst detected (lower IP address means we've wrapped around)
-        current_burst_number++;
-        pregrant_done = false;
-        burst_flows_remaining = fd_to_flow.size();
-        RM_PRINTF("INFO: Starting burst %d, reset burst_flows_remaining=%d\n",
-                  current_burst_number, burst_flows_remaining);
-      }
-      last_burst_remote_addr = remote_addr;
+  // Update burst tracking based on received burst_number
+  if (flows_updated > 0 && burst_number >= 0) {
+    if (burst_number > current_burst_number) {
+      // New burst detected
+      current_burst_number = burst_number;
+      pregrant_done = false;
+      burst_flows_remaining = fd_to_flow.size();
+      RM_PRINTF("INFO: Starting burst %d, reset burst_flows_remaining=%d\n",
+                current_burst_number, burst_flows_remaining);
+    } else if (burst_number < current_burst_number) {
+      RM_PRINTF("WARNING: Received burst_number=%d but current_burst_number=%d\n",
+                burst_number, current_burst_number);
     }
   }
 
