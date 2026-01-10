@@ -709,34 +709,28 @@ void pregrant_for_next_burst() {
       continue;  // No pending data for this flow
     }
 
-    // Activate this flow for the next burst
-    // First check if it's already active
-    if (!paused_fds_queue.contains(fd)) {
-      RM_PRINTF("INFO: Pregrant - flow FD=%d already active, skipping\n", fd);
+    // Pre-grant: give an extra large grant without officially activating the flow
+    // The flow remains in its current queue (paused or active) but gets a grant
+    // ready for when the next burst request arrives
+
+    // Set a large grant for the next burst (byte mode only)
+    grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+    grant_info.new_grant_bytes = epoch_bytes;
+    grant_info.grant_done = false;
+    err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
+    if (err != 0) {
+      RM_PRINTF("ERROR: Pregrant - could not set grant for flow FD=%d, err=%d (%s)\n",
+                fd, err, strerror(-err));
       continue;
     }
+    RM_PRINTF("INFO: Pregrant - gave grant of %d bytes to flow FD=%d "
+              "(without official activation)\n",
+              epoch_bytes, fd);
 
-    // Remove from paused queue
-    if (!paused_fds_queue.find_and_delete(fd)) {
-      RM_PRINTF("WARNING: Pregrant - could not remove FD=%d from paused queue\n", fd);
-      continue;
-    }
-
-    // Activate the flow
-    boost::posix_time::ptime const now =
-        boost::posix_time::microsec_clock::local_time();
-    active_fds_queue.emplace(
-        fd, now + boost::posix_time::microseconds(epoch_us) +
-                boost::posix_time::microseconds(jitter(epoch_us)));
-
-    // Activate without triggering ACK (grant will be used when next burst request arrives)
-    if (activate_flow(fd, false) == 0) {
-      RM_PRINTF("ERROR: Pregrant - failed to activate flow FD=%d\n", fd);
-      continue;
-    }
+    // Trigger an ACK to notify the sender about the grant
+    trigger_ack(fd);
 
     pregranted_count++;
-    RM_PRINTF("INFO: Pregrant - activated flow FD=%d for next burst\n", fd);
   }
 
   pregrant_done = true;
