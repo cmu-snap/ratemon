@@ -260,7 +260,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
       return 0;
     }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes = epoch_bytes;
+    grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
@@ -714,7 +714,7 @@ void pregrant_for_next_burst() {
 
     // Set a large grant for the next burst (byte mode only)
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes = epoch_bytes;
+    grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
     if (err != 0) {
@@ -1457,8 +1457,11 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         }
 
         // Trigger an ACK for flows that are activated, except for the calling flow
-        // (sockfd) which will carry the grant in the burst request itself
+        // (sockfd) which will carry the grant in the burst request itself.
         if (fd != sockfd) {
+          // NOTE: These ACKs will probably go out slowly due to performance issues with
+          // sending packets on many flows, so the first burst will have bad performance.
+          // This is okay. We care about steady state (later bursts).
           trigger_ack(fd);
         } else {
           RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
@@ -1590,7 +1593,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
         return true;
       }
       grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-      grant_info.new_grant_bytes = epoch_bytes;
+      grant_info.new_grant_bytes += epoch_bytes;
       grant_info.grant_done = false;
       err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
       if (err != 0) {
