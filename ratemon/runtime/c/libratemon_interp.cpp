@@ -689,19 +689,18 @@ void thread_func() {
 
 // Pre-grant for the next burst when only max_active_flows remain working on current burst.
 // This is used in single_request_pregrant policy.
+// Caller must hold lock_scheduler.
 void pregrant_for_next_burst() {
   RM_PRINTF("INFO: Pre-granting for next burst (burst %d -> %d)\n",
             current_burst_number, current_burst_number + 1);
 
-  std::unique_lock<std::shared_mutex> const lock(lock_scheduler);
-
   int pregranted_count = 0;
 
   // Grant to all flows that have pending ungranted bytes
-  for (auto &entry : fd_to_flow) {
+  // Caller holds lock, so we can safely iterate fd_to_flow
+  for (const auto &entry : fd_to_flow) {
     int const fd = entry.first;
     struct rm_flow const &flow_iter = entry.second;
-
     // Check if flow has ungranted bytes (indicating burst request was received)
     struct rm_grant_info grant_info {};
     int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
@@ -1289,16 +1288,17 @@ bool schedule_on_new_request(int fd) {
 }
 
 // Handle send in normal mode - uses existing queue-based scheduling logic.
-// Requires exclusive lock on scheduler state.
+// Uses lock only for queue operations, not for BPF map accesses.
 static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
-  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   // Update the flow_to_keepalive map to indicate that this flow has pending
-  // data.
+  // data. BPF map has its own locking.
   if (!set_keepalive(sockfd)) {
     RM_PRINTF("ERROR: Failed to update keepalive for FD=%d\n", sockfd);
     return false;
   }
+
   // If we are doing byte-based scheduling, then track the size of this request.
+  // BPF map operations don't need our lock.
   if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
     // trunk-ignore(clang-tidy/google-readability-casting)
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
@@ -1307,9 +1307,19 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
     int const bytes = buf_int[0];
     RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
 
+    struct rm_flow flow;
+    {
+      std::shared_lock<std::shared_mutex> lock(lock_scheduler);
+      auto flow_it = fd_to_flow.find(sockfd);
+      if (flow_it == fd_to_flow.end()) {
+        RM_PRINTF("ERROR: Flow FD=%d not found in fd_to_flow\n", sockfd);
+        return false;
+      }
+      flow = flow_it->second;
+    }
+
     struct rm_grant_info grant_info {};
-    int err =
-        bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info);
+    int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
     if (err != 0) {
       RM_PRINTF(
           "INFO: Could not find existing grant info for flow FD=%d, creating "
@@ -1323,8 +1333,7 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
     }
     grant_info.ungranted_bytes += bytes;
-    err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[sockfd], &grant_info,
-                              BPF_ANY);
+    err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
     if (err != 0) {
       RM_PRINTF("ERROR: Could not update ungranted bytes for flow FD=%d, "
                 "err=%d (%s)\n",
@@ -1333,7 +1342,8 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
     }
   }
 
-  // Use existing queue-based scheduling logic
+  // Use existing queue-based scheduling logic (requires lock)
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   if (!schedule_on_new_request(sockfd)) {
     RM_PRINTF("ERROR: Failed to schedule flow for FD=%d\n", sockfd);
     return false;
@@ -1373,6 +1383,9 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
             sockfd, ipv4_to_string(remote_addr).c_str(),
             burst_number, current_burst_number, single_request_policy.c_str());
 
+  // Acquire lock to access fd_to_flow and global state
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
+
   // Initialize burst tracking on first burst
   if (current_burst_number == 0 && burst_flows_remaining == 0) {
     // Count total flows to initialize burst_flows_remaining
@@ -1406,13 +1419,13 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
                 "from host %s\n",
                 fd, flow_iter.remote_port, ipv4_to_string(remote_addr).c_str());
 
-      // Set keepalive for this flow
+      // Set keepalive for this flow (BPF map - has internal locking)
       if (!set_keepalive(fd)) {
         RM_PRINTF("ERROR: Could not set keepalive for flow FD=%d\n", fd);
         // Continue with other flows rather than failing completely
       }
 
-      // Update ungranted bytes in BPF map
+      // Update ungranted bytes in BPF map (BPF map - has internal locking)
       int err = 0;
       struct rm_grant_info grant_info {};
       err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
@@ -1434,7 +1447,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       RM_PRINTF("INFO: Single mode - flow FD=%d now has %d ungranted bytes\n",
                 fd, grant_info.ungranted_bytes);
 
-      // Perform scheduling if policy allows
+      // Perform scheduling if policy allows (requires lock held)
       if (should_schedule) {
         // Call schedule_on_new_request for this flow
         // This will activate the flow if there's capacity, otherwise leave it paused
