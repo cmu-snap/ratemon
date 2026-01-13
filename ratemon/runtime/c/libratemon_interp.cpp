@@ -1299,13 +1299,19 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
 
   // If we are doing byte-based scheduling, then track the size of this request.
   // BPF map operations don't need our lock.
-  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
+  if (scheduling_mode == "byte") {
+    if (len != 3 * sizeof(int)) {
+      RM_PRINTF("FATAL ERROR: FD=%d burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
+                sockfd, len, 3 * sizeof(int));
+      std::exit(1);
+    }
     // trunk-ignore(clang-tidy/google-readability-casting)
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
     int *buf_int = (int *)buf;
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int const bytes = buf_int[0];
-    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+    int const burst_number = buf_int[0];
+    int const bytes = buf_int[1];
+    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd, burst_number, bytes);
 
     struct rm_flow flow;
     {
@@ -1369,19 +1375,24 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // Get the remote address from the calling flow
   uint32_t const remote_addr = flow.remote_addr;
 
-  // Parse burst_number from the burst request message
+  // Parse burst_number and bytes from the burst request message
   // Format is: [burst_number, bytes, wait_us]
-  int burst_number = -1;
-  if (len == 3 * sizeof(int)) {
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
-    const int *buf_int = reinterpret_cast<const int *>(buf);
-    burst_number = buf_int[0];
+  if (len != 3 * sizeof(int)) {
+    RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
+              sockfd, len, 3 * sizeof(int));
+    std::exit(1);
   }
+  int burst_number = -1;
+  int bytes = 0;
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
+  const int *buf_int = reinterpret_cast<const int *>(buf);
+  burst_number = buf_int[0];
+  bytes = buf_int[1];
 
   RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
-            "received_burst_number=%d, current_burst_number=%d, policy=%s\n",
+            "received_burst_number=%d, bytes=%d, current_burst_number=%d, policy=%s\n",
             sockfd, ipv4_to_string(remote_addr).c_str(),
-            burst_number, current_burst_number, single_request_policy.c_str());
+            burst_number, bytes, current_burst_number, single_request_policy.c_str());
 
   // Acquire lock to access fd_to_flow and global state
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
@@ -1436,7 +1447,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       }
 
       // Add the burst size to ungranted bytes
-      grant_info.ungranted_bytes += static_cast<int>(len);
+      grant_info.ungranted_bytes += bytes;
       err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
       if (err != 0) {
         RM_PRINTF("ERROR: Could not update grant info for flow FD=%d, "
@@ -1532,13 +1543,19 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
 
   // If we are doing byte-based scheduling, then track the size of this request.
-  if (scheduling_mode == "byte" && len == 2 * sizeof(int)) {
+  if (scheduling_mode == "byte") {
+    if (len != 3 * sizeof(int)) {
+      RM_PRINTF("FATAL ERROR: FD=%d port mode burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
+                sockfd, len, 3 * sizeof(int));
+      std::exit(1);
+    }
     // trunk-ignore(clang-tidy/google-readability-casting)
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
     int *buf_int = (int *)buf;
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int const bytes = buf_int[0];
-    RM_PRINTF("INFO: FD=%d has %d bytes pending\n", sockfd, bytes);
+    int const burst_number = buf_int[0];
+    int const bytes = buf_int[1];
+    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd, burst_number, bytes);
 
     struct rm_grant_info grant_info {};
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
