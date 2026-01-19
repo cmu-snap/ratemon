@@ -1376,10 +1376,10 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   uint32_t const remote_addr = flow.remote_addr;
 
   // Parse burst_number and bytes from the burst request message
-  // Format is: [burst_number, bytes, wait_us]
-  if (len != 3 * sizeof(int)) {
-    RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
-              sockfd, len, 3 * sizeof(int));
+  // Format is: [burst_number, bytes, wait_us, padding]
+  if (len != 4 * sizeof(int)) {
+    RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, expected %zu bytes (4 ints)\n",
+              sockfd, len, 4 * sizeof(int));
     std::exit(1);
   }
   int burst_number = -1;
@@ -1550,9 +1550,11 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
 
   // If we are doing byte-based scheduling, then track the size of this request.
   if (scheduling_mode == "byte") {
-    if (len != 3 * sizeof(int)) {
-      RM_PRINTF("FATAL ERROR: FD=%d port mode burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
-                sockfd, len, 3 * sizeof(int));
+    // Parse burst request to get number of bytes in the burst
+    // Format is: [burst_number, bytes, wait_us, padding]
+    if (len != 4 * sizeof(int)) {
+      RM_PRINTF("FATAL ERROR: FD=%d port mode burst request size is %zu bytes, expected %zu bytes (4 ints)\n",
+                sockfd, len, 4 * sizeof(int));
       std::exit(1);
     }
     // trunk-ignore(clang-tidy/google-readability-casting)
