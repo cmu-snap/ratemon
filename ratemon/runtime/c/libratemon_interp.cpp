@@ -1760,14 +1760,19 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   if (noop_mode) {
     return real_send(sockfd, buf, len, flags);
   }
-  // Do any ratemon-specific handling before calling the real send().
+  // Check if this flow is being monitored (i.e., in fd_to_flow map).
+  // If not, skip all ratemon processing.
+  bool is_monitored = false;
   if (setup_done && run) {
+    std::shared_lock<std::shared_mutex> lock(lock_scheduler);
+    is_monitored = (fd_to_flow.find(sockfd) != fd_to_flow.end());
+  }
+
+  // Do any ratemon-specific handling before calling the real send().
+  if (is_monitored) {
     if (!handle_send(sockfd, buf, len)) {
       RM_PRINTF("ERROR: Failed to handle 'send' for FD=%d\n", sockfd);
     }
-  } else {
-    RM_PRINTF("ERROR: Cannot handle 'send' for FD=%d. setup_done=%d, run=%d\n",
-              sockfd, setup_done, run);
   }
   ssize_t const ret = real_send(sockfd, buf, len, flags);
   if (ret == -1) {
@@ -1809,6 +1814,19 @@ int close(int sockfd) {
     return ret;
   }
 
+  // Quick check if this flow is monitored before acquiring the lock.
+  // This avoids overhead for non-monitored connections.
+  bool is_monitored = false;
+  {
+    std::shared_lock<std::shared_mutex> read_lock(lock_scheduler);
+    is_monitored = (fd_to_flow.find(sockfd) != fd_to_flow.end());
+  }
+
+  if (!is_monitored) {
+    RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
+    return ret;
+  }
+
   // Remove this FD from all data structures.
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   // trunk-ignore(clang-tidy/clang-diagnostic-error)
@@ -1847,9 +1865,9 @@ int close(int sockfd) {
 
     // The flow will be removed from the active_fds_queue and paused_fds_queue
     // when the scheduler thread wakes up and processes the next event.
-  } else {
-    RM_PRINTF("INFO: Ignoring 'close' for FD=%d, not in fd_to_flow\n", sockfd);
   }
+  // Note: If fd_to_flow doesn't contain sockfd at this point, another thread
+  // may have removed it between our check and acquiring the lock. This is fine.
   // lock is automatically released when it goes out of scope
   return ret;
 }
