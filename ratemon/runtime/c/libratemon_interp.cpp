@@ -1444,6 +1444,12 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         RM_PRINTF("WARNING: Could not find grant info for flow FD=%d, "
                   "creating new entry\n", fd);
         grant_info = {};
+        grant_info.override_rwnd_bytes = 0xFFFFFFFF;
+        grant_info.new_grant_bytes = 0;
+        grant_info.rwnd_end_seq = 0;
+        grant_info.grant_end_seq = 0;
+        grant_info.grant_done = true;
+        grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
       }
 
       // Add the burst size to ungranted bytes
