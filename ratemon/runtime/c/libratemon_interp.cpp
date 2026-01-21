@@ -695,23 +695,29 @@ void pregrant_for_next_burst() {
 
   int pregranted_count = 0;
 
-  // Grant to all flows that have pending ungranted bytes
+  // Grant to flows that are STILL WORKING on the current burst (ungranted_bytes > 0).
+  // These are the "losers" - by pregranting them, they'll be ready to start the
+  // next burst immediately. This improves fairness (losers get a better chance
+  // in the next burst) and cache efficiency (these flows are currently active).
   // Caller holds lock, so we can safely iterate fd_to_flow
   for (const auto &entry : fd_to_flow) {
     int const fd = entry.first;
     struct rm_flow const &flow_iter = entry.second;
-    // Check if flow has ungranted bytes (indicating burst request was received)
+    // Check if flow has ungranted bytes (still working on current burst)
     struct rm_grant_info grant_info {};
     int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
     if (err != 0 || grant_info.ungranted_bytes <= 0) {
-      continue;  // No pending data for this flow
+      RM_PRINTF("INFO: Pregrant - skipping FD=%d (err=%d, ungranted_bytes=%d)\n",
+                fd, err, err == 0 ? grant_info.ungranted_bytes : 0);
+      continue;  // Skip flows that have finished the current burst
     }
 
-    // Pre-grant: give an extra large grant without officially activating the flow
-    // The flow remains in its current queue (paused or active) but gets a grant
-    // ready for when the next burst request arrives
+    RM_PRINTF("INFO: Pregrant - flow FD=%d still has %d ungranted bytes, "
+              "giving pregrant for next burst\n",
+              fd, grant_info.ungranted_bytes);
 
-    // Set a large grant for the next burst (byte mode only)
+    // Pre-grant: add grant bytes for the next burst
+    // The flow remains working on current burst but will have a grant ready
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
     grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
@@ -722,8 +728,8 @@ void pregrant_for_next_burst() {
       continue;
     }
     RM_PRINTF("INFO: Pregrant - gave grant of %d bytes to flow FD=%d "
-              "(without official activation)\n",
-              epoch_bytes, fd);
+              "(new_grant_bytes now=%d)\n",
+              epoch_bytes, fd, grant_info.new_grant_bytes);
 
     // Trigger an ACK to notify the sender about the grant
     trigger_ack(fd);

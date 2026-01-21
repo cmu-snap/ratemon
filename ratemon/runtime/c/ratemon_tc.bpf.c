@@ -158,13 +158,17 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
-      // Reduce the new grant amount based on pending data.
-      int grant_to_use =
-          min(grant_info->new_grant_bytes, max(grant_info->ungranted_bytes, 0));
+      // Use the full new grant amount. Previously this was capped by
+      // ungranted_bytes, but that prevents pregrants from working since
+      // pregrants are for a future burst where ungranted_bytes hasn't been
+      // set yet.
+      int grant_to_use = grant_info->new_grant_bytes;
       RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
                 "%d bytes",
                 flow.local_port, flow.remote_port, grant_to_use);
       grant_info->new_grant_bytes = 0;
+      // Track granted bytes. ungranted_bytes can go negative, which is fine -
+      // it just means we've granted more than requested (e.g., pregrant).
       grant_info->ungranted_bytes -= grant_to_use;
       // Sequence number increment wraps naturally for uint32_t, but comparisons
       // must use before/after macros.
