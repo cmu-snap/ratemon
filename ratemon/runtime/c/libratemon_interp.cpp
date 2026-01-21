@@ -1398,12 +1398,26 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // Acquire lock to access fd_to_flow and global state
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
 
+  // Update burst tracking BEFORE scheduling decisions
+  // This ensures should_schedule is calculated based on the current burst
+  if (burst_number >= 0 && burst_number > current_burst_number) {
+    // New burst detected
+    RM_PRINTF("INFO: Starting burst %d (was %d), reset burst_flows_remaining=%zu\n",
+              burst_number, current_burst_number, fd_to_flow.size());
+    current_burst_number = burst_number;
+    pregrant_done = false;
+    burst_flows_remaining = fd_to_flow.size();
+  } else if (burst_number >= 0 && burst_number < current_burst_number) {
+    RM_PRINTF("WARNING: Received burst_number=%d but current_burst_number=%d\n",
+              burst_number, current_burst_number);
+  }
+
   // Initialize burst tracking on first burst
   if (current_burst_number == 0 && burst_flows_remaining == 0) {
     // Count total flows to initialize burst_flows_remaining
     burst_flows_remaining = fd_to_flow.size();
     pregrant_done = false;
-    RM_PRINTF("INFO: First burst - initialized burst_flows_remaining=%d\n",
+    RM_PRINTF("INFO: First burst - initialized burst_flows_remaining=%zu\n",
               burst_flows_remaining);
   }
 
@@ -1413,8 +1427,10 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
     // Normal policy: always schedule
     should_schedule = true;
   } else if (single_request_policy == "pregrant") {
-    // Pregrant policy: only schedule on first burst
+    // Pregrant policy: only schedule on first burst (burst_number 0)
     should_schedule = (current_burst_number == 0);
+    RM_PRINTF("INFO: Pregrant policy - current_burst_number=%d, should_schedule=%d\n",
+              current_burst_number, should_schedule);
   }
 
   // Find all flows from the same remote host and update their state
@@ -1489,21 +1505,6 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         RM_PRINTF("INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
                   "(will use pregrant from previous burst)\n", fd);
       }
-    }
-  }
-
-  // Update burst tracking based on received burst_number
-  if (flows_updated > 0 && burst_number >= 0) {
-    if (burst_number > current_burst_number) {
-      // New burst detected
-      current_burst_number = burst_number;
-      pregrant_done = false;
-      burst_flows_remaining = fd_to_flow.size();
-      RM_PRINTF("INFO: Starting burst %d, reset burst_flows_remaining=%d\n",
-                current_burst_number, burst_flows_remaining);
-    } else if (burst_number < current_burst_number) {
-      RM_PRINTF("WARNING: Received burst_number=%d but current_burst_number=%d\n",
-                burst_number, current_burst_number);
     }
   }
 
