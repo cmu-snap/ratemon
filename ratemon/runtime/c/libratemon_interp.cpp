@@ -686,11 +686,11 @@ void thread_func() {
   RM_PRINTF("INFO: Scheduler thread ended\n");
 }
 
-// Pre-grant for the next burst when only max_active_flows remain working on current burst.
+// Pregrant for the next burst when only max_active_flows remain working on current burst.
 // This is used in single_request_pregrant policy.
 // Caller must hold lock_scheduler.
 void pregrant_for_next_burst() {
-  RM_PRINTF("INFO: Pre-granting for next burst (burst %d -> %d)\n",
+  RM_PRINTF("INFO: Pregranting for next burst (burst %d -> %d)\n",
             current_burst_number, current_burst_number + 1);
 
   int pregranted_count = 0;
@@ -707,29 +707,41 @@ void pregrant_for_next_burst() {
     struct rm_grant_info grant_info {};
     int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
     if (err != 0 || grant_info.ungranted_bytes <= 0) {
-      RM_PRINTF("INFO: Pregrant - skipping FD=%d (err=%d, ungranted_bytes=%d)\n",
-                fd, err, err == 0 ? grant_info.ungranted_bytes : 0);
+      RM_PRINTF("INFO: Pregrant - skipping FD=%d %s:%u<->%s:%u (err=%d, ungranted_bytes=%d)\n",
+                fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
+                ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
+                err, err == 0 ? grant_info.ungranted_bytes : 0);
       continue;  // Skip flows that have finished the current burst
     }
 
-    RM_PRINTF("INFO: Pregrant - flow FD=%d still has %d ungranted bytes, "
+    RM_PRINTF("INFO: Pregrant - flow FD=%d %s:%u<->%s:%u still has %d ungranted bytes, "
               "giving pregrant for next burst\n",
-              fd, grant_info.ungranted_bytes);
+              fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
+              ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
+              grant_info.ungranted_bytes);
 
-    // Pre-grant: add grant bytes for the next burst
+    // Pregrant: add grant bytes for the next burst
     // The flow remains working on current burst but will have a grant ready
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
     grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
     if (err != 0) {
-      RM_PRINTF("ERROR: Pregrant - could not set grant for flow FD=%d, err=%d (%s)\n",
-                fd, err, strerror(-err));
+      RM_PRINTF("ERROR: Pregrant - could not set grant for flow FD=%d %s:%u<->%s:%u, err=%d (%s)\n",
+                fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
+                ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
+                err, strerror(-err));
       continue;
     }
-    RM_PRINTF("INFO: Pregrant - gave grant of %d bytes to flow FD=%d "
+
+
+    RM_PRINTF("INFO: Pregrant - gave grant of %d bytes to flow FD=%d %s:%u<->%s:%u "
               "(new_grant_bytes now=%d)\n",
-              epoch_bytes, fd, grant_info.new_grant_bytes);
+              epoch_bytes, fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
+              ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
+              grant_info.new_grant_bytes);
+
+
 
     // Trigger an ACK to notify the sender about the grant
     trigger_ack(fd);
@@ -738,7 +750,7 @@ void pregrant_for_next_burst() {
   }
 
   pregrant_done = true;
-  RM_PRINTF("INFO: Pre-granted %d flows for next burst\n", pregranted_count);
+  RM_PRINTF("INFO: Pregranted %d flows for next burst\n", pregranted_count);
 }
 
 int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
@@ -786,11 +798,11 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
       RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
                 fd->second, burst_flows_remaining);
 
-      // Check if we should trigger pre-granting
+      // Check if we should trigger pregranting
       if (!pregrant_done && burst_flows_remaining <= max_active_flows &&
           burst_flows_remaining > 0) {
         RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
-                  "triggering pre-grant\n",
+                  "triggering pregrant\n",
                   burst_flows_remaining, max_active_flows);
         pregrant_for_next_burst();
       }
@@ -1372,7 +1384,7 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
 // flows from that host.
 // Two policies:
 // - "normal": Perform scheduling on every send() call
-// - "pregrant": Perform scheduling only on first burst; subsequent bursts use pre-grants
+// - "pregrant": Perform scheduling only on first burst; subsequent bursts use pregrants
 static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   struct rm_flow flow {};
   if (!get_flow(sockfd, &flow)) {
@@ -1494,7 +1506,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         }
       } else {
         RM_PRINTF("INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
-                  "(will use pre-grant from previous burst)\n", fd);
+                  "(will use pregrant from previous burst)\n", fd);
       }
     }
   }
