@@ -107,6 +107,9 @@ struct rm_grant_info {
   // re-added to the done_flows map. Used to make sure that a flow is added to
   // the done_flows map at most once per grant.
   bool grant_done;
+  // Indicates if the new_grant_bytes is a pregrant (for a future burst rather
+  // than the current burst). Used for logging/debugging.
+  bool is_pregrant;
   // Consider a grant done when the ACKed sequence number is within this many
   // bytes of grant_end_seq.
   int grant_end_buffer_bytes;

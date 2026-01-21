@@ -262,6 +262,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
     grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
+    grant_info.is_pregrant = false;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
                               BPF_ANY);
@@ -725,6 +726,7 @@ void pregrant_for_next_burst() {
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
     grant_info.new_grant_bytes += epoch_bytes;
     grant_info.grant_done = false;
+    grant_info.is_pregrant = true;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
     if (err != 0) {
       RM_PRINTF("ERROR: Pregrant - could not set grant for flow FD=%d %s:%u<->%s:%u, err=%d (%s)\n",
@@ -1640,6 +1642,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
       grant_info.override_rwnd_bytes = 0xFFFFFFFF;
       grant_info.new_grant_bytes += epoch_bytes;
       grant_info.grant_done = false;
+      grant_info.is_pregrant = false;
       err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
       if (err != 0) {
         RM_PRINTF("ERROR: Could not set grant for flow FD=%d, err=%d (%s)\n",

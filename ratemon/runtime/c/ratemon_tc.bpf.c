@@ -163,10 +163,17 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // pregrants are for a future burst where ungranted_bytes hasn't been
       // set yet.
       int grant_to_use = grant_info->new_grant_bytes;
-      RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
-                "%d bytes",
-                flow.local_port, flow.remote_port, grant_to_use);
+      if (grant_info->is_pregrant) {
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT of "
+                  "%d bytes",
+                  flow.local_port, flow.remote_port, grant_to_use);
+      } else {
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
+                  "%d bytes",
+                  flow.local_port, flow.remote_port, grant_to_use);
+      }
       grant_info->new_grant_bytes = 0;
+      grant_info->is_pregrant = false;
       // Track granted bytes. ungranted_bytes can go negative, which is fine -
       // it just means we've granted more than requested (e.g., pregrant).
       grant_info->ungranted_bytes -= grant_to_use;
