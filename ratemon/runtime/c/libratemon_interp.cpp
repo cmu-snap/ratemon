@@ -81,8 +81,8 @@ template <> struct hash<rm_flow_key> {
 };
 } // namespace std
 
-// Used to signal the scheduler thread to end.
-bool run = true;
+// Used to signal the scheduler thread to end. Atomic for thread-safe access.
+std::atomic<bool> run{true};
 // Existing signal handler for SIGINT.
 struct sigaction oldact;
 // FD for the BPF map "flow_to_rwnd".
@@ -317,8 +317,7 @@ int try_activate_one() {
                                         &fd_to_flow[pause_fr], &dummy);
     RM_PRINTF("INFO: Checking flow FD=%d, dummy=%d, err=%d\n", pause_fr, dummy,
               err);
-    if (bpf_map_lookup_elem(flow_to_keepalive_fd, &fd_to_flow[pause_fr],
-                            &dummy) != 0) {
+    if (err != 0) {
       RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", pause_fr);
       paused_fds_queue.enqueue(pause_fr);
       continue;
@@ -424,7 +423,7 @@ void timer_callback(const boost::system::error_code &error) {
   // Current kernel time (since boot).
   struct timespec ts {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  int64_t const ktime_now_ns = ts.tv_sec * 1000000000 + ts.tv_nsec;
+  int64_t const ktime_now_ns = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
   // For measuring idle time.
   int64_t last_data_time_ns = 0;
   int64_t idle_ns = 0;
@@ -1193,8 +1192,11 @@ void register_fd_for_monitoring(int fd) {
                                       &fd_to_flow[fd], &zero, BPF_ANY);
   if (err != 0) {
     RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
-              "FD=%d, err=%d (%s)\n",
+              "FD=%d, err=%d (%s). Removing flow from tracking.\n",
               fd, err, strerror(-err));
+    // Clean up: remove from fd_to_flow and flow_to_fd since registration failed
+    fd_to_flow.erase(fd);
+    flow_to_fd.erase(key);
     return;
   }
 
