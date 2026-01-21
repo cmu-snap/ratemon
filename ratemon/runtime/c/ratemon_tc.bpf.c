@@ -187,8 +187,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               flow.local_port, flow.remote_port, rwnd);
 
     // Only want extra grant handling to happen on last ACK in the last grant in
-    // a burst. ungranted_bytes == 0 rwnd < MSS or rwnd < win_scale
-    if (grant_info->ungranted_bytes == 0 && rwnd > 0) {
+    // a burst. ungranted_bytes <= 0 (can be negative due to pregrant) and rwnd < MSS or rwnd < win_scale
+    if (grant_info->ungranted_bytes <= 0 && rwnd > 0) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
       // for 200ms. If we are about to do that then grant a little bit extra.
