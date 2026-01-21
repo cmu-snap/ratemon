@@ -240,7 +240,9 @@ int try_find_and_pause(int fd) {
 }
 
 // Attempt to activate this flow. Return the number of activated flows.
-inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
+// If with_pregrant is true, give a double grant (normal + pregrant for next burst).
+inline int activate_flow(int fd, bool trigger_ack_on_activate = true,
+                         bool with_pregrant = false) {
   int err = 0;
   if (scheduling_mode == "byte") {
     struct rm_grant_info grant_info {};
@@ -259,10 +261,13 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
                 fd);
       return 0;
     }
+    // Calculate grant amount: double if pregrant, single otherwise
+    int grant_amount = with_pregrant ? (epoch_bytes * 2) : epoch_bytes;
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes += epoch_bytes;
+    grant_info.new_grant_bytes += grant_amount;
     grant_info.grant_done = false;
-    grant_info.is_pregrant = false;
+    // Mark as pregrant if we're giving a double grant (the extra portion is pregrant)
+    grant_info.is_pregrant = with_pregrant;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
                               BPF_ANY);
@@ -271,8 +276,14 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
                 err, strerror(-err));
       return 0;
     }
-    RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
-              epoch_bytes);
+    if (with_pregrant) {
+      RM_PRINTF("INFO: Activated flow FD=%d with PREGRANT (grant of %d bytes = "
+                "%d normal + %d pregrant)\n",
+                fd, grant_amount, epoch_bytes, epoch_bytes);
+    } else {
+      RM_PRINTF("INFO: Activated flow FD=%d with grant of %d bytes\n", fd,
+                grant_amount);
+    }
   } else if (scheduling_mode == "time") {
     // Remove the RWND limit of 0 that has paused the flow.
     err = bpf_map_delete_elem(flow_to_rwnd_fd, &fd_to_flow[fd]);
@@ -290,8 +301,9 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
 }
 
 // Try to find and activate one flow. Returns the number of flows that were
-// activated.
-int try_activate_one() {
+// activated. If with_pregrant is true, give a double grant only if this is
+// the flow's last grant (ungranted_bytes <= epoch_bytes).
+int try_activate_one(bool with_pregrant = false) {
   // Loop until we find a paused flow that is valid (not closed).
   int const num_paused = static_cast<int>(paused_fds_queue.size());
   // Temporary variable for storing the front of paused_fds_queue.
@@ -323,8 +335,33 @@ int try_activate_one() {
       paused_fds_queue.enqueue(pause_fr);
       continue;
     }
-    RM_PRINTF("INFO: Trying to activate flow FD=%d\n", pause_fr);
-    if (activate_flow(pause_fr) == 0) {
+
+    // Check if we should actually pregrant this flow.
+    // Only pregrant if this is the flow's last grant in the burst
+    // (ungranted_bytes <= epoch_bytes).
+    bool actually_pregrant = false;
+    if (with_pregrant) {
+      struct rm_grant_info grant_info {};
+      int const lookup_err =
+          bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[pause_fr], &grant_info);
+      if (lookup_err == 0 && grant_info.ungranted_bytes <= epoch_bytes) {
+        // This is the flow's last grant in the burst, so pregrant it
+        actually_pregrant = true;
+        RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (<= epoch_bytes=%d), "
+                  "will pregrant\n",
+                  pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+      } else {
+        RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (> epoch_bytes=%d), "
+                  "skipping pregrant\n",
+                  pause_fr, lookup_err == 0 ? grant_info.ungranted_bytes : 0,
+                  epoch_bytes);
+      }
+    }
+
+    RM_PRINTF("INFO: Trying to activate flow FD=%d (with_pregrant=%d, "
+              "actually_pregrant=%d)\n",
+              pause_fr, with_pregrant, actually_pregrant);
+    if (activate_flow(pause_fr, true, actually_pregrant) == 0) {
       // Tried but failed to activate this flow, so put it back in the queue.
       paused_fds_queue.enqueue(pause_fr);
       continue;
@@ -340,15 +377,15 @@ int try_activate_one() {
 }
 
 // Try to pause this flow and activate one other flow. Returns the number of
-// flows that were activated.
-int try_pause_one_activate_one(int fd) {
+// flows that were activated. If with_pregrant is true, give a double grant.
+int try_pause_one_activate_one(int fd, bool with_pregrant = false) {
   // Find the flow in active_fds_queue and remove it
   if (try_find_and_pause(fd) == 0) {
     RM_PRINTF("ERROR: Could not find and/or pause flow FD=%d\n", fd);
     return 0;
   }
   // Then find one flow in paused_fds_queue to restart.
-  int const num_activated = try_activate_one();
+  int const num_activated = try_activate_one(with_pregrant);
   if (num_activated == 0) {
     RM_PRINTF("ERROR: Could not activate a flow after pausing FD=%d\n", fd);
     return 0;
@@ -687,74 +724,6 @@ void thread_func() {
   RM_PRINTF("INFO: Scheduler thread ended\n");
 }
 
-// Pregrant for the next burst when only max_active_flows remain working on current burst.
-// This is used in single_request_pregrant policy.
-// Caller must hold lock_scheduler.
-void pregrant_for_next_burst() {
-  RM_PRINTF("INFO: Pregranting for next burst (burst %d -> %d)\n",
-            current_burst_number, current_burst_number + 1);
-
-  int pregranted_count = 0;
-
-  // Grant to flows that are STILL WORKING on the current burst (ungranted_bytes > 0).
-  // These are the "losers" - by pregranting them, they'll be ready to start the
-  // next burst immediately. This improves fairness (losers get a better chance
-  // in the next burst) and cache efficiency (these flows are currently active).
-  // Caller holds lock, so we can safely iterate fd_to_flow
-  for (const auto &entry : fd_to_flow) {
-    int const fd = entry.first;
-    struct rm_flow const &flow_iter = entry.second;
-    // Check if flow has ungranted bytes (still working on current burst)
-    struct rm_grant_info grant_info {};
-    int err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
-    if (err != 0 || grant_info.ungranted_bytes <= 0) {
-      RM_PRINTF("INFO: Pregrant - skipping FD=%d %s:%u<->%s:%u (err=%d, ungranted_bytes=%d)\n",
-                fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
-                ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
-                err, err == 0 ? grant_info.ungranted_bytes : 0);
-      continue;  // Skip flows that have finished the current burst
-    }
-
-    RM_PRINTF("INFO: Pregrant - flow FD=%d %s:%u<->%s:%u still has %d ungranted bytes, "
-              "giving pregrant for next burst\n",
-              fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
-              ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
-              grant_info.ungranted_bytes);
-
-    // Pregrant: add grant bytes for the next burst
-    // The flow remains working on current burst but will have a grant ready
-    grant_info.override_rwnd_bytes = 0xFFFFFFFF;
-    grant_info.new_grant_bytes += epoch_bytes;
-    grant_info.grant_done = false;
-    grant_info.is_pregrant = true;
-    err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
-    if (err != 0) {
-      RM_PRINTF("ERROR: Pregrant - could not set grant for flow FD=%d %s:%u<->%s:%u, err=%d (%s)\n",
-                fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
-                ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
-                err, strerror(-err));
-      continue;
-    }
-
-
-    RM_PRINTF("INFO: Pregrant - gave grant of %d bytes to flow FD=%d %s:%u<->%s:%u "
-              "(new_grant_bytes now=%d)\n",
-              epoch_bytes, fd, ipv4_to_string(flow_iter.local_addr).c_str(), flow_iter.local_port,
-              ipv4_to_string(flow_iter.remote_addr).c_str(), flow_iter.remote_port,
-              grant_info.new_grant_bytes);
-
-
-
-    // Trigger an ACK to notify the sender about the grant
-    trigger_ack(fd);
-
-    pregranted_count++;
-  }
-
-  pregrant_done = true;
-  RM_PRINTF("INFO: Pregranted %d flows for next burst\n", pregranted_count);
-}
-
 int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   RM_PRINTF("INFO: In handle_grant_done, data_sz=%zu\n", data_sz);
   if (!setup_done) {
@@ -789,6 +758,10 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   }
   RM_PRINTF("INFO: Flow FD=%d has exhausted its grant\n", fd->second);
 
+  // Determine if we should pregrant the next activated flow.
+  // Late-binding: we decide at activation time whether to give a double grant.
+  bool should_pregrant = false;
+
   // Check if this flow has completed its entire burst (ungranted_bytes <= 0)
   // This is used for pregrant policy to track burst progress
   if (single_request_policy == "pregrant" && new_burst_mode == "single") {
@@ -800,20 +773,26 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
       RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
                 fd->second, burst_flows_remaining);
 
-      // Check if we should trigger pregranting
-      if (!pregrant_done && burst_flows_remaining <= max_active_flows &&
+      // Check if we should pregrant the next activated flow.
+      // Pregrant each of the last max_active_flows in the burst.
+      // When burst_flows_remaining <= max_active_flows, every subsequent
+      // activation gets a pregrant until burst_flows_remaining = 0.
+      if (burst_flows_remaining <= max_active_flows &&
           burst_flows_remaining > 0) {
         RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
-                  "triggering pregrant\n",
+                  "will pregrant next activated flow\n",
                   burst_flows_remaining, max_active_flows);
-        pregrant_for_next_burst();
+        should_pregrant = true;
       }
     }
   }
 
-  if (try_pause_one_activate_one(fd->second) == 0) {
+  // Pause this flow and activate another, optionally with pregrant
+  if (try_pause_one_activate_one(fd->second, should_pregrant) == 0) {
     RM_PRINTF("ERROR: Could not pause flow FD=%d and activate another flow\n",
               fd->second);
+  } else if (should_pregrant) {
+    RM_PRINTF("INFO: Pregrant applied to activated flow\n");
   }
   return 0;
 }
