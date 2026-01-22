@@ -256,7 +256,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               "actual_end=%u",
               flow.local_port, flow.remote_port, actual_grant_end_seq);
     RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
-              "ack-end=%u",
+              "end-ack=%u",
               flow.local_port, flow.remote_port, actual_grant_end_seq-ack_seq);
     RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
               "should_trigger=%u ",
