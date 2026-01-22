@@ -158,34 +158,41 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
-      int grant_to_use;
-      if (grant_info->is_pregrant) {
-        // Pregrant: use full grant amount, allowing ungranted_bytes to go
-        // negative. This is intentional - pregrants are for a future burst
-        // where ungranted_bytes hasn't been set yet.
-        grant_to_use = grant_info->new_grant_bytes;
-        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT of "
-                  "%d bytes",
-                  flow.local_port, flow.remote_port, grant_to_use);
-      } else {
-        // Normal grant: cap by ungranted_bytes to avoid over-granting.
-        // This prevents granting more than the flow needs.
-        grant_to_use = min(grant_info->new_grant_bytes,
-                           max(grant_info->ungranted_bytes, 0));
-        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
-                  "%d bytes (requested %d, ungranted %d)",
-                  flow.local_port, flow.remote_port, grant_to_use,
-                  grant_info->new_grant_bytes, grant_info->ungranted_bytes);
-      }
+      bool is_pregrant = grant_info->is_pregrant;
+      int total_grant = grant_info->new_grant_bytes;
       grant_info->new_grant_bytes = 0;
       grant_info->is_pregrant = false;
-      // Track granted bytes. For pregrants, ungranted_bytes can go negative,
-      // which is fine - it means we've pre-granted for the next burst.
-      grant_info->ungranted_bytes -= grant_to_use;
-      // Sequence number increment wraps naturally for uint32_t, but comparisons
-      // must use before/after macros.
-      grant_info->rwnd_end_seq += grant_to_use;
-      grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+
+      // Step 1: Process the normal grant portion (capped by ungranted_bytes).
+      // This updates both rwnd_end_seq and grant_end_seq.
+      int normal_grant = min(total_grant, max(grant_info->ungranted_bytes, 0));
+      if (normal_grant > 0) {
+        grant_info->ungranted_bytes -= normal_grant;
+        grant_info->rwnd_end_seq += normal_grant;
+        grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received normal grant "
+                  "of %d bytes (ungranted now %d)",
+                  flow.local_port, flow.remote_port, normal_grant,
+                  grant_info->ungranted_bytes);
+      }
+
+      // Step 2: If this is a pregrant, process the pregrant portion.
+      // The pregrant is the remainder after the normal grant.
+      // This only updates rwnd_end_seq, not grant_end_seq, because the
+      // pregrant is for future data that doesn't exist yet.
+      if (is_pregrant) {
+        int pregrant_portion = total_grant - normal_grant;
+        if (pregrant_portion > 0) {
+          // ungranted_bytes goes negative - this is intentional for pregrants
+          grant_info->ungranted_bytes -= pregrant_portion;
+          grant_info->rwnd_end_seq += pregrant_portion;
+          // Do NOT update grant_end_seq - we don't expect sender to reach this
+          RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT "
+                    "of %d bytes (ungranted now %d)",
+                    flow.local_port, flow.remote_port, pregrant_portion,
+                    grant_info->ungranted_bytes);
+        }
+      }
     }
     // Calculate window size using sequence number wrapping.
     if (after(grant_info->rwnd_end_seq, ack_seq)) {
