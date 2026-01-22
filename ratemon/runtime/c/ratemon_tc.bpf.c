@@ -158,24 +158,29 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
-      // Use the full new grant amount. Previously this was capped by
-      // ungranted_bytes, but that prevents pregrants from working since
-      // pregrants are for a future burst where ungranted_bytes hasn't been
-      // set yet.
-      int grant_to_use = grant_info->new_grant_bytes;
+      int grant_to_use;
       if (grant_info->is_pregrant) {
+        // Pregrant: use full grant amount, allowing ungranted_bytes to go
+        // negative. This is intentional - pregrants are for a future burst
+        // where ungranted_bytes hasn't been set yet.
+        grant_to_use = grant_info->new_grant_bytes;
         RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT of "
                   "%d bytes",
                   flow.local_port, flow.remote_port, grant_to_use);
       } else {
+        // Normal grant: cap by ungranted_bytes to avoid over-granting.
+        // This prevents granting more than the flow needs.
+        grant_to_use = min(grant_info->new_grant_bytes,
+                           max(grant_info->ungranted_bytes, 0));
         RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received new grant of "
-                  "%d bytes",
-                  flow.local_port, flow.remote_port, grant_to_use);
+                  "%d bytes (requested %d, ungranted %d)",
+                  flow.local_port, flow.remote_port, grant_to_use,
+                  grant_info->new_grant_bytes, grant_info->ungranted_bytes);
       }
       grant_info->new_grant_bytes = 0;
       grant_info->is_pregrant = false;
-      // Track granted bytes. ungranted_bytes can go negative, which is fine -
-      // it just means we've granted more than requested (e.g., pregrant).
+      // Track granted bytes. For pregrants, ungranted_bytes can go negative,
+      // which is fine - it means we've pre-granted for the next burst.
       grant_info->ungranted_bytes -= grant_to_use;
       // Sequence number increment wraps naturally for uint32_t, but comparisons
       // must use before/after macros.
@@ -193,9 +198,10 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               "remaining of %u bytes",
               flow.local_port, flow.remote_port, rwnd);
 
-    // Only want extra grant handling to happen on last ACK in the last grant in
-    // a burst. ungranted_bytes <= 0 (can be negative due to pregrant) and rwnd < MSS or rwnd < win_scale
-    if (grant_info->ungranted_bytes <= 0 && rwnd > 0) {
+    // Only apply extra grant handling on the last grant of a burst (when
+    // ungranted_bytes == 0). Skip if ungranted_bytes < 0, which means we
+    // already pregranted - we don't want to add even more extra grant on top.
+    if (grant_info->ungranted_bytes == 0 && rwnd > 0) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
       // for 200ms. If we are about to do that then grant a little bit extra.
