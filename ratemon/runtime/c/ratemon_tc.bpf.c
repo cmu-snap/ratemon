@@ -201,6 +201,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // Only apply extra grant handling on the last grant of a burst (when
     // ungranted_bytes == 0). Skip if ungranted_bytes < 0, which means we
     // already pregranted - we don't want to add even more extra grant on top.
+    // TODO: Maybe change to <=
     if (grant_info->ungranted_bytes == 0 && rwnd > 0) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
