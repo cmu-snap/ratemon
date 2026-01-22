@@ -246,8 +246,26 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     uint32_t actual_grant_end_seq =
         grant_info->grant_end_seq -
         (uint32_t)grant_info->grant_end_buffer_bytes;
-    if (ack_seq == actual_grant_end_seq ||
-        after(ack_seq, actual_grant_end_seq)) {
+
+    // Debug: log the grant_done check values to understand timing
+    bool should_trigger = (ack_seq == actual_grant_end_seq ||
+                           after(ack_seq, actual_grant_end_seq));
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: ack=%u",
+              flow.local_port, flow.remote_port, ack_seq);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
+              "actual_end=%u",
+              flow.local_port, flow.remote_port, actual_grant_end_seq);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
+              "ack-end=%u",
+              flow.local_port, flow.remote_port, actual_grant_end_seq-ack_seq);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
+              "should_trigger=%u ",
+              flow.local_port, flow.remote_port, should_trigger);
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check: "
+              "already_done=%u",
+              flow.local_port, flow.remote_port, grant_info->grant_done);
+
+    if (should_trigger) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;
