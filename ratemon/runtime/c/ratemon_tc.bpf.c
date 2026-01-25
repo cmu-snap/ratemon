@@ -133,25 +133,25 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
             flow.local_port, flow.remote_port, ack_seq);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
             flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->override_rwnd_bytes: %u",
-            flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->override_rwnd_bytes: %u",
+  //           flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
             "grant_info->new_grant_bytes: %d",
             flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
             "grant_info->rwnd_end_seq: %u",
             flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->grant_end_seq: %u",
-            flow.local_port, flow.remote_port, grant_info->grant_end_seq);
-  RM_PRINTK(
-      "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
-      flow.local_port, flow.remote_port, grant_info->grant_done);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->grant_end_buffer_bytes: %d",
-            flow.local_port, flow.remote_port,
-            grant_info->grant_end_buffer_bytes);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->grant_end_seq: %u",
+  //           flow.local_port, flow.remote_port, grant_info->grant_end_seq);
+  // RM_PRINTK(
+  //     "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
+  //     flow.local_port, flow.remote_port, grant_info->grant_done);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->grant_end_buffer_bytes: %d",
+  //           flow.local_port, flow.remote_port,
+  //           grant_info->grant_end_buffer_bytes);
 
   uint32_t rwnd = 0;
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
@@ -319,8 +319,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   //   rwnd_with_win_scale = existing_rwnd_with_win_scale;
   // }
   tcp->window = bpf_htons(rwnd_with_win_scale);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
-            "to %u (win scale: %u)",
-            flow.remote_port, rwnd_with_win_scale, *win_scale);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
+  //           "to %u (win scale: %u)",
+  //           flow.remote_port, rwnd_with_win_scale, *win_scale);
   return TC_ACT_OK;
 }
