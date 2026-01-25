@@ -221,8 +221,11 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Only apply extra grant handling on the last grant of a burst (when
     // ungranted_bytes <= 0). Skip if we just processed a pregrant, because
-    // we don't need to add even more extra grant on top.
-    if (!is_pregrant && grant_info->ungranted_bytes <= 0 && rwnd > 0) {
+    // we don't need to add even more extra grant on top. Also skip if there's
+    // no pending data (ack_seq has caught up to grant_end_seq).
+    bool has_pending_data = before(ack_seq, grant_info->grant_end_seq);
+    if (!is_pregrant && grant_info->ungranted_bytes <= 0 && rwnd > 0 &&
+        has_pending_data) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
       // for 200ms. If we are about to do that then grant a little bit extra.
