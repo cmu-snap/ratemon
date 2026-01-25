@@ -169,7 +169,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       if (normal_grant > 0) {
         grant_info->ungranted_bytes -= normal_grant;
         grant_info->rwnd_end_seq += normal_grant;
-        grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+        // TODO: This will cause problems if rwnd_end_seq is far ahead due to pregrants.
+        // TODO: Maybe: grant_info->grant_end_seq = ack_seq + normal_grant.
+        grant_info->grant_end_seq += normal_grant;
         RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received normal grant "
                   "of %d bytes (ungranted now %d)",
                   flow.local_port, flow.remote_port, normal_grant,
