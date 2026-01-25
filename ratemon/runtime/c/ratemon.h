@@ -113,6 +113,9 @@ struct rm_grant_info {
   // Consider a grant done when the ACKed sequence number is within this many
   // bytes of grant_end_seq.
   int grant_end_buffer_bytes;
+  // Set by BPF when it encounters an error condition. Checked by userspace
+  // to detect and report BPF-side errors.
+  bool bpf_experienced_error;
 };
 
 #endif /* __RATEMON_H */

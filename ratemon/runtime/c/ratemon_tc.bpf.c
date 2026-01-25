@@ -118,6 +118,16 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     return TC_ACT_OK;
   }
 
+  if (*win_scale > 10) {
+    grant_info->bpf_experienced_error = true;
+    RM_PRINTK("FATAL ERROR: 'do_rwnd_at_egress' flow with local port %u, remote "
+              "port %u, win scale must be at most 10 so that it is smaller than "
+              "one packet: %u > 10 (1024B)",
+              flow.local_port, flow.remote_port, *win_scale);
+    // Do not exit here because we need to continue normal operation so that the
+    // grant eventually finishes and the userspace code reads this error.
+  }
+
   uint32_t ack_seq = bpf_ntohl(tcp->ack_seq);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
             flow.local_port, flow.remote_port, ack_seq);

@@ -179,6 +179,18 @@ std::string ipv4_to_string(uint32_t addr) {
   return std::string("INVALID_IP");
 }
 
+// Check if the BPF program has signaled an error condition. If so, log the
+// error and exit with a fatal error. This should be called after every
+// successful bpf_map_lookup_elem that retrieves grant_info.
+inline void check_bpf_error(const struct rm_grant_info &grant_info,
+                            const char *context) {
+  if (grant_info.bpf_experienced_error) {
+    RM_PRINTF("FATAL: BPF program experienced an error (detected in %s). "
+              "Exiting.\n", context);
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 // Pause this flow. Return the number of flows that were paused.
 inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
   if (scheduling_mode == "byte") {
@@ -196,6 +208,7 @@ inline int pause_flow(int fd, bool trigger_ack_on_pause = true) {
     RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
     return 0;
   }
+  check_bpf_error(grant_info, "pause_flow");
   grant_info.override_rwnd_bytes = 0;
   err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
                             BPF_ANY);
@@ -255,6 +268,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true,
       RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", fd);
       return 0;
     }
+    check_bpf_error(grant_info, "activate_flow");
     if (grant_info.ungranted_bytes <= 0) {
       RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
                 "bytes\n",
@@ -344,17 +358,22 @@ int try_activate_one(bool with_pregrant = false) {
       struct rm_grant_info grant_info {};
       int const lookup_err =
           bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[pause_fr], &grant_info);
-      if (lookup_err == 0 && grant_info.ungranted_bytes <= epoch_bytes) {
-        // This is the flow's last grant in the burst, so pregrant it
-        actually_pregrant = true;
-        RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (<= epoch_bytes=%d), "
-                  "will pregrant\n",
-                  pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+      if (lookup_err == 0) {
+        check_bpf_error(grant_info, "try_activate_one");
+        if (grant_info.ungranted_bytes <= epoch_bytes) {
+          // This is the flow's last grant in the burst, so pregrant it
+          actually_pregrant = true;
+          RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (<= epoch_bytes=%d), "
+                    "will pregrant\n",
+                    pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+        } else {
+          RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (> epoch_bytes=%d), "
+                    "skipping pregrant\n",
+                    pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+        }
       } else {
-        RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (> epoch_bytes=%d), "
-                  "skipping pregrant\n",
-                  pause_fr, lookup_err == 0 ? grant_info.ungranted_bytes : 0,
-                  epoch_bytes);
+        RM_PRINTF("INFO: Flow FD=%d lookup failed, skipping pregrant\n",
+                  pause_fr);
       }
     }
 
@@ -767,22 +786,25 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   if (single_request_policy == "pregrant" && new_burst_mode == "single") {
     struct rm_grant_info grant_info {};
     int err = bpf_map_lookup_elem(flow_to_rwnd_fd, flow, &grant_info);
-    if (err == 0 && grant_info.ungranted_bytes <= 0) {
-      // This flow completed its burst
-      burst_flows_remaining--;
-      RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
-                fd->second, burst_flows_remaining);
+    if (err == 0) {
+      check_bpf_error(grant_info, "handle_grant_done");
+      if (grant_info.ungranted_bytes <= 0) {
+        // This flow completed its burst
+        burst_flows_remaining--;
+        RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
+                  fd->second, burst_flows_remaining);
 
-      // Check if we should pregrant the next activated flow.
-      // Pregrant each of the last max_active_flows in the burst.
-      // When burst_flows_remaining <= max_active_flows, every subsequent
-      // activation gets a pregrant until burst_flows_remaining = 0.
-      if (burst_flows_remaining <= max_active_flows &&
-          burst_flows_remaining > 0) {
-        RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
-                  "will pregrant next activated flow\n",
-                  burst_flows_remaining, max_active_flows);
-        should_pregrant = true;
+        // Check if we should pregrant the next activated flow.
+        // Pregrant each of the last max_active_flows in the burst.
+        // When burst_flows_remaining <= max_active_flows, every subsequent
+        // activation gets a pregrant until burst_flows_remaining = 0.
+        if (burst_flows_remaining <= max_active_flows &&
+            burst_flows_remaining > 0) {
+          RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
+                    "will pregrant next activated flow\n",
+                    burst_flows_remaining, max_active_flows);
+          should_pregrant = true;
+        }
       }
     }
   }
@@ -1338,6 +1360,9 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
       grant_info.grant_end_seq = 0;
       grant_info.grant_done = true;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
+      grant_info.bpf_experienced_error = false;
+    } else {
+      check_bpf_error(grant_info, "register_fd_for_monitoring_single_burst");
     }
     grant_info.ungranted_bytes += bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
@@ -1467,6 +1492,9 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         grant_info.grant_end_seq = 0;
         grant_info.grant_done = true;
         grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
+        grant_info.bpf_experienced_error = false;
+      } else {
+        check_bpf_error(grant_info, "handle_send_single_mode");
       }
 
       // Add the burst size to ungranted bytes
@@ -1580,6 +1608,9 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
       grant_info.grant_end_seq = 0;
       grant_info.grant_done = true;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
+      grant_info.bpf_experienced_error = false;
+    } else {
+      check_bpf_error(grant_info, "handle_send_port_mode_ungranted");
     }
     grant_info.ungranted_bytes += bytes;
     err = bpf_map_update_elem(flow_to_rwnd_fd, &flow, &grant_info, BPF_ANY);
@@ -1613,6 +1644,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
         RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", sockfd);
         return false;
       }
+      check_bpf_error(grant_info, "handle_send_port_mode");
       if (grant_info.ungranted_bytes <= 0) {
         RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
                   "bytes\n",
