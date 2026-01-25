@@ -296,18 +296,18 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
   // Apply the window scale to the configured RWND value.
   uint16_t rwnd_with_win_scale = (uint16_t)(rwnd >> *win_scale);
-  // Set the RWND value in the TCP header. If the existing advertised window
-  // set by flow control is smaller, then use that instead so that we
-  // preserve flow control.
-  uint16_t existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
-  if (existing_rwnd_with_win_scale < rwnd_with_win_scale) {
-    RM_PRINTK("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
-              "advertised window %u smaller than grant %u (values printed do "
-              "not include win scale)",
-              flow.remote_port, existing_rwnd_with_win_scale,
-              rwnd_with_win_scale);
-    rwnd_with_win_scale = existing_rwnd_with_win_scale;
-  }
+  // // Set the RWND value in the TCP header. If the existing advertised window
+  // // set by flow control is smaller, then use that instead so that we
+  // // preserve flow control.
+  // uint16_t existing_rwnd_with_win_scale = bpf_ntohs(tcp->window);
+  // if (existing_rwnd_with_win_scale < rwnd_with_win_scale) {
+  //   RM_PRINTK("WARNING: 'do_rwnd_at_egress' flow with remote port %u existing "
+  //             "advertised window %u smaller than grant %u (values printed do "
+  //             "not include win scale)",
+  //             flow.remote_port, existing_rwnd_with_win_scale,
+  //             rwnd_with_win_scale);
+  //   rwnd_with_win_scale = existing_rwnd_with_win_scale;
+  // }
   tcp->window = bpf_htons(rwnd_with_win_scale);
   RM_PRINTK("INFO: 'do_rwnd_at_egress' set RWND for flow with remote port %u "
             "to %u (win scale: %u)",
