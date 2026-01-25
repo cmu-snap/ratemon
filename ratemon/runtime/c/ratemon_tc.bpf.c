@@ -142,9 +142,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
             "grant_info->rwnd_end_seq: %u",
             flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
-  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-  //           "grant_info->grant_end_seq: %u",
-  //           flow.local_port, flow.remote_port, grant_info->grant_end_seq);
+  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+            "grant_info->grant_end_seq: %u",
+            flow.local_port, flow.remote_port, grant_info->grant_end_seq);
   // RM_PRINTK(
   //     "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
   //     flow.local_port, flow.remote_port, grant_info->grant_done);
