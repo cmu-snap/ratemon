@@ -147,6 +147,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
     // Override is 2^32-1, so use grant info.
 
+    bool is_pregrant = false;
+
     if (grant_info->grant_end_seq == 0) {
       // This is the first time we've seen this flow.
       grant_info->grant_end_seq = ack_seq;
@@ -158,7 +160,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
 
     // Process a new grant, if available.
     if (grant_info->new_grant_bytes > 0) {
-      bool is_pregrant = grant_info->is_pregrant;
+      is_pregrant = grant_info->is_pregrant;
       int total_grant = grant_info->new_grant_bytes;
       grant_info->new_grant_bytes = 0;
       grant_info->is_pregrant = false;
