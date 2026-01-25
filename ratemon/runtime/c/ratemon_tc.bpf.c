@@ -228,6 +228,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // for 200ms. If we are about to do that then grant a little bit extra.
       uint32_t min_grant = 1448U;
       if (rwnd < min_grant) {
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u getting extra grant due to less than packet size",
+              flow.local_port, flow.remote_port);
         handle_extra_grant(&flow, grant_info, min_grant - rwnd, &rwnd);
       }
 
@@ -246,6 +248,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       // }
 
       if (rwnd < 1 << *win_scale) {
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u getting extra grant due to less than win scale",
+              flow.local_port, flow.remote_port);
         handle_extra_grant(&flow, grant_info, (1 << *win_scale) - rwnd, &rwnd);
       }
 
