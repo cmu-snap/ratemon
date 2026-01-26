@@ -56,12 +56,15 @@
 // "single": one send() per host represents all flows from that host (for IBG's
 //           single_request mode). Updates state and performs scheduling for all
 //           flows from the same remote host. Triggers ACKs for activated flows
-//           except the calling flow (which carries the grant in the burst request).
+//           except the calling flow (which carries the grant in the burst
+//           request).
 #define RM_NEW_BURST_MODE_KEY "RM_NEW_BURST_MODE"
-// Environment variable that specifies the scheduling policy for single request mode.
+// Environment variable that specifies the scheduling policy for single request
+// mode.
 // "normal": perform scheduling on send() for all bursts
 // "pregrant": perform scheduling on send() for first burst only, then pregrant
-//             at the end of burst N-1 for burst N (when only max_active_flows remain)
+//             at the end of burst N-1 for burst N (when only max_active_flows
+//             remain)
 #define RM_SINGLE_REQUEST_POLICY_KEY "RM_SINGLE_REQUEST_POLICY"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
@@ -116,6 +119,9 @@ struct rm_grant_info {
   // Set by BPF when it encounters an error condition. Checked by userspace
   // to detect and report BPF-side errors.
   bool bpf_experienced_error;
+  // Tracks bytes that were applied as a pregrant and should later be added to
+  // grant_end_seq.
+  int pregranted_bytes;
 };
 
 #endif /* __RATEMON_H */

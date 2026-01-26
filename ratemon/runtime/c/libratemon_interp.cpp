@@ -37,11 +37,11 @@
 #include <linux/bpf.h>
 #include <linux/inet_diag.h>
 #include <mutex>
-#include <shared_mutex>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <optional>
 #include <queue>
+#include <shared_mutex>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
@@ -117,9 +117,10 @@ std::unordered_map<struct rm_flow_key, int> flow_to_fd;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
-std::string scheduling_mode = "byte"; // or "time"
+std::string scheduling_mode = "byte";  // or "time"
 std::string new_burst_mode = "normal"; // or "port" or "single"
-std::string single_request_policy = "normal"; // or "pregrant" (only applies when new_burst_mode="single")
+std::string single_request_policy =
+    "normal"; // or "pregrant" (only applies when new_burst_mode="single")
 int epoch_us = 10000;
 int epoch_bytes = 65536;
 int idle_timeout_us = 0;
@@ -186,7 +187,8 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
                             const char *context) {
   if (grant_info.bpf_experienced_error) {
     RM_PRINTF("FATAL: BPF program experienced an error (detected in %s). "
-              "Exiting.\n", context);
+              "Exiting.\n",
+              context);
     std::exit(EXIT_FAILURE);
   }
 }
@@ -253,7 +255,8 @@ int try_find_and_pause(int fd) {
 }
 
 // Attempt to activate this flow. Return the number of activated flows.
-// If with_pregrant is true, give a double grant (normal + pregrant for next burst).
+// If with_pregrant is true, give a double grant (normal + pregrant for next
+// burst).
 inline int activate_flow(int fd, bool trigger_ack_on_activate = true,
                          bool with_pregrant = false) {
   int err = 0;
@@ -280,7 +283,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true,
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
     grant_info.new_grant_bytes += grant_amount;
     grant_info.grant_done = false;
-    // Mark as pregrant if we're giving a double grant (the extra portion is pregrant)
+    // Mark as pregrant if we're giving a double grant (the extra portion is
+    // pregrant)
     grant_info.is_pregrant = with_pregrant;
     // Write the new grant info into the map.
     err = bpf_map_update_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info,
@@ -356,20 +360,22 @@ int try_activate_one(bool with_pregrant = false) {
     bool actually_pregrant = false;
     if (with_pregrant) {
       struct rm_grant_info grant_info {};
-      int const lookup_err =
-          bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[pause_fr], &grant_info);
+      int const lookup_err = bpf_map_lookup_elem(
+          flow_to_rwnd_fd, &fd_to_flow[pause_fr], &grant_info);
       if (lookup_err == 0) {
         check_bpf_error(grant_info, "try_activate_one");
         if (grant_info.ungranted_bytes <= epoch_bytes) {
           // This is the flow's last grant in the burst, so pregrant it
           actually_pregrant = true;
-          RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (<= epoch_bytes=%d), "
-                    "will pregrant\n",
-                    pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+          RM_PRINTF(
+              "INFO: Flow FD=%d has %d ungranted bytes (<= epoch_bytes=%d), "
+              "will pregrant\n",
+              pause_fr, grant_info.ungranted_bytes, epoch_bytes);
         } else {
-          RM_PRINTF("INFO: Flow FD=%d has %d ungranted bytes (> epoch_bytes=%d), "
-                    "skipping pregrant\n",
-                    pause_fr, grant_info.ungranted_bytes, epoch_bytes);
+          RM_PRINTF(
+              "INFO: Flow FD=%d has %d ungranted bytes (> epoch_bytes=%d), "
+              "skipping pregrant\n",
+              pause_fr, grant_info.ungranted_bytes, epoch_bytes);
         }
       } else {
         RM_PRINTF("INFO: Flow FD=%d lookup failed, skipping pregrant\n",
@@ -480,7 +486,8 @@ void timer_callback(const boost::system::error_code &error) {
   // Current kernel time (since boot).
   struct timespec ts {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  int64_t const ktime_now_ns = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+  int64_t const ktime_now_ns =
+      static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
   // For measuring idle time.
   int64_t last_data_time_ns = 0;
   int64_t idle_ns = 0;
@@ -913,9 +920,10 @@ bool setup() {
   const char *noop_env = std::getenv("RM_NOOP_MODE");
   if (noop_env != nullptr && std::string(noop_env) == "yes") {
     noop_mode = true;
-    RM_PRINTF("WARNING: Running in no-op mode. All functions will delegate to kernel implementations\n");
-    // In no-op mode we still do all other setup, but later we do not perform any
-    // ratemon operations.
+    RM_PRINTF("WARNING: Running in no-op mode. All functions will delegate to "
+              "kernel implementations\n");
+    // In no-op mode we still do all other setup, but later we do not perform
+    // any ratemon operations.
   }
 
   // Parameter setup.
@@ -942,7 +950,8 @@ bool setup() {
   RM_PRINTF("INFO: new_burst_mode=%s\n", new_burst_mode.c_str());
   if (new_burst_mode != "normal" && new_burst_mode != "port" &&
       new_burst_mode != "single") {
-    RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal', 'port', or 'single'\n",
+    RM_PRINTF("ERROR: Invalid new_burst_mode=%s, must be 'normal', 'port', or "
+              "'single'\n",
               new_burst_mode.c_str());
     return false;
   }
@@ -951,11 +960,14 @@ bool setup() {
   if (!read_env_string(RM_SINGLE_REQUEST_POLICY_KEY, single_request_policy)) {
     // Default to "normal" if not specified
     single_request_policy = "normal";
-    RM_PRINTF("INFO: RM_SINGLE_REQUEST_POLICY not set, defaulting to 'normal'\n");
+    RM_PRINTF(
+        "INFO: RM_SINGLE_REQUEST_POLICY not set, defaulting to 'normal'\n");
   }
   RM_PRINTF("INFO: single_request_policy=%s\n", single_request_policy.c_str());
-  if (single_request_policy != "normal" && single_request_policy != "pregrant") {
-    RM_PRINTF("ERROR: Invalid single_request_policy=%s, must be 'normal' or 'pregrant'\n",
+  if (single_request_policy != "normal" &&
+      single_request_policy != "pregrant") {
+    RM_PRINTF("ERROR: Invalid single_request_policy=%s, must be 'normal' or "
+              "'pregrant'\n",
               single_request_policy.c_str());
     return false;
   }
@@ -1324,7 +1336,8 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
   // BPF map operations don't need our lock.
   if (scheduling_mode == "byte") {
     if (len != 3 * sizeof(int)) {
-      RM_PRINTF("FATAL ERROR: FD=%d burst request size is %zu bytes, expected %zu bytes (3 ints)\n",
+      RM_PRINTF("FATAL ERROR: FD=%d burst request size is %zu bytes, expected "
+                "%zu bytes (3 ints)\n",
                 sockfd, len, 3 * sizeof(int));
       std::exit(1);
     }
@@ -1334,7 +1347,8 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
     int const burst_number = buf_int[0];
     int const bytes = buf_int[1];
-    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd, burst_number, bytes);
+    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd,
+              burst_number, bytes);
 
     struct rm_flow flow;
     {
@@ -1361,6 +1375,7 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
       grant_info.grant_done = true;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
       grant_info.bpf_experienced_error = false;
+      grant_info.pregranted_bytes = 0;
     } else {
       check_bpf_error(grant_info, "register_fd_for_monitoring_single_burst");
     }
@@ -1384,13 +1399,13 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
   return true;
 }
 
-// Handle send in single mode - one send() per host represents all flows from that host.
-// This mode is for IBG's single_request feature where the receiver sends one burst
-// request to each sender host, and that single send() should update state for all
-// flows from that host.
-// Two policies:
+// Handle send in single mode - one send() per host represents all flows from
+// that host. This mode is for IBG's single_request feature where the receiver
+// sends one burst request to each sender host, and that single send() should
+// update state for all flows from that host. Two policies:
 // - "normal": Perform scheduling on every send() call
-// - "pregrant": Perform scheduling only on first burst; subsequent bursts use pregrants
+// - "pregrant": Perform scheduling only on first burst; subsequent bursts use
+// pregrants
 static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   struct rm_flow flow {};
   if (!get_flow(sockfd, &flow)) {
@@ -1404,7 +1419,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // Parse burst_number and bytes from the burst request message
   // Format is: [burst_number, bytes, wait_us, padding]
   if (len != 4 * sizeof(int)) {
-    RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, expected %zu bytes (4 ints)\n",
+    RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, "
+              "expected %zu bytes (4 ints)\n",
               sockfd, len, 4 * sizeof(int));
     std::exit(1);
   }
@@ -1416,9 +1432,10 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   bytes = buf_int[1];
 
   RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
-            "received_burst_number=%d, bytes=%d, current_burst_number=%d, policy=%s\n",
-            sockfd, ipv4_to_string(remote_addr).c_str(),
-            burst_number, bytes, current_burst_number, single_request_policy.c_str());
+            "received_burst_number=%d, bytes=%d, current_burst_number=%d, "
+            "policy=%s\n",
+            sockfd, ipv4_to_string(remote_addr).c_str(), burst_number, bytes,
+            current_burst_number, single_request_policy.c_str());
 
   // Acquire lock to access fd_to_flow and global state
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
@@ -1427,8 +1444,9 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // This ensures should_schedule is calculated based on the current burst
   if (burst_number >= 0 && burst_number > current_burst_number) {
     // New burst detected
-    RM_PRINTF("INFO: Starting burst %d (was %d), reset burst_flows_remaining=%zu\n",
-              burst_number, current_burst_number, fd_to_flow.size());
+    RM_PRINTF(
+        "INFO: Starting burst %d (was %d), reset burst_flows_remaining=%zu\n",
+        burst_number, current_burst_number, fd_to_flow.size());
     current_burst_number = burst_number;
     pregrant_done = false;
     burst_flows_remaining = fd_to_flow.size();
@@ -1454,8 +1472,9 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   } else if (single_request_policy == "pregrant") {
     // Pregrant policy: only schedule on first burst (burst_number 0)
     should_schedule = (current_burst_number == 0);
-    RM_PRINTF("INFO: Pregrant policy - current_burst_number=%d, should_schedule=%d\n",
-              current_burst_number, should_schedule);
+    RM_PRINTF(
+        "INFO: Pregrant policy - current_burst_number=%d, should_schedule=%d\n",
+        current_burst_number, should_schedule);
   }
 
   // Find all flows from the same remote host and update their state
@@ -1484,7 +1503,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow_iter, &grant_info);
       if (err != 0) {
         RM_PRINTF("WARNING: Could not find grant info for flow FD=%d, "
-                  "creating new entry\n", fd);
+                  "creating new entry\n",
+                  fd);
         grant_info = {};
         grant_info.override_rwnd_bytes = 0xFFFFFFFF;
         grant_info.new_grant_bytes = 0;
@@ -1493,16 +1513,19 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         grant_info.grant_done = true;
         grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
         grant_info.bpf_experienced_error = false;
+        grant_info.pregranted_bytes = 0;
       } else {
         check_bpf_error(grant_info, "handle_send_single_mode");
       }
 
       // Add the burst size to ungranted bytes
       grant_info.ungranted_bytes += bytes;
-      err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info, BPF_ANY);
+      err = bpf_map_update_elem(flow_to_rwnd_fd, &flow_iter, &grant_info,
+                                BPF_ANY);
       if (err != 0) {
         RM_PRINTF("ERROR: Could not update grant info for flow FD=%d, "
-                  "err=%d (%s)\n", fd, err, strerror(-err));
+                  "err=%d (%s)\n",
+                  fd, err, strerror(-err));
         // Continue with other flows
       }
 
@@ -1512,26 +1535,33 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       // Perform scheduling if policy allows (requires lock held)
       if (should_schedule) {
         // Call schedule_on_new_request for this flow
-        // This will activate the flow if there's capacity, otherwise leave it paused
+        // This will activate the flow if there's capacity, otherwise leave it
+        // paused
         if (!schedule_on_new_request(fd)) {
-          RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n", fd);
+          RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n",
+                    fd);
           // Continue with other flows
         }
 
-        // Trigger an ACK for flows that are activated, except for the calling flow
-        // (sockfd) which will carry the grant in the burst request itself.
+        // Trigger an ACK for flows that are activated, except for the calling
+        // flow (sockfd) which will carry the grant in the burst request itself.
         if (fd != sockfd) {
-          // NOTE: These ACKs will probably go out slowly due to performance issues with
-          // sending packets on many flows, so the first burst will have bad performance.
-          // This is okay. We care about steady state (later bursts).
+          // NOTE: These ACKs will probably go out slowly due to performance
+          // issues with sending packets on many flows, so the first burst will
+          // have bad performance. This is okay. We care about steady state
+          // (later bursts).
           trigger_ack(fd);
         } else {
-          RM_PRINTF("INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
-                    "(grant will be in burst request)\n", fd);
+          RM_PRINTF(
+              "INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
+              "(grant will be in burst request)\n",
+              fd);
         }
       } else {
-        RM_PRINTF("INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
-                  "(will use pregrant from previous burst)\n", fd);
+        RM_PRINTF(
+            "INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
+            "(will use pregrant from previous burst)\n",
+            fd);
       }
     }
   }
@@ -1540,7 +1570,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
             flows_updated, ipv4_to_string(remote_addr).c_str());
 
   if (flows_updated == 0) {
-    RM_PRINTF("WARNING: Single mode - no flows found for host %s (only found FD=%d)\n",
+    RM_PRINTF("WARNING: Single mode - no flows found for host %s (only found "
+              "FD=%d)\n",
               ipv4_to_string(remote_addr).c_str(), sockfd);
   }
 
@@ -1549,7 +1580,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
 
 // Handle send in port mode - makes decisions based on port numbers.
 // Provides initial "flash" grants, then queue-based scheduling takes over.
-// Uses shared lock for reading flow info, then unique lock for queue manipulation.
+// Uses shared lock for reading flow info, then unique lock for queue
+// manipulation.
 static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   // First, extract needed information with a shared lock
   uint16_t remote_port;
@@ -1583,7 +1615,8 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
     // Parse burst request to get number of bytes in the burst
     // Format is: [burst_number, bytes, wait_us, padding]
     if (len != 4 * sizeof(int)) {
-      RM_PRINTF("FATAL ERROR: FD=%d port mode burst request size is %zu bytes, expected %zu bytes (4 ints)\n",
+      RM_PRINTF("FATAL ERROR: FD=%d port mode burst request size is %zu bytes, "
+                "expected %zu bytes (4 ints)\n",
                 sockfd, len, 4 * sizeof(int));
       std::exit(1);
     }
@@ -1593,7 +1626,8 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
     // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
     int const burst_number = buf_int[0];
     int const bytes = buf_int[1];
-    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd, burst_number, bytes);
+    RM_PRINTF("INFO: FD=%d burst_number=%d has %d bytes pending\n", sockfd,
+              burst_number, bytes);
 
     struct rm_grant_info grant_info {};
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
@@ -1609,6 +1643,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
       grant_info.grant_done = true;
       grant_info.grant_end_buffer_bytes = grant_end_buffer_bytes;
       grant_info.bpf_experienced_error = false;
+      grant_info.pregranted_bytes = 0;
     } else {
       check_bpf_error(grant_info, "handle_send_port_mode_ungranted");
     }
@@ -1624,14 +1659,15 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
 
   // Port mode: make scheduling decision based on remote port number.
   // This provides the initial "flash" grant. After this grant completes,
-  // handle_grant_done will transition the flow to normal queue-based scheduling.
-  // NOTE: We do NOT touch queue data structures here. The queues will show all
-  // flows as paused during flash grants, which is fine - normal scheduling takes
-  // over when flash grants complete.
+  // handle_grant_done will transition the flow to normal queue-based
+  // scheduling. NOTE: We do NOT touch queue data structures here. The queues
+  // will show all flows as paused during flash grants, which is fine - normal
+  // scheduling takes over when flash grants complete.
   uint16_t const port_range_end = monitor_port_start + max_active_flows;
 
   if (remote_port >= monitor_port_start && remote_port < port_range_end) {
-    // This flow gets a flash grant - set grant in BPF maps only, don't touch queues
+    // This flow gets a flash grant - set grant in BPF maps only, don't touch
+    // queues
     RM_PRINTF("INFO: Port mode - giving flash grant to flow FD=%d with "
               "remote_port=%u (in range [%u, %u))\n",
               sockfd, remote_port, monitor_port_start, port_range_end);
@@ -1641,14 +1677,16 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
       struct rm_grant_info grant_info {};
       err = bpf_map_lookup_elem(flow_to_rwnd_fd, &flow, &grant_info);
       if (err != 0) {
-        RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n", sockfd);
+        RM_PRINTF("ERROR: Could not find existing grant for flow FD=%d\n",
+                  sockfd);
         return false;
       }
       check_bpf_error(grant_info, "handle_send_port_mode");
       if (grant_info.ungranted_bytes <= 0) {
-        RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
-                  "bytes\n",
-                  sockfd);
+        RM_PRINTF(
+            "INFO: Cannot activate flow FD=%d because it has no ungranted "
+            "bytes\n",
+            sockfd);
         return true;
       }
       grant_info.override_rwnd_bytes = 0xFFFFFFFF;

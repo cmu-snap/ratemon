@@ -15,6 +15,7 @@ lint:
     - ruff
     - hadolint
   enabled:
+    - clang-format@16.0.3
     - taplo@0.10.0
     - actionlint@1.7.10
     - bandit@1.9.3

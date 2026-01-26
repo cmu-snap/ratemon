@@ -60,7 +60,8 @@ void BPF_PROG(bpf_cubic_state, struct sock *sk, uint8_t new_state) {
 // SEC("struct_ops/bpf_cubic_custom_cong_control")
 // // trunk-ignore(clang-tidy/misc-unused-parameters)
 // // trunk-ignore(clang-tidy/performance-no-int-to-ptr)
-// void BPF_PROG(bpf_cubic_custom_cong_control, struct sock *sk, const struct rate_sample *rs) {
+// void BPF_PROG(bpf_cubic_custom_cong_control, struct sock *sk, const struct
+// rate_sample *rs) {
 //   // Force an ACK by always marking that an ACK is pending.
 //   ((struct inet_connection_sock *)sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 //   RM_PRINTK("INFO: 'bpf_cubic_custom_cong_control' requested an ACK");
