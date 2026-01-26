@@ -43,10 +43,6 @@ inline void handle_extra_grant(struct rm_flow *flow,
   }
   RM_PRINTK("INFO: 'handle_extra_grant' flow %u<->%u granted an extra %u bytes",
             flow->local_port, flow->remote_port, extra_grant);
-  // This may go negative (if the extra grant is more than the remaining
-  // data). If it does, then this grant will actually pregrant for the
-  // sender's next data, which we cannot escape.
-  grant_info->ungranted_bytes -= (int)extra_grant;
   // ALWAYS update rwnd_end_seq when granting so that we NEVER retract a
   // grant.
   grant_info->rwnd_end_seq += extra_grant;
@@ -57,6 +53,11 @@ inline void handle_extra_grant(struct rm_flow *flow,
   grant_info->grant_end_seq +=
       min((int)extra_grant, max(grant_info->ungranted_bytes, 0));
   *rwnd += extra_grant;
+  // TODO: Do this after updating grant_end_seq since that formula needs the old
+  // value of ungranted_bytes. This may go negative (if the extra grant is more
+  // than the remaining data). If it does, then this grant will actually
+  // pregrant for the sender's next data, which we cannot escape.
+  grant_info->ungranted_bytes -= (int)extra_grant;
 }
 
 // Perform RWND tuning at TC egress. If a flow has an entry in flow_to_rwnd,
