@@ -322,6 +322,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                     flow.local_port, flow.remote_port,
                     grant_info->pregranted_bytes, grant_info->grant_end_seq);
           grant_info->pregranted_bytes = 0;
+          grant_info->grant_done = false;
         }
       }
     }
