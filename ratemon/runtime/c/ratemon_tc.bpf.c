@@ -283,19 +283,17 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     uint32_t actual_grant_end_seq =
         grant_info->grant_end_seq -
         (uint32_t)grant_info->grant_end_buffer_bytes;
-
     bool grant_done = (ack_seq == actual_grant_end_seq ||
                        after(ack_seq, actual_grant_end_seq));
-    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant_done_check:\n"
-              "\tack_seq=%u\n"
-              "\tactual_end=%u\n"
-              "\tend-ack=%d\n"
-              "\tgrant_done=%u\n"
-              "\talready_done=%u\n",
-              flow.local_port, flow.remote_port, ack_seq, actual_grant_end_seq,
-              (int)actual_grant_end_seq - (int)ack_seq, grant_done,
-              grant_info->grant_done);
-
+    // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u grant done check:\n"
+    //           "\tack_seq=%u\n"
+    //           "\tactual_end=%u\n"
+    //           "\tend-ack=%d\n"
+    //           "\tgrant_done=%u\n"
+    //           "\talready_done=%u\n",
+    //           flow.local_port, flow.remote_port, ack_seq,
+    //           actual_grant_end_seq, (int)actual_grant_end_seq - (int)ack_seq,
+    //           grant_done, grant_info->grant_done);
     if (grant_done) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
