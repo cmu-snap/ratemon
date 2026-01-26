@@ -143,12 +143,13 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
             "\trwnd_end_seq: %u,\n"
             "\tgrant_end_seq: %u,\n"
             "\tgrant_done: %u,\n"
-            "\tgrant_end_buffer_bytes: %d",
+            "\tgrant_end_buffer_bytes: %d\n"
+            "\ttotal_grant: %d",
             flow.local_port, flow.remote_port, ack_seq,
             grant_info->ungranted_bytes, grant_info->override_rwnd_bytes,
             grant_info->new_grant_bytes, grant_info->rwnd_end_seq,
             grant_info->grant_end_seq, grant_info->grant_done,
-            grant_info->grant_end_buffer_bytes);
+            grant_info->grant_end_buffer_bytes, grant_info->total_grant);
 
   uint32_t rwnd = 0;
   if (grant_info->override_rwnd_bytes == 0xFFFFFFFF) {
@@ -177,6 +178,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       int normal_grant = min(total_grant, max(grant_info->ungranted_bytes, 0));
       if (normal_grant > 0) {
         grant_info->ungranted_bytes -= normal_grant;
+        grant_info->total_grant += normal_grant;
         grant_info->rwnd_end_seq += normal_grant;
         // TODO: Maybe: grant_info->grant_end_seq = ack_seq + normal_grant
         // grant_info->grant_end_seq += normal_grant;
@@ -198,6 +200,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         if (pregrant_portion > 0) {
           // ungranted_bytes goes negative - this is intentional for pregrants
           grant_info->ungranted_bytes -= pregrant_portion;
+          grant_info->total_grant += pregrant_portion;
           grant_info->rwnd_end_seq += pregrant_portion;
           grant_info->pregranted_bytes += pregrant_portion;
           // Do NOT update grant_end_seq - we don't expect sender to reach this.
@@ -313,6 +316,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         }
         if (grant_info->pregranted_bytes > 0) {
           grant_info->grant_end_seq += grant_info->pregranted_bytes;
+          // grant_info->grant_end_seq = grant_info->rwnd_end_seq;
           RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u adjusting "
                     "grant_end_seq with +%u to %u due to earlier pregrant",
                     flow.local_port, flow.remote_port,

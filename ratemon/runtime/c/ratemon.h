@@ -122,6 +122,8 @@ struct rm_grant_info {
   // Tracks bytes that were applied as a pregrant and should later be added to
   // grant_end_seq.
   int pregranted_bytes;
+  // Sum of all grants ever given to this flow (for debugging).
+  int total_grant;
 };
 
 #endif /* __RATEMON_H */
