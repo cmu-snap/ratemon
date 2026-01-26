@@ -129,22 +129,43 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
   }
 
   uint32_t ack_seq = bpf_ntohl(tcp->ack_seq);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
-            flow.local_port, flow.remote_port, ack_seq);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
-            flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
+  RM_PRINTK(
+    "INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+    "ack_seq: %u, "
+    "ungranted_bytes: %d, "
+    "override_rwnd_bytes: %u, "
+    "new_grant_bytes: %d, "
+    "rwnd_end_seq: %u, "
+    "grant_end_seq: %u",
+    "grant_done: %u, "
+    "grant_end_buffer_bytes: %d",
+    flow.local_port,
+    flow.remote_port,
+    ack_seq,
+    grant_info->ungranted_bytes,
+    grant_info->override_rwnd_bytes,
+    grant_info->new_grant_bytes,
+    grant_info->rwnd_end_seq,
+    grant_info->grant_end_seq,
+    grant_info->grant_done,
+    grant_info->grant_end_buffer_bytes
+  );
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ack_seq: %u",
+  //           flow.local_port, flow.remote_port, ack_seq);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: ungranted_bytes: %d",
+  //           flow.local_port, flow.remote_port, grant_info->ungranted_bytes);
   // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
   //           "grant_info->override_rwnd_bytes: %u",
   //           flow.local_port, flow.remote_port, grant_info->override_rwnd_bytes);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->new_grant_bytes: %d",
-            flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->rwnd_end_seq: %u",
-            flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
-  RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
-            "grant_info->grant_end_seq: %u",
-            flow.local_port, flow.remote_port, grant_info->grant_end_seq);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->new_grant_bytes: %d",
+  //           flow.local_port, flow.remote_port, grant_info->new_grant_bytes);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->rwnd_end_seq: %u",
+  //           flow.local_port, flow.remote_port, grant_info->rwnd_end_seq);
+  // RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u: "
+  //           "grant_info->grant_end_seq: %u",
+  //           flow.local_port, flow.remote_port, grant_info->grant_end_seq);
   // RM_PRINTK(
   //     "INFO: 'do_rwnd_at_egress' flow %u<->%u: grant_info->grant_done: %u",
   //     flow.local_port, flow.remote_port, grant_info->grant_done);
