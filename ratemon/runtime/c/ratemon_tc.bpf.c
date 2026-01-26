@@ -316,7 +316,7 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         }
         if (grant_info->pregranted_bytes > 0) {
           grant_info->grant_end_seq += grant_info->pregranted_bytes;
-          // grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+          // TODO: grant_info->grant_end_seq = grant_info->rwnd_end_seq;
           RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u adjusting "
                     "grant_end_seq with +%u to %u due to earlier pregrant",
                     flow.local_port, flow.remote_port,
