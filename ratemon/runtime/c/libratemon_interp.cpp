@@ -407,7 +407,7 @@ int try_pause_one_activate_one(int fd, bool with_pregrant = false) {
   // Find the flow in active_fds_queue and remove it
   if (try_find_and_pause(fd) == 0) {
     RM_PRINTF("ERROR: Could not find and/or pause flow FD=%d\n", fd);
-    return 0;
+    // TODO: return 0;
   }
   // Then find one flow in paused_fds_queue to restart.
   int const num_activated = try_activate_one(with_pregrant);
