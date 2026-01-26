@@ -178,8 +178,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         grant_info->ungranted_bytes -= normal_grant;
         grant_info->rwnd_end_seq += normal_grant;
         // TODO: Maybe: grant_info->grant_end_seq = ack_seq + normal_grant
-        // grant_info->grant_end_seq += normal_grant;
-        grant_info->grant_end_seq = ack_seq + normal_grant;
+        grant_info->grant_end_seq += normal_grant;
+        // grant_info->grant_end_seq = ack_seq + normal_grant;
         RM_PRINTK(
             "INFO: 'do_rwnd_at_egress' flow %u<->%u received normal grant "
             "of %d bytes (ungranted now %d)",
