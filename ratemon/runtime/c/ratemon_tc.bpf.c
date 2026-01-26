@@ -234,8 +234,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
               "\thas_pending_data=%u\n"
               "\tshould_check_extra_grant=%u\n",
               flow.local_port, flow.remote_port, is_pregrant,
-              grant_info->ungranted_bytes, rwnd, ack_seq, grant_end_seq,
-              has_pending_data, should_check_extra_grant);
+              grant_info->ungranted_bytes, rwnd, ack_seq,
+              grant_info->grant_end_seq, has_pending_data,
+              should_check_extra_grant);
     if (should_check_extra_grant) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
