@@ -223,8 +223,18 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // we don't need to add even more extra grant on top. Also skip if there's
     // no pending data (ack_seq has caught up to grant_end_seq).
     bool has_pending_data = before(ack_seq, grant_info->grant_end_seq);
-    if (!is_pregrant && grant_info->ungranted_bytes <= 0 && rwnd > 0 &&
-        has_pending_data) {
+    bool should_check_extra_grant =
+        (grant_info->ungranted_bytes <= 0) && !is_pregrant && has_pending_data;
+    RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u extra grant check:\n"
+              "\tis_pregrant=%u\n"
+              "\tungranted_bytes=%d\n"
+              "\trwnd=%u\n"
+              "\thas_pending_data=%u\n"
+              "\tshould_check_extra_grant=%u\n",
+              flow.local_port, flow.remote_port, is_pregrant,
+              grant_info->ungranted_bytes, rwnd, has_pending_data,
+              should_check_extra_grant);
+    if (should_check_extra_grant) {
       // If we are supposed to send a nonzero grant, then we should not grant
       // less than one segment (1448B) because otherwise the sender will stall
       // for 200ms. If we are about to do that then grant a little bit extra.
