@@ -36,10 +36,10 @@ enum { TC_ACT_OK = 0 };
 inline void handle_extra_grant(struct rm_flow *flow,
                                struct rm_grant_info *grant_info,
                                uint32_t extra_grant, uint32_t *rwnd) {
-  RM_PRINTK(
-      "INFO: 'do_rwnd_at_egress' flow %u<->%u granted an extra %u bytes on top "
-      "of desired grant of %u bytes",
-      flow->local_port, flow->remote_port, extra_grant, *rwnd);
+  uint32_t rwnd_ = *rwnd;
+  RM_PRINTK("INFO: 'handle_extra_grant' flow %u<->%u granted an extra %u bytes "
+            "on top of desired grant of %u bytes",
+            flow->local_port, flow->remote_port, extra_grant, rwnd_);
   // This may go negative (if the extra grant is more than the remaining
   // data). If it does, then this grant will actually pregrant for the
   // sender's next data, which we cannot escape.
