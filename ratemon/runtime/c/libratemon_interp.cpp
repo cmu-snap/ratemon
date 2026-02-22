@@ -551,25 +551,38 @@ void timer_callback(const boost::system::error_code &error) {
         RM_PRINTF("INFO: FD=%d idle has been idle for %lu ns. timeout is %lu "
                   "ns\n",
                   active_fr.first, idle_ns, idle_timeout_ns);
-        // If the flow has been idle for longer than the idle timeout, then
-        // pause it. We pause the flow *before* activating a replacement
-        // flow because it is by definition not sending data, so we do not
-        // risk causing a drop in utilization by pausing it immediately.
+        // If the flow has been idle for longer than the idle timeout,
+        // handle it based on the scheduling policy.
         if (idle_ns >= idle_timeout_ns) {
-          RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n",
-                    active_fr.first);
-          // Remove the flow from flow_to_keepalive, signalling that it no
-          // longer has pending demand.
-          int const err = bpf_map_delete_elem(flow_to_keepalive_fd,
-                                              &fd_to_flow[active_fr.first]);
-          if (err != 0) {
-            RM_PRINTF("ERROR: Could not delete flow FD=%d from keepalive map, "
-                      "err=%d (%s)\n",
-                      active_fr.first, err, strerror(-err));
+          if (single_request_policy == "pregrant") {
+            // In pregrant mode, an idle active flow experienced a tail loss and
+            // is waiting for the retransmission timeout to fire. Give it more
+            // grant so it can send more packets and get a triple duk-ACK.
+            RM_PRINTF("INFO: FD=%d idle timeout in pregrant mode, giving "
+                      "extra grant instead of pausing\n",
+                      active_fr.first);
+            activate_flow(active_fr.first, true, false);
+            // Keep the flow in the active queue (do not pause it).
+          } else {
+            // Default behavior: pause the idle flow. We pause the flow
+            // *before* activating a replacement flow because it is by
+            // definition not sending data, so we do not risk causing a
+            // drop in utilization by pausing it immediately.
+            RM_PRINTF("INFO: Pausing FD=%d due to idle timeout\n",
+                      active_fr.first);
+            // Remove the flow from flow_to_keepalive, signalling that it
+            // no longer has pending demand.
+            int const err = bpf_map_delete_elem(flow_to_keepalive_fd,
+                                                &fd_to_flow[active_fr.first]);
+            if (err != 0) {
+              RM_PRINTF("ERROR: Could not delete flow FD=%d from keepalive "
+                        "map, err=%d (%s)\n",
+                        active_fr.first, err, strerror(-err));
+            }
+            paused_fds_queue.enqueue(active_fr.first);
+            pause_flow(active_fr.first);
+            continue;
           }
-          paused_fds_queue.enqueue(active_fr.first);
-          pause_flow(active_fr.first);
-          continue;
         }
       }
     }
