@@ -1229,6 +1229,10 @@ void register_fd_for_monitoring(int fd) {
   flow_to_fd[key] = fd;
   // Change the CCA to BPF_CUBIC.
   if (!set_cca(fd, RM_BPF_CUBIC)) {
+    RM_PRINTF("ERROR: Failed to set CCA for FD=%d, removing from tracking\n",
+              fd);
+    fd_to_flow.erase(fd);
+    flow_to_fd.erase(key);
     return;
   }
 
@@ -1792,6 +1796,14 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
   }
 
   register_fd_for_monitoring(fd);
+  {
+    std::shared_lock<std::shared_mutex> lock(lock_scheduler);
+    if (fd_to_flow.find(fd) == fd_to_flow.end()) {
+      RM_PRINTF("WARNING: 'accept' FD=%d was NOT registered for monitoring "
+                "(registration failed)\n",
+                fd);
+    }
+  }
   RM_PRINTF("INFO: Successful 'accept' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
@@ -1830,6 +1842,14 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   }
 
   register_fd_for_monitoring(fd);
+  {
+    std::shared_lock<std::shared_mutex> lock(lock_scheduler);
+    if (fd_to_flow.find(fd) == fd_to_flow.end()) {
+      RM_PRINTF("WARNING: 'connect' FD=%d was NOT registered for monitoring "
+                "(registration failed)\n",
+                fd);
+    }
+  }
   RM_PRINTF("INFO: Successful 'connect' for FD=%d, got FD=%d\n", sockfd, fd);
   return fd;
 }
@@ -1949,8 +1969,30 @@ int close(int sockfd) {
       return ret;
     }
 
-    // The flow will be removed from the active_fds_queue and paused_fds_queue
-    // when the scheduler thread wakes up and processes the next event.
+    // Remove the flow from the active_fds_queue if it was active, and try to
+    // activate a replacement flow so that scheduling does not stall.
+    bool was_active = false;
+    int queue_size = static_cast<int>(active_fds_queue.size());
+    for (int i = 0; i < queue_size; ++i) {
+      auto front = active_fds_queue.front();
+      active_fds_queue.pop();
+      if (front.first == sockfd) {
+        was_active = true;
+        RM_PRINTF("INFO: Removed closed FD=%d from active_fds_queue\n", sockfd);
+        // Don't push it back.
+      } else {
+        active_fds_queue.push(front);
+      }
+    }
+    // Also remove from paused queue if present.
+    paused_fds_queue.find_and_delete(sockfd);
+
+    if (was_active && !paused_fds_queue.empty()) {
+      // Try to activate a replacement flow so we don't waste a slot.
+      int const num_activated = try_activate_one();
+      RM_PRINTF("INFO: Closed active FD=%d, activated %d replacement flow(s)\n",
+                sockfd, num_activated);
+    }
   }
   // Note: If fd_to_flow doesn't contain sockfd at this point, another thread
   // may have removed it between our check and acquiring the lock. This is fine.
