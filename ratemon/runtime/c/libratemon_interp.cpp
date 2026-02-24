@@ -813,19 +813,22 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
         burst_flows_remaining--;
         RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
                   fd->second, burst_flows_remaining);
-
-        // Check if we should pregrant the next activated flow.
-        // Pregrant each of the last max_active_flows in the burst.
-        // When burst_flows_remaining <= max_active_flows, every subsequent
-        // activation gets a pregrant until burst_flows_remaining = 0.
-        if (burst_flows_remaining <= max_active_flows &&
-            burst_flows_remaining > 0) {
-          RM_PRINTF("INFO: Only %d flows remaining (<= max_active_flows=%d), "
-                    "will pregrant next activated flow\n",
-                    burst_flows_remaining, max_active_flows);
-          should_pregrant = true;
-        }
       }
+    }
+
+    // Check if we should pregrant the next activated flow.
+    // Pregrant each of the last max_active_flows in the burst.
+    // When burst_flows_remaining <= max_active_flows, every subsequent
+    // activation gets a pregrant until burst_flows_remaining = 0.
+    // This is checked regardless of whether THIS flow just completed, because
+    // the straggler flows that still have data need pregrants on their last
+    // grant epoch too (not just flows activated to replace completed ones).
+    if (burst_flows_remaining <= max_active_flows &&
+        burst_flows_remaining > 0) {
+      RM_PRINTF("INFO: %d flows remaining (<= max_active_flows=%d), "
+                "will pregrant next activated flow\n",
+                burst_flows_remaining, max_active_flows);
+      should_pregrant = true;
     }
   }
 
