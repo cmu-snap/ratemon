@@ -775,13 +775,15 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
         if (burst_flows_remaining < max_active_flows) {
           // Give pregrant directly to THIS flow. The BPF will extend
           // rwnd_end_seq (opening the RWND for the next burst) but NOT
-          // grant_end_seq (since is_pregrant=true). We deliberately keep
-          // grant_done=true (set by BPF when it fired the done_flows event)
-          // so the existing if(!grant_info->grant_done) check in BPF prevents
-          // re-submission to done_flows for this pregrant.
+          // grant_end_seq (since is_pregrant=true). The BPF's
+          // processed_new_grant guard prevents declaring the grant done on the
+          // same packet that processes the pregrant.
           grant_info.new_grant_bytes = epoch_bytes;
           grant_info.is_pregrant = true;
-          // grant_info.grant_done stays true — do NOT reset it.
+          // Reset grant_done so the BPF can properly track when this pregrant
+          // is consumed. The BPF will not re-submit to done_flows on the same
+          // packet that processes a new grant (processed_new_grant guard).
+          grant_info.grant_done = false;
           err =
               bpf_map_update_elem(flow_to_rwnd_fd, flow, &grant_info, BPF_ANY);
           if (err != 0) {

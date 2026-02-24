@@ -156,6 +156,9 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     // Override is 2^32-1, so use grant info.
 
     bool is_pregrant = false;
+    // Track if we just processed a new grant in this packet, to avoid
+    // simultaneously processing a grant and declaring the grant done.
+    bool processed_new_grant = false;
 
     if (grant_info->grant_end_seq == 0) {
       // This is the first time we've seen this flow.
@@ -172,6 +175,10 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       int total_grant = grant_info->new_grant_bytes;
       grant_info->new_grant_bytes = 0;
       grant_info->is_pregrant = false;
+      // A new grant has been issued, so reset the completion flag and mark
+      // that we should not check for grant completion on this same packet.
+      grant_info->grant_done = false;
+      processed_new_grant = true;
 
       // Step 1: Process the normal grant portion (capped by ungranted_bytes).
       // This updates both rwnd_end_seq and grant_end_seq.
@@ -299,7 +306,11 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
     //           flow.local_port, flow.remote_port, ack_seq,
     //           actual_grant_end_seq, (int)actual_grant_end_seq - (int)ack_seq,
     //           grant_done, grant_info->grant_done);
-    if (grant_done) {
+    // Only check for grant completion if we did NOT just process a new grant
+    // on this same packet. Processing a grant and declaring it done in the
+    // same operation would cause incorrect behavior (e.g., the old
+    // grant_end_seq may be stale and would trigger a spurious done event).
+    if (grant_done && !processed_new_grant) {
       // Check grant_done so that we only submit this flow to done_flows once.
       if (!grant_info->grant_done) {
         grant_info->grant_done = true;
