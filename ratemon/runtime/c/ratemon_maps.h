@@ -56,12 +56,12 @@ struct {
 // A ringbuffer of struct rm_flow that have finished their grant and are now
 // paused. max_entries is the total ringbuf size in bytes and must be both a
 // multiple of the page size (4096) and a power of two. A single struct rm_flow
-// is 12 bytes. The max number of entries this ringbuf will need to hold is set
-// by the RM_MAX_ACTIVE_FLOWS environment variable and will typically be ~20.
-// So 4096 bytes is plenty.
+// is 12 bytes + ~16 bytes BPF header = ~28 bytes per entry. With thousands of
+// flows, many grant-done events can fire in rapid succession, so we size this
+// generously (256KB = 262144 bytes, ~9000 entries).
 struct {
   __uint(type, BPF_MAP_TYPE_RINGBUF);
-  __uint(max_entries, 4096 /* bytes, one page */);
+  __uint(max_entries, 262144 /* bytes, 256KB */);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } done_flows SEC(".maps");
 

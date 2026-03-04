@@ -319,7 +319,8 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
         RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u exhausted its "
                   "grant, adding to done_flows",
                   flow.local_port, flow.remote_port);
-        if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow), 0)) {
+        if (bpf_ringbuf_output(&done_flows, &flow, sizeof(flow),
+                               BPF_RB_FORCE_WAKEUP)) {
           RM_PRINTK("ERROR: 'do_rwnd_at_egress' error adding flow %u<->%u to "
                     "done_flows",
                     flow.local_port, flow.remote_port);
