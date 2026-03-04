@@ -840,7 +840,7 @@ void ringbuf_poll_func() {
 // Catch SIGINT and trigger the scheduler thread and timer to end.
 void sigint_handler(int signum) {
   switch (signum) {
-  case SIGINT:
+  case SIGINT: {
     RM_PRINTF("INFO: Caught SIGINT\n");
     run = false;
     // Join the ringbuf poll thread FIRST, before the scheduler thread.
@@ -873,6 +873,7 @@ void sigint_handler(int signum) {
     RM_PRINTF("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, nullptr);
     break;
+  }
   default:
     RM_PRINTF("ERROR: Caught signal %d\n", signum);
     break;
