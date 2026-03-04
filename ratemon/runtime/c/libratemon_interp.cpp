@@ -708,18 +708,19 @@ void thread_func() {
   }
   RM_PRINTF("INFO: Scheduler thread ended\n");
 
-  // Need to manually free the ring buffer. Set the pointer to nullptr first
-  // so the ringbuf poll thread (which may still be running) sees it and stops.
-  if (done_flows_rb.load() != nullptr) {
-    struct ring_buffer *rb = done_flows_rb.load();
-    done_flows_rb.store(nullptr, std::memory_order_release);
-    ring_buffer__free(rb);
-  }
-
   if (run) {
-    RM_PRINTF("ERROR: Scheduled thread ended before program was signalled to "
+    RM_PRINTF("ERROR: Scheduler thread ended before program was signalled to "
               "stop\n");
   }
+
+  // Signal the ringbuf poll thread to stop. The poll thread checks `run`
+  // each iteration and will exit. Do NOT free or null out done_flows_rb
+  // here — the poll thread may still be inside ring_buffer__poll(), and
+  // freeing the ring buffer would NULL out its internal consumer_pos
+  // pointer mid-use, causing a SEGV. ring_buffer__free() is called in
+  // sigint_handler() after the poll thread has been joined.
+  run = false;
+
   RM_PRINTF("INFO: Scheduler thread ended\n");
 }
 
@@ -821,8 +822,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
 void ringbuf_poll_func() {
   RM_PRINTF("INFO: Ringbuf poll thread started\n");
   while (run) {
-    // Re-check done_flows_rb under the knowledge that the scheduler thread
-    // may free it. After freeing, it sets the pointer to nullptr.
+    // Safety check: if done_flows_rb was set to nullptr (shouldn't happen
+    // during normal operation, but guard against it), stop polling.
     struct ring_buffer *rb = done_flows_rb.load(std::memory_order_acquire);
     if (rb == nullptr) {
       break;
@@ -842,9 +843,11 @@ void sigint_handler(int signum) {
   case SIGINT:
     RM_PRINTF("INFO: Caught SIGINT\n");
     run = false;
-    // Join the ringbuf poll thread FIRST, before the scheduler thread, because
-    // the scheduler thread frees done_flows_rb on exit. The poll thread checks
-    // done_flows_rb and will exit once run==false.
+    // Join the ringbuf poll thread FIRST, before the scheduler thread.
+    // The scheduler thread does NOT free or null out done_flows_rb — it
+    // only sets run=false to signal the poll thread. We free the ring
+    // buffer here after the poll thread has fully exited, so there is
+    // no race with ring_buffer__poll() internals.
     if (ringbuf_poll_thread &&
         std::this_thread::get_id() == ringbuf_poll_thread->get_id()) {
       RM_PRINTF("WARNING: Caught SIGINT in the ringbuf poll thread. Should "
@@ -853,7 +856,7 @@ void sigint_handler(int signum) {
       ringbuf_poll_thread->join();
       ringbuf_poll_thread.reset();
     }
-    // Now join the scheduler thread (which frees done_flows_rb on exit).
+    // Now join the scheduler thread.
     if (scheduler_thread &&
         std::this_thread::get_id() == scheduler_thread->get_id()) {
       RM_PRINTF("WARNING: Caught SIGINT in the scheduler thread. Should this "
@@ -861,6 +864,11 @@ void sigint_handler(int signum) {
     } else if (scheduler_thread && scheduler_thread->joinable()) {
       scheduler_thread->join();
       scheduler_thread.reset();
+    }
+    // Now that both threads are done, safely free the ring buffer.
+    struct ring_buffer *rb = done_flows_rb.exchange(nullptr);
+    if (rb != nullptr) {
+      ring_buffer__free(rb);
     }
     RM_PRINTF("INFO: Resetting old SIGINT handler\n");
     sigaction(SIGINT, &oldact, nullptr);
