@@ -125,8 +125,8 @@ std::string single_request_policy =
     "normal"; // or "pregrant" (only applies when new_burst_mode="single")
 int epoch_us = 10000;
 int epoch_bytes = 65536;
-int idle_timeout_us = 0;
-int64_t idle_timeout_ns = 0;
+int idle_timeout_us = -1;
+int64_t idle_timeout_ns = -1;
 // Burst tracking for single_request_pregrant policy
 int current_burst_number = 0;
 int burst_flows_remaining = 0;
@@ -482,7 +482,7 @@ void timer_callback(const boost::system::error_code &error) {
     // 1.2) If idle timeout mode is enabled, then check if this flow is
     // past its idle timeout. Skip this check if there are no paused
     // flows (i.e., no flows seeking activation).
-    if (idle_timeout_ns > 0 && !paused_fds_queue.empty()) {
+    if (idle_timeout_ns >= 0 && !paused_fds_queue.empty()) {
       // Look up this flow's last active time.
       if (bpf_map_lookup_elem(flow_to_last_data_time_fd,
                               &fd_to_flow[active_fr.first],
@@ -632,7 +632,7 @@ void timer_callback(const boost::system::error_code &error) {
     auto const next_epoch_us =
         (active_fds_queue.front().second - now).total_microseconds();
     if (scheduling_mode == "byte") {
-      if (idle_timeout_ns == 0U) {
+      if (idle_timeout_ns < 0) {
         // If we are not using idle timeout mode...
         RM_PRINTF("INFO: In byte-based scheduling mode but no idle timeout, "
                   "falling back to slow check mode\n");
@@ -642,7 +642,7 @@ void timer_callback(const boost::system::error_code &error) {
                   "next idle timeout\n");
         when = boost::posix_time::microsec(idle_timeout_us);
       }
-    } else if (idle_timeout_ns == 0U) {
+    } else if (idle_timeout_ns < 0) {
       // If we are not using idle timeout mode...
       RM_PRINTF("INFO: No idle timeout, scheduling timer for next epoch end\n");
       when = boost::posix_time::microsec(next_epoch_us);
@@ -992,7 +992,7 @@ bool setup() {
     return false;
   }
   if (!read_env_int(RM_IDLE_TIMEOUT_US_KEY, &idle_timeout_us,
-                    true /* allow_zero */, false /* allow_neg */)) {
+                    true /* allow_zero */, true /* allow_neg */)) {
     return false;
   }
   idle_timeout_ns = static_cast<int64_t>(idle_timeout_us) * 1000;
