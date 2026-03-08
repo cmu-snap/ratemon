@@ -71,10 +71,9 @@ $(call allow-override,LD,$(CROSS_COMPILE)ld)
 .PHONY: all
 all: $(APPS) $(INTERPS) $(OUTPUT)/ratemon_tc.bpf.o
 
-.PHONY: clean
-clean:
-	$(call msg,CLEAN)
-	rm -rfv $(OUTPUT) $(APPS)
+.PHONY: clean_bpf
+clean_bpf:
+	$(call msg,CLEAN-BPF)
 	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc filter del dev $(RM_IFACE) egress || true
 	sudo tc qdisc del dev $(RM_IFACE) clsact || true
@@ -88,6 +87,11 @@ clean:
 	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_last_data_time_ns
 	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_keepalive
 	sudo rm -fv /sys/fs/bpf/tc/globals/done_flows
+
+.PHONY: clean
+clean: clean_bpf
+	$(call msg,CLEAN)
+	rm -rfv $(OUTPUT) $(APPS)
 
 $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 	$(call msg,MKDIR,$@)
