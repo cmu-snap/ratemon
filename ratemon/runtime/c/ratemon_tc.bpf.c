@@ -180,43 +180,39 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
       grant_info->grant_done = false;
       processed_new_grant = true;
 
-      // Step 1: Process the normal grant portion (capped by ungranted_bytes).
-      // This updates both rwnd_end_seq and grant_end_seq.
-      int normal_grant = min(total_grant, max(grant_info->ungranted_bytes, 0));
-      if (normal_grant > 0) {
-        grant_info->ungranted_bytes -= normal_grant;
-        grant_info->total_grant += normal_grant;
-        grant_info->rwnd_end_seq += normal_grant;
-        // TODO: Maybe: grant_info->grant_end_seq = ack_seq + normal_grant
-        // grant_info->grant_end_seq += normal_grant;
-        // grant_info->grant_end_seq = ack_seq + normal_grant;
-        grant_info->grant_end_seq = grant_info->rwnd_end_seq;
-        RM_PRINTK(
-            "INFO: 'do_rwnd_at_egress' flow %u<->%u received normal grant "
-            "of %d bytes (ungranted now %d)",
-            flow.local_port, flow.remote_port, normal_grant,
-            grant_info->ungranted_bytes);
-      }
-
-      // Step 2: If this is a pregrant, process the pregrant portion.
-      // The pregrant is the remainder after the normal grant.
-      // This only updates rwnd_end_seq, not grant_end_seq, because the
-      // pregrant is for future data that doesn't exist yet.
       if (is_pregrant) {
-        int pregrant_portion = total_grant - normal_grant;
-        if (pregrant_portion > 0) {
-          // ungranted_bytes goes negative - this is intentional for pregrants
-          grant_info->ungranted_bytes -= pregrant_portion;
-          grant_info->total_grant += pregrant_portion;
-          grant_info->rwnd_end_seq += pregrant_portion;
-          grant_info->pregranted_bytes += pregrant_portion;
-          // Do NOT update grant_end_seq - we don't expect sender to reach this.
-          // But we will need to account for this later after the normal grant
-          // is done.
-          RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT "
-                    "of %d bytes (ungranted now %d)",
-                    flow.local_port, flow.remote_port, pregrant_portion,
-                    grant_info->ungranted_bytes);
+        // Standalone pregrant for a future burst. Open the RWND so the
+        // sender can start the next burst immediately, and advance
+        // grant_end_seq so the BPF tracks when the pregranted window
+        // is consumed.
+        grant_info->ungranted_bytes -= total_grant;
+        grant_info->total_grant += total_grant;
+        grant_info->rwnd_end_seq += total_grant;
+        // It is safe to update grant_end_seq without breaking grant end
+        // detection because with the new pregrant logic where a pregrant is
+        // applied after the final grant is done, we actually *do* expect the
+        // sender to reach this and *do not* need any fixes to make sure the
+        // last grant in the burst is recognized as done (because it already
+        // finished).
+        grant_info->grant_end_seq += total_grant;
+        RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u received PREGRANT "
+                  "of %d bytes (ungranted now %d)",
+                  flow.local_port, flow.remote_port, total_grant,
+                  grant_info->ungranted_bytes);
+      } else {
+        // Normal grant: cap by ungranted_bytes so we don't over-grant.
+        int normal_grant =
+            min(total_grant, max(grant_info->ungranted_bytes, 0));
+        if (normal_grant > 0) {
+          grant_info->ungranted_bytes -= normal_grant;
+          grant_info->total_grant += normal_grant;
+          grant_info->rwnd_end_seq += normal_grant;
+          grant_info->grant_end_seq = grant_info->rwnd_end_seq;
+          RM_PRINTK(
+              "INFO: 'do_rwnd_at_egress' flow %u<->%u received normal grant "
+              "of %d bytes (ungranted now %d)",
+              flow.local_port, flow.remote_port, normal_grant,
+              grant_info->ungranted_bytes);
         }
       }
     }
@@ -325,16 +321,6 @@ int do_rwnd_at_egress(struct __sk_buff *skb) {
                     "done_flows",
                     flow.local_port, flow.remote_port);
           return 0;
-        }
-        if (grant_info->pregranted_bytes > 0) {
-          grant_info->grant_end_seq += grant_info->pregranted_bytes;
-          // TODO: grant_info->grant_end_seq = grant_info->rwnd_end_seq;
-          RM_PRINTK("INFO: 'do_rwnd_at_egress' flow %u<->%u adjusting "
-                    "grant_end_seq with +%u to %u due to earlier pregrant",
-                    flow.local_port, flow.remote_port,
-                    grant_info->pregranted_bytes, grant_info->grant_end_seq);
-          grant_info->pregranted_bytes = 0;
-          grant_info->grant_done = false;
         }
       }
     }
