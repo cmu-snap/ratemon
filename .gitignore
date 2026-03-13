@@ -150,3 +150,5 @@ ratemon/runtime/c/experimental/client_server/client
 ratemon/runtime/c/experimental/client_server/server
 
 .DS_Store
+
+.trunk/
