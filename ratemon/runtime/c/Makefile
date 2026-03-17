@@ -116,7 +116,7 @@ $(VMLINUX):	$(BPFTOOL)
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $@
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h ratemon.bpf.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) ratemon_maps.h ratemon.h ratemon.bpf.h ratemon_structops.bpf.h $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
 	$(CLANG) -g -O3 -target bpf -D__TARGET_ARCH_$(ARCH)                \
 		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)                     \
@@ -129,7 +129,7 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
 	$(BPFTOOL) gen skeleton $< > $@
 
 # Build user-space code
-$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %_sockops.skel.h %_structops.skel.h %_kprobe.skel.h
+$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %_main.o: %_sockops.skel.h %_structops_cubic.skel.h %_structops_dctcp.skel.h %_kprobe.skel.h
 
 $(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT)
 	$(call msg,CC,$@)

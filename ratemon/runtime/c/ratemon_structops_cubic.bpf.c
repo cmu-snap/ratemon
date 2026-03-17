@@ -9,6 +9,7 @@
 #include <bpf/bpf_endian.h>
 
 #include "ratemon.bpf.h"
+#include "ratemon_structops.bpf.h"
 // clang-format on
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
@@ -98,28 +99,7 @@ SEC("struct_ops/bpf_cubic_get_info")
 void BPF_PROG(bpf_cubic_get_info, struct sock *sk, uint32_t ext, int *attr,
               // trunk-ignore(clang-tidy/misc-unused-parameters)
               union tcp_cc_info *info) {
-  if (sk == NULL) {
-    RM_PRINTK("ERROR: 'bpf_cubic_get_info' sk=%u", sk);
-    return;
-  }
-  struct tcp_sock *tp = (struct tcp_sock *)sk;
-  if (tp == NULL) {
-    RM_PRINTK("ERROR: 'bpf_cubic_get_info' tp=%u", tp);
-    return;
-  }
-
-  uint16_t skc_num = 0;
-  __be16 skc_dport = 0;
-  BPF_CORE_READ_INTO(&skc_num, sk, __sk_common.skc_num);
-  BPF_CORE_READ_INTO(&skc_dport, sk, __sk_common.skc_dport);
-  RM_PRINTK("INFO: 'bpf_cubic_get_info' sending ACK for flow %u<->%u", skc_num,
-            bpf_ntohs(skc_dport));
-  // 'bpf_tcp_send_ack' only works in struct_ops!
-  uint64_t ret = bpf_tcp_send_ack(tp, tp->rcv_nxt);
-  if (ret != 0) {
-    RM_PRINTK("ERROR: 'bpf_cubic_get_info' failed to send ACK: %u", ret);
-    return;
-  }
+  rm_send_ack(sk, "bpf_cubic_get_info");
 }
 
 SEC(".struct_ops")

@@ -15,14 +15,17 @@
 #include "ratemon.h"
 #include "ratemon_kprobe.skel.h"
 #include "ratemon_sockops.skel.h"
-#include "ratemon_structops.skel.h"
+#include "ratemon_structops_cubic.skel.h"
+#include "ratemon_structops_dctcp.skel.h"
 
 // Signals whether the program should continue running.
 static volatile bool run = true;
 
-struct bpf_link *structops_link;
+struct bpf_link *structops_cubic_link;
+struct bpf_link *structops_dctcp_link;
 struct ratemon_sockops_bpf *sockops_skel;
-struct ratemon_structops_bpf *structops_skel;
+struct ratemon_structops_cubic_bpf *structops_cubic_skel;
+struct ratemon_structops_dctcp_bpf *structops_dctcp_skel;
 struct ratemon_kprobe_bpf *kprobe_skel;
 
 // Existing signal handler for SIGINT.
@@ -111,17 +114,37 @@ int prepare_sockops(char *cg_path) {
   return 0;
 }
 
-int prepare_structops() {
+int prepare_structops_cubic() {
   // Open skeleton and load programs and maps.
-  structops_skel = ratemon_structops_bpf__open_and_load();
-  if (!structops_skel) {
-    printf("ERROR: Failed to open/load 'ratemon_structops' BPF skeleton\n");
+  structops_cubic_skel = ratemon_structops_cubic_bpf__open_and_load();
+  if (!structops_cubic_skel) {
+    printf(
+        "ERROR: Failed to open/load 'ratemon_structops_cubic' BPF skeleton\n");
     return 1;
   }
   // Attach struct_ops.
-  structops_link = bpf_map__attach_struct_ops(structops_skel->maps.bpf_cubic);
-  if (structops_link == NULL) {
+  structops_cubic_link =
+      bpf_map__attach_struct_ops(structops_cubic_skel->maps.bpf_cubic);
+  if (structops_cubic_link == NULL) {
     printf("ERROR: Failed to attach 'bpf_cubic'\n");
+    return 1;
+  }
+  return 0;
+}
+
+int prepare_structops_dctcp() {
+  // Open skeleton and load programs and maps.
+  structops_dctcp_skel = ratemon_structops_dctcp_bpf__open_and_load();
+  if (!structops_dctcp_skel) {
+    printf(
+        "ERROR: Failed to open/load 'ratemon_structops_dctcp' BPF skeleton\n");
+    return 1;
+  }
+  // Attach struct_ops.
+  structops_dctcp_link =
+      bpf_map__attach_struct_ops(structops_dctcp_skel->maps.bpf_dctcp);
+  if (structops_dctcp_link == NULL) {
+    printf("ERROR: Failed to attach 'bpf_dctcp'\n");
     return 1;
   }
   return 0;
@@ -179,8 +202,12 @@ int main(int argc, char **argv) {
     printf("ERROR: Failed to set up sockops\n");
     goto cleanup;
   }
-  if (prepare_structops()) {
-    printf("ERROR: Failed to set up structops\n");
+  if (prepare_structops_cubic()) {
+    printf("ERROR: Failed to set up structops cubic\n");
+    goto cleanup;
+  }
+  if (prepare_structops_dctcp()) {
+    printf("ERROR: Failed to set up structops dctcp\n");
     goto cleanup;
   }
   if (prepare_kprobe()) {
@@ -203,9 +230,11 @@ cleanup:
   // bpf_tc_hook_destroy(&hook);
   // bpf_map__unpin(skel->maps.flow_to_rwnd, NULL);
   // bpf_map__unpin(skel->maps.flow_to_win_scale, NULL);
-  bpf_link__destroy(structops_link);
+  bpf_link__destroy(structops_cubic_link);
+  bpf_link__destroy(structops_dctcp_link);
   ratemon_sockops_bpf__destroy(sockops_skel);
-  ratemon_structops_bpf__destroy(structops_skel);
+  ratemon_structops_cubic_bpf__destroy(structops_cubic_skel);
+  ratemon_structops_dctcp_bpf__destroy(structops_dctcp_skel);
   ratemon_kprobe_bpf__destroy(kprobe_skel);
   return 0;
 }
