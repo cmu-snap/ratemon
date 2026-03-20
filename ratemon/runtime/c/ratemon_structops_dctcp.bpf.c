@@ -12,6 +12,12 @@
 #include "ratemon_structops.bpf.h"
 // clang-format on
 
+// vmlinux.h does not include #define macros from kernel headers.
+// TCP_CONG_NEEDS_ECN is defined in include/net/tcp.h as 0x2.
+#ifndef TCP_CONG_NEEDS_ECN
+#define TCP_CONG_NEEDS_ECN 0x2
+#endif
+
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 // These are the regular DCTCP functions that will be called below.
