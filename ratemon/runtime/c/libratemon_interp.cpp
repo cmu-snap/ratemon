@@ -116,6 +116,10 @@ ConstantTimeIntQueue paused_fds_queue;
 // Maps file descriptor to rm_flow struct.
 std::unordered_map<int, struct rm_flow> fd_to_flow;
 std::unordered_map<struct rm_flow_key, int> flow_to_fd;
+// Per-host index: remote_addr -> list of FDs from that host.
+// Maintained alongside fd_to_flow so handle_send_single_mode() can skip
+// scanning all flows. Protected by lock_scheduler.
+std::unordered_map<uint32_t, std::vector<int>> addr_to_fds;
 // The next six are scheduled RWND tuning parameters. See ratemon.h for
 // parameter documentation.
 int max_active_flows = 5;
@@ -1221,12 +1225,17 @@ void register_fd_for_monitoring(int fd) {
   rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
                            flow.remote_port};
   flow_to_fd[key] = fd;
+  addr_to_fds[flow.remote_addr].push_back(fd);
   // Change the CCA to BPF_CUBIC.
   if (!set_cca(fd, RM_BPF_CUBIC)) {
     RM_PRINTF("ERROR: Failed to set CCA for FD=%d, removing from tracking\n",
               fd);
     fd_to_flow.erase(fd);
     flow_to_fd.erase(key);
+    auto &vec = addr_to_fds[flow.remote_addr];
+    vec.erase(std::remove(vec.begin(), vec.end(), fd), vec.end());
+    if (vec.empty())
+      addr_to_fds.erase(flow.remote_addr);
     return;
   }
 
@@ -1238,9 +1247,14 @@ void register_fd_for_monitoring(int fd) {
     RM_PRINTF("ERROR: Failed to create entry in flow_to_last_data_time_fd for "
               "FD=%d, err=%d (%s). Removing flow from tracking.\n",
               fd, err, strerror(-err));
-    // Clean up: remove from fd_to_flow and flow_to_fd since registration failed
+    // Clean up: remove from fd_to_flow, flow_to_fd, and addr_to_fds since
+    // registration failed
     fd_to_flow.erase(fd);
     flow_to_fd.erase(key);
+    auto &vec2 = addr_to_fds[flow.remote_addr];
+    vec2.erase(std::remove(vec2.begin(), vec2.end(), fd), vec2.end());
+    if (vec2.empty())
+      addr_to_fds.erase(flow.remote_addr);
     return;
   }
 
@@ -1488,14 +1502,16 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
         current_burst_number, should_schedule);
   }
 
-  // Find all flows from the same remote host and update their state
+  // Find all flows from the same remote host using the per-host index.
   int flows_updated = 0;
-  for (auto &entry : fd_to_flow) {
-    int const fd = entry.first;
-    struct rm_flow const &flow_iter = entry.second;
-
-    // Check if this flow is from the same remote host
-    if (flow_iter.remote_addr == remote_addr) {
+  auto ait = addr_to_fds.find(remote_addr);
+  if (ait != addr_to_fds.end()) {
+    for (int const fd : ait->second) {
+      auto fit = fd_to_flow.find(fd);
+      if (fit == fd_to_flow.end()) {
+        continue;
+      }
+      struct rm_flow const &flow_iter = fit->second;
       flows_updated++;
 
       RM_PRINTF("INFO: Single mode - updating flow FD=%d (remote_port=%u) "
@@ -1944,6 +1960,14 @@ int close(int sockfd) {
     removed = flow_to_fd.erase(key);
     RM_PRINTF("INFO: Removed FD=%d from flow_to_fd (%ld elements removed)\n",
               sockfd, removed);
+    // Remove from per-host index.
+    auto ait = addr_to_fds.find(flow.remote_addr);
+    if (ait != addr_to_fds.end()) {
+      auto &vec = ait->second;
+      vec.erase(std::remove(vec.begin(), vec.end(), sockfd), vec.end());
+      if (vec.empty())
+        addr_to_fds.erase(ait);
+    }
 
     // If this is the last flow that we know about and we close it, then assume
     // that we are no longer needed and kill the scheduler thread.
