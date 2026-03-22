@@ -1498,38 +1498,36 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
 // - "pregrant": Perform scheduling only on first burst; subsequent bursts use
 // pregrants
 static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
-  struct rm_flow flow {};
-  if (!get_flow(sockfd, &flow)) {
-    RM_PRINTF("ERROR: Could not get flow for FD=%d\n", sockfd);
-    return false;
-  }
-
-  // Get the remote address from the calling flow
-  uint32_t const remote_addr = flow.remote_addr;
-
-  // Parse burst_number and bytes from the burst request message
-  // Format is: [burst_number, bytes, wait_us, padding]
+  // Parse burst_number and bytes from the burst request message before
+  // acquiring any lock. Format is: [burst_number, bytes, wait_us, padding]
   if (len != 4 * sizeof(int)) {
     RM_PRINTF("FATAL ERROR: FD=%d single mode burst request size is %zu bytes, "
               "expected %zu bytes (4 ints)\n",
               sockfd, len, 4 * sizeof(int));
     std::exit(1);
   }
-  int burst_number = -1;
-  int bytes = 0;
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
   const int *buf_int = reinterpret_cast<const int *>(buf);
-  burst_number = buf_int[0];
-  bytes = buf_int[1];
+  int const burst_number = buf_int[0];
+  int const bytes = buf_int[1];
+
+  // Acquire lock to access fd_to_flow and global state
+  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
+
+  // Look up remote_addr from fd_to_flow (avoids getsockname/getpeername
+  // syscalls that get_flow() would do).
+  auto flow_it = fd_to_flow.find(sockfd);
+  if (flow_it == fd_to_flow.end()) {
+    RM_PRINTF("ERROR: Could not get flow for FD=%d\n", sockfd);
+    return false;
+  }
+  uint32_t const remote_addr = flow_it->second.remote_addr;
 
   RM_PRINTF("INFO: Single mode - send() called for FD=%d from host %s, "
             "received_burst_number=%d, bytes=%d, current_burst_number=%d, "
             "policy=%s\n",
             sockfd, ipv4_to_string(remote_addr).c_str(), burst_number, bytes,
             current_burst_number, single_request_policy.c_str());
-
-  // Acquire lock to access fd_to_flow and global state
-  std::unique_lock<std::shared_mutex> lock(lock_scheduler);
 
   // Update burst tracking BEFORE scheduling decisions
   // This ensures should_schedule is calculated based on the current burst
@@ -1580,6 +1578,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
     pending_burst_info[remote_addr] = {bytes, current_burst_number};
     flows_updated =
         (ait != addr_to_fds.end()) ? static_cast<int>(ait->second.size()) : 0;
+    // Release the lock immediately — deferred path is done.
+    lock.unlock();
     RM_PRINTF("INFO: Single mode (pregrant) - deferred %d bytes for %d flows "
               "from %s, burst=%d\n",
               bytes, flows_updated, ipv4_to_string(remote_addr).c_str(),
@@ -1949,16 +1949,10 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
   if (noop_mode) {
     return real_send(sockfd, buf, len, flags);
   }
-  // Check if this flow is being monitored (i.e., in fd_to_flow map).
-  // If not, skip all ratemon processing.
-  bool is_monitored = false;
-  if (setup_done && run) {
-    std::shared_lock<std::shared_mutex> lock(lock_scheduler);
-    is_monitored = (fd_to_flow.find(sockfd) != fd_to_flow.end());
-  }
-
   // Do any ratemon-specific handling before calling the real send().
-  if (is_monitored) {
+  // handle_send functions do their own fd_to_flow check under lock, so we
+  // skip the separate is_monitored shared lock to avoid double-locking.
+  if (setup_done && run) {
     if (!handle_send(sockfd, buf, len)) {
       RM_PRINTF("ERROR: Failed to handle 'send' for FD=%d\n", sockfd);
     }
