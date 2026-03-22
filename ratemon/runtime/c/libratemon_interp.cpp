@@ -135,6 +135,15 @@ int64_t idle_timeout_ns = -1;
 int current_burst_number = 0;
 int burst_flows_remaining = 0;
 bool pregrant_done = false;
+// Deferred burst bytes for pregrant mode. When should_schedule=false,
+// handle_send_single_mode() caches burst info per-host instead of updating
+// each flow's BPF maps. Applied lazily during
+// activate_flow()/handle_grant_done(). Maps remote_addr -> {bytes,
+// burst_number}. Protected by lock_scheduler.
+std::unordered_map<uint32_t, std::pair<int, int>> pending_burst_info;
+// Per-flow: last burst number whose deferred bytes were applied to BPF maps.
+// Protected by lock_scheduler.
+std::unordered_map<int, int> fd_last_applied_burst;
 // Ports in this range (inclusive) will be tracked for scheduling.
 uint16_t monitor_port_start = 9000;
 uint16_t monitor_port_end = 9999;
@@ -260,6 +269,48 @@ int try_find_and_pause(int fd) {
   return 0;
 }
 
+// Check whether a flow has deferred burst bytes that haven't been applied yet.
+// Caller must hold lock_scheduler (at least shared).
+inline bool has_pending_burst_bytes(int fd) {
+  auto fit = fd_to_flow.find(fd);
+  if (fit == fd_to_flow.end())
+    return false;
+  auto pbi = pending_burst_info.find(fit->second.remote_addr);
+  if (pbi == pending_burst_info.end())
+    return false;
+  auto applied = fd_last_applied_burst.find(fd);
+  return (applied == fd_last_applied_burst.end() ||
+          applied->second < pbi->second.second);
+}
+
+// Apply deferred burst bytes to a flow's grant_info if needed.
+// Modifies grant_info in place (caller must write back to BPF if it returns
+// true). Also sets keepalive in BPF for this flow.
+// Returns true if deferred bytes were applied.
+// Caller must hold lock_scheduler (unique).
+inline bool apply_deferred_burst_bytes(int fd,
+                                       struct rm_grant_info &grant_info) {
+  auto fit = fd_to_flow.find(fd);
+  if (fit == fd_to_flow.end())
+    return false;
+  auto pbi = pending_burst_info.find(fit->second.remote_addr);
+  if (pbi == pending_burst_info.end())
+    return false;
+  int burst_num = pbi->second.second;
+  auto &last_applied = fd_last_applied_burst[fd];
+  if (last_applied >= burst_num)
+    return false;
+
+  grant_info.ungranted_bytes += pbi->second.first;
+  last_applied = burst_num;
+  set_keepalive(fd);
+
+  RM_PRINTF("INFO: Applied deferred burst bytes (%d) for FD=%d, burst=%d, "
+            "new ungranted_bytes=%d\n",
+            pbi->second.first, fd, burst_num, grant_info.ungranted_bytes);
+  return true;
+}
+
 // Attempt to activate this flow. Return the number of activated flows.
 inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
   int err = 0;
@@ -275,6 +326,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
       return 0;
     }
     check_bpf_error(grant_info, "activate_flow");
+    // Apply any deferred burst bytes before checking ungranted_bytes.
+    apply_deferred_burst_bytes(fd, grant_info);
     if (grant_info.ungranted_bytes <= 0) {
       RM_PRINTF("INFO: Cannot activate flow FD=%d because it has no ungranted "
                 "bytes\n",
@@ -335,12 +388,13 @@ int try_activate_one() {
     }
     // If this flow is not in the flow_to_keepalive map (bpf_map_lookup_elem()
     // returns negative error code when the flow is not found), then it has no
-    // pending data and should be skipped.
+    // pending data and should be skipped — unless it has deferred burst bytes
+    // that haven't been applied yet.
     int const err = bpf_map_lookup_elem(flow_to_keepalive_fd,
                                         &fd_to_flow[pause_fr], &dummy);
     RM_PRINTF("INFO: Checking flow FD=%d, dummy=%d, err=%d\n", pause_fr, dummy,
               err);
-    if (err != 0) {
+    if (err != 0 && !has_pending_burst_bytes(pause_fr)) {
       RM_PRINTF("INFO: Skipping activating FD=%d, no pending data\n", pause_fr);
       paused_fds_queue.enqueue(pause_fr);
       continue;
@@ -773,6 +827,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     int err = bpf_map_lookup_elem(flow_to_rwnd_fd, flow, &grant_info);
     if (err == 0) {
       check_bpf_error(grant_info, "handle_grant_done");
+      // Apply any deferred burst bytes before checking burst completion.
+      bool needs_write = apply_deferred_burst_bytes(fd->second, grant_info);
       if (grant_info.ungranted_bytes <= 0) {
         // This flow completed its burst.
         burst_flows_remaining--;
@@ -807,6 +863,16 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
             // the RWND for the next burst.
             trigger_ack(fd->second);
           }
+          needs_write = false; // already wrote the updated grant_info
+        }
+      }
+      if (needs_write) {
+        // Write the updated grant_info back to the map.
+        err = bpf_map_update_elem(flow_to_rwnd_fd, flow, &grant_info, BPF_ANY);
+        if (err != 0) {
+          RM_PRINTF("ERROR: Could not write updated grant_info for flow FD=%d, "
+                    "err=%d (%s)\n",
+                    fd->second, err, strerror(-err));
         }
       }
     }
@@ -1505,7 +1571,22 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   // Find all flows from the same remote host using the per-host index.
   int flows_updated = 0;
   auto ait = addr_to_fds.find(remote_addr);
-  if (ait != addr_to_fds.end()) {
+
+  if (!should_schedule) {
+    // Defer BPF map updates — cache burst info per host instead of iterating
+    // all flows. Each flow's BPF maps (keepalive + ungranted_bytes) will be
+    // updated lazily when the flow is activated via handle_grant_done() or
+    // try_activate_one().
+    pending_burst_info[remote_addr] = {bytes, current_burst_number};
+    flows_updated =
+        (ait != addr_to_fds.end()) ? static_cast<int>(ait->second.size()) : 0;
+    RM_PRINTF("INFO: Single mode (pregrant) - deferred %d bytes for %d flows "
+              "from %s, burst=%d\n",
+              bytes, flows_updated, ipv4_to_string(remote_addr).c_str(),
+              current_burst_number);
+  } else if (ait != addr_to_fds.end()) {
+    // should_schedule=true (first burst or normal policy): eagerly update all
+    // flows' BPF maps and perform scheduling.
     for (int const fd : ait->second) {
       auto fit = fd_to_flow.find(fd);
       if (fit == fd_to_flow.end()) {
@@ -1559,35 +1640,27 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
       RM_PRINTF("INFO: Single mode - flow FD=%d now has %d ungranted bytes\n",
                 fd, grant_info.ungranted_bytes);
 
-      // Perform scheduling if policy allows (requires lock held)
-      if (should_schedule) {
-        // Call schedule_on_new_request for this flow
-        // This will activate the flow if there's capacity, otherwise leave it
-        // paused
-        if (!schedule_on_new_request(fd)) {
-          RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n",
-                    fd);
-          // Continue with other flows
-        }
+      // Call schedule_on_new_request for this flow
+      // This will activate the flow if there's capacity, otherwise leave it
+      // paused
+      if (!schedule_on_new_request(fd)) {
+        RM_PRINTF("WARNING: schedule_on_new_request failed for flow FD=%d\n",
+                  fd);
+        // Continue with other flows
+      }
 
-        // Trigger an ACK for flows that are activated, except for the calling
-        // flow (sockfd) which will carry the grant in the burst request itself.
-        if (fd != sockfd) {
-          // NOTE: These ACKs will probably go out slowly due to performance
-          // issues with sending packets on many flows, so the first burst will
-          // have bad performance. This is okay. We care about steady state
-          // (later bursts).
-          trigger_ack(fd);
-        } else {
-          RM_PRINTF(
-              "INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
-              "(grant will be in burst request)\n",
-              fd);
-        }
+      // Trigger an ACK for flows that are activated, except for the calling
+      // flow (sockfd) which will carry the grant in the burst request itself.
+      if (fd != sockfd) {
+        // NOTE: These ACKs will probably go out slowly due to performance
+        // issues with sending packets on many flows, so the first burst will
+        // have bad performance. This is okay. We care about steady state
+        // (later bursts).
+        trigger_ack(fd);
       } else {
         RM_PRINTF(
-            "INFO: Single mode (pregrant) - skipping scheduling for FD=%d "
-            "(will use pregrant from previous burst)\n",
+            "INFO: Single mode - skipping ACK trigger for calling flow FD=%d "
+            "(grant will be in burst request)\n",
             fd);
       }
     }
@@ -1968,6 +2041,8 @@ int close(int sockfd) {
       if (vec.empty())
         addr_to_fds.erase(ait);
     }
+    // Remove deferred burst tracking for this FD.
+    fd_last_applied_burst.erase(sockfd);
 
     // If this is the last flow that we know about and we close it, then assume
     // that we are no longer needed and kill the scheduler thread.
