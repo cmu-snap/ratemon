@@ -135,6 +135,11 @@ int64_t idle_timeout_ns = -1;
 int current_burst_number = 0;
 int burst_flows_remaining = 0;
 bool pregrant_done = false;
+// True after the last flow in a burst finishes (burst_flows_remaining hits 0)
+// and before a new burst request arrives via send(). If handle_grant_done fires
+// while this is true, it is a spurious/stale event. Protected by
+// lock_scheduler.
+bool between_bursts = false;
 // Deferred burst bytes for pregrant mode. When should_schedule=false,
 // handle_send_single_mode() caches burst info per-host instead of updating
 // each flow's BPF maps. Applied lazily during
@@ -811,6 +816,19 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     return 0;
   }
 
+  // Sanity check: if we are between bursts (all flows finished the previous
+  // burst and no new burst request has arrived yet), this grant-done event is
+  // spurious — there should be no in-flight grants during the quiescent period.
+  // Check before acquiring the lock to avoid unnecessary work.
+  if (between_bursts) {
+    RM_PRINTF("ERROR: Spurious grant_done while between_bursts=true "
+              "(burst_flows_remaining=%d, current_burst_number=%d, "
+              "pregrant_done=%d)\n",
+              burst_flows_remaining, current_burst_number,
+              static_cast<int>(pregrant_done));
+    return 0;
+  }
+
   if (scheduling_mode != "byte") {
     return 0;
   }
@@ -854,6 +872,11 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
       if (grant_info.ungranted_bytes <= 0) {
         // This flow completed its burst.
         burst_flows_remaining--;
+        if (burst_flows_remaining <= 0) {
+          between_bursts = true;
+          RM_PRINTF("INFO: All flows completed burst %d, between_bursts=true\n",
+                    current_burst_number);
+        }
         RM_PRINTF("INFO: Flow FD=%d completed burst, %d flows remaining\n",
                   fd->second, burst_flows_remaining);
 
@@ -1674,6 +1697,11 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
               "FD=%d)\n",
               ipv4_to_string(remote_addr).c_str(), sockfd);
   }
+
+  // Clear between_bursts now that a new burst request has been fully processed.
+  // This must happen after all send processing so handle_grant_done can detect
+  // spurious calls during the quiescent period.
+  between_bursts = false;
 
   return true;
 }
