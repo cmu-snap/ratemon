@@ -1521,6 +1521,16 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
 // - "pregrant": Perform scheduling only on first burst; subsequent bursts use
 // pregrants
 static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
+  // Quick check: skip unmonitored FDs (e.g., control connections) before
+  // parsing the burst message. Uses a shared lock to avoid blocking other
+  // readers.
+  {
+    std::shared_lock<std::shared_mutex> slock(lock_scheduler);
+    if (fd_to_flow.find(sockfd) == fd_to_flow.end()) {
+      return false;
+    }
+  }
+
   // Parse burst_number and bytes from the burst request message before
   // acquiring any lock. Format is: [burst_number, bytes, wait_us, padding]
   if (len != 4 * sizeof(int)) {
