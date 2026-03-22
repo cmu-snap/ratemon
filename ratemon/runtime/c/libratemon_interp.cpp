@@ -821,11 +821,12 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // be from a pregrant being consumed or a straggler finishing. Log it but do
   // NOT return early — the flow still needs to be paused and replaced.
   if (between_bursts) {
-    RM_PRINTF("WARNING: grant_done while between_bursts=true "
-              "(burst_flows_remaining=%d, current_burst_number=%d, "
-              "pregrant_done=%d)\n",
-              burst_flows_remaining, current_burst_number,
-              static_cast<int>(pregrant_done));
+    fprintf(stderr,
+            "WARNING: grant_done while between_bursts=true "
+            "(burst_flows_remaining=%d, current_burst_number=%d, "
+            "pregrant_done=%d)\n",
+            burst_flows_remaining, current_burst_number,
+            static_cast<int>(pregrant_done));
   }
 
   if (scheduling_mode != "byte") {
