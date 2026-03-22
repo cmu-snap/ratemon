@@ -816,17 +816,16 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
     return 0;
   }
 
-  // Sanity check: if we are between bursts (all flows finished the previous
-  // burst and no new burst request has arrived yet), this grant-done event is
-  // spurious — there should be no in-flight grants during the quiescent period.
-  // Check before acquiring the lock to avoid unnecessary work.
+  // Diagnostic: if we are between bursts (all flows finished the previous
+  // burst and no new burst request has arrived yet), this grant-done event may
+  // be from a pregrant being consumed or a straggler finishing. Log it but do
+  // NOT return early — the flow still needs to be paused and replaced.
   if (between_bursts) {
-    RM_PRINTF("ERROR: Spurious grant_done while between_bursts=true "
+    RM_PRINTF("WARNING: grant_done while between_bursts=true "
               "(burst_flows_remaining=%d, current_burst_number=%d, "
               "pregrant_done=%d)\n",
               burst_flows_remaining, current_burst_number,
               static_cast<int>(pregrant_done));
-    return 0;
   }
 
   if (scheduling_mode != "byte") {
@@ -1611,12 +1610,14 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
     pending_burst_info[remote_addr] = {bytes, current_burst_number};
     flows_updated =
         (ait != addr_to_fds.end()) ? static_cast<int>(ait->second.size()) : 0;
-    // Release the lock immediately — deferred path is done.
+    // Clear between_bursts while still holding the lock, then release.
+    between_bursts = false;
     lock.unlock();
     RM_PRINTF("INFO: Single mode (pregrant) - deferred %d bytes for %d flows "
               "from %s, burst=%d\n",
               bytes, flows_updated, ipv4_to_string(remote_addr).c_str(),
               current_burst_number);
+    return true;
   } else if (ait != addr_to_fds.end()) {
     // should_schedule=true (first burst or normal policy): eagerly update all
     // flows' BPF maps and perform scheduling.
