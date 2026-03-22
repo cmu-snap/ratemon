@@ -283,6 +283,28 @@ inline bool has_pending_burst_bytes(int fd) {
           applied->second < pbi->second.second);
 }
 
+// Add a flow to the flow_to_keepalive map. Must hold lock_scheduler before
+// calling this function.
+bool set_keepalive(int sockfd) {
+  auto flow = fd_to_flow.find(sockfd);
+  if (flow == fd_to_flow.end()) {
+    // We are not tracking this flow, so ignore it.
+    RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
+    return false;
+  }
+  int one = 1;
+  int const err =
+      bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
+  if (err != 0) {
+    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d, "
+              "flow_to_keepalive_fd=%d, err=%d (%s)\n",
+              sockfd, flow_to_keepalive_fd, err, strerror(-err));
+    return false;
+  }
+  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
+  return true;
+}
+
 // Apply deferred burst bytes to a flow's grant_info if needed.
 // Modifies grant_info in place (caller must write back to BPF if it returns
 // true). Also sets keepalive in BPF for this flow.
@@ -1230,28 +1252,6 @@ bool set_cca(int fd, const char *cca) {
               retrieved_cca.data());
     return false;
   }
-  return true;
-}
-
-// Add a flow to the flow_to_keepalive map. Must hold lock_scheduler before
-// calling this function.
-bool set_keepalive(int sockfd) {
-  auto flow = fd_to_flow.find(sockfd);
-  if (flow == fd_to_flow.end()) {
-    // We are not tracking this flow, so ignore it.
-    RM_PRINTF("INFO: Ignoring 'send' for FD=%d, not in fd_to_flow\n", sockfd);
-    return false;
-  }
-  int one = 1;
-  int const err =
-      bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
-  if (err != 0) {
-    RM_PRINTF("ERROR: Failed to update flow_to_keepalive for FD=%d, "
-              "flow_to_keepalive_fd=%d, err=%d (%s)\n",
-              sockfd, flow_to_keepalive_fd, err, strerror(-err));
-    return false;
-  }
-  RM_PRINTF("INFO: Updated flow_to_keepalive for FD=%d\n", sockfd);
   return true;
 }
 
