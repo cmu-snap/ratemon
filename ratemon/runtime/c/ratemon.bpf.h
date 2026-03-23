@@ -6,10 +6,12 @@
 
 #include "ratemon.h"
 
+// Comment out the below line to disable verbose BPF logging.
+// #define RM_VERBOSE
+
 #ifdef RM_VERBOSE
 #define RM_PRINTK(...) bpf_printk(__VA_ARGS__)
 #else
-#define NDEBUG // Disable assert() calls.
 #define RM_PRINTK(...)
 #endif
 

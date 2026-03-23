@@ -4,16 +4,6 @@
 #ifndef __RATEMON_H
 #define __RATEMON_H
 
-// Comment out the below line to disable verbose logging.
-// #define RM_VERBOSE
-
-#ifdef RM_VERBOSE
-#define RM_PRINTF(...) printf(__VA_ARGS__)
-#else
-#define NDEBUG // Disable assert() calls.
-#define RM_PRINTF(...)
-#endif
-
 // Max number of flows that BPF can track.
 #define RM_MAX_FLOWS 8192
 // Map pin paths.
