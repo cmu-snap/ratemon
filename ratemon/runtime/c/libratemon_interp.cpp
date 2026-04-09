@@ -1024,7 +1024,8 @@ bool read_env_string(const char *key, std::string &dest) {
 // Perform setup (only once for all flows in this process), such as reading
 // parameters from environment variables and setting up BPF maps.
 bool setup() {
-  google::InitGoogleLogging("libratemon_interp");
+  if (!google::IsGoogleLoggingInitialized())
+    google::InitGoogleLogging("libratemon_interp");
   google::InstallFailureSignalHandler();
   // Default to WARNING level. Override at runtime with GLOG_minloglevel=0 for
   // INFO or GLOG_v=1 for VLOG messages.
