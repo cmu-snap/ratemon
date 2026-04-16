@@ -27,7 +27,19 @@ DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install
 	flex \
 	libelf-dev \
 	bison \
-	pahole
+	pahole \
+	libdw-dev \
+	libaudit-dev \
+	libslang2-dev \
+	libperl-dev \
+	python3-dev \
+	libnuma-dev \
+	libunwind-dev \
+	libcap-dev \
+	systemtap-sdt-dev \
+	libiberty-dev \
+	libzstd-dev \
+	libtraceevent-dev
 
 # Download Linux 5.15.156 and apply get_info() patch. Do not build it yet.
 pushd "${main_dir}"
@@ -45,6 +57,13 @@ make -j "${nproc}" menuconfig
 make -j "${nproc}"
 sudo make -j "${nproc}" modules_install
 sudo make -j "${nproc}" install
+
+# Build and install perf from the kernel source tree so it matches this kernel.
+pushd tools/perf
+make clean
+make -j "${nproc}"
+sudo make install prefix=/usr
+popd
 popd
 
 printf "Please reboot!\n"
