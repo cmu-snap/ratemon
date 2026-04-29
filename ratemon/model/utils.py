@@ -740,7 +740,7 @@ def parse_q_enq_deq(line):
         ( "enq" or "deq", time ns, src port, seq, payload B, qsize, dropped,
           queued, batch size )
     """
-    (event, time_ns, src_port, seq, payload_B, qsize, dropped, queued, batch_size) = [
+    event, time_ns, src_port, seq, payload_B, qsize, dropped, queued, batch_size = [
         int(tok, 16) if tok.startswith("0x") else int(tok) for tok in line.split(",")
     ]
 

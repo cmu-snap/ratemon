@@ -95,7 +95,7 @@ def process_one(
         sequential=True,
     )
 
-    (dat_in, dat_out, dat_out_raw, dat_out_oracle, _) = utils.load_tmp_file(temp_path)
+    dat_in, dat_out, dat_out_raw, dat_out_oracle, _ = utils.load_tmp_file(temp_path)
 
     # Load and apply the scaling parameters.
     with open(scl_prms_flp, "r") as fil:
