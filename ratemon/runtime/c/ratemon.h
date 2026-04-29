@@ -58,6 +58,9 @@
 #define RM_SINGLE_REQUEST_POLICY_KEY "RM_SINGLE_REQUEST_POLICY"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
+// Congestion control algorithm whose struct_ops to attach. Must be "cubic" or
+// "dctcp".
+#define RM_CCA_KEY "RM_CCA"
 // Environment variable that specifies how early to consider a grant done (in
 // bytes). See struct rm_grant_info for more details.
 #define RM_GRANT_END_BUFFER_BYTES_KEY "RM_GRANT_END_BUFFER_BYTES"

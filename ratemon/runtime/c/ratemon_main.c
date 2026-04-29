@@ -28,6 +28,12 @@ struct ratemon_structops_cubic_bpf *structops_cubic_skel;
 struct ratemon_structops_dctcp_bpf *structops_dctcp_skel;
 struct ratemon_kprobe_bpf *kprobe_skel;
 
+// Selected congestion control algorithm whose struct_ops to attach. Set from
+// the RM_CCA environment variable. Only one of cubic/dctcp is loaded so that
+// the kernel cannot fall back to the unselected variant.
+enum rm_cca { RM_CCA_CUBIC, RM_CCA_DCTCP };
+static enum rm_cca selected_cca;
+
 // Existing signal handler for SIGINT.
 struct sigaction oldact;
 
@@ -198,17 +204,40 @@ int main(int argc, char **argv) {
   }
   printf("INFO: cgroup path: %s\n", cg_path);
 
+  char cca_str[32];
+  // trunk-ignore(clang-tidy/clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+  memset(cca_str, 0, sizeof(cca_str));
+  if (!read_env_charstar(RM_CCA_KEY, cca_str, sizeof(cca_str))) {
+    printf("ERROR: Failed to read CCA selection (env var %s); expected "
+           "\"cubic\" or \"dctcp\"\n",
+           RM_CCA_KEY);
+    goto cleanup;
+  }
+  if (strcmp(cca_str, "cubic") == 0) {
+    selected_cca = RM_CCA_CUBIC;
+  } else if (strcmp(cca_str, "dctcp") == 0) {
+    selected_cca = RM_CCA_DCTCP;
+  } else {
+    printf("ERROR: Unsupported CCA '%s'; expected \"cubic\" or \"dctcp\"\n",
+           cca_str);
+    goto cleanup;
+  }
+  printf("INFO: Selected CCA: %s\n", cca_str);
+
   if (prepare_sockops(cg_path)) {
     printf("ERROR: Failed to set up sockops\n");
     goto cleanup;
   }
-  if (prepare_structops_cubic()) {
-    printf("ERROR: Failed to set up structops cubic\n");
-    goto cleanup;
-  }
-  if (prepare_structops_dctcp()) {
-    printf("ERROR: Failed to set up structops dctcp\n");
-    goto cleanup;
+  if (selected_cca == RM_CCA_CUBIC) {
+    if (prepare_structops_cubic()) {
+      printf("ERROR: Failed to set up structops cubic\n");
+      goto cleanup;
+    }
+  } else {
+    if (prepare_structops_dctcp()) {
+      printf("ERROR: Failed to set up structops dctcp\n");
+      goto cleanup;
+    }
   }
   if (prepare_kprobe()) {
     printf("ERROR: Failed to set up kprobe\n");
@@ -230,11 +259,19 @@ cleanup:
   // bpf_tc_hook_destroy(&hook);
   // bpf_map__unpin(skel->maps.flow_to_rwnd, NULL);
   // bpf_map__unpin(skel->maps.flow_to_win_scale, NULL);
-  bpf_link__destroy(structops_cubic_link);
-  bpf_link__destroy(structops_dctcp_link);
+  if (structops_cubic_link != NULL) {
+    bpf_link__destroy(structops_cubic_link);
+  }
+  if (structops_dctcp_link != NULL) {
+    bpf_link__destroy(structops_dctcp_link);
+  }
   ratemon_sockops_bpf__destroy(sockops_skel);
-  ratemon_structops_cubic_bpf__destroy(structops_cubic_skel);
-  ratemon_structops_dctcp_bpf__destroy(structops_dctcp_skel);
+  if (structops_cubic_skel != NULL) {
+    ratemon_structops_cubic_bpf__destroy(structops_cubic_skel);
+  }
+  if (structops_dctcp_skel != NULL) {
+    ratemon_structops_dctcp_bpf__destroy(structops_dctcp_skel);
+  }
   ratemon_kprobe_bpf__destroy(kprobe_skel);
   return 0;
 }
