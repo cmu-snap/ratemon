@@ -17,6 +17,7 @@
 #include "ratemon_sockops.skel.h"
 #include "ratemon_structops_cubic.skel.h"
 #include "ratemon_structops_dctcp.skel.h"
+#include "ratemon_utils.h"
 
 // Signals whether the program should continue running.
 static volatile bool run = true;
@@ -209,20 +210,25 @@ int main(int argc, char **argv) {
   memset(cca_str, 0, sizeof(cca_str));
   if (!read_env_charstar(RM_CCA_KEY, cca_str, sizeof(cca_str))) {
     printf("ERROR: Failed to read CCA selection (env var %s); expected "
-           "\"cubic\" or \"dctcp\"\n",
-           RM_CCA_KEY);
+           "%s\n",
+           RM_CCA_KEY, RM_CCA_ACCEPTED_VALUES);
     goto cleanup;
   }
-  if (strcmp(cca_str, "cubic") == 0) {
+  const char *bpf_cca = NULL;
+  if (!rm_cca_to_bpf_name(cca_str, &bpf_cca)) {
+    printf("ERROR: Unsupported CCA '%s'; expected %s\n", cca_str,
+           RM_CCA_ACCEPTED_VALUES);
+    goto cleanup;
+  }
+  if (strcmp(bpf_cca, RM_BPF_CUBIC) == 0) {
     selected_cca = RM_CCA_CUBIC;
-  } else if (strcmp(cca_str, "dctcp") == 0) {
+  } else if (strcmp(bpf_cca, RM_BPF_DCTCP) == 0) {
     selected_cca = RM_CCA_DCTCP;
   } else {
-    printf("ERROR: Unsupported CCA '%s'; expected \"cubic\" or \"dctcp\"\n",
-           cca_str);
+    printf("ERROR: Unsupported normalized CCA '%s'\n", bpf_cca);
     goto cleanup;
   }
-  printf("INFO: Selected CCA: %s\n", cca_str);
+  printf("INFO: Selected CCA: %s (normalized: %s)\n", cca_str, bpf_cca);
 
   if (prepare_sockops(cg_path)) {
     printf("ERROR: Failed to set up sockops\n");

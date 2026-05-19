@@ -140,7 +140,7 @@ $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
 
-$(OUTPUT)/libratemon_interp.so: libratemon_interp.cpp ratemon.h constant_time_int_queue.h | $(OUTPUT)
+$(OUTPUT)/libratemon_interp.so: libratemon_interp.cpp ratemon.h constant_time_int_queue.h ratemon_utils.h | $(OUTPUT)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -I$(OUTPUT) $< -ldl -lbpf -lglog -o $@
 
 $(INTERPS): %: $(OUTPUT)/%.so ;

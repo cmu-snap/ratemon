@@ -15,6 +15,7 @@
 #define RM_DONE_FLOWS_PIN_PATH "/sys/fs/bpf/done_flows"
 // Name of struct_ops CCA that flows must use to be woken up.
 #define RM_BPF_CUBIC "bpf_cubic"
+#define RM_BPF_DCTCP "bpf_dctcp"
 
 // Environment variable that specifies the max number of active flows.
 #define RM_MAX_ACTIVE_FLOWS_KEY "RM_MAX_ACTIVE_FLOWS"
@@ -58,12 +59,15 @@
 #define RM_SINGLE_REQUEST_POLICY_KEY "RM_SINGLE_REQUEST_POLICY"
 // Path to cgroup for attaching sockops programs.
 #define RM_CGROUP_KEY "RM_CGROUP"
-// Congestion control algorithm whose struct_ops to attach. Must be "cubic" or
-// "dctcp".
+// Congestion control algorithm whose struct_ops to attach. Accepts user-facing
+// names ("cubic", "dctcp") and struct_ops names ("bpf_cubic",
+// "bpf_dctcp").
 #define RM_CCA_KEY "RM_CCA"
 // Environment variable that specifies how early to consider a grant done (in
 // bytes). See struct rm_grant_info for more details.
 #define RM_GRANT_END_BUFFER_BYTES_KEY "RM_GRANT_END_BUFFER_BYTES"
+// Optional path where libratemon_interp writes a final health snapshot JSON.
+#define RM_HEALTH_SNAPSHOT_JSON_PATH_KEY "RM_HEALTH_SNAPSHOT_JSON_PATH"
 
 #ifndef UINT32_MAX
 #define UINT32_MAX 4294967295U

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <array>
+#include <atomic>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/detail/impl/epoll_reactor.hpp>
 #include <boost/asio/detail/impl/epoll_reactor.ipp>
@@ -33,6 +34,7 @@
 #include <ctime>
 #include <dlfcn.h>
 #include <experimental/random>
+#include <fstream>
 #include <glog/logging.h>
 #include <linux/bpf.h>
 #include <linux/inet_diag.h>
@@ -42,6 +44,7 @@
 #include <optional>
 #include <queue>
 #include <shared_mutex>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
@@ -53,6 +56,7 @@
 
 #include "constant_time_int_queue.h"
 #include "ratemon.h"
+#include "ratemon_utils.h"
 
 struct rm_flow_key {
   // trunk-ignore(clang-tidy/misc-non-private-member-variables-in-classes)
@@ -125,6 +129,7 @@ std::unordered_map<uint32_t, std::vector<int>> addr_to_fds;
 int max_active_flows = 5;
 std::string scheduling_mode = "byte";  // or "time"
 std::string new_burst_mode = "normal"; // or "port" or "single"
+std::string bpf_cca = RM_BPF_CUBIC;
 std::string single_request_policy =
     "normal"; // or "pregrant" (only applies when new_burst_mode="single")
 int epoch_us = 10000;
@@ -159,6 +164,28 @@ int grant_end_buffer_bytes = 0;
 // implementations. Controlled by the RM_NOOP_MODE environment variable.
 bool noop_mode = false;
 
+struct HealthCounters {
+  std::atomic<uint64_t> monitored_flow_candidates_total{0};
+  std::atomic<uint64_t> monitored_flow_registered_total{0};
+  std::atomic<uint64_t> monitored_flow_registration_failed_total{0};
+  std::atomic<uint64_t> cca_set_failed_total{0};
+  std::atomic<uint64_t> flow_last_data_map_insert_failed_total{0};
+  std::atomic<uint64_t> grant_done_events_total{0};
+  std::atomic<uint64_t> grant_done_between_bursts_total{0};
+  std::atomic<uint64_t> flow_activations_total{0};
+  std::atomic<uint64_t> flow_activation_failed_total{0};
+  std::atomic<uint64_t> pregrants_given_total{0};
+  std::atomic<uint64_t> flash_grants_given_total{0};
+  std::atomic<uint64_t> bursts_seen_total{0};
+  std::atomic<uint64_t> burst_sequence_regression_total{0};
+  std::atomic<uint64_t> deferred_burst_applied_total{0};
+  std::atomic<uint64_t> keepalive_update_failed_total{0};
+  std::atomic<uint64_t> scheduler_tick_total{0};
+  std::atomic<uint64_t> idle_timeout_pause_total{0};
+};
+
+HealthCounters health;
+
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
 // Whether setup has been performed.
@@ -173,7 +200,8 @@ socklen_t placeholder_cc_info_length =
     static_cast<socklen_t>(sizeof(placeholder_cc_info));
 
 // Trigger a pure ACK packet to be sent on this FD by calling getsockopt() with
-// TCP_CC_INFO. This only works if the flow is using the CCA BPF_CUBIC.
+// TCP_CC_INFO. This only works when the flow uses a compatible BPF struct_ops
+// CCA (configured via RM_CCA).
 inline void trigger_ack(int fd) {
   VLOG(1) << "Triggering ACK for flow FD=" << fd;
   // Do not store the output to check for errors since there is nothing we can
@@ -210,6 +238,181 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
                << "). Exiting.";
     std::exit(EXIT_FAILURE);
   }
+}
+
+[[noreturn]] inline void fatal_monitoring_failure(int fd,
+                                                  const struct rm_flow &flow,
+                                                  const char *reason) {
+  monitored_flow_registration_failed_total.fetch_add(1,
+                                                     std::memory_order_relaxed);
+  LOG(ERROR) << "Fatal monitoring failure for expected monitor-port flow FD="
+             << fd << " " << ipv4_to_string(flow.remote_addr).c_str() << ":"
+             << flow.remote_port << "->"
+             << ipv4_to_string(flow.local_addr).c_str() << ":"
+             << flow.local_port << ": " << reason;
+  std::abort();
+}
+
+inline void emit_health_snapshot(const char *phase, int active_flows,
+                                 int paused_flows);
+
+inline std::string json_escape(const std::string &input) {
+  std::ostringstream oss;
+  for (char c : input) {
+    switch (c) {
+    case '\\':
+      oss << "\\\\";
+      break;
+    case '"':
+      oss << "\\\"";
+      break;
+    case '\b':
+      oss << "\\b";
+      break;
+    case '\f':
+      oss << "\\f";
+      break;
+    case '\n':
+      oss << "\\n";
+      break;
+    case '\r':
+      oss << "\\r";
+      break;
+    case '\t':
+      oss << "\\t";
+      break;
+    default:
+      oss << c;
+      break;
+    }
+  }
+  return oss.str();
+}
+
+inline std::string health_snapshot_json(const char *phase, int active_flows,
+                                        int paused_flows) {
+  std::ostringstream oss;
+  oss << "{"
+      << "\"phase\":\"" << json_escape(phase) << "\""
+      << ",\"monitored_flow_candidates_total\":"
+      << health.monitored_flow_candidates_total.load(std::memory_order_relaxed)
+      << ",\"monitored_flow_registered_total\":"
+      << health.monitored_flow_registered_total.load(std::memory_order_relaxed)
+      << ",\"monitored_flow_registration_failed_total\":"
+      << health.monitored_flow_registration_failed_total.load(
+             std::memory_order_relaxed)
+      << ",\"cca_set_failed_total\":"
+      << health.cca_set_failed_total.load(std::memory_order_relaxed)
+      << ",\"flow_last_data_map_insert_failed_total\":"
+      << health.flow_last_data_map_insert_failed_total.load(
+             std::memory_order_relaxed)
+      << ",\"grant_done_events_total\":"
+      << health.grant_done_events_total.load(std::memory_order_relaxed)
+      << ",\"grant_done_between_bursts_total\":"
+      << health.grant_done_between_bursts_total.load(std::memory_order_relaxed)
+      << ",\"flow_activations_total\":"
+      << health.flow_activations_total.load(std::memory_order_relaxed)
+      << ",\"flow_activation_failed_total\":"
+      << health.flow_activation_failed_total.load(std::memory_order_relaxed)
+      << ",\"pregrants_given_total\":"
+      << health.pregrants_given_total.load(std::memory_order_relaxed)
+      << ",\"flash_grants_given_total\":"
+      << health.flash_grants_given_total.load(std::memory_order_relaxed)
+      << ",\"bursts_seen_total\":"
+      << health.bursts_seen_total.load(std::memory_order_relaxed)
+      << ",\"burst_sequence_regression_total\":"
+      << health.burst_sequence_regression_total.load(std::memory_order_relaxed)
+      << ",\"deferred_burst_applied_total\":"
+      << health.deferred_burst_applied_total.load(std::memory_order_relaxed)
+      << ",\"keepalive_update_failed_total\":"
+      << health.keepalive_update_failed_total.load(std::memory_order_relaxed)
+      << ",\"scheduler_tick_total\":"
+      << health.scheduler_tick_total.load(std::memory_order_relaxed)
+      << ",\"idle_timeout_pause_total\":"
+      << health.idle_timeout_pause_total.load(std::memory_order_relaxed)
+      << ",\"current_burst_number\":" << current_burst_number
+      << ",\"burst_flows_remaining\":" << burst_flows_remaining
+      << ",\"between_bursts\":" << (between_bursts ? "true" : "false")
+      << ",\"active_flows\":" << active_flows
+      << ",\"paused_flows\":" << paused_flows << "}";
+  return oss.str();
+}
+
+inline std::string resolve_health_snapshot_path() {
+  if (const char *path = std::getenv(RM_HEALTH_SNAPSHOT_JSON_PATH_KEY);
+      path != nullptr && *path != '\0') {
+    return std::string(path);
+  }
+  if (const char *log_dir = std::getenv("GLOG_log_dir");
+      log_dir != nullptr && *log_dir != '\0') {
+    return std::string(log_dir) + "/ratemon_health_snapshot.json";
+  }
+  return std::string("./ratemon_health_snapshot.json");
+}
+
+inline void write_health_snapshot_json(const char *phase, int active_flows,
+                                       int paused_flows) {
+  std::string const path = resolve_health_snapshot_path();
+  std::ofstream out(path, std::ios::out | std::ios::trunc);
+  if (!out.is_open()) {
+    LOG(ERROR) << "Could not open health snapshot path '" << path << "'";
+    return;
+  }
+  out << health_snapshot_json(phase, active_flows, paused_flows) << '\n';
+  if (!out.good()) {
+    LOG(ERROR) << "Failed to write health snapshot JSON to '" << path << "'";
+  }
+}
+
+inline void emit_health_snapshot(const char *phase, int active_flows,
+                                 int paused_flows) {
+  std::ostringstream oss;
+  oss << "RATEMON_HEALTH phase=" << phase << " monitored_flow_candidates_total="
+      << health.monitored_flow_candidates_total.load(std::memory_order_relaxed)
+      << " monitored_flow_registered_total="
+      << health.monitored_flow_registered_total.load(std::memory_order_relaxed)
+      << " monitored_flow_registration_failed_total="
+      << health.monitored_flow_registration_failed_total.load(
+             std::memory_order_relaxed)
+      << " cca_set_failed_total="
+      << health.cca_set_failed_total.load(std::memory_order_relaxed)
+      << " flow_last_data_map_insert_failed_total="
+      << health.flow_last_data_map_insert_failed_total.load(
+             std::memory_order_relaxed)
+      << " grant_done_events_total="
+      << health.grant_done_events_total.load(std::memory_order_relaxed)
+      << " grant_done_between_bursts_total="
+      << health.grant_done_between_bursts_total.load(std::memory_order_relaxed)
+      << " flow_activations_total="
+      << health.flow_activations_total.load(std::memory_order_relaxed)
+      << " flow_activation_failed_total="
+      << health.flow_activation_failed_total.load(std::memory_order_relaxed)
+      << " pregrants_given_total="
+      << health.pregrants_given_total.load(std::memory_order_relaxed)
+      << " flash_grants_given_total="
+      << health.flash_grants_given_total.load(std::memory_order_relaxed)
+      << " bursts_seen_total="
+      << health.bursts_seen_total.load(std::memory_order_relaxed)
+      << " burst_sequence_regression_total="
+      << health.burst_sequence_regression_total.load(std::memory_order_relaxed)
+      << " deferred_burst_applied_total="
+      << health.deferred_burst_applied_total.load(std::memory_order_relaxed)
+      << " keepalive_update_failed_total="
+      << health.keepalive_update_failed_total.load(std::memory_order_relaxed)
+      << " scheduler_tick_total="
+      << health.scheduler_tick_total.load(std::memory_order_relaxed)
+      << " idle_timeout_pause_total="
+      << health.idle_timeout_pause_total.load(std::memory_order_relaxed)
+      << " current_burst_number=" << current_burst_number
+      << " burst_flows_remaining=" << burst_flows_remaining
+      << " between_bursts=" << static_cast<int>(between_bursts);
+  if (active_flows >= 0) {
+    oss << " active_flows=" << active_flows;
+  }
+  if (paused_flows >= 0) {
+    oss << " paused_flows=" << paused_flows;
+  }
+  LOG(INFO) << oss.str();
 }
 
 // Pause this flow. Return the number of flows that were paused.
@@ -300,6 +503,7 @@ bool set_keepalive(int sockfd) {
   int const err =
       bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
   if (err != 0) {
+    keepalive_update_failed_total.fetch_add(1, std::memory_order_relaxed);
     LOG(ERROR) << "Failed to update flow_to_keepalive for FD=" << sockfd
                << ", flow_to_keepalive_fd=" << flow_to_keepalive_fd
                << ", err=" << err << " (" << strerror(-err) << ")";
@@ -329,6 +533,7 @@ inline bool apply_deferred_burst_bytes(int fd,
 
   grant_info.ungranted_bytes += pbi->second.first;
   last_applied = burst_num;
+  deferred_burst_applied_total.fetch_add(1, std::memory_order_relaxed);
   set_keepalive(fd);
 
   VLOG(1) << "Applied deferred burst bytes (" << pbi->second.first
@@ -349,6 +554,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
     if (err != 0) {
       LOG(ERROR) << "Could not find existing grant for flow FD=" << fd;
+      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
       return 0;
     }
     check_bpf_error(grant_info, "activate_flow");
@@ -357,6 +563,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     if (grant_info.ungranted_bytes <= 0) {
       VLOG(1) << "Cannot activate flow FD=" << fd
               << " because it has no ungranted bytes";
+      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
       return 0;
     }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
@@ -369,6 +576,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     if (err != 0) {
       LOG(ERROR) << "Could not set grant for flow FD=" << fd << ", err=" << err
                  << " (" << strerror(-err) << ")";
+      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
       return 0;
     }
     VLOG(1) << "Activated flow FD=" << fd << " with grant of " << epoch_bytes
@@ -385,6 +593,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
   if (trigger_ack_on_activate) {
     trigger_ack(fd);
   }
+  flow_activations_total.fetch_add(1, std::memory_order_relaxed);
   VLOG(1) << "Activated FD=" << fd;
   return 1;
 }
@@ -513,6 +722,8 @@ void timer_callback(const boost::system::error_code &error) {
 
   // It is now safe to perform scheduling.
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
+  uint64_t const tick =
+      scheduler_tick_total.fetch_add(1, std::memory_order_relaxed) + 1;
   VLOG(1) << "Performing scheduling. active=" << active_fds_queue.size()
           << ", paused=" << paused_fds_queue.size();
 
@@ -608,6 +819,7 @@ void timer_callback(const boost::system::error_code &error) {
             // drop in utilization by pausing it immediately.
             VLOG(1) << "Pausing FD=" << active_fr.first
                     << " due to idle timeout";
+            idle_timeout_pause_total.fetch_add(1, std::memory_order_relaxed);
             // Remove the flow from flow_to_keepalive, signalling that it
             // no longer has pending demand.
             int const err = bpf_map_delete_elem(flow_to_keepalive_fd,
@@ -736,6 +948,10 @@ void timer_callback(const boost::system::error_code &error) {
   if (timer.expires_from_now(when) != 0U) {
     LOG(ERROR) << "Timer unexpectedly cancelled (3)";
   }
+  if (tick % 100 == 0) {
+    emit_health_snapshot("periodic", static_cast<int>(active_fds_queue.size()),
+                         static_cast<int>(paused_fds_queue.size()));
+  }
   timer.async_wait(&timer_callback);
   // lock is automatically released when it goes out of scope
   VLOG(1) << "Sleeping until next event in " << when.total_microseconds()
@@ -784,6 +1000,11 @@ void thread_func() {
     LOG(ERROR) << "Scheduler thread ended before program was signalled to stop";
   }
 
+  emit_health_snapshot("final", static_cast<int>(active_fds_queue.size()),
+                       static_cast<int>(paused_fds_queue.size()));
+  write_health_snapshot_json("final", static_cast<int>(active_fds_queue.size()),
+                             static_cast<int>(paused_fds_queue.size()));
+
   // Signal the ringbuf poll thread to stop. The poll thread checks `run`
   // each iteration and will exit. Do NOT free or null out done_flows_rb
   // here — the poll thread may still be inside ring_buffer__poll(), and
@@ -807,6 +1028,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // be from a pregrant being consumed or a straggler finishing. Log it but do
   // NOT return early — the flow still needs to be paused and replaced.
   if (between_bursts) {
+    grant_done_between_bursts_total.fetch_add(1, std::memory_order_relaxed);
     LOG(WARNING)
         << "grant_done while between_bursts=true (burst_flows_remaining="
         << burst_flows_remaining
@@ -822,6 +1044,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
                << sizeof(struct rm_flow);
     return 0;
   }
+  grant_done_events_total.fetch_add(1, std::memory_order_relaxed);
   const auto *flow = static_cast<const struct rm_flow *>(data);
 
   // This flow has exhausted its grant. Remove it from the active flows. It
@@ -887,6 +1110,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
             LOG(ERROR) << "Could not set pregrant for flow FD=" << fd->second
                        << ", err=" << err << " (" << strerror(-err) << ")";
           } else {
+            pregrants_given_total.fetch_add(1, std::memory_order_relaxed);
             VLOG(1) << "Pregranted flow FD=" << fd->second << " directly ("
                     << burst_flows_remaining << " burst flows remaining)";
             // Trigger an ACK so the BPF processes the pregrant and opens
@@ -1068,6 +1292,24 @@ bool setup() {
                << ", must be 'normal', 'port', or 'single'";
     return false;
   }
+
+  // Optional CCA selector for flows that libratemon manages.
+  // Accept both user-facing values (cubic/dctcp) and struct_ops names
+  // (bpf_cubic/bpf_dctcp) for compatibility.
+  if (const char *cca_env = std::getenv(RM_CCA_KEY); cca_env != nullptr) {
+    const char *normalized_bpf_cca = nullptr;
+    if (!rm_cca_to_bpf_name(cca_env, &normalized_bpf_cca)) {
+      LOG(ERROR) << "Invalid value for '" << RM_CCA_KEY << "'='" << cca_env
+                 << "' (must be " << RM_CCA_ACCEPTED_VALUES << ")";
+      return false;
+    }
+    bpf_cca = normalized_bpf_cca;
+  } else {
+    LOG(WARNING) << "Environment variable '" << RM_CCA_KEY
+                 << "' not set. Defaulting to " << RM_BPF_CUBIC;
+    bpf_cca = RM_BPF_CUBIC;
+  }
+  VLOG(1) << "Using BPF CCA: " << bpf_cca;
 
   // Read and validate single_request_policy
   if (!read_env_string(RM_SINGLE_REQUEST_POLICY_KEY, single_request_policy)) {
@@ -1299,14 +1541,16 @@ void register_fd_for_monitoring(int fd) {
             << monitor_port_end << "]";
     return;
   }
+  monitored_flow_candidates_total.fetch_add(1, std::memory_order_relaxed);
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   fd_to_flow[fd] = flow;
   rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
                            flow.remote_port};
   flow_to_fd[key] = fd;
   addr_to_fds[flow.remote_addr].push_back(fd);
-  // Change the CCA to BPF_CUBIC.
-  if (!set_cca(fd, RM_BPF_CUBIC)) {
+  // Change the CCA to the configured BPF CCA.
+  if (!set_cca(fd, bpf_cca.c_str())) {
+    cca_set_failed_total.fetch_add(1, std::memory_order_relaxed);
     LOG(ERROR) << "Failed to set CCA for FD=" << fd
                << ", removing from tracking";
     fd_to_flow.erase(fd);
@@ -1315,7 +1559,7 @@ void register_fd_for_monitoring(int fd) {
     vec.erase(std::remove(vec.begin(), vec.end(), fd), vec.end());
     if (vec.empty())
       addr_to_fds.erase(flow.remote_addr);
-    return;
+    fatal_monitoring_failure(fd, flow, "set_cca failed");
   }
 
   // Create an entry in flow_to_last_data_time_ns for this flow so that the
@@ -1323,6 +1567,8 @@ void register_fd_for_monitoring(int fd) {
   int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
                                       &fd_to_flow[fd], &zero, BPF_ANY);
   if (err != 0) {
+    flow_last_data_map_insert_failed_total.fetch_add(1,
+                                                     std::memory_order_relaxed);
     LOG(ERROR) << "Failed to create entry in flow_to_last_data_time_fd for FD="
                << fd << ", err=" << err << " (" << strerror(-err)
                << "). Removing flow from tracking.";
@@ -1334,7 +1580,8 @@ void register_fd_for_monitoring(int fd) {
     vec2.erase(std::remove(vec2.begin(), vec2.end(), fd), vec2.end());
     if (vec2.empty())
       addr_to_fds.erase(flow.remote_addr);
-    return;
+    fatal_monitoring_failure(fd, flow,
+                             "failed to create flow_to_last_data_time entry");
   }
 
   // All flows start paused and are added to scheduler queues.
@@ -1342,7 +1589,10 @@ void register_fd_for_monitoring(int fd) {
   // but flows are still tracked in queues for when normal scheduling takes over
   // after the flash grants complete.
   paused_fds_queue.enqueue(fd);
-  pause_flow(fd);
+  if (pause_flow(fd) == 0) {
+    fatal_monitoring_failure(fd, flow, "failed to pause newly registered flow");
+  }
+  monitored_flow_registered_total.fetch_add(1, std::memory_order_relaxed);
   VLOG(1) << "Flow FD=" << fd << " registered and added to paused queue";
   // lock is automatically released when it goes out of scope
 }
@@ -1555,9 +1805,11 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
             << current_burst_number
             << "), reset burst_flows_remaining=" << fd_to_flow.size();
     current_burst_number = burst_number;
+    bursts_seen_total.fetch_add(1, std::memory_order_relaxed);
     pregrant_done = false;
     burst_flows_remaining = fd_to_flow.size();
   } else if (burst_number >= 0 && burst_number < current_burst_number) {
+    burst_sequence_regression_total.fetch_add(1, std::memory_order_relaxed);
     LOG(WARNING) << "Received burst_number=" << burst_number
                  << " but current_burst_number=" << current_burst_number;
   }
@@ -1722,6 +1974,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   int one = 1;
   int err = bpf_map_update_elem(flow_to_keepalive_fd, &flow, &one, BPF_ANY);
   if (err != 0) {
+    keepalive_update_failed_total.fetch_add(1, std::memory_order_relaxed);
     LOG(ERROR) << "Could not update flow_to_keepalive for FD=" << sockfd
                << ", err=" << err << " (" << strerror(-err) << ")";
     return false;
@@ -1811,6 +2064,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
                    << ", err=" << err << " (" << strerror(-err) << ")";
         return false;
       }
+      flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
       VLOG(1) << "Gave flash grant of " << epoch_bytes
               << " bytes to flow FD=" << sockfd << " (queues not updated)";
     } else if (scheduling_mode == "time") {
@@ -1818,6 +2072,9 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
       if (err != 0) {
         LOG(WARNING) << "Could not delete RWND clamp for flow FD=" << sockfd
                      << ", err=" << err << " (" << strerror(-err) << ")";
+      }
+      if (err == 0) {
+        flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
       }
       VLOG(1) << "Gave flash grant to flow FD=" << sockfd
               << " in time-based mode (queues not updated)";
@@ -1849,7 +2106,8 @@ bool handle_send(int sockfd, const void *buf, size_t len) {
 
 // accept() handles the responder side and connect() handles the initiator side.
 // On these calls, we register the socket for monitoring and set the CCA to
-// BPF_CUBIC. All flows are initially paused. Scheduling takes place when the
+// the configured BPF struct_ops CCA. All flows are initially paused.
+// Scheduling takes place when the
 // applications transmits a burst request via send().
 //
 // For some reason, C++ function name mangling does not prevent us from
