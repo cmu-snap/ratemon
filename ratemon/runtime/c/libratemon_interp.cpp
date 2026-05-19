@@ -243,8 +243,8 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
 [[noreturn]] inline void fatal_monitoring_failure(int fd,
                                                   const struct rm_flow &flow,
                                                   const char *reason) {
-  monitored_flow_registration_failed_total.fetch_add(1,
-                                                     std::memory_order_relaxed);
+  health.monitored_flow_registration_failed_total.fetch_add(
+      1, std::memory_order_relaxed);
   LOG(ERROR) << "Fatal monitoring failure for expected monitor-port flow FD="
              << fd << " " << ipv4_to_string(flow.remote_addr).c_str() << ":"
              << flow.remote_port << "->"
@@ -503,7 +503,8 @@ bool set_keepalive(int sockfd) {
   int const err =
       bpf_map_update_elem(flow_to_keepalive_fd, &flow->second, &one, BPF_ANY);
   if (err != 0) {
-    keepalive_update_failed_total.fetch_add(1, std::memory_order_relaxed);
+    health.keepalive_update_failed_total.fetch_add(1,
+                                                   std::memory_order_relaxed);
     LOG(ERROR) << "Failed to update flow_to_keepalive for FD=" << sockfd
                << ", flow_to_keepalive_fd=" << flow_to_keepalive_fd
                << ", err=" << err << " (" << strerror(-err) << ")";
@@ -533,7 +534,7 @@ inline bool apply_deferred_burst_bytes(int fd,
 
   grant_info.ungranted_bytes += pbi->second.first;
   last_applied = burst_num;
-  deferred_burst_applied_total.fetch_add(1, std::memory_order_relaxed);
+  health.deferred_burst_applied_total.fetch_add(1, std::memory_order_relaxed);
   set_keepalive(fd);
 
   VLOG(1) << "Applied deferred burst bytes (" << pbi->second.first
@@ -554,7 +555,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     err = bpf_map_lookup_elem(flow_to_rwnd_fd, &fd_to_flow[fd], &grant_info);
     if (err != 0) {
       LOG(ERROR) << "Could not find existing grant for flow FD=" << fd;
-      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
+      health.flow_activation_failed_total.fetch_add(1,
+                                                    std::memory_order_relaxed);
       return 0;
     }
     check_bpf_error(grant_info, "activate_flow");
@@ -563,7 +565,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     if (grant_info.ungranted_bytes <= 0) {
       VLOG(1) << "Cannot activate flow FD=" << fd
               << " because it has no ungranted bytes";
-      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
+      health.flow_activation_failed_total.fetch_add(1,
+                                                    std::memory_order_relaxed);
       return 0;
     }
     grant_info.override_rwnd_bytes = 0xFFFFFFFF;
@@ -576,7 +579,8 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
     if (err != 0) {
       LOG(ERROR) << "Could not set grant for flow FD=" << fd << ", err=" << err
                  << " (" << strerror(-err) << ")";
-      flow_activation_failed_total.fetch_add(1, std::memory_order_relaxed);
+      health.flow_activation_failed_total.fetch_add(1,
+                                                    std::memory_order_relaxed);
       return 0;
     }
     VLOG(1) << "Activated flow FD=" << fd << " with grant of " << epoch_bytes
@@ -593,7 +597,7 @@ inline int activate_flow(int fd, bool trigger_ack_on_activate = true) {
   if (trigger_ack_on_activate) {
     trigger_ack(fd);
   }
-  flow_activations_total.fetch_add(1, std::memory_order_relaxed);
+  health.flow_activations_total.fetch_add(1, std::memory_order_relaxed);
   VLOG(1) << "Activated FD=" << fd;
   return 1;
 }
@@ -723,7 +727,7 @@ void timer_callback(const boost::system::error_code &error) {
   // It is now safe to perform scheduling.
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   uint64_t const tick =
-      scheduler_tick_total.fetch_add(1, std::memory_order_relaxed) + 1;
+      health.scheduler_tick_total.fetch_add(1, std::memory_order_relaxed) + 1;
   VLOG(1) << "Performing scheduling. active=" << active_fds_queue.size()
           << ", paused=" << paused_fds_queue.size();
 
@@ -819,7 +823,8 @@ void timer_callback(const boost::system::error_code &error) {
             // drop in utilization by pausing it immediately.
             VLOG(1) << "Pausing FD=" << active_fr.first
                     << " due to idle timeout";
-            idle_timeout_pause_total.fetch_add(1, std::memory_order_relaxed);
+            health.idle_timeout_pause_total.fetch_add(
+                1, std::memory_order_relaxed);
             // Remove the flow from flow_to_keepalive, signalling that it
             // no longer has pending demand.
             int const err = bpf_map_delete_elem(flow_to_keepalive_fd,
@@ -1028,7 +1033,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
   // be from a pregrant being consumed or a straggler finishing. Log it but do
   // NOT return early — the flow still needs to be paused and replaced.
   if (between_bursts) {
-    grant_done_between_bursts_total.fetch_add(1, std::memory_order_relaxed);
+    health.grant_done_between_bursts_total.fetch_add(1,
+                                                     std::memory_order_relaxed);
     LOG(WARNING)
         << "grant_done while between_bursts=true (burst_flows_remaining="
         << burst_flows_remaining
@@ -1044,7 +1050,7 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
                << sizeof(struct rm_flow);
     return 0;
   }
-  grant_done_events_total.fetch_add(1, std::memory_order_relaxed);
+  health.grant_done_events_total.fetch_add(1, std::memory_order_relaxed);
   const auto *flow = static_cast<const struct rm_flow *>(data);
 
   // This flow has exhausted its grant. Remove it from the active flows. It
@@ -1110,7 +1116,8 @@ int handle_grant_done(void * /*ctx*/, void *data, size_t data_sz) {
             LOG(ERROR) << "Could not set pregrant for flow FD=" << fd->second
                        << ", err=" << err << " (" << strerror(-err) << ")";
           } else {
-            pregrants_given_total.fetch_add(1, std::memory_order_relaxed);
+            health.pregrants_given_total.fetch_add(1,
+                                                   std::memory_order_relaxed);
             VLOG(1) << "Pregranted flow FD=" << fd->second << " directly ("
                     << burst_flows_remaining << " burst flows remaining)";
             // Trigger an ACK so the BPF processes the pregrant and opens
@@ -1541,7 +1548,8 @@ void register_fd_for_monitoring(int fd) {
             << monitor_port_end << "]";
     return;
   }
-  monitored_flow_candidates_total.fetch_add(1, std::memory_order_relaxed);
+  health.monitored_flow_candidates_total.fetch_add(1,
+                                                   std::memory_order_relaxed);
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
   fd_to_flow[fd] = flow;
   rm_flow_key const key = {flow.local_addr, flow.remote_addr, flow.local_port,
@@ -1550,7 +1558,7 @@ void register_fd_for_monitoring(int fd) {
   addr_to_fds[flow.remote_addr].push_back(fd);
   // Change the CCA to the configured BPF CCA.
   if (!set_cca(fd, bpf_cca.c_str())) {
-    cca_set_failed_total.fetch_add(1, std::memory_order_relaxed);
+    health.cca_set_failed_total.fetch_add(1, std::memory_order_relaxed);
     LOG(ERROR) << "Failed to set CCA for FD=" << fd
                << ", removing from tracking";
     fd_to_flow.erase(fd);
@@ -1567,8 +1575,8 @@ void register_fd_for_monitoring(int fd) {
   int const err = bpf_map_update_elem(flow_to_last_data_time_fd,
                                       &fd_to_flow[fd], &zero, BPF_ANY);
   if (err != 0) {
-    flow_last_data_map_insert_failed_total.fetch_add(1,
-                                                     std::memory_order_relaxed);
+    health.flow_last_data_map_insert_failed_total.fetch_add(
+        1, std::memory_order_relaxed);
     LOG(ERROR) << "Failed to create entry in flow_to_last_data_time_fd for FD="
                << fd << ", err=" << err << " (" << strerror(-err)
                << "). Removing flow from tracking.";
@@ -1592,7 +1600,8 @@ void register_fd_for_monitoring(int fd) {
   if (pause_flow(fd) == 0) {
     fatal_monitoring_failure(fd, flow, "failed to pause newly registered flow");
   }
-  monitored_flow_registered_total.fetch_add(1, std::memory_order_relaxed);
+  health.monitored_flow_registered_total.fetch_add(1,
+                                                   std::memory_order_relaxed);
   VLOG(1) << "Flow FD=" << fd << " registered and added to paused queue";
   // lock is automatically released when it goes out of scope
 }
@@ -1805,11 +1814,12 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
             << current_burst_number
             << "), reset burst_flows_remaining=" << fd_to_flow.size();
     current_burst_number = burst_number;
-    bursts_seen_total.fetch_add(1, std::memory_order_relaxed);
+    health.bursts_seen_total.fetch_add(1, std::memory_order_relaxed);
     pregrant_done = false;
     burst_flows_remaining = fd_to_flow.size();
   } else if (burst_number >= 0 && burst_number < current_burst_number) {
-    burst_sequence_regression_total.fetch_add(1, std::memory_order_relaxed);
+    health.burst_sequence_regression_total.fetch_add(1,
+                                                     std::memory_order_relaxed);
     LOG(WARNING) << "Received burst_number=" << burst_number
                  << " but current_burst_number=" << current_burst_number;
   }
@@ -1974,7 +1984,8 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   int one = 1;
   int err = bpf_map_update_elem(flow_to_keepalive_fd, &flow, &one, BPF_ANY);
   if (err != 0) {
-    keepalive_update_failed_total.fetch_add(1, std::memory_order_relaxed);
+    health.keepalive_update_failed_total.fetch_add(1,
+                                                   std::memory_order_relaxed);
     LOG(ERROR) << "Could not update flow_to_keepalive for FD=" << sockfd
                << ", err=" << err << " (" << strerror(-err) << ")";
     return false;
@@ -2064,7 +2075,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
                    << ", err=" << err << " (" << strerror(-err) << ")";
         return false;
       }
-      flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
+      health.flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
       VLOG(1) << "Gave flash grant of " << epoch_bytes
               << " bytes to flow FD=" << sockfd << " (queues not updated)";
     } else if (scheduling_mode == "time") {
@@ -2074,7 +2085,7 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
                      << ", err=" << err << " (" << strerror(-err) << ")";
       }
       if (err == 0) {
-        flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
+        health.flash_grants_given_total.fetch_add(1, std::memory_order_relaxed);
       }
       VLOG(1) << "Gave flash grant to flow FD=" << sockfd
               << " in time-based mode (queues not updated)";
