@@ -11,7 +11,11 @@
 #include <boost/asio/detail/impl/epoll_reactor.ipp>
 #include <boost/asio/detail/impl/scheduler.ipp>
 #include <boost/asio/detail/impl/service_registry.hpp>
+#if __has_include(<boost/asio/detail/impl/timer_queue_ptime.ipp>)
 #include <boost/asio/detail/impl/timer_queue_ptime.ipp>
+#elif __has_include(<boost/asio/detail/impl/timer_queue_set.ipp>)
+#include <boost/asio/detail/impl/timer_queue_set.ipp>
+#endif
 #include <boost/asio/impl/any_io_executor.ipp>
 #include <boost/asio/impl/execution_context.hpp>
 #include <boost/asio/impl/io_context.hpp>
@@ -33,7 +37,6 @@
 #include <cstring>
 #include <ctime>
 #include <dlfcn.h>
-#include <experimental/random>
 #include <fstream>
 #include <glog/logging.h>
 #include <linux/bpf.h>
@@ -44,6 +47,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <queue>
+#include <random>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
@@ -214,9 +218,10 @@ inline void trigger_ack(int fd) {
 
 // Jitter the provided value by +/- 12.5%. Returns just the jitter.
 inline int jitter(int val) {
-  return std::experimental::randint(0,
-                                    static_cast<int>(std::roundl(val * 0.25))) -
-         static_cast<int>(std::roundl(val * 0.125));
+  static thread_local std::mt19937 rng(std::random_device{}());
+  std::uniform_int_distribution<int> dist(
+      0, static_cast<int>(std::roundl(val * 0.25)));
+  return dist(rng) - static_cast<int>(std::roundl(val * 0.125));
 }
 
 std::string ipv4_to_string(uint32_t addr) {
@@ -530,11 +535,13 @@ int try_find_and_pause(int fd) {
 // Caller must hold lock_scheduler (at least shared).
 inline bool has_pending_burst_bytes(int fd) {
   auto fit = fd_to_flow.find(fd);
-  if (fit == fd_to_flow.end())
+  if (fit == fd_to_flow.end()) {
     return false;
+  }
   auto pbi = pending_burst_info.find(fit->second.remote_addr);
-  if (pbi == pending_burst_info.end())
+  if (pbi == pending_burst_info.end()) {
     return false;
+  }
   auto applied = fd_last_applied_burst.find(fd);
   return (applied == fd_last_applied_burst.end() ||
           applied->second < pbi->second.second);
@@ -572,15 +579,18 @@ bool set_keepalive(int sockfd) {
 inline bool apply_deferred_burst_bytes(int fd,
                                        struct rm_grant_info &grant_info) {
   auto fit = fd_to_flow.find(fd);
-  if (fit == fd_to_flow.end())
+  if (fit == fd_to_flow.end()) {
     return false;
+  }
   auto pbi = pending_burst_info.find(fit->second.remote_addr);
-  if (pbi == pending_burst_info.end())
+  if (pbi == pending_burst_info.end()) {
     return false;
+  }
   int burst_num = pbi->second.second;
   auto &last_applied = fd_last_applied_burst[fd];
-  if (last_applied >= burst_num)
+  if (last_applied >= burst_num) {
     return false;
+  }
 
   grant_info.ungranted_bytes += pbi->second.first;
   last_applied = burst_num;
@@ -710,7 +720,7 @@ int try_pause_one_activate_one(int fd) {
   // Find the flow in active_fds_queue and remove it
   if (try_find_and_pause(fd) == 0) {
     LOG(ERROR) << "Could not find and/or pause flow FD=" << fd;
-    // TODO: return 0;
+    // TODO(unknown): return 0;
   }
   // Then find one flow in paused_fds_queue to restart.
   int const num_activated = try_activate_one();
@@ -784,7 +794,7 @@ void timer_callback(const boost::system::error_code &error) {
   // Temporary variable for storing the front of active_fds_queue.
   std::pair<int, boost::posix_time::ptime> active_fr;
   // Size of active_fds_queue.
-  int active_size = 0;
+  int const active_size = 0;
   // Vector of active flows that we plan to pause.
   std::vector<int> to_pause;
   // Current kernel time (since boot).
@@ -793,7 +803,7 @@ void timer_callback(const boost::system::error_code &error) {
   int64_t const ktime_now_ns =
       static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
   // For measuring idle time.
-  int64_t last_data_time_ns = 0;
+  int64_t const last_data_time_ns = 0;
   int64_t idle_ns = 0;
   // Current time (absolute).
   boost::posix_time::ptime const now =
@@ -1305,8 +1315,9 @@ bool read_env_string(const char *key, std::string &dest) {
 // Perform setup (only once for all flows in this process), such as reading
 // parameters from environment variables and setting up BPF maps.
 bool setup() {
-  if (!google::IsGoogleLoggingInitialized())
+  if (!google::IsGoogleLoggingInitialized()) {
     google::InitGoogleLogging("libratemon_interp");
+  }
   google::InstallFailureSignalHandler();
   // Default to INFO level. Use GLOG_v=1 for VLOG messages.
   FLAGS_minloglevel = 0;
@@ -1761,7 +1772,7 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
     VLOG(1) << "FD=" << sockfd << " burst_number=" << burst_number << " has "
             << bytes << " bytes pending";
 
-    struct rm_flow flow;
+    struct rm_flow flow {};
     {
       std::shared_lock<std::shared_mutex> lock(lock_scheduler);
       auto flow_it = fd_to_flow.find(sockfd);
@@ -1896,7 +1907,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   }
 
   // Find all flows from the same remote host using the per-host index.
-  int flows_updated = 0;
+  int const flows_updated = 0;
   auto ait = addr_to_fds.find(remote_addr);
 
   if (!should_schedule) {
@@ -1915,7 +1926,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
             << ipv4_to_string(remote_addr).c_str()
             << ", burst=" << current_burst_number;
     return true;
-  } else if (ait != addr_to_fds.end()) {
+  }
+  if (ait != addr_to_fds.end()) {
     // should_schedule=true (first burst or normal policy): eagerly update all
     // flows' BPF maps and perform scheduling.
     for (int const fd : ait->second) {
@@ -2015,8 +2027,8 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
 // manipulation.
 static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   // First, extract needed information with a shared lock
-  uint16_t remote_port;
-  struct rm_flow flow;
+  uint16_t remote_port = 0;
+  struct rm_flow flow {};
   {
     std::shared_lock<std::shared_mutex> lock(lock_scheduler);
 

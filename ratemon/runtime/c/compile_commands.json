@@ -1,7 +1,7 @@
 [
   {
-    "directory": "/home/ccanel/src/ratemon/ratemon/runtime/c",
-    "command": "/usr/bin/clang++ --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 -g -stdlib=libstdc++ -std=c++23 -Wall -Wextra -O3 -shared -fPIC -I/home/ccanel/src/ratemon/ratemon/runtime/c/.output libratemon_interp.cpp -ldl -lbpf -o /home/ccanel/src/ratemon/ratemon/runtime/c/.output/libratemon_interp.so",
+    "directory": "/Users/ccanel/src/ratemon/ratemon/runtime/c",
+    "command": "/usr/bin/clang++ -g -std=c++23 -Wall -Wextra -O3 -DGLOG_USE_GLOG_EXPORT -fPIC -Istubs -I.output -I../../../libbpf/include/uapi -I/opt/homebrew/include -I/opt/homebrew/opt/boost/include -c libratemon_interp.cpp -o .output/libratemon_interp.o",
     "file": "libratemon_interp.cpp"
   },
   {
