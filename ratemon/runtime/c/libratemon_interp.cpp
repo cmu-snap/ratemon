@@ -1027,9 +1027,8 @@ bool setup() {
   if (!google::IsGoogleLoggingInitialized())
     google::InitGoogleLogging("libratemon_interp");
   google::InstallFailureSignalHandler();
-  // Default to WARNING level. Override at runtime with GLOG_minloglevel=0 for
-  // INFO or GLOG_v=1 for VLOG messages.
-  FLAGS_minloglevel = 1;
+  // Default to INFO level. Use GLOG_v=1 for VLOG messages.
+  FLAGS_minloglevel = 0;
 
   // Check if no-op mode is enabled first
   const char *noop_env = std::getenv("RM_NOOP_MODE");
