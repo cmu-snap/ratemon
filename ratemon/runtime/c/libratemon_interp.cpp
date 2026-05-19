@@ -41,6 +41,7 @@
 #include <mutex>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <queue>
 #include <shared_mutex>
@@ -256,86 +257,53 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
 inline void emit_health_snapshot(const char *phase, int active_flows,
                                  int paused_flows);
 
-inline std::string json_escape(const std::string &input) {
-  std::ostringstream oss;
-  for (char c : input) {
-    switch (c) {
-    case '\\':
-      oss << "\\\\";
-      break;
-    case '"':
-      oss << "\\\"";
-      break;
-    case '\b':
-      oss << "\\b";
-      break;
-    case '\f':
-      oss << "\\f";
-      break;
-    case '\n':
-      oss << "\\n";
-      break;
-    case '\r':
-      oss << "\\r";
-      break;
-    case '\t':
-      oss << "\\t";
-      break;
-    default:
-      oss << c;
-      break;
-    }
-  }
-  return oss.str();
-}
-
 inline std::string health_snapshot_json(const char *phase, int active_flows,
                                         int paused_flows) {
-  std::ostringstream oss;
-  oss << "{"
-      << "\"phase\":\"" << json_escape(phase) << "\""
-      << ",\"monitored_flow_candidates_total\":"
-      << health.monitored_flow_candidates_total.load(std::memory_order_relaxed)
-      << ",\"monitored_flow_registered_total\":"
-      << health.monitored_flow_registered_total.load(std::memory_order_relaxed)
-      << ",\"monitored_flow_registration_failed_total\":"
-      << health.monitored_flow_registration_failed_total.load(
-             std::memory_order_relaxed)
-      << ",\"cca_set_failed_total\":"
-      << health.cca_set_failed_total.load(std::memory_order_relaxed)
-      << ",\"flow_last_data_map_insert_failed_total\":"
-      << health.flow_last_data_map_insert_failed_total.load(
-             std::memory_order_relaxed)
-      << ",\"grant_done_events_total\":"
-      << health.grant_done_events_total.load(std::memory_order_relaxed)
-      << ",\"grant_done_between_bursts_total\":"
-      << health.grant_done_between_bursts_total.load(std::memory_order_relaxed)
-      << ",\"flow_activations_total\":"
-      << health.flow_activations_total.load(std::memory_order_relaxed)
-      << ",\"flow_activation_failed_total\":"
-      << health.flow_activation_failed_total.load(std::memory_order_relaxed)
-      << ",\"pregrants_given_total\":"
-      << health.pregrants_given_total.load(std::memory_order_relaxed)
-      << ",\"flash_grants_given_total\":"
-      << health.flash_grants_given_total.load(std::memory_order_relaxed)
-      << ",\"bursts_seen_total\":"
-      << health.bursts_seen_total.load(std::memory_order_relaxed)
-      << ",\"burst_sequence_regression_total\":"
-      << health.burst_sequence_regression_total.load(std::memory_order_relaxed)
-      << ",\"deferred_burst_applied_total\":"
-      << health.deferred_burst_applied_total.load(std::memory_order_relaxed)
-      << ",\"keepalive_update_failed_total\":"
-      << health.keepalive_update_failed_total.load(std::memory_order_relaxed)
-      << ",\"scheduler_tick_total\":"
-      << health.scheduler_tick_total.load(std::memory_order_relaxed)
-      << ",\"idle_timeout_pause_total\":"
-      << health.idle_timeout_pause_total.load(std::memory_order_relaxed)
-      << ",\"current_burst_number\":" << current_burst_number
-      << ",\"burst_flows_remaining\":" << burst_flows_remaining
-      << ",\"between_bursts\":" << (between_bursts ? "true" : "false")
-      << ",\"active_flows\":" << active_flows
-      << ",\"paused_flows\":" << paused_flows << "}";
-  return oss.str();
+  nlohmann::json snapshot = {
+      {"phase", phase},
+      {"monitored_flow_candidates_total",
+       health.monitored_flow_candidates_total.load(std::memory_order_relaxed)},
+      {"monitored_flow_registered_total",
+       health.monitored_flow_registered_total.load(std::memory_order_relaxed)},
+      {"monitored_flow_registration_failed_total",
+       health.monitored_flow_registration_failed_total.load(
+           std::memory_order_relaxed)},
+      {"cca_set_failed_total",
+       health.cca_set_failed_total.load(std::memory_order_relaxed)},
+      {"flow_last_data_map_insert_failed_total",
+       health.flow_last_data_map_insert_failed_total.load(
+           std::memory_order_relaxed)},
+      {"grant_done_events_total",
+       health.grant_done_events_total.load(std::memory_order_relaxed)},
+      {"grant_done_between_bursts_total",
+       health.grant_done_between_bursts_total.load(std::memory_order_relaxed)},
+      {"flow_activations_total",
+       health.flow_activations_total.load(std::memory_order_relaxed)},
+      {"flow_activation_failed_total",
+       health.flow_activation_failed_total.load(std::memory_order_relaxed)},
+      {"pregrants_given_total",
+       health.pregrants_given_total.load(std::memory_order_relaxed)},
+      {"flash_grants_given_total",
+       health.flash_grants_given_total.load(std::memory_order_relaxed)},
+      {"bursts_seen_total",
+       health.bursts_seen_total.load(std::memory_order_relaxed)},
+      {"burst_sequence_regression_total",
+       health.burst_sequence_regression_total.load(std::memory_order_relaxed)},
+      {"deferred_burst_applied_total",
+       health.deferred_burst_applied_total.load(std::memory_order_relaxed)},
+      {"keepalive_update_failed_total",
+       health.keepalive_update_failed_total.load(std::memory_order_relaxed)},
+      {"scheduler_tick_total",
+       health.scheduler_tick_total.load(std::memory_order_relaxed)},
+      {"idle_timeout_pause_total",
+       health.idle_timeout_pause_total.load(std::memory_order_relaxed)},
+      {"current_burst_number", current_burst_number},
+      {"burst_flows_remaining", burst_flows_remaining},
+      {"between_bursts", between_bursts},
+      {"active_flows", active_flows},
+      {"paused_flows", paused_flows},
+  };
+  return snapshot.dump(2);
 }
 
 inline std::string resolve_health_snapshot_path() {
