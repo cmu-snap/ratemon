@@ -137,7 +137,7 @@ int epoch_bytes = 65536;
 int idle_timeout_us = -1;
 int64_t idle_timeout_ns = -1;
 // Burst tracking for single_request_pregrant policy
-int current_burst_number = 0;
+int current_burst_number = -1;
 int burst_flows_remaining = 0;
 bool pregrant_done = false;
 // True after the last flow in a burst finishes (burst_flows_remaining hits 0)
@@ -366,6 +366,88 @@ inline void write_health_snapshot_json(const char *phase, int active_flows,
 
 inline void emit_health_snapshot(const char *phase, int active_flows,
                                  int paused_flows) {
+  // For the final snapshot, emit a deterministic multi-line view so each
+  // key is easy to diff and inspect in logs.
+  if (std::strcmp(phase, "final") == 0) {
+    std::vector<std::pair<std::string, std::string>> fields;
+    fields.emplace_back("active_flows", std::to_string(active_flows));
+    fields.emplace_back("between_bursts", between_bursts ? "true" : "false");
+    fields.emplace_back("burst_flows_remaining",
+                        std::to_string(burst_flows_remaining));
+    fields.emplace_back(
+        "burst_sequence_regression_total",
+        std::to_string(health.burst_sequence_regression_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back("bursts_seen_total",
+                        std::to_string(health.bursts_seen_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("cca_set_failed_total",
+                        std::to_string(health.cca_set_failed_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("current_burst_number",
+                        std::to_string(current_burst_number));
+    fields.emplace_back("deferred_burst_applied_total",
+                        std::to_string(health.deferred_burst_applied_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("flash_grants_given_total",
+                        std::to_string(health.flash_grants_given_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("flow_activation_failed_total",
+                        std::to_string(health.flow_activation_failed_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("flow_activations_total",
+                        std::to_string(health.flow_activations_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "flow_last_data_map_insert_failed_total",
+        std::to_string(health.flow_last_data_map_insert_failed_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "grant_done_between_bursts_total",
+        std::to_string(health.grant_done_between_bursts_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back("grant_done_events_total",
+                        std::to_string(health.grant_done_events_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("idle_timeout_pause_total",
+                        std::to_string(health.idle_timeout_pause_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "keepalive_update_failed_total",
+        std::to_string(health.keepalive_update_failed_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "monitored_flow_candidates_total",
+        std::to_string(health.monitored_flow_candidates_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "monitored_flow_registered_total",
+        std::to_string(health.monitored_flow_registered_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back(
+        "monitored_flow_registration_failed_total",
+        std::to_string(health.monitored_flow_registration_failed_total.load(
+            std::memory_order_relaxed)));
+    fields.emplace_back("paused_flows", std::to_string(paused_flows));
+    fields.emplace_back("pregrants_given_total",
+                        std::to_string(health.pregrants_given_total.load(
+                            std::memory_order_relaxed)));
+    fields.emplace_back("scheduler_tick_total",
+                        std::to_string(health.scheduler_tick_total.load(
+                            std::memory_order_relaxed)));
+
+    std::sort(fields.begin(), fields.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    std::ostringstream oss;
+    oss << "RATEMON_HEALTH phase=final";
+    for (const auto &entry : fields) {
+      oss << '\n' << entry.first << "=" << entry.second;
+    }
+    LOG(INFO) << oss.str();
+    return;
+  }
+
   std::ostringstream oss;
   oss << "RATEMON_HEALTH phase=" << phase << " monitored_flow_candidates_total="
       << health.monitored_flow_candidates_total.load(std::memory_order_relaxed)
