@@ -794,7 +794,7 @@ void timer_callback(const boost::system::error_code &error) {
   // Temporary variable for storing the front of active_fds_queue.
   std::pair<int, boost::posix_time::ptime> active_fr;
   // Size of active_fds_queue.
-  int const active_size = 0;
+  int active_size = 0;
   // Vector of active flows that we plan to pause.
   std::vector<int> to_pause;
   // Current kernel time (since boot).
@@ -803,7 +803,7 @@ void timer_callback(const boost::system::error_code &error) {
   int64_t const ktime_now_ns =
       static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
   // For measuring idle time.
-  int64_t const last_data_time_ns = 0;
+  int64_t last_data_time_ns = 0;
   int64_t idle_ns = 0;
   // Current time (absolute).
   boost::posix_time::ptime const now =
@@ -1907,7 +1907,7 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   }
 
   // Find all flows from the same remote host using the per-host index.
-  int const flows_updated = 0;
+  int flows_updated = 0;
   auto ait = addr_to_fds.find(remote_addr);
 
   if (!should_schedule) {
