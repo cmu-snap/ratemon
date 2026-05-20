@@ -170,4 +170,3 @@ attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 
 # keep intermediate (.skel.h, .bpf.o, etc) targets
 .SECONDARY:
-˝
