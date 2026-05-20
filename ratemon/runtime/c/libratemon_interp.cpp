@@ -327,7 +327,7 @@ inline void write_single_bpf_map_dump_json(const std::string &dir,
 
 inline void write_bpf_map_dump_json(const nlohmann::json &dump) {
   std::string const dir = resolve_bpf_map_dump_dir();
-  std::error_code error;
+  std::error_code error = 0;
   std::filesystem::create_directories(dir, error);
   if (error) {
     LOG(ERROR) << "Could not create BPF map dump directory '" << dir
@@ -2452,7 +2452,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 
 // Get around C++ function name mangling.
 extern "C" {
-void exit(int status) {
+[[noreturn]] void exit(int status) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_exit = (void (*)(int))dlsym(RTLD_NEXT, "exit");
   if (!noop_mode && status != EXIT_SUCCESS) {
@@ -2464,7 +2464,7 @@ void exit(int status) {
   _Exit(status);
 }
 
-void abort(void) {
+[[noreturn]] void abort(void) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_abort = (void (*)(void))dlsym(RTLD_NEXT, "abort");
   if (!noop_mode) {
