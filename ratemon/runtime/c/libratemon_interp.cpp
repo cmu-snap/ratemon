@@ -2298,7 +2298,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 
 // Get around C++ function name mangling.
 extern "C" {
-[[noreturn]] void exit(int status) {
+void exit(int status) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_exit = (void (*)(int))dlsym(RTLD_NEXT, "exit");
   if (real_exit != nullptr) {
@@ -2307,7 +2307,7 @@ extern "C" {
   _Exit(status);
 }
 
-[[noreturn]] void abort(void) {
+void abort(void) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_abort = (void (*)(void))dlsym(RTLD_NEXT, "abort");
   if (real_abort != nullptr) {
