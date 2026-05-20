@@ -37,6 +37,7 @@
 #include <cstring>
 #include <ctime>
 #include <dlfcn.h>
+#include <filesystem>
 #include <fstream>
 #include <glog/logging.h>
 #include <linux/bpf.h>
@@ -190,6 +191,7 @@ struct HealthCounters {
 };
 
 HealthCounters health;
+std::atomic<bool> error_bpf_maps_dumped{false};
 
 // Forward declaration so that setup() resolves. Defined for real below.
 bool setup();
@@ -234,13 +236,163 @@ std::string ipv4_to_string(uint32_t addr) {
   return std::string("INVALID_IP");
 }
 
+inline nlohmann::json flow_json(const struct rm_flow &flow) {
+  return {
+      {"local_addr", ipv4_to_string(flow.local_addr)},
+      {"remote_addr", ipv4_to_string(flow.remote_addr)},
+      {"local_port", flow.local_port},
+      {"remote_port", flow.remote_port},
+  };
+}
+
+inline nlohmann::json grant_info_json(const struct rm_grant_info &grant_info) {
+  return {
+      {"ungranted_bytes", grant_info.ungranted_bytes},
+      {"override_rwnd_bytes", grant_info.override_rwnd_bytes},
+      {"new_grant_bytes", grant_info.new_grant_bytes},
+      {"rwnd_end_seq", grant_info.rwnd_end_seq},
+      {"grant_end_seq", grant_info.grant_end_seq},
+      {"grant_done", grant_info.grant_done},
+      {"is_pregrant", grant_info.is_pregrant},
+      {"grant_end_buffer_bytes", grant_info.grant_end_buffer_bytes},
+      {"bpf_experienced_error", grant_info.bpf_experienced_error},
+      {"pregranted_bytes", grant_info.pregranted_bytes},
+      {"total_grant", grant_info.total_grant},
+  };
+}
+
+template <typename Value, typename ToJson>
+inline void append_flow_map_dump(nlohmann::json &maps, const char *map_name,
+                                 int map_fd, ToJson to_json) {
+  nlohmann::json map_dump = {
+      {"fd", map_fd},
+      {"entries", nlohmann::json::array()},
+  };
+  if (map_fd == 0) {
+    map_dump["available"] = false;
+    maps[map_name] = std::move(map_dump);
+    return;
+  }
+
+  struct rm_flow key {};
+  struct rm_flow next_key {};
+  struct rm_flow *key_ptr = nullptr;
+  while (bpf_map_get_next_key(map_fd, key_ptr, &next_key) == 0) {
+    Value value{};
+    int const err = bpf_map_lookup_elem(map_fd, &next_key, &value);
+    if (err != 0) {
+      map_dump["entries"].push_back({
+          {"flow", flow_json(next_key)},
+          {"lookup_errno", -err},
+          {"lookup_error", strerror(-err)},
+      });
+    } else {
+      map_dump["entries"].push_back({
+          {"flow", flow_json(next_key)},
+          {"value", to_json(value)},
+      });
+    }
+    key = next_key;
+    key_ptr = &key;
+  }
+
+  map_dump["entry_count"] = map_dump["entries"].size();
+  maps[map_name] = std::move(map_dump);
+}
+
+inline std::string resolve_bpf_map_dump_dir() {
+  if (const char *log_dir = std::getenv("GLOG_log_dir");
+      log_dir != nullptr && *log_dir != '\0') {
+    return std::string(log_dir) + "/bpf_maps";
+  }
+  return std::string("./bpf_maps");
+}
+
+inline void write_single_bpf_map_dump_json(const std::string &dir,
+                                           const std::string &map_name,
+                                           const nlohmann::json &dump) {
+  std::string const path = dir + "/" + map_name + ".json";
+  std::ofstream out(path, std::ios::out | std::ios::trunc);
+  if (!out.is_open()) {
+    LOG(ERROR) << "Could not open BPF map dump path '" << path << "'";
+    return;
+  }
+  out << dump.dump(2) << '\n';
+  if (!out.good()) {
+    LOG(ERROR) << "Failed to write BPF map dump JSON to '" << path << "'";
+    return;
+  }
+  LOG(ERROR) << "RATEMON_BPF_MAP_DUMP_FILE " << path;
+}
+
+inline void write_bpf_map_dump_json(const nlohmann::json &dump) {
+  std::string const dir = resolve_bpf_map_dump_dir();
+  std::error_code error;
+  std::filesystem::create_directories(dir, error);
+  if (error) {
+    LOG(ERROR) << "Could not create BPF map dump directory '" << dir
+               << "': " << error.message();
+    return;
+  }
+
+  auto const maps_it = dump.find("maps");
+  if (maps_it == dump.end() || !maps_it->is_object()) {
+    LOG(ERROR) << "BPF map dump JSON missing 'maps' object";
+    return;
+  }
+
+  for (auto it = maps_it->begin(); it != maps_it->end(); ++it) {
+    nlohmann::json map_dump = {
+        {"reason", dump.value("reason", "unknown")},
+        {"map_name", it.key()},
+        {"map", it.value()},
+    };
+    write_single_bpf_map_dump_json(dir, it.key(), map_dump);
+  }
+}
+
+inline void dump_bpf_maps_on_error(const char *reason) {
+  bool expected = false;
+  if (!error_bpf_maps_dumped.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  nlohmann::json dump = {
+      {"reason", reason},
+      {"maps", nlohmann::json::object()},
+  };
+
+  append_flow_map_dump<struct rm_grant_info>(
+      dump["maps"], "flow_to_rwnd", flow_to_rwnd_fd,
+      [](const struct rm_grant_info &value) { return grant_info_json(value); });
+  append_flow_map_dump<uint8_t>(
+      dump["maps"], "flow_to_win_scale", flow_to_win_scale_fd,
+      [](uint8_t value) { return nlohmann::json(value); });
+  append_flow_map_dump<uint64_t>(
+      dump["maps"], "flow_to_last_data_time_ns", flow_to_last_data_time_fd,
+      [](uint64_t value) { return nlohmann::json(value); });
+  append_flow_map_dump<int>(dump["maps"], "flow_to_keepalive",
+                            flow_to_keepalive_fd,
+                            [](int value) { return nlohmann::json(value); });
+  dump["maps"]["done_flows"] = {
+      {"pin_path", RM_DONE_FLOWS_PIN_PATH},
+      {"iterable", false},
+      {"note",
+       "ring buffer contents cannot be enumerated with bpf_map_get_next_key"},
+  };
+
+  write_bpf_map_dump_json(dump);
+  LOG(ERROR) << "RATEMON_BPF_MAP_DUMP\n" << dump.dump(2);
+}
+
 // Check if the BPF program has signaled an error condition. If so, log the
 // error and exit with a fatal error. This should be called after every
 // successful bpf_map_lookup_elem that retrieves grant_info.
 inline void check_bpf_error(const struct rm_grant_info &grant_info,
                             const char *context) {
   if (grant_info.bpf_experienced_error) {
-    LOG(FATAL) << "BPF program experienced an error (detected in " << context
+    dump_bpf_maps_on_error(context);
+    LOG(ERROR) << "BPF program experienced an error (detected in " << context
                << "). Exiting.";
     std::exit(EXIT_FAILURE);
   }
@@ -251,6 +403,7 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
                                                   const char *reason) {
   health.monitored_flow_registration_failed_total.fetch_add(
       1, std::memory_order_relaxed);
+  dump_bpf_maps_on_error(reason);
   LOG(ERROR) << "Fatal monitoring failure for expected monitor-port flow FD="
              << fd << " " << ipv4_to_string(flow.remote_addr).c_str() << ":"
              << flow.remote_port << "->"
@@ -258,9 +411,6 @@ inline void check_bpf_error(const struct rm_grant_info &grant_info,
              << flow.local_port << ": " << reason;
   std::abort();
 }
-
-inline void emit_health_snapshot(const char *phase, int active_flows,
-                                 int paused_flows);
 
 inline std::string health_snapshot_json(const char *phase, int active_flows,
                                         int paused_flows) {
@@ -312,10 +462,6 @@ inline std::string health_snapshot_json(const char *phase, int active_flows,
 }
 
 inline std::string resolve_health_snapshot_path() {
-  if (const char *path = std::getenv(RM_HEALTH_SNAPSHOT_JSON_PATH_KEY);
-      path != nullptr && *path != '\0') {
-    return std::string(path);
-  }
   if (const char *log_dir = std::getenv("GLOG_log_dir");
       log_dir != nullptr && *log_dir != '\0') {
     return std::string(log_dir) + "/ratemon_health_snapshot.json";
@@ -1052,6 +1198,11 @@ void thread_func() {
   // Execute the configured events, until there are no more events to execute.
   io.run();
 
+  if (run) {
+    LOG(ERROR) << "Scheduler thread ended before program was signalled to stop";
+    dump_bpf_maps_on_error("scheduler thread ended unexpectedly");
+  }
+
   // Clean up all flows.
   {
     std::unique_lock<std::shared_mutex> lock(lock_scheduler);
@@ -1060,10 +1211,6 @@ void thread_func() {
     }
   }
   VLOG(1) << "Scheduler thread ended";
-
-  if (run) {
-    LOG(ERROR) << "Scheduler thread ended before program was signalled to stop";
-  }
 
   emit_health_snapshot("final", static_cast<int>(active_fds_queue.size()),
                        static_cast<int>(paused_fds_queue.size()));
@@ -2305,6 +2452,31 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 
 // Get around C++ function name mangling.
 extern "C" {
+[[noreturn]] void exit(int status) {
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+  static auto real_exit = (void (*)(int))dlsym(RTLD_NEXT, "exit");
+  if (!noop_mode && status != EXIT_SUCCESS) {
+    dump_bpf_maps_on_error("process exit with non-zero status");
+  }
+  if (real_exit != nullptr) {
+    real_exit(status);
+  }
+  _Exit(status);
+}
+
+[[noreturn]] void abort(void) {
+  // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
+  static auto real_abort = (void (*)(void))dlsym(RTLD_NEXT, "abort");
+  if (!noop_mode) {
+    dump_bpf_maps_on_error("process abort");
+  }
+  if (real_abort != nullptr) {
+    real_abort();
+  }
+  raise(SIGABRT);
+  _Exit(EXIT_FAILURE);
+}
+
 int close(int sockfd) {
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
   static auto real_close = (int (*)(int))dlsym(RTLD_NEXT, "close");

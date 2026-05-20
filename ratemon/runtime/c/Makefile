@@ -150,9 +150,9 @@ $(INTERPS): %: $(OUTPUT)/%.so ;
 get_ld_var:
 	$(Q) echo "LD_PRELOAD=$(OUTPUT)/libratemon_interp.so"
 
-# Run ratemon_main and associated setup/teardown.
-# Remove existing struct_ops programs, manually attach RWND tc/egress program,
-# run ratemon_main, remove tc/egress program, clean up struct_ops.
+# Run ratemon_main and associated setup only.
+# Cleanup is intentionally manual (e.g., via clean_bpf) so callers can inspect
+# or dump pinned map state before teardown.
 attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
 	sudo tc qdisc del dev $(RM_IFACE) clsact || true
@@ -164,22 +164,10 @@ attach_tc_and_run: ratemon_main $(OUTPUT)/ratemon_tc.bpf.o
 	sudo bpftool map pin name flow_to_keepali /sys/fs/bpf/flow_to_keepalive
 	sudo bpftool map pin name done_flows /sys/fs/bpf/done_flows
 	sudo RM_CGROUP=$(RM_CGROUP) RM_CCA=$(RM_CCA) ./ratemon_main || true
-	for id in `sudo bpftool struct_ops list | cut -d":" -f1`; do sudo bpftool struct_ops unregister id $$id; done
-	sudo tc filter del dev $(RM_IFACE) egress
-	sudo rm -fv /sys/fs/bpf/flow_to_rwnd
-	sudo rm -fv /sys/fs/bpf/flow_to_win_scale
-	sudo rm -fv /sys/fs/bpf/flow_to_last_data_time_ns
-	sudo rm -fv /sys/fs/bpf/flow_to_keepalive
-	sudo rm -fv /sys/fs/bpf/done_flows
-	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_rwnd
-	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_win_scale
-	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_last_data_time_ns
-	sudo rm -fv /sys/fs/bpf/tc/globals/flow_to_keepalive
-	sudo rm -fv /sys/fs/bpf/tc/globals/done_flows
-	sudo tc qdisc del dev $(RM_IFACE) clsact
 
 # delete failed targets
 .DELETE_ON_ERROR:
 
 # keep intermediate (.skel.h, .bpf.o, etc) targets
 .SECONDARY:
+˝
