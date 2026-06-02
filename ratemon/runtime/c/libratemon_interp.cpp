@@ -1751,17 +1751,17 @@ static bool handle_send_normal_mode(int sockfd, const void *buf, size_t len) {
   // If we are doing byte-based scheduling, then track the size of this request.
   // BPF map operations don't need our lock.
   if (scheduling_mode == "byte") {
-    if (len != 3 * sizeof(int)) {
+    if (len != sizeof(struct rm_burst_request)) {
       LOG(FATAL) << "FD=" << sockfd << " burst request size is " << len
-                 << " bytes, expected " << 3 * sizeof(int) << " bytes (3 ints)";
+                 << " bytes, expected " << sizeof(struct rm_burst_request)
+                 << " bytes (rm_burst_request)";
       std::exit(1);
     }
-    // trunk-ignore(clang-tidy/google-readability-casting)
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
-    int *buf_int = (int *)buf;
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int const burst_number = buf_int[0];
-    int const bytes = buf_int[1];
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
+    auto const *request =
+        reinterpret_cast<const struct rm_burst_request *>(buf);
+    int const burst_number = request->burst_idx;
+    int const bytes = request->bytes;
     VLOG(1) << "FD=" << sockfd << " burst_number=" << burst_number << " has "
             << bytes << " bytes pending";
 
@@ -1830,17 +1830,17 @@ static bool handle_send_single_mode(int sockfd, const void *buf, size_t len) {
   }
 
   // Parse burst_number and bytes from the burst request message before
-  // acquiring any lock. Format is: [burst_number, bytes, wait_us, padding]
-  if (len != 4 * sizeof(int)) {
+  // acquiring any lock.
+  if (len != sizeof(struct rm_burst_request)) {
     LOG(FATAL) << "FD=" << sockfd << " single mode burst request size is "
-               << len << " bytes, expected " << 4 * sizeof(int)
-               << " bytes (4 ints)";
+               << len << " bytes, expected " << sizeof(struct rm_burst_request)
+               << " bytes (rm_burst_request)";
     std::exit(1);
   }
   // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
-  const int *buf_int = reinterpret_cast<const int *>(buf);
-  int const burst_number = buf_int[0];
-  int const bytes = buf_int[1];
+  auto const *request = reinterpret_cast<const struct rm_burst_request *>(buf);
+  int const burst_number = request->burst_idx;
+  int const bytes = request->bytes;
 
   // Acquire lock to access fd_to_flow and global state
   std::unique_lock<std::shared_mutex> lock(lock_scheduler);
@@ -2050,19 +2050,18 @@ static bool handle_send_port_mode(int sockfd, const void *buf, size_t len) {
   // If we are doing byte-based scheduling, then track the size of this request.
   if (scheduling_mode == "byte") {
     // Parse burst request to get number of bytes in the burst
-    // Format is: [burst_number, bytes, wait_us, padding]
-    if (len != 4 * sizeof(int)) {
+    if (len != sizeof(struct rm_burst_request)) {
       LOG(FATAL) << "FD=" << sockfd << " port mode burst request size is "
-                 << len << " bytes, expected " << 4 * sizeof(int)
-                 << " bytes (4 ints)";
+                 << len << " bytes, expected "
+                 << sizeof(struct rm_burst_request)
+                 << " bytes (rm_burst_request)";
       std::exit(1);
     }
-    // trunk-ignore(clang-tidy/google-readability-casting)
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-cstyle-cast)
-    int *buf_int = (int *)buf;
-    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    int const burst_number = buf_int[0];
-    int const bytes = buf_int[1];
+    // trunk-ignore(clang-tidy/cppcoreguidelines-pro-type-reinterpret-cast)
+    auto const *request =
+        reinterpret_cast<const struct rm_burst_request *>(buf);
+    int const burst_number = request->burst_idx;
+    int const bytes = request->bytes;
     VLOG(1) << "FD=" << sockfd << " burst_number=" << burst_number << " has "
             << bytes << " bytes pending";
 

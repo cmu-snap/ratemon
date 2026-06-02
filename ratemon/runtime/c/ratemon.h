@@ -81,6 +81,13 @@ struct rm_flow {
   uint16_t remote_port;
 };
 
+// IBG burst request packet format.
+struct rm_burst_request {
+  int32_t burst_idx;
+  int32_t bytes;
+  int64_t scheduled_send_time_ns;
+};
+
 // Contains grant / RWND information for a flow.
 struct rm_grant_info {
   // Data pending / yet to be granted. Incremented by libratemon_interp on a new
