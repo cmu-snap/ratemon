@@ -1421,6 +1421,13 @@ bool setup() {
                     true /* allow_zero */, false /* allow_neg */)) {
     return false;
   }
+  if (grant_end_buffer_bytes > epoch_bytes) {
+    LOG(ERROR) << "Invalid value for '" << RM_GRANT_END_BUFFER_BYTES_KEY
+               << "'=" << grant_end_buffer_bytes
+               << " (must be <= grant size RM_EPOCH_BYTES=" << epoch_bytes
+               << ")";
+    return false;
+  }
 
   // BPF setup.
 
