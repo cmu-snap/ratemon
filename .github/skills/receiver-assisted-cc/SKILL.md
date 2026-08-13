@@ -124,6 +124,19 @@ When user asks "why did throughput collapse/alternate/stall?":
    - BPF experienced error flags
 5. Correlate with BPF map dumps (`flow_to_rwnd`, `done_flows`) when available.
 
+## Graph Validation
+
+Do not regenerate graphs or run the full IBG graph-generation pipeline automatically.
+Graph generation can take a long time, especially for large results directories.
+Prefer cheap, focused validation first:
+
+- Inspect the graph configuration and relevant existing output files.
+- Validate JSON/configuration syntax.
+- Run targeted unit-style checks against the graph renderer with a small in-memory dataset.
+- Verify generated sidecar contents only when using a focused temporary output directory.
+
+Run the full generation pipeline only when the user explicitly requests it.
+
 ## How to Answer User Questions
 
 - Start with the end-to-end control path relevant to the question.
